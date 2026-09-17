@@ -1,0 +1,86 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-17T23:54:05Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 1945696746,
+  "lat": 34.8407131,
+  "lon": 136.5439658,
+  "tags": {
+    "natural": "tree"
+  }
+},
+{
+  "type": "node",
+  "id": 1945696747,
+  "lat": 34.8407391,
+  "lon": 136.5439248,
+  "tags": {
+    "natural": "tree"
+  }
+},
+{
+  "type": "node",
+  "id": 1945696750,
+  "lat": 34.8407658,
+  "lon": 136.5438830,
+  "tags": {
+    "natural": "tree"
+  }
+},
+{
+  "type": "node",
+  "id": 1945696751,
+  "lat": 34.8407892,
+  "lon": 136.5438462,
+  "tags": {
+    "natural": "tree"
+  }
+},
+{
+  "type": "node",
+  "id": 1945696753,
+  "lat": 34.8408145,
+  "lon": 136.5438065,
+  "tags": {
+    "natural": "tree"
+  }
+},
+{
+  "type": "node",
+  "id": 1945696759,
+  "lat": 34.8408394,
+  "lon": 136.5437673,
+  "tags": {
+    "natural": "tree"
+  }
+},
+{
+  "type": "node",
+  "id": 1945696761,
+  "lat": 34.8408642,
+  "lon": 136.5437284,
+  "tags": {
+    "natural": "tree"
+  }
+},
+{
+  "type": "node",
+  "id": 10172597006,
+  "lat": 34.8335375,
+  "lon": 136.5298081,
+  "tags": {
+    "leaf_type": "broadleaved",
+    "name": "河津桜",
+    "natural": "tree"
+  }
+}
+
+  ]
+}

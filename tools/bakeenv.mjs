@@ -103,6 +103,46 @@ const DEFAULT_H = {
   grandstand: 14, stadium: 20, hangar: 12, garage: 3.2, garages: 3.2,
   shed: 3, hut: 3, roof: 4.5, carport: 3, service: 4, kiosk: 3,
 };
+// Building kind, normalised to a small set the renderer can switch on. Left
+// OUT entirely for a plain `building=yes`, which is most of them — omitting the
+// field is what keeps these files at a few hundred KB.
+const KIND = {
+  grandstand: 'grandstand', tribune: 'grandstand',
+  stadium: 'stadium',
+  garage: 'garage', garages: 'garage', carport: 'garage',
+  industrial: 'industrial', warehouse: 'industrial', hangar: 'industrial', service: 'industrial',
+  house: 'house', detached: 'house', bungalow: 'house', terrace: 'house', semidetached_house: 'house',
+  apartments: 'apartments', residential: 'apartments', dormitory: 'apartments',
+  retail: 'retail', supermarket: 'retail', kiosk: 'retail', commercial: 'retail',
+  office: 'office',
+  hotel: 'hotel',
+  church: 'church', cathedral: 'church', chapel: 'church', mosque: 'church', temple: 'church',
+  roof: 'roof',
+  shed: 'shed', hut: 'shed',
+};
+// Only the unambiguous ones. A guessed roof colour is worse than none, because
+// the renderer can pick something sane but cannot un-pick a wrong survey.
+const ROOF_MAT = {
+  roof_tiles: '#9d5b3f', tile: '#9d5b3f', tiles: '#9d5b3f',
+  metal: '#8a8f94', concrete: '#9a9a94',
+};
+
+// Surveyed facade detail, emitted ONLY where OSM actually has it — a real
+// tagged colour is exactly the accuracy that stops a city looking like grey
+// boxes, and a made-up one is just noise.
+function buildingExtras(t) {
+  const out = {};
+  const k = KIND[t.building];
+  if (k) out.k = k;
+  const c = t['building:colour'] || t['building:color'] || t.colour || t.color;
+  if (c) out.c = String(c).slice(0, 24);
+  const rc = t['roof:colour'] || t['roof:color'] || ROOF_MAT[t['roof:material']];
+  if (rc) out.rc = String(rc).slice(0, 24);
+  const lv = parseInt(t['building:levels'], 10);
+  if (Number.isFinite(lv) && lv >= 1 && lv < 200) out.lv = lv;
+  return out;
+}
+
 function heightOf(t) {
   const h = parseFloat(t.height);
   if (Number.isFinite(h) && h > 1 && h < 400) return h;
@@ -176,6 +216,14 @@ async function bake(key, force) {
   const cJson = await overpass(
     `[out:json][timeout:180];(way["natural"="coastline"](${box}););out geom;`,
     raw + `${key}-coast.json`, force).catch(() => ({ elements: [] }));
+  await sleep(3000);
+  console.log('  individual trees…');
+  // Surveyed tree NODES. Scattering randomly inside a forest polygon is fine
+  // for a wood, but wrong for the avenue of planes down Monza's main straight —
+  // and that avenue is in the survey data, so it may as well be in the game.
+  const tJson = await overpass(
+    `[out:json][timeout:180];(node["natural"="tree"](${box}););out;`,
+    raw + `${key}-trees.json`, force).catch(() => ({ elements: [] }));
 
   const buildings = [];
   for (const el of bJson.elements || []) {
@@ -185,11 +233,13 @@ async function bake(key, force) {
     const rings = el.type === 'relation'
       ? (el.members || []).filter(m => m.role !== 'inner' && m.geometry).map(m => m.geometry)
       : (el.geometry ? [el.geometry] : []);
+    const tg = el.tags || {};
+    const extra = buildingExtras(tg);
     for (const ring of rings) {
       if (ring.length < 4) continue;
       const pts = simplify(ring.map(g => toXY(g.lat, g.lon)));
       if (pts.length < 3 || area2(pts) < 18) continue;
-      buildings.push({ h: Math.round(heightOf(el.tags || {}) * 10) / 10, p: pts });
+      buildings.push({ h: Math.round(heightOf(tg) * 10) / 10, p: pts, ...extra });
     }
   }
 
@@ -252,16 +302,28 @@ async function bake(key, force) {
     sea.push({ p: line.concat(far).map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]) });
   }
 
+  const trees = [];
+  for (const el of tJson.elements || []) {
+    if (el.lat == null) continue;
+    const [x, y] = toXY(el.lat, el.lon);
+    trees.push([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+  }
+
   const out = {
     key, full: track.full, lat0, lon0, pad: PAD,
     bbox: { x0: bb.x0 - PAD, y0: bb.y0 - PAD, x1: bb.x1 + PAD, y1: bb.y1 + PAD },
-    buildings, areas, sea,
+    buildings, areas, sea, trees,
   };
   const file = ROOT + `data/env/${key}.json`;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(out));
   const kb = (fs.statSync(file).size / 1024).toFixed(0);
-  console.log(`  -> ${buildings.length} buildings, ${areas.length} areas, ${sea.length} sea, ${kb}KB`);
+  const kinds = {};
+  for (const b of buildings) if (b.k) kinds[b.k] = (kinds[b.k] || 0) + 1;
+  const tagged = buildings.filter(b => b.c).length, roofed = buildings.filter(b => b.rc).length;
+  console.log(`  -> ${buildings.length} buildings, ${areas.length} areas, ${sea.length} sea, ${trees.length} trees, ${kb}KB`);
+  console.log(`     kinds: ${Object.entries(kinds).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}:${v}`).join(' ') || '(none tagged)'}`);
+  console.log(`     surveyed colours: ${tagged} facade, ${roofed} roof`);
   console.log('     ' + Object.entries(counts).sort((a, b) => b[1] - a[1])
     .map(([k, v]) => `${k}:${v}`).join('  '));
   return out;
