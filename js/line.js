@@ -90,6 +90,45 @@ export function speedProfile(track, off, cur, spec, mu) {
   return v;
 }
 
+// Both paths a bot might drive, solved once and shared across the whole grid.
+//
+// The centreline is not "the racing line, slower" — it is a genuinely different
+// path with different curvature, so it needs its own speed profile. A bot that
+// follows the centreline while carrying racing-line speeds does not drive like
+// a novice, it drives like someone crashing. This is what makes SUPERCASUAL
+// work: competent car control, correct braking, wrong path.
+export function buildLines(track, spec, mu = spec.mu) {
+  const zero = new Float32Array(track.n);
+  const ccur = lineCurvature(track, zero);
+  const cpts = new Float32Array(track.n * 2);
+  for (let i = 0; i < track.n; i++) { cpts[i * 2] = track.x[i]; cpts[i * 2 + 1] = track.y[i]; }
+  const lapOf = v => { let l = 0; for (let i = 0; i < track.n; i++) l += track.ds / Math.max(v[i], 5); return l; };
+
+  const race = buildLine(track, spec, mu);
+  const cv = speedProfile(track, zero, ccur, spec, mu * 0.93);
+  const centre = { off: zero, cur: ccur, v: cv, pts: cpts, hdg: track.hdg, lapTime: lapOf(cv) };
+
+  // `at(which, grip)` — a slower driver is NOT a fast driver with the speed
+  // turned down. They use less of the tyre. Re-solving the profile at reduced
+  // grip is the physically honest version: corner speeds fall (v ~ sqrt(mu))
+  // while the straights are untouched, because top speed is drag-limited, not
+  // grip-limited. Scaling the finished profile instead caps top speed too,
+  // which had the whole grid trundling down the Monza straight 70 km/h below
+  // what the car can actually do.
+  const cache = new Map();
+  const at = (which, grip = 1) => {
+    const key = `${which}:${grip.toFixed(3)}`;
+    let got = cache.get(key);
+    if (got) return got;
+    const base = which === 'centre' ? centre : race;
+    const v = speedProfile(track, base.off, base.cur, spec, mu * 0.93 * grip);
+    got = { ...base, v, lapTime: lapOf(v) };
+    cache.set(key, got);
+    return got;
+  };
+  return { race, centre, at };
+}
+
 export function buildLine(track, spec, mu = spec.mu, margin = 0.35) {
   // The profile is what the car can do at PEAK grip. A driver never sits
   // exactly on the optimum, so budget for that here instead of asking for 7%

@@ -2,9 +2,9 @@
 // can never drift apart and start reporting on two different simulations.
 import fs from 'fs';
 import { Track } from '../js/track.js';
-import { buildLine } from '../js/line.js';
+import { buildLines } from '../js/line.js';
 import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip } from '../js/physics.js';
-import { makeAutopilot } from '../js/autopilot.js';
+import { makeAutopilot, makeDriver } from '../js/autopilot.js';
 
 export const fmt = s => s == null ? '--.---'
   : `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
@@ -13,10 +13,10 @@ export function loadTrack(key, cls) {
   const track = new Track(JSON.parse(
     fs.readFileSync(new URL(`../data/tracks/${key}.json`, import.meta.url), 'utf8')));
   const spec = CARS[cls] || CARS.f4;
-  return { track, line: buildLine(track, spec), spec };
+  return { track, lines: buildLines(track, spec), spec };
 }
 
-// Surface under the car, from its lateral offset. Same rule as the game uses.
+// Surface under the car, from its lateral offset. Same rule the game uses.
 export function surfaceAt(proj) {
   const al = Math.abs(proj.lat);
   if (al > proj.w + proj.run) return SURFACE.grass;
@@ -27,16 +27,24 @@ export function surfaceAt(proj) {
 
 // Drives `laps` laps and returns the numbers. `onTick` gets every substep so a
 // tracer can watch without a second copy of the loop existing anywhere.
-export function runLaps({ track, line, spec, laps = 3, opt = {}, onTick = null }) {
+export function runLaps({ track, lines, spec, laps = 3, tier = 'hard', seed = 1, grip = null, quiet = false, opt = {}, onTick = null }) {
   const peak = peakSlip(spec);
-  const drive = makeAutopilot(track, line, spec, peak, opt);
+  const driver = makeDriver(seed, tier, track.corners.length || 24);
+  // Overrides for measurement runs. NOTE: driver.T is a shared reference into
+  // TIERS — never write through it, or one sweep silently reconfigures every
+  // other driver on the grid.
+  if (grip != null) driver.gripOverride = grip;
+  if (quiet) { driver.nextMistake = Infinity; driver.consistency = 1; }
+  const drive = makeAutopilot(track, lines, spec, peak, { ...opt, driver });
+  const line = lines.at(driver.T.line, driver.grip);
   const car = makeCar({ cls: spec.key });
   const i0 = track.idx(0);
   const p0 = track.point(0, line.off[i0]);
   car.x = p0.x; car.y = p0.y; car.hdg = line.hdg[i0]; car.vx = 20;
 
   let hint = i0, sPrev = 0, lap = 0, lapT = 0, best = null, t = 0;
-  let offT = 0, worstLat = 0, maxSlip = 0, spinT = 0, vmax = 0;
+  let offT = 0, worstLat = 0, maxSlip = 0, spinT = 0, vmax = 0, mistakes = 0;
+  let wasMistake = false;
   const times = [];
   const maxT = laps * 400 + 120;
 
@@ -52,6 +60,8 @@ export function runLaps({ track, line, spec, laps = 3, opt = {}, onTick = null }
     maxSlip = Math.max(maxSlip, Math.abs(car.slipR));
     vmax = Math.max(vmax, car.speed);
     if (Math.abs(car.slipR) > peak * 3 && car.speed > 12) spinT += FIXED_DT;
+    if (info.mistake && !wasMistake) mistakes++;
+    wasMistake = !!info.mistake;
 
     if (onTick) onTick({ t, car, proj, surface, info, lap, lapT });
 
@@ -61,5 +71,5 @@ export function runLaps({ track, line, spec, laps = 3, opt = {}, onTick = null }
     }
     sPrev = proj.s; lapT += FIXED_DT; t += FIXED_DT;
   }
-  return { car, times, best, offT, worstLat, maxSlip, spinT, vmax, t, peak };
+  return { car, driver, line, times, best, offT, worstLat, maxSlip, spinT, vmax, t, peak, mistakes };
 }

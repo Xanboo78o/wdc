@@ -117,12 +117,36 @@ learning braking points, because it is uniform.
 ## Harnesses — use these instead of guessing
 
 ```
-node tools/drive.mjs [track] [laps] [class]     # the gate: lap time, off-track, sideways
-node tools/trace.mjs [track] [class]            # WHY it failed: timeline + dense window
+node tools/drive.mjs [track] [laps] [class] [tier|all]   # the gate: lap, off-track, sideways
+node tools/trace.mjs [track] [class] [tier]              # WHY: timeline + dense failure window
+node tools/ceiling.mjs [track|all] [class]               # how much grip the controller can use
 ```
-`tools/harness.mjs` is shared by both so they can never drift apart and start
-reporting on two different simulations. Flags `--rack=N --yaw=N` override the
-autopilot's rack slew rate and switch countersteer to yaw-rate damping.
+`tools/harness.mjs` is shared by all three so they can never drift apart and
+start reporting on two different simulations.
+
+## The difficulty ladder is measured, not chosen
+
+Difficulty is a **grip fraction**, never a speed multiplier. Skill means using
+more of the tyre, which slows the corners (`v ~ sqrt(mu)`) and leaves the
+straights alone, because top speed is drag-limited. Scaling the finished speed
+profile instead capped every bot's top speed 70 km/h under the drag limit.
+
+`tools/ceiling.mjs` measures the highest grip this controller can drive cleanly
+— strictly: under 1 s off track, under 1.5 s sideways, never a wheel past the
+white line. HARD sits exactly there; the other tiers are fractions of it.
+
+| circuit | F4 | F1 |
+|---|---|---|
+| Monza | 0.84 | 0.84 |
+| Zandvoort | 0.84 | 0.88 |
+| Suzuka | 0.88 | 0.92 |
+| Monaco | 0.84 | **0.78** |
+| Baku | 0.88 | **0.95** |
+
+At the ceiling the bots run 7–15% off the ideal line and put nothing a wheel
+wrong. **Above it they get SLOWER, not faster** — an unintuitive failure that
+cost two rounds of hand-tuning before this sweep existed. Re-run it after any
+physics change: if the car becomes easier to drive, those are free tenths.
 
 Browser check without a human clicking anything:
 `?auto=monza:f1` boots straight into a session, `?lo` disables shadows — both
@@ -149,12 +173,16 @@ chmod +x .git/hooks/pre-commit
 
 ## Not done yet
 
-- **The autopilot is 27–47% off ideal pace** and still spends 25–40 s a lap
-  sideways. Suzuka is the best (27.5%), F1 anywhere is the worst (47%, and it
-  still puts a wheel 17 m off). For reference, DIRTY AIR's AI sits at 30–45%
-  off ideal and that is documented there as *its* open problem — this is a hard
-  problem, not a missing line of code. **Next job.**
-- No opponents, no qualifying, no race. It is a hotlap.
+- **Racecraft is not built yet.** The driver can lap cleanly; it cannot yet
+  attack, defend, or race anyone. `dirtyair/js/ai.js` has the attack/defend
+  layer worth adapting (one committed move, take the inside for the braking
+  zone, don't drive into someone alongside) and `dirtyair/js/race.js` has the
+  session layer: grid, dirty-air/tow neighbour loop, collisions with damage and
+  blame, pit lane (densify the OSM pit nodes first), track limits, DRS.
+- **No grid yet.** Target is 21 opponents; nothing has been performance-tested
+  at 22 cars, and `track.project()` searching 90 samples per car per substep is
+  the obvious first thing that will need rate-limiting.
+- No qualifying, no race, no damage-forces-a-pitstop. It is a hotlap.
 - No sound at all.
 - No wheel/force-feedback layer. The WebHID pedal pairing in
   `apex-racer/js/main.js` (lines ~432–487) is the thing to port when the DIY
