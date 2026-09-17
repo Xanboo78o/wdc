@@ -10,6 +10,7 @@ import { buildLine } from './line.js';
 import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip } from './physics.js';
 import { Hands, steerLock } from './input.js';
 import { View } from './render.js';
+import { loadEnv } from './env.js';
 
 const $ = id => document.getElementById(id);
 const CAMS = ['CHASE', 'CLOSE', 'NOSE', 'TV'];
@@ -72,7 +73,8 @@ async function start() {
   resetCar();
 
   const q = new URLSearchParams(location.search);
-  if (!state.view) state.view = new View($('cv'), t, line, { shadows: !q.has('lo') });
+  const env = q.has('noenv') ? null : await loadEnv(pickTrack);
+  if (!state.view) state.view = new View($('cv'), t, line, { shadows: !q.has('lo'), env });
   else { location.reload(); return; }   // changing circuit rebuilds the world
 
   $('trackName').textContent = t.full;

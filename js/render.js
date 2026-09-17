@@ -9,6 +9,7 @@
 // and a sim heading of h becomes rotation.y = -h on a mesh built pointing
 // along +X. Nothing outside this file should ever have to know that.
 import * as THREE from 'three';
+import { buildEnv } from './env.js';
 
 const KERB_W = 0.55;
 const WALL_H = 1.25;
@@ -187,6 +188,10 @@ export class View {
 
     this._lights();
     this._world();
+    // The real surroundings, if they have been baked. Without these the world
+    // ends in a flat plane against the sky, which reads as a video game
+    // instantly — and gives the eye nothing to measure speed against.
+    this.envStats = buildEnv(this.scene, opts.env);
     const car = buildCar(0xd8352a);
     this.car = car.group; this.wheels = car.wheels; this.frontAxle = car.front;
     this.scene.add(this.car);

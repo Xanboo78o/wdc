@@ -110,6 +110,50 @@ learning braking points, because it is uniform.
    being down. Send `-A '<project>/<version> (contact ...)'` and it works.
    `https://overpass-api.de/api/interpreter` answers fine with one.
 
+## The world around the circuit
+
+`tools/bakeenv.mjs` pulls the real surroundings from OpenStreetMap using the
+**same projection the circuit was baked with**, so the facades line up with the
+barriers instead of floating 40 m away. `js/env.js` renders them, merged into a
+handful of draw calls — 2,300 separate building meshes would cost more than the
+entire physics budget.
+
+```
+node tools/bakeenv.mjs [track|all] [--force]   # buildings, landcover, coastline
+node tools/envmap.mjs  [track] [width]         # draw it as ASCII to check it
+```
+Raw Overpass responses cache under `data/env/raw/`, so re-running without
+`--force` re-derives the geometry for free and does not hammer a volunteer-run
+service. Output is ~140–330 KB per circuit.
+
+**Proof the projection is right** (this is the test to repeat after any change):
+the baked track carries real OSM corner names, and the building dump carries
+real building names. At Monaco, the building called *Le Mirabeau* lands 56 m
+from the corner called *Mirabeau Haute*, and La Rascasse/Anthony Noghès pick up
+*Chapelle de la Miséricorde* and *Ecole de la Condamine* — both genuinely in La
+Condamine. A mirrored or offset world cannot produce that pattern. Small
+distances alone prove nothing: in a dense city a mirrored world still puts
+buildings near the track.
+
+More gotchas, paid for:
+
+8. **Ground cover must render BELOW the racing surface.** The road is at y=0
+   and the run-off at −0.03, so any positive y paints over the track. Zandvoort
+   has a single 4,886 m dune polygon in a 2,173 m world; at y=+0.028 it
+   blanketed the entire circuit and looked like a renderer crash. Cover is
+   scenery and never competes with the surface you drive on. Layers are
+   millimetres apart, so they also need `polygonOffset`.
+9. **Query building RELATIONS as well as ways.** Only ~1% of buildings are
+   multipolygon relations, but they are the landmarks — ways alone silently
+   drops the Casino at Monaco, the one building anyone would recognise.
+10. **The sea is not an area.** It is an open `natural=coastline` way with, by
+    OSM convention, LAND ON THE LEFT of the direction of travel. Skip it and
+    Monaco has no Mediterranean. Extrude it seaward and close it — but clamp
+    BOTH edges to the world box: Overpass returns a whole way if any part
+    touches the box, so a national coastline produced a single 14.6 km polygon
+    around a 2 km circuit. Take the seaward direction from the UNCLAMPED line,
+    or squashing points onto the box edge flips which side the sea is on.
+
 ## Inherited gotchas (from DIRTY AIR — still load-bearing here)
 
 - Low-speed regularisation is mandatory: floor the slip-angle denominator at
