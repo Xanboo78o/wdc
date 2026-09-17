@@ -3,6 +3,9 @@
 A single-seater racing simulator, in the browser, built to be practised on
 rather than played. Started 2026-09-16.
 
+**Live: https://xanboo78o.github.io/wdc/** — repo `Xanboo78o/wdc`, Pages served
+from `master` root, so a push is a deploy.
+
 Read this file before touching `js/physics.js` or `js/autopilot.js`. Most of
 what is in here was paid for with a debugging session, once, already.
 
@@ -122,8 +125,27 @@ reporting on two different simulations. Flags `--rack=N --yaw=N` override the
 autopilot's rack slew rate and switch countersteer to yaw-rate damping.
 
 Browser check without a human clicking anything:
-`?auto=monza:f1` boots straight into a session — used by the headless
-chromium screenshot pass.
+`?auto=monza:f1` boots straight into a session, `?lo` disables shadows — both
+used by the headless chromium screenshot pass. Chromium needs
+`--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader` to get
+WebGL in headless mode.
+
+## Cache busting (do not remove)
+
+`tools/stamp.mjs` rewrites the import map so every module is fetched as
+`./js/foo.js?v=<epoch>`, and `.git/hooks/pre-commit` re-stamps on every commit.
+Without it, a plain reload after a push serves the new `index.html` alongside
+JS from a ~10 minute cache — new HTML running old modules, which presents as
+"you didn't add the thing you said you added" and sends you hunting a bug that
+does not exist.
+
+Git hooks are not committed, so **after a fresh clone the hook has to be
+reinstalled** or stamping silently stops happening:
+
+```sh
+printf '#!/bin/sh\nnode tools/stamp.mjs "$(date +%%s)" >/dev/null 2>&1 && git add index.html\nexit 0\n' > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
 
 ## Not done yet
 
@@ -137,4 +159,6 @@ chromium screenshot pass.
 - No wheel/force-feedback layer. The WebHID pedal pairing in
   `apex-racer/js/main.js` (lines ~432–487) is the thing to port when the DIY
   pedals exist — see `apex-racer/docs/RIG-BUILD.md`.
-- No cache-busting stamp yet (`dirtyair/tools/stamp.mjs` is the recipe).
+- The start/finish marking is a plain white slab rather than a proper
+  checkered line — it is the first thing you see on load, so it is worth 10
+  minutes at some point.
