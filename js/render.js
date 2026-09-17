@@ -132,11 +132,14 @@ function buildCar(colour) {
 }
 
 export class View {
-  constructor(canvas, track, line) {
+  constructor(canvas, track, line, opts = {}) {
     this.track = track; this.line = line;
+    // Shadows off is both a real setting for a weak machine and the fastest
+    // way to tell whether a lighting problem is the shadow map or the material.
+    this.shadows = opts.shadows !== false;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = this.shadows;
     // PCFSoftShadowMap is deprecated in this three build and silently falls
     // back to PCFShadowMap anyway — ask for what we actually get.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -177,18 +180,22 @@ export class View {
     this.scene.add(new THREE.HemisphereLight(0xbcd2ea, 0x4a4a42, 1.05));
     const sun = new THREE.DirectionalLight(0xfff4e0, 2.1);
     sun.position.set(180, 260, 120);
-    sun.castShadow = true;
+    sun.castShadow = this.shadows;
     sun.shadow.mapSize.set(2048, 2048);
     const d = 45;
     sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
     sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
-    sun.shadow.camera.near = 1; sun.shadow.camera.far = 600;
+    // The light sits ~340 m from its target, so a 1..600 depth range spends
+    // almost all of its precision on empty space. Bracket the useful slice.
+    sun.shadow.camera.near = 180; sun.shadow.camera.far = 480;
     // A big unbroken flat surface is the worst case for shadow acne, and the
     // track is nothing but that. normalBias offsets along the surface normal,
     // which is what actually fixes acne on flat ground — a depth bias alone
     // left the whole road self-shadowing and rendering near-black.
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.06;
+    // At d=45 with a 2048 map a shadow texel is ~4.4 cm on the ground, so the
+    // normal offset has to be measured in several texels to clear acne.
+    sun.shadow.bias = -0.0002;
+    sun.shadow.normalBias = 0.30;
     this.scene.add(sun);
     this.sun = sun;
     this.scene.add(sun.target);

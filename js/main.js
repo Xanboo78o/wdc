@@ -71,7 +71,8 @@ async function start() {
   state.car = makeCar({ cls: pickCar });
   resetCar();
 
-  if (!state.view) state.view = new View($('cv'), t, line);
+  const q = new URLSearchParams(location.search);
+  if (!state.view) state.view = new View($('cv'), t, line, { shadows: !q.has('lo') });
   else { location.reload(); return; }   // changing circuit rebuilds the world
 
   $('trackName').textContent = t.full;
