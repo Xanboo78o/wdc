@@ -76,6 +76,45 @@ function ribbon(track, innerAt, outerAt, colorAt) {
   return g;
 }
 
+// Kerbs need HARD colour edges, so each segment gets its own four vertices and
+// one flat colour. Sharing vertices between segments — which is what the main
+// ribbon() does, because it is built for continuous surfaces — makes the GPU
+// interpolate red into white across every quad, and alternating blocks come
+// out as a smooth gradient.
+function stripes(track, innerAt, outerAt, colorAt) {
+  const n = track.n, pos = [], col = [], idx = [];
+  const c = new THREE.Color();
+  let base = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    let a = innerAt(i), b = outerAt(i);
+    if (a === b) continue;                       // not a kerb here
+    if (a > b) { const s = a; a = b; b = s; }
+    let a2 = innerAt(j), b2 = outerAt(j);
+    if (a2 === b2) continue;
+    if (a2 > b2) { const s = a2; a2 = b2; b2 = s; }
+    const h1 = track.hdg[i], h2 = track.hdg[j];
+    const p = (x, y, h, lat) => [x - Math.sin(h) * lat, Z(y + Math.cos(h) * lat)];
+    const q = [
+      p(track.x[i], track.y[i], h1, a), p(track.x[i], track.y[i], h1, b),
+      p(track.x[j], track.y[j], h2, a2), p(track.x[j], track.y[j], h2, b2),
+    ];
+    c.set(colorAt(i));
+    for (const v of q) { pos.push(v[0], 0, v[1]); col.push(c.r, c.g, c.b); }
+    idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    base += 4;
+  }
+  if (!idx.length) return null;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  const nrm = new Float32Array(pos.length);
+  for (let k = 0; k < pos.length / 3; k++) nrm[k * 3 + 1] = 1;
+  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  return g;
+}
+
 // A vertical wall standing on the outer edge of the run-off.
 function wall(track, atFn, height) {
   const n = track.n;
@@ -277,13 +316,15 @@ export class View {
       }
     }
     const kerbMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, side: THREE.DoubleSide });
-    const kerbGeo = ribbon(t,
+    const kerbGeo = stripes(t,
       i => inCorner[i] ? side[i] * t.w[i] : 0,
       i => inCorner[i] ? side[i] * (t.w[i] + KERB_W) : 0,
       i => (Math.floor(i * t.ds / 2.4) % 2) ? 0xd23b2f : 0xe6e6e6);
-    const kerb = new THREE.Mesh(kerbGeo, kerbMat);
-    kerb.position.y = 0.022;
-    S.add(kerb);
+    if (kerbGeo) {
+      const kerb = new THREE.Mesh(kerbGeo, kerbMat);
+      kerb.position.y = 0.022;
+      S.add(kerb);
+    }
 
     // barriers
     const barMat = new THREE.MeshStandardMaterial({ color: 0xbfc4cb, roughness: 0.6, metalness: 0.3, side: THREE.DoubleSide });
@@ -387,11 +428,16 @@ export class View {
     while (d < -Math.PI) d += 2 * Math.PI;
     this.camH += d * Math.min(1, dt * 7);
 
+    // Speed is a MOTION CUE, not a number. A high, distant camera with a fixed
+    // field of view makes 210 km/h feel like 60, because almost nothing moves
+    // across the screen. Low, close, and a field of view that opens as you go
+    // faster puts the ground and the barriers into the corners of your eye,
+    // which is where the sensation actually comes from.
     const RIGS = [
-      { dist: 7.2, height: 2.35, lead: 9, fov: 62 },   // CHASE
-      { dist: 4.6, height: 1.70, lead: 8, fov: 66 },   // CLOSE
-      { dist: 0.15, height: 1.18, lead: 14, fov: 72 }, // NOSE
-      { dist: 15, height: 9.5, lead: 6, fov: 55 },     // TV
+      { dist: 6.0, height: 1.80, lead: 11, fov: 60, kick: 1 },   // CHASE
+      { dist: 4.1, height: 1.50, lead: 10, fov: 64, kick: 1 },   // CLOSE
+      { dist: 0.15, height: 1.10, lead: 16, fov: 72, kick: 1 },  // NOSE
+      { dist: 15, height: 9.5, lead: 6, fov: 55, kick: 0.25 },   // TV
     ];
     const rig = RIGS[this.mode];
     const ch = Math.cos(this.camH), sh = Math.sin(this.camH);
@@ -407,8 +453,10 @@ export class View {
 
     this.camAim.lerp(new THREE.Vector3(car.x + ch * rig.lead, 0.75, Z(car.y + sh * rig.lead)), Math.min(1, dt * 10));
     this.camera.lookAt(this.camAim);
-    // speed pulls the FOV out — cheap, and it is most of why fast feels fast
-    const fov = rig.fov + Math.min(14, car.speed * 0.13);
+    // Speed pulls the field of view open. This is cheap and it is most of why
+    // fast feels fast — at 300 km/h the frame widens by over 20 degrees, so the
+    // barriers rush past the edges instead of sitting still.
+    const fov = rig.fov + Math.min(24, car.speed * 0.26) * rig.kick;
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
 
     this.sun.position.set(car.x + 180, 260, Z(car.y) + 120);

@@ -91,8 +91,20 @@ function buildings(list) {
   const c = new THREE.Color();
   let base = 0;
   for (const b of list) {
-    const p = b.p, h = b.h;
+    let p = b.p;
+    const h = b.h;
     if (p.length < 3) continue;
+    // OSM does not guarantee which way round a footprint is wound, and the
+    // extrusion's facing follows that winding — so roughly half of every city
+    // came out with its walls facing INWARD, got backface-culled, and you could
+    // see straight through the building. Force every footprint anticlockwise
+    // (positive signed area) before extruding.
+    let sa = 0;
+    for (let i = 0; i < p.length; i++) {
+      const q = p[i], r = p[(i + 1) % p.length];
+      sa += q[0] * r[1] - r[0] * q[1];
+    }
+    if (sa < 0) p = p.slice().reverse();
     // A little hue variation per building, seeded off position so it is stable
     const seed = (Math.abs(p[0][0] * 7.3 + p[0][1] * 3.1) % 1);
     const tint = 0.62 + seed * 0.30;
@@ -101,7 +113,10 @@ function buildings(list) {
       const a = p[i], d = p[(i + 1) % p.length];
       const dx = d[0] - a[0], dy = d[1] - a[1];
       const m = Math.hypot(dx, dy) || 1;
-      const nx = -(-dy / m), nz = -(dx / m);   // outward normal, mirrored by Z()
+      // Outward normal. In sim space that is (dy, -dx) for an anticlockwise
+      // ring; Z() maps sim y to -z, so it becomes (dy, 0, +dx). The + matters —
+      // it was negated, which lit every wall from the inside.
+      const nx = dy / m, nz = dx / m;
       const quad = [[a[0], 0, Z(a[1])], [d[0], 0, Z(d[1])], [d[0], h, Z(d[1])], [a[0], h, Z(a[1])]];
       for (let k = 0; k < 4; k++) {
         pos.push(quad[k][0], quad[k][1], quad[k][2]);
@@ -138,6 +153,10 @@ function buildings(list) {
   g.setIndex(idx);
   const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.88, metalness: 0.02,
+    // Belt and braces after the see-through-buildings bug: with the winding
+    // normalised this should never be needed, but a degenerate footprint that
+    // slips through should look slightly odd, not become a hole in the city.
+    side: THREE.DoubleSide,
   }));
   mesh.castShadow = true; mesh.receiveShadow = true;
   return mesh;

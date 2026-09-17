@@ -73,6 +73,15 @@ async function start() {
   resetCar();
 
   const q = new URLSearchParams(location.search);
+  // Driver aids are tunable from the URL, including all the way off. They are
+  // real systems — TC limits drive torque to what the rear tyre can still take
+  // once cornering has used its share of the friction circle, ABS releases
+  // pressure when the front locks, and SC adds counter-lock plus stops the rack
+  // asking the front for more slip than it can give. None of them invent grip.
+  //   ?tc=0&abs=0&sc=0   purist, nothing between you and the tyres
+  //   ?tc=1&sc=1         maximum help while you learn a circuit
+  const aid = (k, d) => { const v = q.get(k); return v == null ? d : Math.max(0, Math.min(1, parseFloat(v) || 0)); };
+  state.car.aids = { tc: aid('tc', 0.6), abs: aid('abs', 0.6), sc: aid('sc', 0.35) };
   const env = q.has('noenv') ? null : await loadEnv(pickTrack);
   if (!state.view) state.view = new View($('cv'), t, line, { shadows: !q.has('lo'), env });
   else { location.reload(); return; }   // changing circuit rebuilds the world

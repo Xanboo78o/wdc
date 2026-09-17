@@ -90,6 +90,11 @@ export function makeCar(opts = {}) {
     delta: 0, throttle: 0, brake: 0,
     tyre: { Tf: 60, Tr: 60, wf: 0, wr: 0, age: 0 },
     drsOpen: false, dirty: 0, tow: 0,
+    // Driver aids, modelled as the real systems they are rather than as grip
+    // bonuses. 0 = off. A keyboard throttle is binary — 0% or 100% — so without
+    // TC the car spins on the exit of every slow corner, which it did.
+    aids: { tc: 0.60, abs: 0.60, sc: 0.35, ...(opts.aids || {}) },
+    tcCut: 1, absCut: 1,
     surface: 1, damage: 0,
     speed: 0, slipF: 0, slipR: 0, lock: false, wheelspin: false,
     gLat: 0, gLong: 0,
@@ -125,7 +130,7 @@ function clampCircle(fx, fy, cap) {
 export const FIXED_DT = 1 / 400;
 
 export function step(car, dt, env = {}) {
-  const S = car.spec, t = car.tyre;
+  const S = car.spec, t = car.tyre, A = car.aids || { tc: 0, abs: 0, sc: 0 };
   const v = Math.hypot(car.vx, car.vy);
   // Low-speed regularisation. With raw slip angles, vx -> 0 sends every slip
   // angle to 90 degrees, the friction circle then eats all the drive force,
@@ -157,24 +162,106 @@ export function step(car, dt, env = {}) {
   const muR = tyreGrip(S, t.Tr, t.wr) * surf;
 
   // ---- slip angles --------------------------------------------------------
-  const af = Math.atan((car.vy + S.a * car.r) / vSafe) - car.delta;
+  // Stability control adds counter-lock when the car rotates faster than the
+  // steering asks for. It must NOT be written back into car.delta: that field
+  // is the DRIVER's rack position, and both the autopilot and the keyboard
+  // model read it back as their own state. Writing to it made the assist and
+  // the driver fight each other every substep and put the reference driver
+  // 113 m off the road. Keep the correction local to the force calculation.
+  const pk = S._pk || (S._pk = peakSlip(S));
+  let steer = car.delta;
+  if (A.sc > 0) {
+    const ex = Math.abs(car.slipR) - Math.abs(car.slipF);
+    if (ex > 0.03) steer += Math.sign(car.slipR) * Math.min(0.25, (ex - 0.03) * 1.6) * A.sc;
+
+    // STEERING LIMITER — the fix for "I can't turn without spinning out".
+    //
+    // A keyboard winds to full lock in about a third of a second, and full lock
+    // at 70 km/h asks the front tyre for ~12 degrees of slip when it peaks at
+    // 7.4. Past peak, MORE steering gives LESS grip: the front washes out, the
+    // car ploughs straight on, and only then does it let go. The trace showed
+    // front slip above rear slip the whole way in — understeer, not oversteer,
+    // which is why the traction control and the counter-lock above could not
+    // touch it (both look for the REAR going first).
+    //
+    // So clamp the rack to the slip the front can actually use. This is not a
+    // driving aid inventing grip — it is what a real steering rack's geometry
+    // and a real driver's hands already do. Nobody steers to 37 degrees of slip.
+    const base = Math.atan((car.vy + S.a * car.r) / vSafe);
+    const lim = pk * (1.05 + 0.45 * (1 - A.sc));
+    steer = Math.max(base - lim, Math.min(base + lim, steer));
+  }
+  car.steerEff = steer;
+
+  const af = Math.atan((car.vy + S.a * car.r) / vSafe) - steer;
   const ar = Math.atan((car.vy - S.b * car.r) / vSafe);
-  // A stationary car cannot generate cornering force. The 6 m/s floor above
-  // keeps slip angles finite, but it also means a PARKED car with lock applied
-  // computes a full-size slip angle, gets a full-size lateral force, and spins
-  // on the spot like a shopping trolley. Fade the lateral force out as the car
-  // actually stops. 3 m/s is well below any real corner (Monaco's hairpin is
-  // 12.5 m/s), so nothing that matters is touched.
+
+  // LOW SPEED. A slip ANGLE is meaningless as the car stops — the 6 m/s floor
+  // keeps it finite, but a parked car with lock applied still computes a
+  // full-size angle and spins on the spot like a shopping trolley.
+  //
+  // The honest model is that a tyre near standstill resists by slip VELOCITY,
+  // not slip angle: the contact patch scrubs, and the force opposes how fast
+  // the tyre is being dragged sideways, capped by grip. Blending to that below
+  // 3 m/s both kills the spinning-while-parked bug AND straightens a spun car
+  // for a real reason. The previous version faked the second half with a
+  // hand-written `vy -= vy*k; r -= r*k` fudge below 5 m/s — which is exactly
+  // what made a spin feel like a canned animation instead of physics.
   const lowV = Math.min(1, v / 3.0);
   let Fyf = pac(S, af, muF * Fzf) * lowV;
   let Fyr = pac(S, ar, muR * Fzr) * lowV;
+  if (lowV < 1) {
+    const w = 1 - lowV;
+    const capF = muF * Fzf, capR = muR * Fzr;
+    const vLatF = car.vy + S.a * car.r, vLatR = car.vy - S.b * car.r;
+    const visc = 1 / 1.5;                       // full grip by 1.5 m/s of scrub
+    Fyf += -Math.max(-capF, Math.min(capF, vLatF * visc * capF)) * w;
+    Fyr += -Math.max(-capR, Math.min(capR, vLatR * visc * capR)) * w;
+  }
 
   // ---- longitudinal -------------------------------------------------------
+  // Driver aids act on the PEDALS, never on the grip. TC cuts engine torque
+  // when the rear is past its peak; ABS releases brake pressure when the front
+  // locks. Both react to the previous substep's measured slip — 2.5 ms of
+  // latency, which is about what a real system has. Neither invents grip: they
+  // stop the driver asking for more than the tyre has.
+  let thrCmd = car.throttle, brkCmd = car.brake;
+  if (A.tc > 0) {
+    // Limit drive torque to what the rear tyre can still take once cornering
+    // has taken its share of the friction circle. This is what a real traction
+    // control does, and it is PREDICTIVE — it never lets the demand exceed the
+    // grip in the first place.
+    //
+    // The first version waited for the rear slip angle to pass peak before
+    // cutting. In a slow corner that is far too late: the car is already gone
+    // by the time the signal appears, which is why it still spun on every
+    // chicane exit.
+    const capR = Math.max(1, muR * Fzr);
+    const latUse = Math.min(1, Math.abs(Fyr) / capR);
+    const longRoom = Math.sqrt(Math.max(0, 1 - latUse * latUse)) * capR;
+    const full = Math.min(S.Pmax / Math.max(v, 9), S.Fdrive);
+    // The AID LEVEL sets how far past the circle the tyre is allowed to go,
+    // not what fraction of the correct cut to apply. Applying 60% of the needed
+    // cut at level 0.6 still overdrives and still spins — a mid setting should
+    // permit more wheelspin, not permit a spin. Level 0 disables TC entirely
+    // (the else branch below), which is the setting for doing it properly.
+    const room = longRoom * (1 + 0.6 * (1 - A.tc));
+    const want = full > 1 ? Math.min(1, room / full) : 1;
+    // cut hard, restore gently — a TC that restores fast just oscillates
+    car.tcCut += (want - car.tcCut) * Math.min(1, dt * (want < car.tcCut ? 90 : 9));
+    thrCmd *= car.tcCut;
+  } else car.tcCut = 1;
+  if (A.abs > 0) {
+    const tgt = car.lock ? 0.5 : 1;
+    car.absCut += (tgt - car.absCut) * Math.min(1, dt * (car.lock ? 120 : 25));
+    brkCmd *= 1 - (1 - car.absCut) * A.abs;
+  } else car.absCut = 1;
+
   let FxR = 0, FxF = 0;
-  if (car.throttle > 0) FxR += Math.min(S.Pmax / Math.max(v, 9), S.Fdrive) * car.throttle;
-  if (car.brake > 0) {
-    FxF -= S.Fbrake * S.brakeBal * car.brake;
-    FxR -= S.Fbrake * (1 - S.brakeBal) * car.brake;
+  if (thrCmd > 0) FxR += Math.min(S.Pmax / Math.max(v, 9), S.Fdrive) * thrCmd;
+  if (brkCmd > 0) {
+    FxF -= S.Fbrake * S.brakeBal * brkCmd;
+    FxR -= S.Fbrake * (1 - S.brakeBal) * brkCmd;
   }
   // Friction circle: grip spent stopping is grip you do not have for turning.
   // This is the whole of trail-braking, and it falls out for free.
@@ -190,7 +277,7 @@ export function step(car, dt, env = {}) {
   }
 
   // ---- equations of motion ------------------------------------------------
-  const cd = Math.cos(car.delta), sd = Math.sin(car.delta);
+  const cd = Math.cos(steer), sd = Math.sin(steer);
   const Fx = FxR + FxF * cd - Fyf * sd - drag * Math.sign(car.vx || 1);
   const Fy = Fyf * cd + Fyr + FxF * sd + bankF;
   const Mz = S.a * (Fyf * cd + FxF * sd) - S.b * Fyr;
@@ -210,13 +297,9 @@ export function step(car, dt, env = {}) {
   // NOT bleed the lateral component — doing that destroys all the car's energy
   // in about 0.05 s and reads as an instant stop from 120 km/h.
   if (car.vx < 0) car.vx = 0;
-  // At a crawl the tyres bite and the car straightens instead of hovering
-  // sideways forever.
-  if (v < 5) {
-    const k = Math.min(0.85, (1 - v / 5) * 5 * dt);
-    car.vy -= car.vy * k;
-    car.r -= car.r * k;
-  }
+  // Nothing scripted here any more. A spun car is straightened by the viscous
+  // scrub term above, which is a tyre force like any other, so the recovery is
+  // something the simulation does rather than something played back at you.
   car.hdg += car.r * dt;
   car.x += (car.vx * Math.cos(car.hdg) - car.vy * Math.sin(car.hdg)) * dt;
   car.y += (car.vx * Math.sin(car.hdg) + car.vy * Math.cos(car.hdg)) * dt;
