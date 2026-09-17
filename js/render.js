@@ -21,7 +21,16 @@ function ribbon(track, innerAt, outerAt, colorAt) {
   const c = new THREE.Color();
   for (let i = 0; i < n; i++) {
     const h = track.hdg[i], nx = -Math.sin(h), ny = Math.cos(h);
-    const a = innerAt(i), b = outerAt(i);
+    // Order the two edges so the LARGER lateral offset is always the first
+    // vertex. The triangle winding — and therefore which way the surface
+    // faces — depends on that order, and the ribbons disagree about it: the
+    // road runs -w -> +w (crossing the centreline) while the right run-off
+    // runs -w -> -(w+run). Left as written, the road came out facing DOWN, and
+    // because the materials are DoubleSide three.js negated its normal instead
+    // of culling it, so the tarmac rendered lit-from-below — near-black — while
+    // the run-off beside it looked fine. Shadows were never involved.
+    let a = innerAt(i), b = outerAt(i);
+    if (a < b) { const s = a; a = b; b = s; }
     pos[i * 6 + 0] = track.x[i] + nx * a; pos[i * 6 + 1] = 0; pos[i * 6 + 2] = track.y[i] + ny * a;
     pos[i * 6 + 3] = track.x[i] + nx * b; pos[i * 6 + 4] = 0; pos[i * 6 + 5] = track.y[i] + ny * b;
     if (col) {
