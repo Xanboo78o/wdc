@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHASING WDC</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%230b0d10%27/%3E%3Crect x=%274%27 y=%2711%27 width=%275%27 height=%2710%27 fill=%27%2335d6a0%27/%3E%3Crect x=%2711%27 y=%2711%27 width=%275%27 height=%2710%27 fill=%27%23e8eaee%27/%3E%3Crect x=%2718%27 y=%2711%27 width=%275%27 height=%2710%27 fill=%27%23d8352a%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./style.css">
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<!-- ===================== MENU ===================== -->
+<div id="menu" class="screen">
+  <div class="brand">
+    <h1>CHASING <span>WDC</span></h1>
+    <p>real tyres · real circuits · the line is earned, not given</p>
+  </div>
+
+  <div class="pickrow">
+    <div class="pick">
+      <h2>CIRCUIT</h2>
+      <div class="cards" id="trackList"></div>
+      <small>Surveyed geometry, not drawn by hand — every corner is where it really is.</small>
+    </div>
+    <div class="pick">
+      <h2>CAR</h2>
+      <div class="cards" id="carList"></div>
+      <small>F4 peaks later and warns you first. That is why you start there.</small>
+    </div>
+  </div>
+
+  <button id="go" class="go">GO</button>
+
+  <div class="keys">
+    <b>&larr; &rarr;</b> steer &nbsp;·&nbsp; <b>&uarr;</b> throttle &nbsp;·&nbsp; <b>&darr;</b> brake &nbsp;·&nbsp;
+    <b>SPACE</b> DRS &nbsp;·&nbsp; <b>C</b> camera &nbsp;·&nbsp; <b>L</b> ideal line &nbsp;·&nbsp;
+    <b>R</b> reset &nbsp;·&nbsp; <b>ESC</b> menu
+    <br><i>A gamepad works too — plug it in and it takes over automatically.</i>
+  </div>
+</div>
+
+<div id="load" class="screen hidden"><div class="loadbox">SOLVING THE RACING LINE…</div></div>
+
+<!-- ===================== HUD ===================== -->
+<div id="hud" class="hidden">
+
+  <div id="topleft">
+    <div class="circuit" id="trackName">—</div>
+    <div class="carline" id="carName">—</div>
+  </div>
+
+  <div id="times">
+    <div class="row big"><span>LAP <b id="lapNo">1</b></span><em id="tCur">--:--.---</em></div>
+    <div class="row"><span>LAST</span><em id="tLast">--:--.---</em></div>
+    <div class="row best"><span>BEST</span><em id="tBest">--:--.---</em></div>
+  </div>
+
+  <!-- The whole point of the sim, on screen: how far into the tyre you are.
+       The marker is the real peak of the tyre curve, not a decorative label. -->
+  <div id="slip">
+    <div class="sliphead">TYRE SLIP <i>peak at <span id="peakMark">—</span></i></div>
+    <div class="sliprow">
+      <span>FRONT</span>
+      <div class="track"><i id="slipFbar"></i><u></u></div>
+      <em id="slipFv">0.0°</em>
+    </div>
+    <div class="sliprow">
+      <span>REAR</span>
+      <div class="track"><i id="slipRbar"></i><u></u></div>
+      <em id="slipRv">0.0°</em>
+    </div>
+    <div class="tyretemp">TYRE °C &nbsp; F <b id="tfT">70</b> &nbsp; R <b id="trT">70</b></div>
+  </div>
+
+  <div id="bottomright">
+    <div class="spd"><b id="spd">0</b><small>KM/H</small></div>
+    <div class="glat"><b id="gLat">0.0</b><small>G LAT</small></div>
+    <div class="pedals">
+      <div class="ped throttle"><i id="pedT"></i></div>
+      <div class="ped brake"><i id="pedB"></i></div>
+    </div>
+    <div class="lights">
+      <span id="drsLight">DRS</span>
+      <span id="padLight" style="display:none">PAD</span>
+    </div>
+  </div>
+
+  <div id="msg"></div>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

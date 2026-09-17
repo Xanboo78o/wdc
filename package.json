@@ -1,0 +1,6 @@
+{
+  "name": "wdc",
+  "private": true,
+  "type": "module",
+  "description": "Chasing WDC — a single-seater racing simulator. No build step: the browser loads the same ES modules the Node harnesses do."
+}
