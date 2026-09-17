@@ -11,6 +11,7 @@ import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip } from './physics.js';
 import { Hands, steerLock } from './input.js';
 import { View } from './render.js';
 import { loadEnv } from './env.js';
+import { resolveBarrier } from './collide.js';
 
 const $ = id => document.getElementById(id);
 const CAMS = ['CHASE', 'CLOSE', 'NOSE', 'TV'];
@@ -160,24 +161,11 @@ function loop(now) {
 
     step(car, FIXED_DT, { surface, bank: proj.bank, bankDir: Math.sign(proj.curv) });
 
-    // ---- barrier ---------------------------------------------------------
-    const limit = proj.w + proj.run;
-    if (Math.abs(proj.lat) > limit) {
-      const sgn = Math.sign(proj.lat);
-      const p = track.point(proj.s, sgn * limit);
-      car.x = p.x; car.y = p.y;
-      const nx = -Math.sin(p.hdg) * sgn, ny = Math.cos(p.hdg) * sgn;
-      const cs = Math.cos(car.hdg), sn = Math.sin(car.hdg);
-      let vwx = car.vx * cs - car.vy * sn, vwz = car.vx * sn + car.vy * cs;
-      const vn = vwx * nx + vwz * ny;
-      if (vn > 0) {
-        vwx -= nx * vn * 1.25; vwz -= ny * vn * 1.25;   // absorb, slight bounce
-        vwx *= 0.72; vwz *= 0.72;
-        car.damage = Math.min(1, car.damage + Math.abs(vn) / 90);
-        if (Math.abs(vn) > 4) { hands.rumble(0.8, 0.5, 160); toast('CONTACT'); }
-      }
-      car.vx = vwx * cs + vwz * sn;
-      car.vy = -vwx * sn + vwz * cs;
+    // ---- barrier: real rigid-body contact, resolved at the bodywork corners
+    const hit = resolveBarrier(car, track, state.hint);
+    if (hit && hit.closing > 3.5) {
+      hands.rumble(Math.min(1, hit.closing / 14), 0.5, 160);
+      toast(hit.harm > 0.12 ? `HEAVY CONTACT — ${hit.part.toUpperCase()}` : 'CONTACT');
     }
 
     // ---- lap timing ------------------------------------------------------

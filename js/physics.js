@@ -23,6 +23,7 @@ export const CARS = {
     // Getting this backwards makes the car push into a corner then snap on
     // exit, which reads as "broken" rather than "oversteery".
     L: 2.75, a: 1.51, b: 1.24,
+    bodyL: 4.60, bodyW: 1.75,   // real bodywork, for contact — not the wheelbase
     h: 0.28,                    // CG height — this is what makes trail-braking work
     ClA: 1.35, CdA: 0.92, rho: 1.225,
     aeroBal: 0.42,
@@ -46,6 +47,7 @@ export const CARS = {
     // hairpin at 45 km/h. Do not "tidy" them without re-running tools/laptime.
     m: 798, Izz: 950,
     L: 3.60, a: 1.98, b: 1.62,
+    bodyL: 5.63, bodyW: 2.00,   // real bodywork, for contact — not the wheelbase
     h: 0.30,
     ClA: 4.62, CdA: 1.28, rho: 1.225,
     aeroBal: 0.435,
