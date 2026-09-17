@@ -13,6 +13,18 @@ import * as THREE from 'three';
 const KERB_W = 0.55;
 const WALL_H = 1.25;
 
+// HANDEDNESS. The simulation works in a right-handed 2D frame: +x forward at
+// heading 0, +y to the car's LEFT, headings increasing anticlockwise. Three.js
+// with Y up is the other handedness, so mapping sim y straight onto three z
+// renders the entire world as its own MIRROR IMAGE — every circuit reflected,
+// every right-hander a left-hander, and steering that reads as inverted because
+// pressing left moves the car right on screen.
+//
+// One negation fixes all of it. Sim (x, y) -> three (x, 0, -y), and a sim
+// heading maps to rotation.y directly instead of negated. Nothing outside this
+// file should ever have to know.
+const Z = y => -y;
+
 function ribbon(track, innerAt, outerAt, colorAt) {
   const n = track.n;
   const pos = new Float32Array(n * 2 * 3);
@@ -21,18 +33,22 @@ function ribbon(track, innerAt, outerAt, colorAt) {
   const c = new THREE.Color();
   for (let i = 0; i < n; i++) {
     const h = track.hdg[i], nx = -Math.sin(h), ny = Math.cos(h);
-    // Order the two edges so the LARGER lateral offset is always the first
-    // vertex. The triangle winding — and therefore which way the surface
-    // faces — depends on that order, and the ribbons disagree about it: the
-    // road runs -w -> +w (crossing the centreline) while the right run-off
-    // runs -w -> -(w+run). Left as written, the road came out facing DOWN, and
-    // because the materials are DoubleSide three.js negated its normal instead
-    // of culling it, so the tarmac rendered lit-from-below — near-black — while
-    // the run-off beside it looked fine. Shadows were never involved.
+    // Order the two edges consistently, because the triangle winding — and so
+    // which way the surface faces — depends on it, and the ribbons disagree:
+    // the road runs -w -> +w (crossing the centreline) while the right run-off
+    // runs -w -> -(w+run). Get it wrong and the surface faces DOWN; because
+    // these materials are DoubleSide three.js then negates the normal instead
+    // of culling, so it renders lit-from-underneath — near-black — while the
+    // ribbon beside it looks perfect. It reads as a shadow bug. It isn't.
+    //
+    // SMALLER offset first, because Z() mirrors the geometry: a reflection
+    // flips the handedness and therefore the sign of every face normal. This
+    // rule is the exact opposite of what it was before the mirror fix, and
+    // flipping one without the other brings the black tarmac straight back.
     let a = innerAt(i), b = outerAt(i);
-    if (a < b) { const s = a; a = b; b = s; }
-    pos[i * 6 + 0] = track.x[i] + nx * a; pos[i * 6 + 1] = 0; pos[i * 6 + 2] = track.y[i] + ny * a;
-    pos[i * 6 + 3] = track.x[i] + nx * b; pos[i * 6 + 4] = 0; pos[i * 6 + 5] = track.y[i] + ny * b;
+    if (a > b) { const s = a; a = b; b = s; }
+    pos[i * 6 + 0] = track.x[i] + nx * a; pos[i * 6 + 1] = 0; pos[i * 6 + 2] = Z(track.y[i] + ny * a);
+    pos[i * 6 + 3] = track.x[i] + nx * b; pos[i * 6 + 4] = 0; pos[i * 6 + 5] = Z(track.y[i] + ny * b);
     if (col) {
       c.set(colorAt(i));
       col[i * 6 + 0] = c.r; col[i * 6 + 1] = c.g; col[i * 6 + 2] = c.b;
@@ -67,11 +83,13 @@ function wall(track, atFn, height) {
   for (let i = 0; i < n; i++) {
     const h = track.hdg[i], nx = -Math.sin(h), ny = Math.cos(h);
     const d = atFn(i);
-    const x = track.x[i] + nx * d, z = track.y[i] + ny * d;
+    const x = track.x[i] + nx * d, z = Z(track.y[i] + ny * d);
     pos[i * 6 + 0] = x; pos[i * 6 + 1] = 0; pos[i * 6 + 2] = z;
     pos[i * 6 + 3] = x; pos[i * 6 + 4] = height; pos[i * 6 + 5] = z;
     const j = (i + 1) % n;
-    idx.push(i * 2, i * 2 + 1, j * 2, i * 2 + 1, j * 2 + 1, j * 2);
+    // Wound the other way round than it reads, for the same reason as ribbon():
+    // Z() mirrors the world, which reverses every triangle.
+    idx.push(j * 2, i * 2 + 1, i * 2, j * 2, j * 2 + 1, i * 2 + 1);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -218,7 +236,7 @@ export class View {
       new THREE.PlaneGeometry((bb.x1 - bb.x0) + pad * 2, (bb.y1 - bb.y0) + pad * 2),
       new THREE.MeshStandardMaterial({ color: 0x4e5f3a, roughness: 1 }));
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set((bb.x0 + bb.x1) / 2, -0.06, (bb.y0 + bb.y1) / 2);
+    ground.position.set((bb.x0 + bb.x1) / 2, -0.06, Z((bb.y0 + bb.y1) / 2));
     ground.receiveShadow = true;
     S.add(ground);
 
@@ -317,9 +335,8 @@ export class View {
   // dt here is a REAL frame time — camera smoothing is allowed to be
   // frame-rate dependent, the simulation is not.
   frame(car, dt, hud = {}) {
-    const S = car.spec;
-    this.car.position.set(car.x, 0, car.y);
-    this.car.rotation.y = -car.hdg;
+    this.car.position.set(car.x, 0, Z(car.y));
+    this.car.rotation.y = car.hdg;
     this.frontAxle.rotation.y = -car.delta;
     const roll = this.wheels.rl.rotation.z;
     const spin = car.speed * dt / 0.35;
@@ -334,11 +351,12 @@ export class View {
     const over = hud.slipOver || 0;
     if (over > 0 && car.speed > 6) {
       const cs = Math.cos(car.hdg), sn = Math.sin(car.hdg);
-      const vwx = car.vx * cs - car.vy * sn, vwz = car.vx * sn + car.vy * cs;
+      const vwx = car.vx * cs - car.vy * sn, vwy = car.vx * sn + car.vy * cs;
       for (const sd of [0.68, -0.68]) {
-        const px = car.x - cs * 1.15 - sn * sd * -1;
-        const pz = car.y - sn * 1.15 + cs * sd * -1;
-        if (Math.random() < Math.min(1, over * 2.2)) this.puff(px, pz, vwx, vwz, Math.min(2, over * 3));
+        // rear axle, then out to each rear tyre along the car's left vector
+        const px = car.x - cs * 1.15 - sn * sd;
+        const py = car.y - sn * 1.15 + cs * sd;
+        if (Math.random() < Math.min(1, over * 2.2)) this.puff(px, Z(py), vwx, Z(vwy), Math.min(2, over * 3));
       }
     }
     const pa = this.smokePts.geometry.attributes.position;
@@ -372,7 +390,7 @@ export class View {
     ];
     const rig = RIGS[this.mode];
     const ch = Math.cos(this.camH), sh = Math.sin(this.camH);
-    const tgt = new THREE.Vector3(car.x - ch * rig.dist, rig.height, car.y - sh * rig.dist);
+    const tgt = new THREE.Vector3(car.x - ch * rig.dist, rig.height, Z(car.y - sh * rig.dist));
     // The nose cam is bolted on; the others lag, which is where the sense of
     // weight comes from.
     const k = this.mode === 2 ? 1 : Math.min(1, dt * 9);
@@ -382,14 +400,14 @@ export class View {
     const sx = (Math.random() - 0.5) * this.shake, sy = (Math.random() - 0.5) * this.shake;
     this.camera.position.set(this.camPos.x + sx, this.camPos.y + sy, this.camPos.z + sx);
 
-    this.camAim.lerp(new THREE.Vector3(car.x + ch * rig.lead, 0.75, car.y + sh * rig.lead), Math.min(1, dt * 10));
+    this.camAim.lerp(new THREE.Vector3(car.x + ch * rig.lead, 0.75, Z(car.y + sh * rig.lead)), Math.min(1, dt * 10));
     this.camera.lookAt(this.camAim);
     // speed pulls the FOV out — cheap, and it is most of why fast feels fast
     const fov = rig.fov + Math.min(14, car.speed * 0.13);
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
 
-    this.sun.position.set(car.x + 180, 260, car.y + 120);
-    this.sun.target.position.set(car.x, 0, car.y);
+    this.sun.position.set(car.x + 180, 260, Z(car.y) + 120);
+    this.sun.target.position.set(car.x, 0, Z(car.y));
 
     this.renderer.render(this.scene, this.camera);
   }

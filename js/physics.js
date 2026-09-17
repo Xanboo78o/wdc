@@ -159,8 +159,15 @@ export function step(car, dt, env = {}) {
   // ---- slip angles --------------------------------------------------------
   const af = Math.atan((car.vy + S.a * car.r) / vSafe) - car.delta;
   const ar = Math.atan((car.vy - S.b * car.r) / vSafe);
-  let Fyf = pac(S, af, muF * Fzf);
-  let Fyr = pac(S, ar, muR * Fzr);
+  // A stationary car cannot generate cornering force. The 6 m/s floor above
+  // keeps slip angles finite, but it also means a PARKED car with lock applied
+  // computes a full-size slip angle, gets a full-size lateral force, and spins
+  // on the spot like a shopping trolley. Fade the lateral force out as the car
+  // actually stops. 3 m/s is well below any real corner (Monaco's hairpin is
+  // 12.5 m/s), so nothing that matters is touched.
+  const lowV = Math.min(1, v / 3.0);
+  let Fyf = pac(S, af, muF * Fzf) * lowV;
+  let Fyr = pac(S, ar, muR * Fzr) * lowV;
 
   // ---- longitudinal -------------------------------------------------------
   let FxR = 0, FxF = 0;

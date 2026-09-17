@@ -96,6 +96,19 @@ learning braking points, because it is uniform.
 5. **Shadow acne on flat ground needs `normalBias`, not depth bias.** The track
    is one enormous unbroken plane, which is the worst case; a depth bias alone
    left the whole road self-shadowing and rendering near-black.
+6. **The sim frame and three.js are opposite handedness.** The simulation is
+   right-handed in 2D — +x forward at heading 0, +y to the car's LEFT, headings
+   increasing anticlockwise. Mapping sim y straight onto three z renders the
+   whole world as its MIRROR IMAGE: every circuit reflected, every right-hander
+   a left-hander, and steering that feels inverted because pressing left moves
+   the car right on screen. The fix is one negation (`Z()` in `render.js`), but
+   a reflection also reverses every triangle's winding — so the edge-ordering
+   rule in gotcha 4 had to flip at the same time, or the black tarmac comes
+   straight back. Change one, change both.
+7. **Overpass rejects requests without a real User-Agent** with a bare
+   `406 Not Acceptable` and an HTML body, which looks exactly like the service
+   being down. Send `-A '<project>/<version> (contact ...)'` and it works.
+   `https://overpass-api.de/api/interpreter` answers fine with one.
 
 ## Inherited gotchas (from DIRTY AIR — still load-bearing here)
 
