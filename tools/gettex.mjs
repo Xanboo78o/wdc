@@ -53,6 +53,7 @@ const SETS = {
   plaster:  { id: 'PaintedPlaster017', res: 512,  why: 'painted render — Monaco, Baku; takes a tint well' },
   metal:    { id: 'MetalPlates014',    res: 512,  why: 'armco, garage doors, debris fence posts' },
   fence:    { id: 'Fence003',          res: 512,  why: 'the debris fence — wire mesh, with a real opacity map' },
+  carbon:   { id: 'Fabric004',         res: 512,  why: 'the car — a real photographed carbon weave, not a dark grey' },
 };
 
 const sh = (cmd, args) => execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });

@@ -18,6 +18,7 @@ import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish
 import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround } from './horizon.js';
+import { buildCar } from './car.js';
 
 const KERB_W = 0.62;
 const KERB_H = 0.055;
@@ -260,103 +261,6 @@ function puffTexture() {
 }
 
 // ---------------------------------------------------------------------------
-// The car. Still built from primitives — a clean silhouette reads better at
-// speed than a detailed model you never actually see — but built to the real
-// dimensions of a modern single-seater: 5.63 m long, 2.0 m wide, 3.6 m
-// wheelbase. Using real numbers is free and it is why the thing sits on the
-// road like a car rather than like a toy that happens to be car-shaped.
-//
-// Licensed game assets are not an option here and never were; this is CC0
-// geometry or nothing.
-// ---------------------------------------------------------------------------
-function buildCar(look, colour) {
-  const g = new THREE.Group();
-  const env = 1.1;
-  const paint = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.22, metalness: 0.28, envMapIntensity: env });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.42, metalness: 0.35, envMapIntensity: env });
-  const carbon = new THREE.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.28, metalness: 0.5, envMapIntensity: env });
-  const rubber = look.mat('metal', { size: 0.6, tint: 0x141418, roughness: 0.95, metalness: 0.0, env: 0.4 });
-  const rim = new THREE.MeshStandardMaterial({ color: 0xb9bec4, roughness: 0.28, metalness: 0.9, envMapIntensity: env });
-  const visor = new THREE.MeshStandardMaterial({ color: 0x0a0c10, roughness: 0.06, metalness: 0.6, envMapIntensity: 1.5 });
-  const helmet = new THREE.MeshStandardMaterial({ color: 0xe8eaee, roughness: 0.18, metalness: 0.1, envMapIntensity: env });
-
-  const add = (geo, mat, x, y, z, ry = 0, rz = 0) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z); m.rotation.y = ry; m.rotation.z = rz;
-    m.castShadow = true;
-    g.add(m); return m;
-  };
-  const B = (x, y, z) => new THREE.BoxGeometry(x, y, z);
-
-  // body points along +X: nose at +X, engine at -X
-  add(B(2.55, 0.24, 0.66), paint, 0.15, 0.34, 0);            // monocoque
-  add(B(0.95, 0.20, 0.42), paint, 1.70, 0.30, 0);            // nose cone
-  add(B(0.55, 0.12, 0.28), paint, 2.22, 0.24, 0);            // nose tip
-  add(B(3.40, 0.05, 1.30), carbon, 0.10, 0.07, 0);           // floor
-  for (const s of [1, -1]) {
-    add(B(1.30, 0.44, 0.34), paint, -0.35, 0.36, s * 0.52);  // sidepod
-    add(B(0.50, 0.26, 0.20), dark, 0.34, 0.40, s * 0.55);    // radiator inlet
-    // suspension: two wishbones per corner, which is most of why an open-wheel
-    // car looks like an open-wheel car from the cockpit camera
-    add(B(0.70, 0.045, 0.045), carbon, 1.30, 0.26, s * 0.38, 0, 0.12);
-    add(B(0.70, 0.045, 0.045), carbon, 1.22, 0.44, s * 0.38, 0, -0.10);
-    add(B(0.70, 0.05, 0.05), carbon, -1.10, 0.28, s * 0.42, 0, 0.12);
-    add(B(0.70, 0.05, 0.05), carbon, -1.18, 0.46, s * 0.42, 0, -0.10);
-  }
-  add(B(0.70, 0.46, 0.80), paint, -1.05, 0.46, 0);           // engine cover
-  add(B(0.34, 0.40, 0.34), dark, -1.42, 0.52, 0);            // airbox
-  add(B(0.10, 0.34, 0.06), paint, -1.62, 0.62, 0);           // shark fin
-
-  // front wing: main plane, flap, endplates
-  add(B(0.46, 0.04, 1.58), carbon, 2.32, 0.11, 0);
-  add(B(0.26, 0.04, 1.50), carbon, 2.10, 0.20, 0);
-  for (const s of [1, -1]) add(B(0.60, 0.26, 0.05), carbon, 2.24, 0.17, s * 0.80);
-
-  // rear wing: main plane, a DRS flap that really opens, endplates
-  add(B(0.36, 0.05, 1.02), carbon, -1.86, 0.70, 0);
-  const drs = add(B(0.22, 0.04, 0.98), carbon, -1.98, 0.84, 0);
-  for (const s of [1, -1]) add(B(0.55, 0.42, 0.05), carbon, -1.90, 0.72, s * 0.52);
-  add(B(0.30, 0.04, 0.70), carbon, -1.70, 0.30, 0);          // beam wing
-
-  // halo and the driver inside it
-  add(B(0.10, 0.30, 0.10), carbon, 0.92, 0.62, 0);           // halo front pillar
-  add(B(1.30, 0.08, 0.10), carbon, 0.30, 0.76, 0);           // halo spine
-  for (const s of [1, -1]) add(B(0.90, 0.07, 0.07), carbon, 0.30, 0.68, s * 0.30, 0, 0.18);
-  add(B(0.34, 0.34, 0.30), dark, -0.42, 0.56, 0);            // roll hoop
-  const head = add(B(0.26, 0.28, 0.25), helmet, -0.10, 0.62, 0);
-  add(B(0.06, 0.13, 0.23), visor, 0.04, 0.63, 0);            // visor
-  void head;
-
-  const tyre = (r, w) => {
-    const t = new THREE.CylinderGeometry(r, r, w, 20);
-    t.rotateX(Math.PI / 2);   // cylinder axis along Z = the car's lateral axis
-    return t;
-  };
-  const hub = (r, w) => {
-    const t = new THREE.CylinderGeometry(r, r, w, 16);
-    t.rotateX(Math.PI / 2);
-    return t;
-  };
-  const fw = tyre(0.33, 0.30), rw = tyre(0.36, 0.40);
-  const fh = hub(0.19, 0.31), rh = hub(0.20, 0.41);
-  const wheels = { fl: null, fr: null, rl: null, rr: null };
-  const front = new THREE.Group();
-  for (const [k, x, z, t2, h2] of [['fl', 1.55, 0.72, fw, fh], ['fr', 1.55, -0.72, fw, fh],
-    ['rl', -1.30, 0.76, rw, rh], ['rr', -1.30, -0.76, rw, rh]]) {
-    const w = new THREE.Mesh(t2, rubber);
-    w.position.set(x, t2.parameters.radiusTop, z);
-    w.castShadow = true;
-    const r = new THREE.Mesh(h2, rim);
-    w.add(r);
-    wheels[k] = w;
-    if (k[0] === 'f') front.add(w); else g.add(w);
-  }
-  g.add(front);
-
-  return { group: g, wheels, front, drs };
-}
-
-// ---------------------------------------------------------------------------
 export class View {
   /**
    * Building a circuit now needs textures and a sky off the network, so
@@ -442,7 +346,8 @@ export class View {
     }
 
     const car = buildCar(look, 0xd8352a);
-    this.car = car.group; this.wheels = car.wheels; this.frontAxle = car.front; this.drs = car.drs;
+    this.car = car.group; this.wheels = car.wheels; this.steer = car.steer;
+    this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
     this.crushParts = crushParts(car.group, car.wheels);
     // YAW ON THE PARENT, ROLL AND PITCH ON THE CHILD.
     //
@@ -678,10 +583,27 @@ export class View {
 
     this.carYaw.position.set(car.x, surfaceY, Z(car.y));
     this.carYaw.rotation.y = car.hdg;
-    this.frontAxle.rotation.y = -car.delta;
-    const wheelRoll = this.wheels.rl.rotation.z;
-    const spin = car.speed * dt / 0.36;
-    for (const k in this.wheels) this.wheels[k].rotation.z = wheelRoll - spin;
+    // STEERING. Each front wheel pivots at its OWN hub — see js/car.js for
+    // what happened when they shared one group at the car's centre.
+    //
+    // The sign is +delta, not -delta. A positive delta steers LEFT, and a mesh
+    // built along +X needs rotation.y = +delta to point its nose that way once
+    // the sim->three reflection is accounted for. It had been negated since
+    // day one, so the front wheels pointed the wrong way in every corner —
+    // invisible from a chase camera, and the first thing you see from onboard.
+    //
+    // Ackermann: the inside wheel takes more angle than the outside one,
+    // because they are tracing circles of different radius about the same
+    // centre. It is a few degrees and it is very visible at full lock.
+    const ACK = 0.13;
+    const dl = car.delta * (car.delta > 0 ? 1 + ACK : 1 - ACK);
+    const dr = car.delta * (car.delta > 0 ? 1 - ACK : 1 + ACK);
+    this.steer.fl.rotation.y = dl;
+    this.steer.fr.rotation.y = dr;
+    // Wheel rotation is ACCUMULATED, not read back off the mesh, so it cannot
+    // drift when a wheel is reparented or reset.
+    this.spin -= car.speed * dt / this.wheelR;
+    for (const k in this.wheels) this.wheels[k].rotation.z = this.spin;
 
     // Body roll and pitch, in the car's own frame now.
     //

@@ -19,6 +19,7 @@ Refetch or change any of them with `node tools/gettex.mjs [name|all] [--force]`.
 | `plaster-*.jpg` | [PaintedPlaster017](https://ambientcg.com/view?id=PaintedPlaster017) | painted render — Monaco, Baku; takes a tint well |
 | `metal-*.jpg` | [MetalPlates014](https://ambientcg.com/view?id=MetalPlates014) | armco, garage doors, debris fence posts |
 | `fence-*.jpg` | [Fence003](https://ambientcg.com/view?id=Fence003) | the debris fence — wire mesh, with a real opacity map |
+| `carbon-*.jpg` | [Fabric004](https://ambientcg.com/view?id=Fabric004) | the car — a real photographed carbon weave, not a dark grey |
 
 Each material is three files, not six:
 
