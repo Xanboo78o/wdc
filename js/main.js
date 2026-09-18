@@ -14,7 +14,7 @@ import { loadEnv } from './env.js';
 import { resolveBarrier } from './collide.js';
 
 const $ = id => document.getElementById(id);
-const CAMS = ['CHASE', 'CLOSE', 'NOSE', 'TV'];
+const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV'];
 
 const state = {
   track: null, line: null, car: null, view: null,

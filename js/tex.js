@@ -246,15 +246,3 @@ export function sunRig(scene, sky, { shadows = true } = {}) {
     },
   };
 }
-
-// Fog is the sky seen through air, so it is the colour of the horizon band in
-// the very same photograph the background is showing. Anything else puts grey
-// haze in front of a blue sky, which is the tell that breaks the whole image.
-export function fogFor(scene, sky, span) {
-  const c = new THREE.Color(sky?.horizon || '#a7aabb');
-  // Near plane scales with the circuit: Monaco is 2 km across and Monza 5.8,
-  // and haze that starts at 260 m would bury half of Monza.
-  const near = Math.max(300, span * 0.22);
-  scene.fog = new THREE.Fog(c, near, near + Math.max(900, span * 0.75));
-  return c;
-}

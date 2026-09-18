@@ -11,12 +11,13 @@
 // this file should ever have to know that.
 import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
-import { Look, sunRig, fogFor } from './tex.js';
+import { Look, sunRig } from './tex.js';
 import { bankTable, bankY, bankRoll } from './bank.js';
 import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
 import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
+import { buildHorizon, buildGround } from './horizon.js';
 
 const KERB_W = 0.62;
 const KERB_H = 0.055;
@@ -386,9 +387,7 @@ export class View {
     this.scene = new THREE.Scene();
     const sky = look.install(this.scene);
     if (!sky) this.scene.background = new THREE.Color(0x8fa9c4);
-    const bb = track.bbox;
-    const span = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0);
-    fogFor(this.scene, sky, span);
+    this.sky = sky;
 
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.2, 4200);
     this.camPos = new THREE.Vector3();
@@ -426,6 +425,11 @@ export class View {
     // Photo mode: park the camera at a point on the circuit and look down the
     // track from it. ?photo=s,lat,height,lead — purely a way to inspect the
     // far side of a world without driving there, so it lives in the renderer.
+    // ?cam=0..3 picks a rig at load, so the harness can photograph one
+    // without a human pressing C.
+    const camQ = new URLSearchParams(location.search).get('cam');
+    if (camQ != null) this.mode = Math.max(0, Math.min(3, parseInt(camQ, 10) || 0));
+
     const ph = new URLSearchParams(location.search).get('photo');
     if (ph) {
       const [s0, lat, y, lead, aimLat] = ph.split(',').map(Number);
@@ -455,6 +459,16 @@ export class View {
     this.carYaw.add(this.car);
     this.scene.add(this.carYaw);
     this.hint = 0;
+
+    // Where a bolted camera sits, and what it looks at, both children of the
+    // car so they inherit its yaw, pitch, roll and banked height for nothing.
+    this.camMount = new THREE.Object3D();
+    this.camTarget = new THREE.Object3D();
+    this.car.add(this.camMount, this.camTarget);
+    // Scratch, so a 400 Hz-adjacent loop allocates nothing.
+    this._v0 = new THREE.Vector3(); this._v1 = new THREE.Vector3(); this._v2 = new THREE.Vector3();
+    this._q = new THREE.Quaternion(); this._up = new THREE.Vector3(0, 1, 0);
+    this.tvI = 0;
     this._smoke();
 
     addEventListener('resize', () => this.resize());
@@ -473,6 +487,10 @@ export class View {
     const S = this.scene;
     const look = this.look;
     const stats = {};
+    // The air, and what is in the distance. First, because everything else is
+    // judged against it: without layered distance and real aerial perspective
+    // a circuit reads as a diorama however good its surfaces are.
+    stats.horizon = buildHorizon(S, t, env, this.sky);
     // Zandvoort banks 18 degrees at Tarzanbocht and Arie Luyendyk. Everywhere
     // else this table is all zeroes and costs one lookup per vertex.
     this.bank = bankTable(t);
@@ -481,22 +499,7 @@ export class View {
     // The ground the whole circuit sits on. Big, textured, and the colour of
     // the region rather than a default green — it is what fills every gap the
     // survey does not cover.
-    const bb = t.bbox, pad = 1400;
-    const groundCol = t.wall === 'gravel' ? 0x63733f : t.key === 'zandvoort' ? 0xa9986f : 0x6d7048;
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry((bb.x1 - bb.x0) + pad * 2, (bb.y1 - bb.y0) + pad * 2),
-      look.mat(t.key === 'zandvoort' ? 'sand' : 'grass', { size: 5, tint: groundCol, roughness: 1 }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set((bb.x0 + bb.x1) / 2, -0.06, Z((bb.y0 + bb.y1) / 2));
-    ground.receiveShadow = true;
-    // UVs on a PlaneGeometry run 0..1, not metres, so this one surface has to
-    // set its own repeat. Everything else in the project is metre-mapped.
-    for (const m of [ground.material]) {
-      for (const k of ['map', 'normalMap', 'aoMap', 'roughnessMap', 'metalnessMap']) {
-        if (m[k]) m[k].repeat.set((bb.x1 - bb.x0 + pad * 2) / 5, (bb.y1 - bb.y0 + pad * 2) / 5);
-      }
-    }
-    S.add(ground);
+    S.add(buildGround(t, look, this.sky));
 
     // Run-off: gravel at Monza and Suzuka, asphalt everywhere else. Grip is
     // handled in main.js; this is only what it looks like.
@@ -556,6 +559,8 @@ export class View {
     buildMarshalPosts(S, t, look);
     stats.stands = buildGrandstands(S, t, env, look);
     stats.pit = buildPitLane(S, t, look, sign);
+    this.tvCams = this._tvCameras();
+    stats.tvCams = this.tvCams.length;
 
     // The ideal line, toggled with L — a reference, not a rail.
     const lg = ribbon(t, i => this.line.off[i] - 0.10, i => this.line.off[i] + 0.10, 0.02, bank).geometry();
@@ -567,6 +572,66 @@ export class View {
     S.add(this.lineMesh);
 
     return stats;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Broadcast cameras: fixed positions beside the circuit that hand the car off
+  // to each other as it comes past. Placed on whichever side has room for a
+  // tower, which is the same rule a real outside broadcast follows.
+  // ---------------------------------------------------------------------------
+  _tvCameras() {
+    const t = this.track;
+    const cams = [];
+    const corridor = this.corridor;
+    // Nothing may stand in the pit complex. The first version put the camera
+    // for the start line inside the pit lane, so the opening broadcast shot
+    // was half pit wall.
+    const inPit = (x, y) => {
+      if (!corridor) return false;
+      const r2 = (corridor.radius + 12) ** 2;
+      for (const q of corridor.pts) if ((q[0] - x) ** 2 + (q[1] - y) ** 2 < r2) return true;
+      return false;
+    };
+    for (let s = 0; s < t.length; s += 255) {
+      const i = t.idx(s);
+      let placed = null;
+      // Prefer the side with more room, but take the other one rather than
+      // stand in the pits.
+      const order = t.runL[i] > t.runR[i] ? [1, -1] : [-1, 1];
+      for (const side of order) {
+        const run = side > 0 ? t.runL[i] : t.runR[i];
+        const lat = side * (t.w[i] + run + Math.min(14, 4 + run * 0.5));
+        const p = t.point(s, lat);
+        if (inPit(p.x, p.y)) continue;
+        // 6-8 m, not 12. A camera twelve metres up at thirty looks DOWN at
+        // twenty degrees and the shot becomes mostly tarmac; real trackside
+        // towers sit low enough to shoot nearly along the track surface.
+        placed = { s, x: p.x, y: 6.2 + (run > 14 ? 1.6 : 0), z: Z(p.y) };
+        break;
+      }
+      if (placed) cams.push(placed);
+    }
+    return cams;
+  }
+
+  // Hold a camera until the car is well past it, then take the next one. Real
+  // directors cut late rather than early, and switching on nearest-distance
+  // alone produces a shot that changes every two seconds.
+  _pickTvCamera(carS) {
+    const cams = this.tvCams;
+    if (!cams || !cams.length) return null;
+    const t = this.track;
+    const cur = cams[this.tvI % cams.length];
+    const gap = t.gap(cur.s, carS);       // positive = the camera is ahead
+    if (gap < -170 || gap > 620) {
+      let best = this.tvI, bestGap = Infinity;
+      for (let k = 0; k < cams.length; k++) {
+        const g = t.gap(cams[k].s, carS);
+        if (g > 40 && g < bestGap) { bestGap = g; best = k; }
+      }
+      this.tvI = best;
+    }
+    return cams[this.tvI % cams.length];
   }
 
   _smoke() {
@@ -659,31 +724,39 @@ export class View {
     pa.needsUpdate = true;
     this.smokePts.material.opacity = 0.45;
 
-    // ---- camera -----------------------------------------------------------
-    // Aim between where the nose points and where the car is actually going,
-    // so a slide reads on screen instead of the camera hiding it.
-    const beta = Math.atan2(car.vy, Math.max(car.vx, 3));
-    let want = car.hdg + beta * 0.5;
-    let d = want - this.camH;
-    while (d > Math.PI) d -= 2 * Math.PI;
-    while (d < -Math.PI) d += 2 * Math.PI;
-    this.camH += d * Math.min(1, dt * 7);
-
-    // Speed is a MOTION CUE, not a number. A high, distant camera with a fixed
-    // field of view makes 210 km/h feel like 60, because almost nothing moves
-    // across the screen. Low, close, and a field of view that opens as you go
-    // faster puts the ground and the barriers into the corners of your eye,
-    // which is where the sensation actually comes from.
+    // ---- camera -------------------------------------------------------------
+    //
+    // "ALL U GOT INTO MAKING THESE IRACING QUALITY (not textures and shaders)".
+    //
+    // Half of that is the air, which is js/horizon.js. The other half is this,
+    // and it is the cheaper half: a sim looks like a sim because of where the
+    // camera is and what it is bolted to, not because of what the surfaces are
+    // made of. Four rigs, and the default is the one every real onboard is
+    // shot from.
+    //
+    // ONBOARD is BOLTED TO THE CAR — above the airbox, looking down the nose.
+    // It pitches when you brake and leans when you turn, because it is
+    // attached to a thing that is pitching and leaning. That single fact does
+    // more for how violent a braking zone feels than any amount of material
+    // work, and it is why a chase camera can never feel like a car. The roll
+    // is damped to 55% of the real thing, the way a broadcast onboard is
+    // part-stabilised — full roll is accurate and makes people ill.
+    //
+    // TV is a real broadcast rig: fixed cameras standing beside the circuit,
+    // handing the car off to each other as it comes past, ZOOMING to hold it
+    // at a constant size in frame. The zoom is the tell — it is what makes
+    // footage read as televised rather than as a game replay.
     const RIGS = [
-      { dist: 6.0, height: 1.80, lead: 11, fov: 60, kick: 1 },   // CHASE
-      { dist: 4.1, height: 1.50, lead: 10, fov: 64, kick: 1 },   // CLOSE
-      { dist: 0.15, height: 1.10, lead: 16, fov: 72, kick: 1 },  // NOSE
-      { dist: 15, height: 9.5, lead: 6, fov: 55, kick: 0.25 },   // TV
+      { name: 'ONBOARD', kind: 'bolted', at: [-0.34, 1.19, 0], aim: 24, fov: 56, kick: 0.55, roll: 0.55 },
+      { name: 'CHASE', kind: 'chase', dist: 5.6, height: 1.66, lead: 13, fov: 55, kick: 1 },
+      { name: 'NOSE', kind: 'bolted', at: [1.62, 0.46, 0], aim: 26, fov: 62, kick: 0.8, roll: 0.85 },
+      { name: 'TV', kind: 'tv', fov: 40, kick: 0 },
     ];
     if (this.photo) {
       const t = this.track;
       const a = t.point(this.photo.s, this.photo.lat);
       const b = t.point(this.photo.s + this.photo.lead, this.photo.aimLat);
+      this.camera.up.set(0, 1, 0);
       this.camera.position.set(a.x, this.photo.y, Z(a.y));
       this.camera.lookAt(new THREE.Vector3(b.x, 0.9, Z(b.y)));
       if (this.camera.fov !== 55) { this.camera.fov = 55; this.camera.updateProjectionMatrix(); }
@@ -691,26 +764,71 @@ export class View {
       this.renderer.render(this.scene, this.camera);
       return;
     }
-
     const rig = RIGS[this.mode];
-    const ch = Math.cos(this.camH), sh = Math.sin(this.camH);
-    const tgt = new THREE.Vector3(car.x - ch * rig.dist, rig.height, Z(car.y - sh * rig.dist));
-    // The nose cam is bolted on; the others lag, which is where the sense of
-    // weight comes from.
-    const k = this.mode === 2 ? 1 : Math.min(1, dt * 9);
-    this.camPos.lerp(tgt, k);
 
-    this.shake = Math.max(this.shake * (1 - dt * 5), (hud.rough || 0) * 0.5 + Math.max(0, Math.abs(car.gLat) - 1.6) * 0.06);
-    const sx = (Math.random() - 0.5) * this.shake, sy = (Math.random() - 0.5) * this.shake;
-    this.camera.position.set(this.camPos.x + sx, this.camPos.y + sy, this.camPos.z + sx);
+    // Vibration. A car at speed is never still, and a perfectly steady frame
+    // is the other reason 210 km/h used to read as 60 — there was nothing
+    // shaking. High frequency and TINY: this is felt rather than seen, and the
+    // moment you can see it, it is a gimmick.
+    const buzz = (0.0016 + car.speed * 0.00017) * (rig.kick || 0);
+    this.shake = Math.max(this.shake * (1 - dt * 6),
+      (hud.rough || 0) * 0.42 + Math.max(0, Math.abs(latG) - 1.8) * 0.045);
+    const jx = (Math.random() - 0.5), jy = (Math.random() - 0.5), jz = (Math.random() - 0.5);
+    const amp = this.shake + buzz;
 
-    this.camAim.lerp(new THREE.Vector3(car.x + ch * rig.lead, 0.75, Z(car.y + sh * rig.lead)), Math.min(1, dt * 10));
-    this.camera.lookAt(this.camAim);
-    // Speed pulls the field of view open. This is cheap and it is most of why
-    // fast feels fast — at 300 km/h the frame widens by over 20 degrees, so the
-    // barriers rush past the edges instead of sitting still.
-    const fov = rig.fov + Math.min(24, car.speed * 0.26) * rig.kick;
-    if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    let fov = rig.fov;
+    if (rig.kind === 'bolted') {
+      // Read the camera's world placement off the car itself, so it inherits
+      // yaw, pitch, roll and the banked height for free.
+      this.camMount.position.set(rig.at[0], rig.at[1], rig.at[2]);
+      this.camTarget.position.set(rig.at[0] + rig.aim, rig.at[1] - 0.22, 0);
+      this.car.updateWorldMatrix(true, false);
+      this.camMount.getWorldPosition(this._v0);
+      this.camTarget.getWorldPosition(this._v1);
+      // Part-stabilised roll: blend the car's own up vector back toward the
+      // world's. At 1.0 the horizon tips with the chassis and it is unpleasant;
+      // at 0 it is a chase camera that happens to be close.
+      this._v2.set(0, 1, 0).applyQuaternion(this.car.getWorldQuaternion(this._q))
+        .lerp(this._up, 1 - (rig.roll ?? 0.6)).normalize();
+      this.camera.up.copy(this._v2);
+      this.camera.position.copy(this._v0).addScaledVector(this._v2, 0);
+      this.camera.position.x += jx * amp; this.camera.position.y += jy * amp; this.camera.position.z += jz * amp;
+      this.camera.lookAt(this._v1);
+      fov = rig.fov + Math.min(16, car.speed * 0.17) * rig.kick;
+    } else if (rig.kind === 'tv') {
+      const cam = this._pickTvCamera(proj.s);
+      if (cam) {
+        this.camera.up.copy(this._up);
+        this.camera.position.set(cam.x, cam.y, cam.z);
+        this._v1.set(car.x, 0.6, Z(car.y));
+        this.camera.lookAt(this._v1);
+        // Hold the car at a constant size in frame. A broadcast camera zooms;
+        // a game camera does not, and that is most of the difference.
+        const dist = this.camera.position.distanceTo(this._v1);
+        // Hold the car at roughly a quarter of the frame. The first attempt
+        // aimed for a twelfth, which is technically a constant size and reads
+        // as a security camera.
+        fov = Math.max(7, Math.min(38, 2 * Math.atan(9 / Math.max(18, dist)) * 180 / Math.PI));
+      }
+    } else {
+      // Chase. Aim between where the nose points and where the car is actually
+      // GOING, so a slide reads on screen instead of the camera hiding it.
+      const beta = Math.atan2(car.vy, Math.max(car.vx, 3));
+      let want = car.hdg + beta * 0.5;
+      let d = want - this.camH;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      this.camH += d * Math.min(1, dt * 7);
+      const ch = Math.cos(this.camH), sh = Math.sin(this.camH);
+      this._v0.set(car.x - ch * rig.dist, surfaceY + rig.height, Z(car.y - sh * rig.dist));
+      this.camPos.lerp(this._v0, Math.min(1, dt * 9));
+      this.camera.up.copy(this._up);
+      this.camera.position.set(this.camPos.x + jx * amp, this.camPos.y + jy * amp, this.camPos.z + jz * amp);
+      this.camAim.lerp(this._v1.set(car.x + ch * rig.lead, surfaceY + 0.75, Z(car.y + sh * rig.lead)), Math.min(1, dt * 10));
+      this.camera.lookAt(this.camAim);
+      fov = rig.fov + Math.min(20, car.speed * 0.22) * rig.kick;
+    }
+    if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
 
     // The sun's DIRECTION never changes — it is wherever it is in the sky
     // photograph. Only the origin follows the car, so the 110 m shadow box

@@ -336,11 +336,16 @@ function coniferGeometry() {
 // lumpy round mass that reads as foliage from ten metres and as a green blob
 // from two hundred, which is the whole range that matters.
 function broadleafGeometry() {
-  const c1 = new THREE.IcosahedronGeometry(2.3, 0); c1.translate(0, 4.7, 0);
-  const c2 = new THREE.IcosahedronGeometry(1.7, 0); c2.translate(1.3, 4.0, 0.5);
-  const c3 = new THREE.IcosahedronGeometry(1.5, 0); c3.translate(-1.1, 4.2, -0.7);
+  // Detail 1, not 0. A 20-face icosahedron at two hundred metres is a green
+  // blob and at fifteen metres — which is where Monaco's plane trees stand —
+  // it is an obvious faceted lump. 80 faces is still nothing and it rounds off.
+  // Crowns are smaller too: the first pass put 8 m wide canopies beside a
+  // street where the real trees are slim.
+  const c1 = new THREE.IcosahedronGeometry(1.75, 1); c1.translate(0, 4.6, 0);
+  const c2 = new THREE.IcosahedronGeometry(1.25, 1); c2.translate(0.95, 4.0, 0.4);
+  const c3 = new THREE.IcosahedronGeometry(1.1, 1); c3.translate(-0.8, 4.15, -0.55);
   // A short, thick trunk. Tall and thin turned every tree into a lollipop.
-  return mergeParts([trunk(3.4, 0.58), c1, c2, c3]);
+  return mergeParts([trunk(3.6, 0.44), c1, c2, c3]);
 }
 
 function scatter(env, limit) {
@@ -348,7 +353,7 @@ function scatter(env, limit) {
   // Surveyed trees first: 1,386 of them at Monza, which is the avenue of plane
   // trees along the main straight, standing where they stand.
   for (const t of env.trees || []) {
-    round.push([t[0], t[1], 0.78 + seeded(t[0], t[1], 3) * 0.4]);
+    round.push([t[0], t[1], 0.72 + seeded(t[0], t[1], 3) * 0.34]);
     if (round.length >= limit * 0.5) break;
   }
   for (const a of env.areas || []) {
