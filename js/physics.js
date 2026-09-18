@@ -326,7 +326,20 @@ export function step(car, dt, env = {}) {
   car.slipF = af; car.slipR = ar;
   car.lock = lockF; car.wheelspin = spinR;
   car.speed = Math.hypot(car.vx, car.vy);
-  car.gLat = car.ay / g; car.gLong = car.ax / g;
+  // WHAT AN ACCELEROMETER READS, not the integration term.
+  //
+  // car.ax/car.ay are body-frame derivatives — `Fy/m - vx*r` — which is the
+  // rate of change of lateral velocity. In a steady corner that is ~ZERO no
+  // matter how hard the car is going round, because the centripetal term has
+  // already been subtracted out. Printing it as G LAT meant the readout sat
+  // near zero exactly when the car was loaded hardest and spiked on
+  // transitions: measured over a clean Monza lap it averaged 0.11 g while the
+  // car was really pulling 0.72 g, peaking at 3.2.
+  //
+  // The force over the mass is the honest number, and it is what a driver
+  // feels. Do NOT redefine car.ax/car.ay to match — those are integrated into
+  // the velocities and are correct as they are.
+  car.gLat = Fy / (S.m * g); car.gLong = Fx / (S.m * g);
   car.muF = muF; car.muR = muR;
   return car;
 }

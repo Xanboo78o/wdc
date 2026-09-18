@@ -226,7 +226,11 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     const Fz = spec.m * g + q * spec.ClA;
     const grip = Math.min(car.muF ?? spec.mu, car.muR ?? spec.mu);
     const aMax = Math.max(4, grip * Fz / spec.m);
-    const aLat = Math.abs(car.ay || 0);
+    // TRUE lateral load, not the body-frame derivative. car.ay is `Fy/m - vx*r`
+    // and goes to ~zero in a steady corner, so reading it here told the budget
+    // the car was barely cornering while it was pinned at 3 g — and it handed
+    // the brakes a friction circle that was already spoken for.
+    const aLat = Math.abs((car.gLat || 0) * 9.81);
     // How much of the circle is left once cornering has taken its share. A
     // braver driver leans closer to the edge of it; that is what `place` buys.
     const budget = Math.sqrt(Math.max(0, 1 - Math.min(1, (aLat / aMax) ** 2)));
