@@ -9,173 +9,307 @@
 // None of that is invented here. `tools/bakeenv.mjs` pulls it from
 // OpenStreetMap using the SAME projection the circuit was baked with, which is
 // why the facades line up with the barriers instead of floating 40 m away.
+// Each building carries what the survey actually knows about it: `k` its kind,
+// `lv` its storeys, `c` and `rc` its facade and roof colour where somebody has
+// stood in front of it and written them down.
 //
-// Everything merges into a handful of draw calls: one mesh for all buildings,
-// one per ground-cover type, one for the sea. 2,200 separate building meshes
-// would cost more than the entire physics budget.
+// ---------------------------------------------------------------------------
+// DEPTH, AND WHERE THE BUDGET GOES
+//
+// A city of flat-shaded extrusions is the thing that makes a racing game look
+// like a racing game. What fixes it is windows, a cornice at the roofline, a
+// different ground floor, and colours that vary the way a real street varies.
+// What you cannot do is give all 2,278 buildings at Monaco all of that: the
+// windows alone would be a quarter of a million quads.
+//
+// So the spend is by DISTANCE. Buildings within ~260 m of the racing line —
+// the only ones you will ever look at properly — get windows, a ground floor,
+// a cornice and a roof. Everything beyond that is a tinted, textured
+// extrusion, which at 300 m is indistinguishable and costs a twentieth as
+// much. The near set is capped and sorted, so a dense city spends its budget
+// on the buildings lining the track rather than on a suburb behind a hill.
+// ---------------------------------------------------------------------------
 import * as THREE from 'three';
+import { Z, Builder } from './geom.js';
 
-// Same handedness note as render.js: sim +y is the car's LEFT, three.js is the
-// other handedness, so sim y maps to -z. Mirror this and the city renders
-// backwards.
-const Z = y => -y;
+const NEAR = 340;            // metres: inside this a building gets detailed
+const MAX_WINDOWS = 26000;   // hard ceiling on window quads per circuit
+const STOREY = 3.2;
+const BAY = 3.6;             // metres between windows along a facade
 
 // Ground-cover colours. Deliberately desaturated and slightly varied — real
 // land is never one flat hue, and a single flat green is most of what makes a
-// track look like a toy.
+// track look like a toy. `tex` names the PBR set each one is painted with.
+//
 // EVERY ground-cover layer sits BELOW the racing surface. The road is at y=0
 // and the run-off at -0.03, so anything positive here paints over the track:
 // Zandvoort has a single 4,886 m dune polygon in a 2,173 m world, and at
 // y=+0.028 it blanketed the entire circuit in sand. Cover is scenery. It never
 // competes with the surface you drive on.
 const COVER = {
-  forest: { col: 0x3a4a2a, y: -0.035 },
-  rock:   { col: 0x6d6a63, y: -0.036 },
-  scrub:  { col: 0x5a5a3c, y: -0.038 },
-  park:   { col: 0x4e6336, y: -0.039 },
-  grass:  { col: 0x55663a, y: -0.040 },
-  pitch:  { col: 0x4a6b42, y: -0.041 },
-  sand:   { col: 0xc2b083, y: -0.042 },
-  farm:   { col: 0x6b6340, y: -0.044 },
-  bare:   { col: 0x6a6357, y: -0.045 },
-  urban:  { col: 0x54524e, y: -0.046 },
-  water:  { col: 0x2b4a5e, y: -0.050 },
+  forest: { col: 0x46552f, y: -0.035, tex: 'grass', size: 6 },
+  rock:   { col: 0x7d7a72, y: -0.036, tex: 'gravel', size: 5 },
+  scrub:  { col: 0x6c6c4a, y: -0.038, tex: 'grass', size: 7 },
+  park:   { col: 0x5a7040, y: -0.039, tex: 'grass', size: 4 },
+  grass:  { col: 0x62733f, y: -0.040, tex: 'grass', size: 4 },
+  pitch:  { col: 0x527a46, y: -0.041, tex: 'grass', size: 3 },
+  sand:   { col: 0xcbba8d, y: -0.042, tex: 'sand', size: 5 },
+  farm:   { col: 0x7a7247, y: -0.044, tex: 'grass', size: 9 },
+  bare:   { col: 0x7a7261, y: -0.045, tex: 'gravel', size: 5 },
+  urban:  { col: 0x63615c, y: -0.046, tex: 'concrete', size: 6 },
+  water:  { col: 0x2b4a5e, y: -0.050, tex: null, size: 8 },
 };
 
-// Triangulate a flat polygon. three's ShapeUtils handles the concave footprints
-// OSM is full of; a naive fan would fold them inside out.
-function triangulate(p) {
-  const contour = p.map(q => new THREE.Vector2(q[0], q[1]));
-  try { return THREE.ShapeUtils.triangulateShape(contour, []); }
-  catch { return []; }
-}
+// Facade palettes by what the building IS. Two or three plausible colours each
+// rather than one, because a street of identical houses is its own kind of
+// wrong. A surveyed `building:colour` always wins over these.
+const PALETTE = {
+  apartments: ['#d9cfbc', '#cbbfa8', '#e0d6c4', '#c4b9a6', '#d7c6ad'],
+  house:      ['#d8d2c6', '#c8b9a4', '#b9a389', '#e2ddd2', '#a98f73'],
+  retail:     ['#e4ded2', '#d2cdc2', '#cfc2ae'],
+  office:     ['#c9ccd0', '#b9bfc6', '#d4d7db'],
+  hotel:      ['#e6dccb', '#d8cdb8', '#efe7d8'],
+  industrial: ['#b0b4b8', '#9ea3a8', '#c0c3c6', '#a8a094'],
+  garage:     ['#b4b0a8', '#a6a29a', '#c2beb6'],
+  shed:       ['#a8a49c', '#b6b2aa'],
+  church:     ['#ded6c4', '#cfc5b0'],
+  roof:       ['#c6c9cd', '#b4b8bc'],
+  stadium:    ['#c4c8cc', '#b2b6ba'],
+  grandstand: ['#c4c8cc'],
+  _:          ['#cfc9bd', '#c2bcb0', '#d8d2c6', '#b9b3a7'],
+};
+const ROOFS = {
+  house:      ['#9d5b3f', '#8a4f38', '#7c4a36'],
+  apartments: ['#8f8b82', '#9d5b3f', '#7d7a72'],
+  industrial: ['#8a8f94', '#7c8288'],
+  garage:     ['#8a8f94'],
+  church:     ['#7a6a58'],
+  _:          ['#8d8a82', '#7f7c75'],
+};
 
-function flatMesh(polys, colour, yLevel, opts = {}) {
-  const pos = [], idx = [];
-  let base = 0;
-  for (const poly of polys) {
-    const p = poly.p || poly;
-    if (p.length < 3) continue;
-    const tris = triangulate(p);
-    if (!tris.length) continue;
-    for (const q of p) { pos.push(q[0], yLevel, Z(q[1])); }
-    // Z() mirrors the world, which reverses winding — so the triangle order
-    // from a maths-convention triangulator has to be flipped to face up.
-    for (const t of tris) idx.push(base + t[0], base + t[2], base + t[1]);
-    base += p.length;
+// How likely a building is to be brick rather than painted render, per
+// circuit. Zandvoort is a Dutch seaside town and is mostly brick; Monaco is a
+// Mediterranean city and is almost entirely render. This one number per track
+// does more for "it actually looks like the area" than any amount of geometry.
+const BRICKINESS = { zandvoort: 0.78, monza: 0.42, suzuka: 0.2, monaco: 0.1, baku: 0.16 };
+
+// A stable pseudo-random in [0,1) from a position, so a building looks the
+// same every time the page loads instead of re-rolling its colour on reload.
+function seeded(x, y, salt = 0) {
+  const s = Math.sin(x * 12.9898 + y * 78.233 + salt * 43.7585) * 43758.5453;
+  return s - Math.floor(s);
+}
+const pick = (list, r) => list[Math.floor(r * list.length) % list.length];
+
+// Distance from a footprint to the nearest centreline sample. Coarse on
+// purpose: it only decides how much detail to spend, so 16 m of error is free.
+function distToTrack(track, ring) {
+  const p = ring[0];
+  let best = Infinity;
+  for (let i = 0; i < track.n; i += 8) {
+    const d = (track.x[i] - p[0]) ** 2 + (track.y[i] - p[1]) ** 2;
+    if (d < best) best = d;
   }
-  if (!idx.length) return null;
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  const nrm = new Float32Array(pos.length);
-  for (let i = 0; i < pos.length / 3; i++) nrm[i * 3 + 1] = 1;
-  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-    color: colour, roughness: opts.roughness ?? 1, metalness: opts.metalness ?? 0,
-    side: THREE.DoubleSide,
-    // These layers are separated by millimetres so they stack without a step at
-    // the track edge. Over a two-kilometre view that is far inside depth-buffer
-    // precision, so push them back explicitly rather than let them flicker.
-    polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4,
-  }));
-  m.receiveShadow = true;
-  return m;
+  return Math.sqrt(best);
 }
 
-// Extrude every footprint into one merged prism soup. Walls get slightly
-// darker vertex colour toward the ground, which reads as ambient occlusion for
-// free and stops a city looking like flat cardboard.
-function buildings(list) {
-  const pos = [], col = [], nrm = [], idx = [];
-  const c = new THREE.Color();
-  let base = 0;
-  for (const b of list) {
-    let p = b.p;
-    const h = b.h;
-    if (p.length < 3) continue;
-    // OSM does not guarantee which way round a footprint is wound, and the
-    // extrusion's facing follows that winding — so roughly half of every city
-    // came out with its walls facing INWARD, got backface-culled, and you could
-    // see straight through the building. Force every footprint anticlockwise
-    // (positive signed area) before extruding.
-    let sa = 0;
-    for (let i = 0; i < p.length; i++) {
-      const q = p[i], r = p[(i + 1) % p.length];
-      sa += q[0] * r[1] - r[0] * q[1];
+// ---------------------------------------------------------------------------
+// One building. `detail` decides whether it gets windows, a ground floor and a
+// cornice, or whether it is a plain extrusion.
+// ---------------------------------------------------------------------------
+function building(wall, glass, roofB, b, detail, trackKey) {
+  let p = b.p;
+  if (p.length < 3) return 0;
+  // OSM does not guarantee which way round a footprint is wound. Builder
+  // normalises it, but the window loop below walks the ring itself and needs
+  // the same orientation to get its outward normals right.
+  let sa = 0;
+  for (let i = 0; i < p.length; i++) {
+    const q = p[i], r = p[(i + 1) % p.length];
+    sa += q[0] * r[1] - r[0] * q[1];
+  }
+  // In three's x/z plane after the sim->three reflection an up-facing ring has
+  // NEGATIVE shoelace, and the ring here is still in sim coordinates where the
+  // sense is the other way round. Force anticlockwise-in-sim.
+  if (sa < 0) p = p.slice().reverse();
+
+  const kind = b.k || '_';
+  const h = b.h;
+  const r1 = seeded(p[0][0], p[0][1], 1);
+  const r2 = seeded(p[0][0], p[0][1], 2);
+  const base = b.c || pick(PALETTE[kind] || PALETTE._, r1);
+  const roofCol = b.rc || pick(ROOFS[kind] || ROOFS._, r2);
+
+  // Three-space ring.
+  const ring = p.map(q => [q[0], Z(q[1])]);
+  const storeys = b.lv || Math.max(1, Math.round((h - 1) / STOREY));
+
+  if (!detail) {
+    wall.prism(ring, 0, h, base, true, 1, roofCol);
+    return 0;
+  }
+
+  // --- a ground floor that is not the same as the rest --------------------
+  // Shops, garage doors, stone plinths. Whatever it is, the bottom 3.2 m of a
+  // real building is never the same as the seventh floor, and breaking the
+  // wall there is the cheapest depth cue on the list.
+  const gh = Math.min(STOREY, h * 0.5);
+  const groundCol = new THREE.Color(base).multiplyScalar(0.82).getHex();
+  let windows = 0;
+
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], c = ring[(i + 1) % ring.length];
+    const dx = c[0] - a[0], dz = c[1] - a[1];
+    const m = Math.hypot(dx, dz);
+    if (m < 0.4) continue;
+    const ux = dx / m, uz = dz / m;
+    const n = [-uz, 0, ux];                       // outward, for this winding
+
+    const face = (y0, y1, colour) => wall.quad(
+      [a[0], y0, a[1]], [c[0], y0, c[1]], [c[0], y1, c[1]], [a[0], y1, a[1]], n,
+      [[0, y0], [m, y0], [m, y1], [0, y1]], colour);
+
+    face(0, gh, groundCol);
+    face(gh, h, base);
+
+    // --- the cornice ------------------------------------------------------
+    // A band that steps 0.22 m PROUD for the top 0.5 m. It is a tiny amount of
+    // geometry and it is what stops a roofline being a cut edge: it catches
+    // the sun and throws a line of shadow down the facade.
+    if (h > 5.5) {
+      const o = 0.22;
+      const a2 = [a[0] + n[0] * o, a[1] + n[2] * o], c2 = [c[0] + n[0] * o, c[1] + n[2] * o];
+      wall.quad([a2[0], h - 0.5, a2[1]], [c2[0], h - 0.5, c2[1]], [c2[0], h, c2[1]], [a2[0], h, a2[1]],
+        n, [[0, 0], [m, 0], [m, 0.5], [0, 0.5]], base);
+      wall.quadN([a[0], h - 0.5, a[1]], [c[0], h - 0.5, c[1]], [c2[0], h - 0.5, c2[1]], [a2[0], h - 0.5, a2[1]],
+        [[0, 0], [m, 0], [m, o], [0, o]], base);
+      wall.quadN([a2[0], h, a2[1]], [c2[0], h, c2[1]], [c[0], h, c[1]], [a[0], h, a[1]],
+        [[0, 0], [m, 0], [m, o], [0, o]], base);
     }
-    if (sa < 0) p = p.slice().reverse();
-    // A little hue variation per building, seeded off position so it is stable
-    const seed = (Math.abs(p[0][0] * 7.3 + p[0][1] * 3.1) % 1);
-    const tint = 0.62 + seed * 0.30;
-    // walls
-    for (let i = 0; i < p.length; i++) {
-      const a = p[i], d = p[(i + 1) % p.length];
-      const dx = d[0] - a[0], dy = d[1] - a[1];
-      const m = Math.hypot(dx, dy) || 1;
-      // Outward normal. In sim space that is (dy, -dx) for an anticlockwise
-      // ring; Z() maps sim y to -z, so it becomes (dy, 0, +dx). The + matters —
-      // it was negated, which lit every wall from the inside.
-      const nx = dy / m, nz = dx / m;
-      const quad = [[a[0], 0, Z(a[1])], [d[0], 0, Z(d[1])], [d[0], h, Z(d[1])], [a[0], h, Z(a[1])]];
-      for (let k = 0; k < 4; k++) {
-        pos.push(quad[k][0], quad[k][1], quad[k][2]);
-        nrm.push(nx, 0, nz);
-        // Vertex colour is multiplied by the lighting, so a value that looks
-        // reasonable in isolation comes out near-black on a shaded wall — the
-        // first pass turned Monaco into a row of black slabs. Keep the base
-        // bright and the street-level darkening subtle.
-        const up = k >= 2 ? 1 : 0.72;
-        c.setRGB(0.78 * tint * up, 0.76 * tint * up, 0.73 * tint * up);
-        col.push(c.r, c.g, c.b);
+
+    // --- windows ----------------------------------------------------------
+    // Laid out on a real grid: one bay every 3.6 m, one row per storey, and
+    // the glass sits 2 cm proud of the wall so the frame around it reads as a
+    // reveal. Proud, not recessed — an inset pane would be hidden BEHIND a
+    // solid wall with no hole in it, which is a lot of work for nothing.
+    const bays = Math.floor(m / BAY);
+    if (bays >= 1 && h > 3.4 && kind !== 'roof') {
+      const pad = (m - bays * BAY) / 2;
+      for (let s = 0; s < storeys; s++) {
+        const cy = gh + (s + 0.5) * ((h - gh - (h > 5.5 ? 0.6 : 0)) / Math.max(1, storeys));
+        if (cy < gh + 0.7 || cy > h - 0.8) continue;
+        const wh = kind === 'industrial' || kind === 'garage' ? 0.9 : 1.45;
+        for (let k = 0; k < bays; k++) {
+          const t0 = pad + k * BAY + BAY / 2 - 0.62, t1 = pad + k * BAY + BAY / 2 + 0.62;
+          const g0 = [a[0] + ux * t0 + n[0] * 0.02, a[1] + uz * t0 + n[2] * 0.02];
+          const g1 = [a[0] + ux * t1 + n[0] * 0.02, a[1] + uz * t1 + n[2] * 0.02];
+          glass.quad([g0[0], cy - wh / 2, g0[1]], [g1[0], cy - wh / 2, g1[1]],
+            [g1[0], cy + wh / 2, g1[1]], [g0[0], cy + wh / 2, g0[1]], n,
+            [[0, 0], [1.24, 0], [1.24, wh], [0, wh]]);
+          // a sill, standing proud under the pane
+          const s0 = [a[0] + ux * (t0 - 0.08) + n[0] * 0.10, a[1] + uz * (t0 - 0.08) + n[2] * 0.10];
+          const s1 = [a[0] + ux * (t1 + 0.08) + n[0] * 0.10, a[1] + uz * (t1 + 0.08) + n[2] * 0.10];
+          wall.quadN([s0[0], cy - wh / 2, s0[1]], [s1[0], cy - wh / 2, s1[1]],
+            [g1[0], cy - wh / 2 - 0.02, g1[1]], [g0[0], cy - wh / 2 - 0.02, g0[1]],
+            [[0, 0], [1.4, 0], [1.4, 0.12], [0, 0.12]], base);
+          windows++;
+        }
       }
-      idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-      base += 4;
-    }
-    // roof
-    const tris = triangulate(p);
-    if (tris.length) {
-      for (const q of p) {
-        pos.push(q[0], h, Z(q[1]));
-        nrm.push(0, 1, 0);
-        c.setRGB(0.62 * tint, 0.61 * tint, 0.59 * tint);
-        col.push(c.r, c.g, c.b);
-      }
-      for (const t of tris) idx.push(base + t[0], base + t[2], base + t[1]);
-      base += p.length;
     }
   }
-  if (!idx.length) return null;
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  g.setIndex(idx);
-  const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-    vertexColors: true, roughness: 0.88, metalness: 0.02,
-    // Belt and braces after the see-through-buildings bug: with the winding
-    // normalised this should never be needed, but a degenerate footprint that
-    // slips through should look slightly odd, not become a hole in the city.
-    side: THREE.DoubleSide,
-  }));
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  return mesh;
+  roofB.fan(ring, h, roofCol);
+  void trackKey;
+  return windows;
 }
 
-// Trees, as cheap instanced cones scattered inside forest polygons. Without
-// something with HEIGHT out there, a forest is just a green patch on a plane
-// and the horizon still reads as flat.
-function trees(areas, limit = 2600) {
-  const pts = [];
-  for (const a of areas) {
+// ---------------------------------------------------------------------------
+// Trees. Two sources, and the real one wins.
+//
+// `env.trees` is every `natural=tree` NODE the survey has — 1,386 of them at
+// Monza, which is the avenue of planes along the main straight, standing where
+// they stand. Forest polygons are then filled with scattered trees to make up
+// the mass behind them. Scattering alone put a random wood where an avenue is.
+// ---------------------------------------------------------------------------
+// A tree is about 9 m tall, not 14. The first pass scaled up to 1.35 on top of
+// a 10.6 m model and put 19 m Christmas trees against a Monaco apartment
+// block, which made the whole scene read as a toy.
+//
+// TWO SPECIES, because one was wrong everywhere. A stack of cones is a
+// conifer, which is right for the woods around Monza and Suzuka and absurd
+// beside the Mediterranean; the plane trees along Monza's straight and the
+// palms and limes in Monaco's gardens are round. So `natural=tree` nodes and
+// park scatter get a broadleaf crown, forest and scrub get conifers, and the
+// two ship as two instanced meshes — two draw calls for the whole circuit.
+function trunk(h, r) {
+  const b = new Builder({ uv: false });
+  b.box(0, h / 2, 0, r, h, r, 0, 0xffffff, 1);
+  const g = b.geometry();
+  g.deleteAttribute('uv'); g.deleteAttribute('uv1');
+  return g;
+}
+
+// Merge by hand — BufferGeometryUtils is in the addons bundle this project
+// does not vendor.
+function mergeParts(parts) {
+  // Not every three primitive is indexed: ConeGeometry is, IcosahedronGeometry
+  // is not. Reading `g.index.array` blind threw on the first broadleaf tree.
+  const count = g => g.index ? g.index.count : g.attributes.position.count;
+  let np = 0, ni = 0;
+  for (const g of parts) { np += g.attributes.position.count; ni += count(g); }
+  const pos = new Float32Array(np * 3), nrm = new Float32Array(np * 3), idx = new Uint32Array(ni);
+  let po = 0, io = 0, vo = 0;
+  for (const g of parts) {
+    pos.set(g.attributes.position.array, po * 3);
+    nrm.set(g.attributes.normal.array, po * 3);
+    const n = count(g);
+    for (let i = 0; i < n; i++) idx[io + i] = (g.index ? g.index.array[i] : i) + vo;
+    po += g.attributes.position.count; io += n; vo = po;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  return out;
+}
+
+function coniferGeometry() {
+  const g1 = new THREE.ConeGeometry(1.85, 4.1, 8); g1.translate(0, 3.6, 0);
+  const g2 = new THREE.ConeGeometry(1.45, 3.4, 8); g2.translate(0.22, 5.2, -0.14);
+  const g3 = new THREE.ConeGeometry(0.95, 2.4, 8); g3.translate(-0.1, 6.8, 0.1);
+  return mergeParts([trunk(1.9, 0.32), g1, g2, g3]);
+}
+
+// A broadleaf crown: three offset low-poly spheres. Low detail on purpose —
+// an icosahedron at detail 0 is 20 faces, and three of them overlapping give a
+// lumpy round mass that reads as foliage from ten metres and as a green blob
+// from two hundred, which is the whole range that matters.
+function broadleafGeometry() {
+  const c1 = new THREE.IcosahedronGeometry(2.3, 0); c1.translate(0, 4.7, 0);
+  const c2 = new THREE.IcosahedronGeometry(1.7, 0); c2.translate(1.3, 4.0, 0.5);
+  const c3 = new THREE.IcosahedronGeometry(1.5, 0); c3.translate(-1.1, 4.2, -0.7);
+  // A short, thick trunk. Tall and thin turned every tree into a lollipop.
+  return mergeParts([trunk(3.4, 0.58), c1, c2, c3]);
+}
+
+function scatter(env, limit) {
+  const round = [], conifer = [];
+  // Surveyed trees first: 1,386 of them at Monza, which is the avenue of plane
+  // trees along the main straight, standing where they stand.
+  for (const t of env.trees || []) {
+    round.push([t[0], t[1], 0.78 + seeded(t[0], t[1], 3) * 0.4]);
+    if (round.length >= limit * 0.5) break;
+  }
+  for (const a of env.areas || []) {
+    if (round.length + conifer.length >= limit) break;
     if (a.k !== 'forest' && a.k !== 'park' && a.k !== 'scrub') continue;
+    const into = a.k === 'park' ? round : conifer;
     const xs = a.p.map(q => q[0]), ys = a.p.map(q => q[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
     const span = (x1 - x0) * (y1 - y0);
     if (span < 400) continue;
     const want = Math.min(140, Math.max(3, Math.round(span / 900)));
-    const tall = a.k === 'scrub' ? 0.45 : 1;
-    for (let i = 0; i < want * 3 && pts.length < limit; i++) {
+    const tall = a.k === 'scrub' ? 0.42 : 1;
+    for (let i = 0; i < want * 3 && round.length + conifer.length < limit; i++) {
       const x = x0 + Math.random() * (x1 - x0), y = y0 + Math.random() * (y1 - y0);
       // point-in-polygon, so trees do not spill into the road
       let inside = false;
@@ -184,34 +318,90 @@ function trees(areas, limit = 2600) {
         if ((pj[1] > y) !== (pk[1] > y) &&
             x < (pk[0] - pj[0]) * (y - pj[1]) / (pk[1] - pj[1]) + pj[0]) inside = !inside;
       }
-      if (inside) pts.push([x, y, tall * (0.75 + Math.random() * 0.6)]);
+      if (inside) into.push([x, y, tall * (0.66 + Math.random() * 0.44)]);
     }
   }
+  return { round, conifer };
+}
+
+function treeMesh(pts, geo) {
   if (!pts.length) return null;
-  const geo = new THREE.ConeGeometry(2.4, 9, 6);
-  geo.translate(0, 4.5, 0);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x33421f, roughness: 1, flatShading: true });
+  const mat = new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true, metalness: 0 });
   const inst = new THREE.InstancedMesh(geo, mat, pts.length);
-  const m = new THREE.Matrix4();
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3();
+  const c = new THREE.Color();
+  const up = new THREE.Vector3(0, 1, 0);
   for (let i = 0; i < pts.length; i++) {
-    const [x, y, s] = pts[i];
-    m.makeScale(s, s, s);
-    m.setPosition(x, 0, Z(y));
+    const [x, y, k] = pts[i];
+    q.setFromAxisAngle(up, seeded(x, y, 4) * Math.PI * 2);
+    s.set(k, k * (0.88 + seeded(x, y, 5) * 0.3), k);
+    v.set(x, 0, Z(y));
+    m.compose(v, q, s);
     inst.setMatrixAt(i, m);
+    // Real foliage is a spread of greens, not one. This is the difference
+    // between a wood and a bag of identical Christmas trees.
+    const g = 0.20 + seeded(x, y, 6) * 0.16;
+    c.setRGB(g * 0.78, g * 1.22, g * 0.45);
+    inst.setColorAt(i, c);
   }
   inst.castShadow = true;
   inst.instanceMatrix.needsUpdate = true;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
   return inst;
 }
 
-// Build the whole environment into `scene`. Returns what it added, so the
-// caller can report it rather than guess.
-export function buildEnv(scene, env) {
-  const added = { buildings: 0, areas: 0, sea: 0, trees: 0 };
+// ---------------------------------------------------------------------------
+function flatMesh(polys, look, spec) {
+  const b = new Builder();
+  for (const poly of polys) {
+    const p = poly.p || poly;
+    if (p.length < 3) continue;
+    b.fan(p.map(q => [q[0], Z(q[1])]), spec.y, null);
+  }
+  const g = b.geometry();
+  if (!g) return null;
+  const mat = spec.tex
+    ? look.mat(spec.tex, {
+      size: spec.size, tint: spec.col, roughness: 1, metalness: 0,
+      side: THREE.DoubleSide,
+      // These layers are separated by millimetres so they stack without a step
+      // at the track edge. Over a two-kilometre view that is far inside
+      // depth-buffer precision, so push them back explicitly rather than let
+      // them flicker.
+      polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4,
+    })
+    : new THREE.MeshStandardMaterial({
+      color: spec.col, roughness: 0.22, metalness: 0.4, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4,
+    });
+  const m = new THREE.Mesh(g, mat);
+  m.receiveShadow = true;
+  return m;
+}
+
+// ---------------------------------------------------------------------------
+// True if a footprint sits inside the corridor the pit complex occupies.
+// Monza tags 81 real buildings `garage` along its pit straight and Zandvoort
+// 50 more; built as well as the synthetic garages they interpenetrate, and you
+// end up looking out of a pit box through somebody's brick wall.
+function inCorridor(ring, corridor) {
+  if (!corridor) return false;
+  let cx = 0, cy = 0;
+  for (const p of ring) { cx += p[0]; cy += p[1]; }
+  cx /= ring.length; cy /= ring.length;
+  const r2 = corridor.radius * corridor.radius;
+  for (const q of corridor.pts) {
+    if ((q[0] - cx) ** 2 + (q[1] - cy) ** 2 < r2) return true;
+  }
+  return false;
+}
+
+export function buildEnv(scene, env, track, look, corridor = null) {
+  const added = { buildings: 0, detailed: 0, windows: 0, areas: 0, sea: 0, trees: 0, cleared: 0 };
   if (!env) return added;
 
   if (env.sea && env.sea.length) {
-    const m = flatMesh(env.sea, COVER.water.col, -0.055, { roughness: 0.25, metalness: 0.35 });
+    const m = flatMesh(env.sea, look, { col: COVER.water.col, y: -0.055, tex: null, size: 8 });
     if (m) { scene.add(m); added.sea = env.sea.length; }
   }
 
@@ -220,15 +410,57 @@ export function buildEnv(scene, env) {
   for (const kind in byKind) {
     const spec = COVER[kind];
     if (!spec) continue;
-    const m = flatMesh(byKind[kind], spec.col, spec.y);
+    const m = flatMesh(byKind[kind], look, spec);
     if (m) { scene.add(m); added.areas += byKind[kind].length; }
   }
 
-  const bm = buildings(env.buildings || []);
-  if (bm) { scene.add(bm); added.buildings = (env.buildings || []).length; }
+  // --- buildings ------------------------------------------------------------
+  // Grandstands are pulled out and handed to crowd.js, which builds them as
+  // raked seating rather than as a box.
+  const all = (env.buildings || []).filter(b => b.k !== 'grandstand' && !inCorridor(b.p, corridor));
+  added.cleared = (env.buildings || []).length - all.length;
+  const withDist = all.map(b => ({ b, d: distToTrack(track, b.p) }));
+  withDist.sort((x, y) => x.d - y.d);
 
-  const tm = trees(env.areas || []);
-  if (tm) { scene.add(tm); added.trees = tm.count; }
+  const brickP = BRICKINESS[env.key] ?? 0.35;
+  const brick = { wall: new Builder({ color: true }), glass: new Builder(), roof: new Builder({ color: true }) };
+  const rendr = { wall: new Builder({ color: true }), glass: new Builder(), roof: new Builder({ color: true }) };
+  let windows = 0, detailed = 0;
+
+  for (const { b, d } of withDist) {
+    const isBrick = seeded(b.p[0][0], b.p[0][1], 7) < brickP && b.k !== 'office' && b.k !== 'stadium';
+    const pile = isBrick ? brick : rendr;
+    const detail = d < NEAR && windows < MAX_WINDOWS;
+    windows += building(pile.wall, pile.glass, pile.roof, b, detail, env.key);
+    if (detail) detailed++;
+    added.buildings++;
+  }
+  added.windows = windows;
+  added.detailed = detailed;
+
+  const put = (bld, mat, opts) => { const m = bld.mesh(mat, opts); if (m) scene.add(m); };
+  // vertexColors carries the per-building tint; the map carries the material.
+  // The two multiply, which is how one brick scan becomes a whole town.
+  put(brick.wall, look.mat('brick', { size: 2.4, vertexColors: true, roughness: 1, side: THREE.DoubleSide }));
+  put(rendr.wall, look.mat('plaster', { size: 3.0, vertexColors: true, roughness: 1, side: THREE.DoubleSide }));
+  put(brick.roof, look.mat('concrete', { size: 3.0, vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }));
+  put(rendr.roof, look.mat('concrete', { size: 3.0, vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }));
+
+  // Glass is the one material here that is NOT a photograph: it is a mirror.
+  // Low roughness and a full-strength environment map means every pane picks
+  // up the actual sky above the circuit, which is what makes a window read as
+  // a window from 200 m rather than as a dark rectangle.
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x2b3742, roughness: 0.09, metalness: 0.55, envMapIntensity: 1.6, side: THREE.DoubleSide,
+  });
+  put(brick.glass, glassMat, { shadow: false });
+  put(rendr.glass, glassMat, { shadow: false });
+
+  const { round, conifer } = scatter(env, 4200);
+  for (const [pts, geo] of [[round, broadleafGeometry()], [conifer, coniferGeometry()]]) {
+    const tm = treeMesh(pts, geo);
+    if (tm) { scene.add(tm); added.trees += tm.count; }
+  }
 
   return added;
 }

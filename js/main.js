@@ -84,8 +84,17 @@ async function start() {
   const aid = (k, d) => { const v = q.get(k); return v == null ? d : Math.max(0, Math.min(1, parseFloat(v) || 0)); };
   state.car.aids = { tc: aid('tc', 0.6), abs: aid('abs', 0.6), sc: aid('sc', 0.35) };
   const env = q.has('noenv') ? null : await loadEnv(pickTrack);
-  if (!state.view) state.view = new View($('cv'), t, line, { shadows: !q.has('lo'), env });
-  else { location.reload(); return; }   // changing circuit rebuilds the world
+  // View.create is async because the circuit is painted with real photographed
+  // materials and lit by a real sky, both of which come off the network.
+  //   ?notex   skip the texture set and run on flat colours
+  //   ?lo      no shadows
+  if (!state.view) {
+    state.view = await View.create($('cv'), t, line, {
+      shadows: !q.has('lo'), env, textures: !q.has('notex'),
+    });
+  } else {
+    location.reload(); return;          // changing circuit rebuilds the world
+  }
 
   $('trackName').textContent = t.full;
   $('carName').textContent = `${spec.full}  ·  peak grip at ${(state.peak * 180 / Math.PI).toFixed(1)}°`;

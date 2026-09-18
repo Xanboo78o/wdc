@@ -1,0 +1,53 @@
+{
+ "tracks": {
+  "monza": "cloud",
+  "suzuka": "cloud",
+  "zandvoort": "overcast",
+  "monaco": "clear",
+  "baku": "clear"
+ },
+ "skies": {
+  "clear": {
+   "name": "clear",
+   "slug": "kloofendal_43d_clear_puresky",
+   "why": "dry, high sun, hard shadows",
+   "sun": [
+    0.5917,
+    0.6807,
+    0.432
+   ],
+   "sunColour": "#fff5e4",
+   "punch": 1,
+   "sky": "#7087af",
+   "horizon": "#bfd0ec"
+  },
+  "cloud": {
+   "name": "cloud",
+   "slug": "kloofendal_48d_partly_cloudy_puresky",
+   "why": "broken cloud, the default racing sky",
+   "sun": [
+    0.5541,
+    0.7419,
+    0.3776
+   ],
+   "sunColour": "#f8ffeb",
+   "punch": 1,
+   "sky": "#93a8ce",
+   "horizon": "#a7aabb"
+  },
+  "overcast": {
+   "name": "overcast",
+   "slug": "overcast_soil_puresky",
+   "why": "flat North Sea light, almost no shadow",
+   "sun": [
+    0.8009,
+    0.5882,
+    -0.1124
+   ],
+   "sunColour": "#ffeeda",
+   "punch": 0.348,
+   "sky": "#cac9ca",
+   "horizon": "#8d8986"
+  }
+ }
+}
