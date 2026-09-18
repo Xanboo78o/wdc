@@ -33,7 +33,19 @@ import os from 'os';
 
 const ROOT = new URL('../', import.meta.url).pathname;
 const OUT = path.join(os.tmpdir(), 'wdc-shots');
-const PORT = 8175, CDP = 9222;
+const PORT = 8175;
+// A UNIQUE debugging port per run.
+//
+// The port was fixed at 9222, which is fine alone and wrong the moment two
+// runs overlap — and two sessions work in this repo at once, so they do. A
+// second run cannot bind the port and attaches to the FIRST run's browser
+// instead, reporting numbers about a page nobody asked for.
+//
+// (I first blamed this for a 0.87 s failure path that looked too fast to be
+// real. It was not the cause: tracing showed both paths attach at 0.3 s and
+// the 0.87 s was simply the early-bail below working. The port is still worth
+// randomising for the concurrency reason, but that is the honest reason.)
+const CDP = 9500 + Math.floor(Math.random() * 400);
 
 const args = process.argv.slice(2);
 const flag = (name, def = null) => {
@@ -66,6 +78,8 @@ const outName = flag('out', target.replace(':', '-'));
 const waitMs = +flag("wait", 1200);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const T0 = Date.now();
+const el = () => `${((Date.now() - T0) / 1000).toFixed(1)}s`;
 
 // --- the page server, started only if nothing is already listening ---------
 function ensureServer() {
@@ -126,7 +140,7 @@ class CDPClient {
 }
 
 async function connect(url) {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 80; i++) {
     try {
       const list = await (await fetch(`http://127.0.0.1:${CDP}/json/list`)).json();
       const page = list.find(t => t.type === 'page' && t.webSocketDebuggerUrl);
@@ -198,24 +212,52 @@ chrome.stderr.on('data', d => { chromeErr += d.toString(); });
 let code = 0;
 try {
   const cdp = await connect(url);
+  // WDC_TRACE=1 prints elapsed time at each stage. Worth knowing what the
+  // numbers mean: attach is ~0.3 s, `build` is only `_world()`, and the ~14 s
+  // between them on a clean run is asset loading, the racing-line solve and
+  // SwiftShader compiling shaders — none of which a real browser pays.
+  if (process.env.WDC_TRACE) console.log(`  [${el()}] attached`);
   await cdp.send('Runtime.enable');
   await cdp.send('Log.enable');
   await cdp.send('Page.enable');
 
   // Wait for the world, not for the clock. render.js sets window.__wdc when
   // the circuit has actually finished building.
-  let stats = null;
-  for (let i = 0; i < 300; i++) {
+  // A failed ES module import throws within about a second and the world then
+  // never builds, so every failure used to pay the FULL ceiling — which at 300
+  // iterations was two minutes per circuit, or ten for --all. That is long
+  // enough that the next person assumes the tool has hung rather than that the
+  // code is broken, which makes the check worse than useless.
+  //
+  // Two changes. The ceiling is 24 s, not 120: a clean build is 1.2 s and the
+  // loop exits the moment __wdc appears, so the ceiling is paid ONLY by the
+  // failure case. And a hard load error breaks out immediately, because once a
+  // module has failed to import the world is never going to build and waiting
+  // is pure cost.
+  const FATAL = /does not provide an export|SyntaxError|ReferenceError|Failed to (fetch|resolve)|Cannot find module|Unexpected token|Importing a module script failed/i;
+  let stats = null, fatal = null;
+  for (let i = 0; i < 60; i++) {
     stats = await cdp.eval('window.__wdc ? JSON.parse(JSON.stringify(window.__wdc)) : null');
     if (stats) break;
+    fatal = cdp.errors.find(e => FATAL.test(e));
+    if (fatal) break;
     await sleep(400);
   }
   if (QUICK) {
     const errs = [...new Set(cdp.errors)].filter(e => !/favicon|PHONE_REGISTRATION|DEPRECATED_ENDPOINT/.test(e));
     const ms = await cdp.eval('window.__wdcBuildMs || 0');
-    const label = `${target.padEnd(16)} build ${String(ms).padStart(5)} ms`;
-    if (!stats) { console.log(`  FAIL ${label}  world never built`); code = 1; }
-    else if (errs.length) {
+    const label = `${target.padEnd(16)} build ${String(ms).padStart(5)} ms  (${el()} wall)`;
+    if (!stats) {
+      // PRINT THE ERRORS. The one case where you most want the message was the
+      // one case that suppressed it: "world never built" told you nothing,
+      // when what was sitting in the buffer was "does not provide an export
+      // named 'crushParts'".
+      console.log(`  FAIL ${label}  world never built`);
+      for (const e of (errs.length ? errs : ['(no console error captured)']).slice(0, 6)) {
+        console.log('       ! ' + e.slice(0, 220));
+      }
+      code = 1;
+    } else if (errs.length) {
       console.log(`  FAIL ${label}  ${errs.length} console error(s)`);
       for (const e of errs.slice(0, 6)) console.log('       ! ' + e.slice(0, 200));
       code = 1;
