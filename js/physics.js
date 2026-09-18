@@ -33,6 +33,17 @@ export const CARS = {
     Pmax: 125e3, Fdrive: 6200,
     Fbrake: 24000, brakeBal: 0.62,
     rollRes: 180,
+    // Pitch and roll inertia. A single-seater is long and narrow, so it
+    // resists pitching about as much as it resists yawing, and barely resists
+    // rolling at all. That ratio is why a launched car barrel-rolls rather
+    // than somersaulting — it is the cheapest axis to spin it about.
+    Iyy: 480, Ixx: 110,
+    trackF: 1.45, trackR: 1.40,
+    // The underbody as a wing, for when air gets UNDER the car. An F4 car has
+    // a flat floor and no real diffuser and tops out around 215 km/h, so on
+    // aerodynamics alone it should never fly at all — and with this number it
+    // cannot. An F4 car that gets airborne has been launched by something.
+    ClFloor: 3.0,
     // Control (non-carbon) slick: lower peak grip than an F1 tyre, and it
     // peaks LATER (~10 deg vs ~7.4). That late peak is why an F4 car is the
     // right thing to learn in — it tells you it is sliding before it goes.
@@ -54,6 +65,17 @@ export const CARS = {
     Pmax: 580e3, Fdrive: 13800,
     Fbrake: 46000, brakeBal: 0.60,
     rollRes: 260,
+    Iyy: 900, Ixx: 165,
+    trackF: 1.60, trackR: 1.40,
+    // A modern F1 floor is the whole downforce story, and turned over it is the
+    // whole lift story. This number sets the takeoff speed, and it was MEASURED
+    // rather than picked: at 12.0 the car flew backwards from 203 km/h, and a
+    // 22-car race at Monza then flipped FIVE CARS — because a spin at Monza
+    // routinely leaves you going backwards above 200. Real single-seaters spin
+    // backwards at those speeds most race weekends and stay on the ground; the
+    // famous flips need a bump or another car as well. 7.0 puts the bare-aero
+    // takeoff at about 265 km/h, which is where it belongs.
+    ClFloor: 7.0,
     B: 12.5, C: 1.80, E: 0.70,
     mu: 1.91, wear: 1.0, Topt: 92, Twin: 33,
     drs: true, drsCl: 0.80, drsCd: 0.74,
@@ -90,6 +112,310 @@ export function peakSlip(spec) {
   return (lo + hi) / 2;
 }
 
+// ---------------------------------------------------------------------------
+// THE VERTICAL AXIS.
+//
+// Everything above this line is planar — x, y and heading. That is enough to
+// drive a lap, and it is exactly why the car could never do the thing a crash
+// is famous for. A car with no third axis cannot be launched over a kerb, ride
+// up the back of another car, or land on its roof, so every shunt however hard
+// ended with the car still flat on the road, sliding.
+//
+// THE RULE THAT KEEPS THE VALIDATED MODEL SAFE: while the wheels are down,
+// none of this runs. z, pitch and roll are pinned at zero, vertical() returns
+// on its third line, and the planar model is bit-for-bit what it was. Lap
+// times cannot move, because on a clean lap nothing here executes. The vertical
+// system only wakes when something gives the car vertical velocity, and it
+// puts itself back to sleep when the car settles.
+//
+// `z` is height above THE ROAD, not above sea level. The circuits have real
+// elevation now, but that belongs to the renderer: from the simulation's point
+// of view the road under the car is always zero, which is why this file still
+// imports nothing. (Known limit: a car launched off the top of a hill lands at
+// the local road height, not at the height of the ground it flew over. At
+// Monaco's 56 m of elevation change that is a metre or two on a long flight.)
+// ---------------------------------------------------------------------------
+const GRAV = 9.81;
+
+// Ground effect dies with height. An F1 floor makes its downforce by sealing
+// against the road; lift the car a few centimetres and the seal is gone. This
+// single line is why a car that gets light keeps getting lighter instead of
+// being pushed back down — the downforce holding it there is the first thing
+// the accident takes away.
+const groundEffect = z => (z <= 0 ? 1 : Math.exp(-z / 0.22));
+
+// The diffuser rakes upward by design, so a car travelling backwards is a ramp
+// facing the wind. This is the number behind every famous single-seater
+// backflip, and it is why they all happened above 200 km/h and none below.
+const DIFFUSER_RAKE = 0.26;                 // ~15 degrees
+
+// A floor at a small angle is still a floor: it makes downforce. It only turns
+// into a lifting plate once the air can get properly underneath it, which takes
+// a few degrees. That threshold is not a detail — it is the entire difference
+// between a car that can ride a kerb and a car that backflips off one. Without
+// it the floor lifted at ANY nose-up angle, the lift pitched the nose up
+// further, and a car dropped from half a metre ended upside down.
+const FLOOR_STALL = 0.09;                   // ~5 degrees
+
+// Suspension, per corner. Real F1 wheel rates — stiff, lightly damped, and
+// almost no travel — which is why these cars land hard and do not wallow.
+const SPRING = 160e3;       // N/m
+const DAMP = 4500;          // N s/m
+const TRAVEL = 0.055;       // m before the chassis is on the deck
+const BUMPSTOP = 6e6;       // N/m once it is
+const FMAX = 2.2e5;         // N — the most one corner can ever transmit
+const RATE_MAX = 11;        // rad/s — a tumbling car, not a blender
+
+const wrapPi = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+
+// Wheel contact patches in body-local metres: +x forward, +y left.
+export function wheelPos(S) {
+  const hf = S.trackF * 0.5, hr = S.trackR * 0.5;
+  return [[S.a, hf], [S.a, -hf], [-S.b, hr], [-S.b, -hr]];
+}
+
+// Net vertical aero force, positive UP, and where along the floor it acts.
+// Where it acts is not a detail: it is the whole difference between lift that
+// settles the car and lift that flips it.
+function aeroVertical(car, q, v) {
+  const S = car.spec;
+  const vh = Math.max(v, 0.001);
+  const fwd = vh > 1 ? car.vx / vh : 1;     // cos of the angle between nose and travel
+  // Wings and a sealed floor push DOWN, and only while the car is pointing
+  // roughly where it is going. Sideways, they do almost nothing.
+  const down = -q * S.ClA * Math.max(0, fwd) * groundEffect(car.z);
+
+  // The underbody as a flat plate. The angle of attack is the floor's angle to
+  // the air actually hitting it: the car's pitch, less the angle at which it
+  // is climbing or falling.
+  const climb = Math.atan2(car.vz, Math.max(vh, 1));
+  let alpha = car.pitch - climb;
+  // Backwards, the DIFFUSER is the leading edge and its own rake is the angle
+  // of attack — so a perfectly level car going backwards is already sitting at
+  // ten degrees before anything else happens.
+  if (fwd < 0) alpha = DIFFUSER_RAKE * -fwd - alpha;
+  alpha = Math.max(-0.9, Math.min(0.9, alpha));
+  // sin(2a): no lift flat on, most at 45 degrees. The standard flat-plate
+  // approximation, and the right SHAPE — the car does not fly until the floor
+  // is angled into the air, and then it flies very suddenly.
+  const excess = Math.abs(alpha) - FLOOR_STALL;
+  // A car on its back has its floor facing the SKY, and a floor facing the sky
+  // pushes down, not up. Folding the attitude in here is what brings a flipped
+  // car back to earth — without it the lift kept pushing an inverted car
+  // upward and it simply never landed.
+  const upright = Math.cos(car.roll) * Math.cos(car.pitch);
+  const lift = excess <= 0 ? 0
+    : Math.sign(alpha) * q * S.ClFloor * Math.sin(2 * Math.min(0.9, excess)) * upright;
+
+  // Lift acts at the LEADING edge of the floor, not at the centre of mass, so
+  // it lifts whichever end met the air first. That raises the angle of attack,
+  // which makes more lift, which raises it further. The runaway is the flip.
+  // It is not scripted anywhere; it falls out of putting the force in the
+  // right PLACE rather than at the centre of the car.
+  const cop = fwd >= 0 ? S.a * 0.62 : -S.b * 0.72;
+
+  // The wings are a long way from the centre of mass, and they are what keeps
+  // a car pointing where it is going: nose-up, the rear wing bites harder and
+  // the front wing unloads, and the pair push the nose back down. Modelling
+  // only the DESTABILISING half of the aerodynamics is what made every small
+  // hop turn into a somersault. A real car is pitch-stable right up until it
+  // is not.
+  const restore = -q * S.ClA * 2.6 * Math.sin(car.pitch) * Math.max(0, fwd);
+  return { Fz: down + lift, cop, lift, restore };
+}
+
+// One vertical substep. Sets car.gripF / car.gripR — the share of each axle
+// actually touching the road, which is what the tyre forces get scaled by.
+function vertical(car, dt, env, q, v) {
+  const S = car.spec;
+  const air = aeroVertical(car, q, v);
+
+  if (!car.airborne) {
+    car.gripF = car.gripR = 1;
+    // The one test a grounded car pays for: is the air genuinely carrying the
+    // car? Below about 200 km/h the answer is never yes, whatever the attitude.
+    if (air.Fz <= S.m * GRAV || v < 8) return;
+    car.airborne = true; car.airTime = 0; car.vz = 0;
+  }
+
+  car.airTime += dt;
+
+  // ---- free body ----------------------------------------------------------
+  car.vz += (air.Fz / S.m - GRAV) * dt;
+  car.z += car.vz * dt;
+  // In the air the only moments are aerodynamic: the floor's lift about its own
+  // centre of pressure, and the damping of a body tumbling through air. There
+  // is nothing else to hold the car straight, which is the point — once it is
+  // off the ground the driver is a passenger.
+  car.pRate += ((air.lift * air.cop + air.restore - car.pRate * q * 0.30) / S.Iyy) * dt;
+  car.rRate += ((-car.rRate * q * 0.05) / S.Ixx) * dt;
+  car.pitch = wrapPi(car.pitch + car.pRate * dt);
+  car.roll = wrapPi(car.roll + car.rRate * dt);
+
+  // ---- what is touching the road? -----------------------------------------
+  // Normally the wheels. Past ninety degrees it is the rollhoop, and a car on
+  // its rollhoop has one contact point, no grip and no way back.
+  const inverted = Math.abs(car.roll) > Math.PI / 2 || Math.abs(car.pitch) > Math.PI / 2;
+  if (inverted) {
+    car.onRoof = true;
+    car.gripF = car.gripR = 0;
+    const ride = S.h * 0.9;                 // rollhoop height above the CG line
+    if (car.z < ride) {
+      car.z = ride;
+      if (car.vz < 0) car.vz *= -0.05;      // a rollhoop does not bounce
+      // Scraping along on carbon: a lot of friction, no steering, no drive.
+      const sp = Math.hypot(car.vx, car.vy);
+      if (sp > 0.05) {
+        const k = Math.max(0, 1 - 0.62 * GRAV * dt / sp);
+        car.vx *= k; car.vy *= k;
+      }
+      car.r *= 1 - Math.min(0.9, 3 * dt);
+      car.pRate *= 1 - Math.min(0.9, 4 * dt);
+      car.rRate *= 1 - Math.min(0.9, 4 * dt);
+    }
+    return;
+  }
+  car.onRoof = false;
+
+  const W = wheelPos(S);
+  const sp = Math.sin(car.pitch), sr = Math.sin(car.roll);
+  let deepest = 0, downF = 0, downR = 0, nDown = 0;
+  for (let i = 0; i < 4; i++) {
+    const h = car.z + W[i][0] * sp + W[i][1] * sr;
+    car.wheelZ[i] = h;
+    if (h < 1e-3) {
+      nDown++;
+      if (i < 2) downF++; else downR++;
+      if (-h > deepest) deepest = -h;
+    }
+  }
+
+  if (!nDown) car.inContact = false;
+
+  if (nDown) {
+    // SPRINGS, NOT IMPULSES.
+    //
+    // The impulse version could not do the one thing a landing has to do:
+    // settle. An impulse only fires while a wheel is PENETRATING, so a car
+    // resting on two wheels at an angle had no force on it at all and stayed
+    // leaning at 56 degrees forever. A suspension spring is the landing AND the
+    // resting state in one, and the restoring moment that rolls a leaning car
+    // back down onto four wheels falls straight out of the springs' lever arms
+    // rather than having to be written down.
+    let Fz = 0, Mp = 0, Mr = 0, peak = 0, hardIdx = 0, deepest = 0;
+    for (let i = 0; i < 4; i++) {
+      const h = car.wheelZ[i];
+      if (h >= 0) continue;
+      if (-h > deepest) deepest = -h;
+      const lx = W[i][0], ly = W[i][1];
+      const vp = car.vz + lx * car.pRate + ly * car.rRate;
+      let f = -h * SPRING - vp * DAMP;
+      // Suspension travel is only a few centimetres, and past it the floor is
+      // on the road. That bump stop is what makes a big landing VIOLENT rather
+      // than a soft bounce, and it is where the damage comes from.
+      //
+      // It only pushes while the car is still coming DOWN. A floor grounding
+      // out on tarmac ABSORBS a landing; it does not hand the energy back.
+      // Modelling it as a plain spring that pushed on the rebound too returned
+      // about 80% of the impact, and a twelve-metre drop came back off the road
+      // as a FIVE-HUNDRED-METRE launch.
+      if (-h > TRAVEL && vp < 0) f += (-h - TRAVEL) * BUMPSTOP;
+      if (f <= 0) continue;                  // a tyre pushes; it never pulls
+      // Nothing a wheel can transmit is unbounded. This is the ceiling that
+      // stops a deep penetration in one substep turning into a number the
+      // integrator cannot survive.
+      f = Math.min(f, FMAX);
+      Fz += f; Mp += f * lx; Mr += f * ly;
+      if (f > peak) { peak = f; hardIdx = i; }
+    }
+
+    // Gravity acts at the centre of mass, which sits ABOVE the contact patches.
+    // So the further the car leans the more gravity helps it lean, and past the
+    // angle where the centre of mass crosses outside the wheels it goes over.
+    // These two terms and the springs above are the whole of "does it tip or
+    // does it settle" — neither outcome is written down anywhere.
+    Mp += S.m * GRAV * S.h * Math.sin(car.pitch);
+    Mr += S.m * GRAV * S.h * Math.sin(car.roll);
+
+    car.vz += (Fz / S.m) * dt;
+    car.pRate += (Mp / S.Iyy) * dt;
+    car.rRate += (Mr / S.Ixx) * dt;
+    // Same reason the yaw rate is clamped: an explicit integrator at the limit
+    // will happily invent a rotation speed no car has ever had.
+    car.pRate = Math.max(-RATE_MAX, Math.min(RATE_MAX, car.pRate));
+    car.rRate = Math.max(-RATE_MAX, Math.min(RATE_MAX, car.rRate));
+    // Last-ditch: if a wheel is somehow buried, lift the car rather than let
+    // the springs try to fix it with a force nothing could survive.
+    if (deepest > 0.30) car.z += deepest - 0.30;
+
+    // LANDING DAMAGE, from the speed of the impact and charged ONCE per
+    // landing.
+    //
+    // The first version charged it every substep from the peak spring force,
+    // and that was wrong twice over. Wrong once because the peak force is
+    // dominated by how stiff I chose to make the bump stop — a modelling
+    // decision — while the impact SPEED is a physical fact about the accident.
+    // Wrong again because billing it every substep meant a landing that took
+    // twenty substeps to absorb was charged twenty times: a two-metre drop, the
+    // kind of thing a car does clearing a kerb, destroyed it outright and took
+    // both wings off.
+    if (!car.inContact) {
+      car.inContact = true;
+      let worst = 0;
+      for (let i = 0; i < 4; i++) {
+        if (car.wheelZ[i] >= 0) continue;
+        const vp = car.vz + W[i][0] * car.pRate + W[i][1] * car.rRate;
+        if (vp < worst) worst = vp;
+      }
+      car.landV = -worst;
+      // Five metres a second is a hard landing off a kerb and costs nothing.
+      // Fifteen is a twelve-metre drop and there is no car left.
+      if (car.landV > 5) {
+        const harm = Math.min(1, Math.pow((car.landV - 5) / 10, 1.5));
+        car.damage = Math.min(1, (car.damage || 0) + harm);
+        car.crush = car.crush || { front: 0, rear: 0, left: 0, right: 0 };
+        const part = hardIdx < 2 ? 'front' : 'rear';
+        car.crush[part] = Math.min(1, car.crush[part] + harm * 1.2);
+        car.landHarm = harm;
+      }
+    }
+
+    // Back to sleep — and the planar model gets the car back in exactly the
+    // state it would have had, which is what makes a clean lap unchanged.
+    //
+    // The `resting` test is not optional: without it the car could never take
+    // off at all. On the first substep of a lift-off it has climbed a fraction
+    // of a millimetre, all four wheels still read as down, and this test
+    // grabbed it and zeroed the vertical velocity it had just earned. Every
+    // substep, forever.
+    const resting = air.Fz < S.m * GRAV;
+    if (resting && nDown === 4 && car.z < 0.02
+        && Math.abs(car.vz) < 0.30 && Math.abs(car.pRate) < 0.30 && Math.abs(car.rRate) < 0.30
+        && Math.abs(car.pitch) < 0.03 && Math.abs(car.roll) < 0.03) {
+      car.airborne = false; car.onRoof = false;
+      car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0;
+      car.wheelZ[0] = car.wheelZ[1] = car.wheelZ[2] = car.wheelZ[3] = 0;
+      car.gripF = car.gripR = 1;
+      return;
+    }
+  }
+
+  car.gripF = downF / 2;
+  car.gripR = downR / 2;
+}
+
+// Give the car a vertical kick. The one entry point collide.js uses to launch
+// a car, so that every launch in the game goes through the same impulse and
+// there is no second, sneakier way to make a car fly.
+export function launch(car, jz, lx = 0, ly = 0) {
+  const S = car.spec;
+  car.airborne = true;
+  car.vz += jz / S.m;
+  car.pRate += (jz * lx) / S.Iyy;
+  car.rRate += (jz * ly) / S.Ixx;
+  if (car.z < 0.001) car.z = 0.001;
+}
+
 export function makeCar(opts = {}) {
   const spec = CARS[opts.cls || 'f4'];
   return {
@@ -106,6 +432,16 @@ export function makeCar(opts = {}) {
     aids: { tc: 0.60, abs: 0.60, sc: 0.35, ...(opts.aids || {}) },
     tcCut: 1, absCut: 1,
     surface: 1, damage: 0,
+    // ---- the vertical axis. All zero while the car is driving, which is what
+    // keeps the planar model below bit-for-bit what it was.
+    z: 0, vz: 0,                  // height above the road, and its rate
+    pitch: 0, roll: 0,            // real attitude now, not a render flourish
+    pRate: 0, rRate: 0,
+    airborne: false, airTime: 0, onRoof: false,
+    inContact: false, landV: 0,   // impact speed of the landing in progress
+    wheelZ: [0, 0, 0, 0],         // per-wheel height; negative = compressed
+    gripF: 1, gripR: 1,           // share of each axle actually on the road
+    dents: [], lost: null,
     speed: 0, slipF: 0, slipR: 0, lock: false, wheelspin: false,
     gLat: 0, gLong: 0,
     ...opts,
@@ -151,16 +487,42 @@ export function step(car, dt, env = {}) {
 
   // ---- aero ---------------------------------------------------------------
   const q = 0.5 * S.rho * v * v;
-  let clA = S.ClA, cdA = S.CdA;
+  let clA = S.ClA, cdA = S.CdA, balF = S.aeroBal;
   if (car.drsOpen && S.drs) { clA *= S.drsCl; cdA *= S.drsCd; }
+  // Bodywork that has left the car does not make downforce. The front wing is
+  // about a third of the total and ALL of it is on the front axle, so losing it
+  // is not a scratch — the car understeers off the road at the next corner.
+  // Losing the rear wing does the opposite and spins it. This is what makes a
+  // first-lap clash cost you the race rather than cost you some paint.
+  if (car.lost) {
+    if (car.lost.frontWing) { clA *= 0.72; balF *= 0.44; cdA *= 0.93; }
+    if (car.lost.rearWing) { clA *= 0.60; balF = Math.min(0.88, balF * 2.0); cdA *= 0.88; }
+  }
   const dirty = env.dirty ?? car.dirty ?? 0;
   const tow = env.tow ?? car.tow ?? 0;
+  // The floor only makes downforce while it is sealed against the road. On the
+  // ground groundEffect() is exactly 1 and nothing below changes.
+  const ge = groundEffect(car.z);
   // Following another car guts your FRONT wing first -> understeer. That is
   // the real reason overtaking is hard, and it is why the effect is asymmetric.
-  const DFf = q * clA * S.aeroBal * (1 - 0.40 * dirty);
-  const DFr = q * clA * (1 - S.aeroBal) * (1 - 0.12 * dirty);
+  const DFf = q * clA * balF * (1 - 0.40 * dirty) * ge;
+  const DFr = q * clA * (1 - balF) * (1 - 0.12 * dirty) * ge;
   // Rolling resistance scales with what the wheels are ploughing through.
-  const drag = q * cdA * (1 - 0.40 * tow) + S.rollRes * (env.rollMul ?? 1);
+  // A car at seventy degrees nose-up is a barn door, and its drag is nothing
+  // like its drag in a straight line. Without this the floor's lift held a
+  // launched car in the air for FIVE SECONDS like a kite, and lowering the
+  // launch impulse made it fly higher rather than lower — the giveaway that
+  // the flight was being sustained by aerodynamics rather than by the launch.
+  // The same angle that makes the lift has to make the drag.
+  const broadside = car.airborne
+    ? Math.abs(Math.sin(car.pitch)) + 0.4 * Math.abs(Math.sin(car.roll)) : 0;
+  const drag = q * (cdA * (1 - 0.40 * tow) + S.ClFloor * 0.55 * broadside)
+             + S.rollRes * (env.rollMul ?? 1);
+
+  // ---- the vertical axis --------------------------------------------------
+  // Sets car.gripF / car.gripR. While the wheels are down this returns almost
+  // immediately and leaves both at 1, so everything below is untouched.
+  vertical(car, dt, env, q, v);
 
   // ---- vertical loads (load transfer is what makes the car feel alive) -----
   const g = 9.81;
@@ -280,9 +642,18 @@ export function step(car, dt, env = {}) {
   [FxF, Fyf, lockF] = clampCircle(FxF, Fyf, muF * Fzf);
   [FxR, Fyr, spinR] = clampCircle(FxR, Fyr, muR * Fzr);
 
+  // A wheel in the air carries no load, so it makes no force: no grip, no
+  // brakes, no drive and no steering. Scaling per AXLE rather than for the
+  // whole car is what makes a nose-up launch take your steering away while you
+  // still have drive, and a nose-down one the other way round.
+  if (car.gripF < 1 || car.gripR < 1) {
+    Fyf *= car.gripF; FxF *= car.gripF;
+    Fyr *= car.gripR; FxR *= car.gripR;
+  }
+
   // ---- banking ------------------------------------------------------------
   let bankF = 0;
-  if (env.bank) {
+  if (env.bank && !car.airborne) {
     const th = env.bank * Math.PI / 180;
     bankF = (S.m * g + DFf + DFr) * Math.sin(th) * (env.bankDir || 0);
   }
@@ -302,12 +673,26 @@ export function step(car, dt, env = {}) {
   // integrator inventing 20 rad/s nonsense at the limit.
   const RMAX = 4.5;
   if (car.r > RMAX) car.r = RMAX; else if (car.r < -RMAX) car.r = -RMAX;
-  if (v < 3) car.r *= 1 - Math.min(0.9, 4 * dt);
+  if (v < 3 && !car.airborne) car.r *= 1 - Math.min(0.9, 4 * dt);
 
   // A spun car still has ground speed. Clamp forward velocity at zero but do
   // NOT bleed the lateral component — doing that destroys all the car's energy
   // in about 0.05 s and reads as an instant stop from 120 km/h.
-  if (car.vx < 0) car.vx = 0;
+  // ...but a car that is FLYING may absolutely be going backwards, and clamping
+  // that was the difference between a spin and a backflip.
+  // A spun car still has ground speed. Clamp forward velocity at zero but do
+  // NOT bleed the lateral component — doing that destroys all the car's energy
+  // in about 0.05 s and reads as an instant stop from 120 km/h.
+  //
+  // ...but ONLY at low speed. The bicycle model's slip angles need vx >= 0 to
+  // stay sane: a slow car rolling backwards produces tyre forces that point the
+  // wrong way and wander it off the road (measured, with the clamp removed
+  // outright: 17.7 s and 90 m off at Zandvoort). Above ~120 km/h that regime is
+  // nowhere near — and a car that has been spun round at speed genuinely IS
+  // travelling backwards, which is the entire mechanism behind a backflip. The
+  // clamp must not be the thing that makes flying impossible, so it stops
+  // applying exactly where it stops being needed.
+  if (car.vx < 0 && !car.airborne && Math.hypot(car.vx, car.vy) < 33) car.vx = 0;
   // Nothing scripted here any more. A spun car is straightened by the viscous
   // scrub term above, which is a tyre force like any other, so the recovery is
   // something the simulation does rather than something played back at you.

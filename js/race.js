@@ -303,6 +303,13 @@ export class Race {
       const hit = resolveBarrier(car, t, e.hint);
       if (hit && hit.harm) { e.contacts++; this.log('crash', `${e.name} INTO THE BARRIER`, e); }
       if (car.damage >= 1 && !e.retired) { e.retired = true; this.log('crash', `${e.name} RETIRES`, e); }
+      // A car on its roof is not rejoining. Retire it once it has stopped
+      // sliding, or it keeps being classified and crawls round for the rest of
+      // the race: measured, an upside-down car dragged the field spread from
+      // 12 s to 162 s because its "best lap" was still being counted.
+      if (!e.retired && car.onRoof && car.speed < 8) {
+        e.retired = true; this.log('crash', `${e.name} IS UPSIDE DOWN`, e);
+      }
     }
 
     this.carContact();

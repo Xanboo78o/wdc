@@ -96,6 +96,16 @@ async function start() {
       if (k in state.car.crush) state.car.crush[k] = Math.max(0, Math.min(1, parseFloat(v) || 0));
     }
   }
+  // Debug: throw the car in the air on load, so a flight can be photographed
+  // without having to arrange a 260 km/h spin first.  ?launch=6  (metres/second
+  // of vertical kick)  ?launch=6,2.5  (and a nose-up pitch rate)
+  if (q.has('launch')) {
+    const [vz, pr] = q.get('launch').split(',').map(parseFloat);
+    state.car.airborne = true;
+    state.car.z = 0.05;
+    state.car.vz = Math.max(0, Math.min(25, vz || 0));
+    state.car.pRate = Math.max(-8, Math.min(8, pr || 0));
+  }
   const env = q.has('noenv') ? null : await loadEnv(pickTrack);
   // View.create is async because the circuit is painted with real photographed
   // materials and lit by a real sky, both of which come off the network.
@@ -128,6 +138,12 @@ function resetCar() {
   car.drsOpen = false;
   car.damage = 0;
   car.crush = { front: 0, rear: 0, left: 0, right: 0 };   // a reset car is a repaired car
+  car.dents = []; car.lost = null;                        // ...and a straight one
+  // Put the car back on the ground. Resetting mid-flip and keeping the
+  // attitude would leave you sitting upside down on the grid.
+  car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0;
+  car.airborne = false; car.onRoof = false; car.inContact = false;
+  car.wheelZ = [0, 0, 0, 0]; car.gripF = 1; car.gripR = 1;
   state.hint = i; state.sPrev = 0;
   state.lapT = 0; state.invalid = false; state.offT = 0;
   hands.wheel = 0;

@@ -299,6 +299,90 @@ calls and 1.16M triangles** a frame, which is the number to watch when the
     pulling 3.43. **The HUD still prints `gLat`**, so the G LAT readout is
     wrong in the same way; that is in `js/main.js` and not fixed here.
 
+## The vertical axis — how a car leaves the ground
+*(`js/physics.js`, the block marked THE VERTICAL AXIS; launches in `js/collide.js`)*
+
+Until this, the sim was strictly planar: `x`, `y`, `hdg`. A car could be hit as
+hard as you liked and it stayed flat on the road, which is why crashing looked
+like sliding. `z`, `pitch` and `roll` are now real state.
+
+**THE RULE THAT PROTECTS THE VALIDATED MODEL: while the wheels are down, none
+of it runs.** `vertical()` returns on its third line, `z`/`pitch`/`roll` are
+pinned at zero, `gripF`/`gripR` stay at 1, and every force below is untouched.
+Proof, not intention: `drive.mjs` over 5 circuits x 2 cars is byte-identical to
+the pre-change output on 9 of 10 combinations, and the tenth has the same lap
+time to the millisecond.
+
+`z` is height above **the local road**, not above sea level. The circuits have
+real elevation now, but that belongs to the renderer, which adds `surfaceY`. So
+physics.js still imports nothing. Known limit: a car launched off the top of a
+hill lands at the local road height, not the height of the ground it flew over
+— a metre or two at Monaco, and it needs `env.groundDrop` to fix properly.
+
+The four ways a car gets airborne, all of them impulses through
+`physics.launch()` so there is no second, sneakier path:
+
+1. **Spun backwards at speed.** The diffuser rakes upward by design, so a car
+   travelling backwards is a ramp facing the wind. Takeoff at about **265 km/h**.
+2. **Hard into a barrier.** The kerb and lip at its base turn part of the hit
+   into a vertical kick, through the WHEEL that climbed it.
+3. **Up another car's rear wheel.** The tyre is a ramp. Geometric test only.
+4. **Landing.** Springs, a bump stop, and damage from the impact speed.
+
+### Gotchas paid for on the vertical axis
+23. **A settle test will stop the car ever taking off.** On the first substep
+    of a lift-off the car has climbed a fraction of a millimetre, all four
+    wheels still read as down, and the "has it come to rest?" test grabs it and
+    zeroes the vertical velocity it just earned — every substep, forever. The
+    settle test must also require that gravity is winning (`air.Fz < m*g`).
+24. **Independent per-wheel impulses multiply.** One impulse per wheel, each
+    computed as if it were the only contact, gives a car landing flat FOUR
+    times the momentum change it should have: restitution 0.16 came out as
+    0.61, and because they were applied in sequence their pitch and roll terms
+    did not cancel either. A car dropped from half a metre landed on its roof.
+    Solve the contacts together over several passes — or use springs, which is
+    what this does now, because an impulse only fires while a wheel is
+    PENETRATING and a car resting on two wheels therefore had no force on it at
+    all and leaned at 56 degrees forever.
+25. **A bump stop must not push on the rebound.** Modelled as a plain spring it
+    returned ~80% of the landing energy: a twelve-metre drop came back off the
+    road as a **five-hundred-metre launch**. A floor grounding out on tarmac
+    absorbs; it does not hand the energy back. Gate it on `vp < 0`.
+26. **Model the destabilising half of the aerodynamics and everything
+    backflips.** Lift acting ahead of the centre of mass raises the angle of
+    attack, which makes more lift — correct, and it is the flip. But a real car
+    is pitch-STABLE until it is not: the wings are far from the CG and push the
+    nose back down. Without that restoring term, and without a stall threshold
+    below which the floor is still a floor, a car backflipped off any bump.
+27. **The same angle that makes lift has to make DRAG.** A car at 70 degrees
+    nose-up is a barn door. Without attitude-dependent drag the floor's lift
+    held a launched car up for five seconds like a kite — and the giveaway was
+    that *lowering* the launch impulse made it fly HIGHER, because the flight
+    was being sustained aerodynamically rather than by the launch.
+28. **Charge crash damage per EVENT, not per substep.** Landing damage billed
+    every substep from the peak spring force charged a twenty-substep landing
+    twenty times: a two-metre drop, the kind of thing a car does clearing a
+    kerb, destroyed it outright and took both wings off. Latch on first contact
+    and bill once, from the impact SPEED — the peak force is dominated by how
+    stiff you chose to make the bump stop, which is a modelling decision, while
+    the impact speed is a fact about the accident.
+29. **A rectangle's corner is always at the full half-width**, so testing the
+    contact CORNER's lateral position to ask "did the nose land on the rear
+    wheel or on the diffuser?" answers yes for every rear-end shunt, including
+    a dead-centre one — which then flew. Measure the offset between the two
+    cars' centrelines instead.
+30. **Tune launch thresholds against the RACE, not against a single crash.**
+    At a 3 m/s bar the vertical kick fired on ordinary rubbing: one 22-car race
+    produced **209 launches**, cars spent it in the air where they cannot
+    steer, and it cascaded — 7 of 22 retired against 1 before. Likewise the
+    backwards-takeoff speed: at 203 km/h a Monza race flipped FIVE cars,
+    because a spin at Monza routinely leaves you going backwards above 200.
+    Every one of these numbers was measured and moved, not picked.
+31. **A car on its roof must be retired by the race layer.** It is not
+    rejoining, but it keeps being classified and crawls round for the rest of
+    the race: an upside-down car dragged the measured field spread from 12 s to
+    **162 s**, because its "best lap" was still counting.
+
 ## Zandvoort's banking
 
 Drawn, as of the taper landing in the bake. `js/bank.js` is the model and it
@@ -346,7 +430,15 @@ banked in the survey.
 node tools/drive.mjs [track] [laps] [class] [tier|all]   # the gate: lap, off-track, sideways
 node tools/trace.mjs [track] [class] [tier]              # WHY: timeline + dense failure window
 node tools/ceiling.mjs [track|all] [class]               # how much grip the controller can use
+node tools/crash.mjs [track] [class]                     # contact: can bodywork end up INSIDE a barrier?
+node tools/flight.mjs [track] [class]                    # the vertical axis: does it fly, and does it come back?
 ```
+`tools/flight.mjs` is the gate for anything that touches `z`, `pitch`, `roll`,
+lift or a launch. It measures the four ways a car gets airborne and asserts the
+thing that matters more than any of them: **every flight has to end.** A car
+that never settles is worse than a car that never flies, because then the race
+never ends. It also prints the takeoff threshold, so retuning the floor shows
+up as a number rather than as a vibe.
 `tools/harness.mjs` is shared by all three so they can never drift apart and
 start reporting on two different simulations.
 
@@ -431,7 +523,17 @@ chmod +x .git/hooks/pre-commit
 - **No grid yet.** Target is 21 opponents; nothing has been performance-tested
   at 22 cars, and `track.project()` searching 90 samples per car per substep is
   the obvious first thing that will need rate-limiting.
-- No qualifying, no race, no damage-forces-a-pitstop. It is a hotlap.
+- No qualifying, and **no pit stop for a new front wing** — which now matters,
+  because losing one is no longer cosmetic: `car.lost.frontWing` takes 56% of
+  the front downforce away and the car understeers off the road. The autopilot
+  does not know it has lost a wing, so it drives into things and retires. That
+  is most of why race retirements sit at 2-6 per 22 rather than 1.
+- **Debris is not simulated.** A wing that comes off vanishes; it should be a
+  physical object on the road.
+- **Dents are recorded but not drawn.** `car.dents` is a live list of
+  `{lx, ly, nx, ny, depth, r}` in body-local metres; `render.js` still deforms
+  from the four `car.crush` scalars. The vertex-displacement version belongs in
+  `car.js` now that the bodywork is lofted surfaces rather than boxes.
 - No sound at all.
 - No wheel/force-feedback layer. The WebHID pedal pairing in
   `apex-racer/js/main.js` (lines ~432–487) is the thing to port when the DIY

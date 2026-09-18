@@ -16,8 +16,79 @@
 
 // Restitution by barrier type. Concrete gives more back than a gravel-backed
 // steel barrier, which is built to absorb.
+import { launch, wheelPos } from './physics.js';
+
 const BOUNCE = { wall: 0.34, barrier: 0.24, gravel: 0.20 };
 const WALL_MU = 0.55;          // scrub along the face
+
+// How much of a hard impact comes back as a VERTICAL kick. A barrier is not a
+// flat vertical plane: there is a kerb in front of it, a lip at its base, and
+// in a tyre wall a stack of tyres that gives and then throws the car back. That
+// is why cars climb barriers and end up on top of them rather than stopping
+// dead at the paint. A tyre wall launches most; bare concrete least.
+const LAUNCH = { wall: 0.035, barrier: 0.100, gravel: 0.070 };
+
+// ---------------------------------------------------------------------------
+// DENTS.
+//
+// The four region scalars in car.crush can only ever fold "the front" — every
+// front impact makes the same shape, whether you kissed a barrier with the
+// right-hand endplate or speared it dead centre. A dent records the impact
+// itself, in the car's own coordinates: WHERE it was hit, which way the blow
+// went, how deep, and how far the damage spread. Bodywork then deforms where
+// it was actually hit.
+//
+// car.crush is still maintained exactly as before, so nothing that reads it
+// has to change and the existing renderer keeps working untouched.
+// ---------------------------------------------------------------------------
+const MAX_DENTS = 14;
+
+export function addDent(car, lx, ly, nlx, nly, depth, radius) {
+  car.dents = car.dents || [];
+  // Hitting the same corner twice makes one dent deeper, not two dents. Without
+  // this a long scrape down a wall leaves a hundred entries and the bodywork
+  // dissolves into noise.
+  for (const d of car.dents) {
+    if (Math.hypot(d.lx - lx, d.ly - ly) < 0.45) {
+      d.depth = Math.min(0.85, d.depth + depth * 0.65);
+      d.r = Math.max(d.r, radius);
+      d.nx = d.nx * 0.6 + nlx * 0.4; d.ny = d.ny * 0.6 + nly * 0.4;
+      return d;
+    }
+  }
+  if (car.dents.length >= MAX_DENTS) {
+    // Drop the shallowest, so the ones you can actually see survive.
+    let k = 0;
+    for (let i = 1; i < car.dents.length; i++) if (car.dents[i].depth < car.dents[k].depth) k = i;
+    car.dents.splice(k, 1);
+  }
+  const d = { lx, ly, nx: nlx, ny: nly, depth: Math.min(0.85, depth), r: radius };
+  car.dents.push(d);
+  return d;
+}
+
+// Turn a world-space impact into a body-local dent, and check whether that was
+// the hit that finally took a wing off.
+function mark(car, wlx, wly, wnx, wny, harm) {
+  const cs = Math.cos(car.hdg), sn = Math.sin(car.hdg);
+  // the contact normal, rotated into the car's own frame
+  addDent(car, wlx, wly, wnx * cs + wny * sn, -wnx * sn + wny * cs,
+          harm * 0.9, 0.55 + harm * 1.1);
+  shed(car);
+}
+
+// Parts leave the car. A front wing at three-quarters crushed is not a bent
+// front wing, it is a front wing lying on the track — and physics.js reads
+// car.lost, so losing it changes how the car DRIVES and not just how it looks.
+// Losing the front wing is most of the front downforce: the car understeers
+// straight on at the next corner, which is the correct punishment.
+function shed(car) {
+  const c = car.crush;
+  if (!c) return;
+  if (!car.lost) car.lost = { frontWing: false, rearWing: false };
+  if (!car.lost.frontWing && c.front > 0.72) car.lost.frontWing = true;
+  if (!car.lost.rearWing && c.rear > 0.72) car.lost.rearWing = true;
+}
 
 // The four corners of the bodywork, in world space.
 export function corners(car) {
@@ -163,9 +234,52 @@ export function resolveCars(a, b, restitution = 0.18) {
         const c2 = car === a ? ca : cb;
         const part = region(c2.lx, c2.ly, car.spec);
         car.crush[part] = Math.min(1, car.crush[part] + harm * 1.6);
+        // and a dent where it was actually hit. The blow pushes each car the
+        // way the contact normal points for it, which is opposite for the two.
+        const sg = car === a ? -1 : 1;
+        mark(car, c2.lx, c2.ly, nx * sg, ny * sg, harm);
       }
     }
     out.harm = Math.abs(j) / Math.min(SA.m, SB.m);
+
+    // RIDING UP A REAR WHEEL — the most recognisable single-seater launch
+    // there is. A car dives up the inside, its front wing goes under the other
+    // car's rear tyre, and the tyre is a ramp.
+    //
+    // Nothing here is scripted. The test is purely geometric: did the nose land
+    // on the other car's REAR WHEEL, or on its diffuser? Dead centre behind is
+    // a shunt and the cars just bang together; a few inches offset and one of
+    // them flies. That is the real distinction, and it is why the same corner
+    // produces both outcomes on different laps.
+    // The offset has to be measured between the CARS, not from the contact
+    // corner. A rectangle's corner always sits at the full half-width, so
+    // testing the corner's lateral position said "on the wheel" for every
+    // rear-end shunt including a dead-centre one — which flew, and which is
+    // exactly the case that must not.
+    const dx = a.x - b.x, dy = a.y - b.y;
+    const offset = Math.abs(-dx * Math.sin(b.hdg) + dy * Math.cos(b.hdg));
+    const nose = ca.lx > SA.bodyL * 0.30;
+    const onWheel = cb.lx < -SB.bodyL * 0.30 && offset > SB.bodyW * 0.30;
+    // NINE metres a second of closing, not three, and not six.
+    //
+    // Measured on a 22-car race: at 3 m/s cars merely settling against each
+    // other in a pack were thrown into the air, and at 6 m/s a first-lap
+    // chicane still flipped four cars that retired upside down with a damage
+    // score of 0.06 — which is to say, without ever having had an accident.
+    // Nine is a genuinely misjudged dive down the inside rather than the
+    // ordinary shuffling of a pack.
+    if (nose && onWheel && -rvn > 9.0) {
+      // A rear tyre is a ramp about a metre across, so it turns a good share of
+      // the closing speed into vertical — applied at the front axle, which is
+      // what pitches the nose up and sends the car over.
+      // Measured against the harness: 0.42 threw the car nine metres up, which
+      // is a stunt rather than a racing accident, and 0.24 barely lifted a
+      // wheel once the suspension was absorbing properly. Real launches off a
+      // rear tyre clear two to four metres.
+      // ...and a marginal one lifts a wheel rather than launching the car.
+      launch(a, Math.abs(j) * 0.50 * Math.min(1, (-rvn - 9.0) / 7), SA.a, ca.ly * 0.5);
+      out.launched = true;
+    }
   }
 
   const back = (c, vx2, vy2, w) => {
@@ -272,6 +386,28 @@ export function resolveBarrier(car, track, hint = null) {
       // the damage legible from the cockpit.
       car.crush[hit.part] = Math.min(1, car.crush[hit.part] + harm * 2.2);
       hit.harm = harm;
+      mark(car, worst.lx, worst.ly, nx, ny, harm);
+    }
+
+    // THE VERTICAL KICK. It comes through the WHEEL that climbed the barrier's
+    // base, not through the corner of the bodywork — so the lever arm is the
+    // wheel's, which is why a nose-first hit levers the car up about its front
+    // axle and a rear clip lifts the back instead.
+    // Only a genuinely hard hit launches, and a marginal one gives a marginal
+    // hop. At dv > 3 m/s this fired on ordinary rubbing: a 22-car race produced
+    // TWO HUNDRED AND NINE launches, cars spent the race in the air where they
+    // cannot steer, and it cascaded — 7 of 22 retired against 1 before. A
+    // vertical kick is what a big accident does, not what contact does.
+    if (dv > 6.5) {
+      const W = wheelPos(S);
+      let wi = 0, bd = Infinity;
+      for (let i = 0; i < 4; i++) {
+        const d = Math.hypot(W[i][0] - worst.lx, W[i][1] - worst.ly);
+        if (d < bd) { bd = d; wi = i; }
+      }
+      const ramp = Math.min(1, (dv - 6.5) / 8);
+      launch(car, Math.abs(j) * (LAUNCH[track.wall] ?? LAUNCH.barrier) * ramp, W[wi][0], W[wi][1]);
+      hit.launched = true;
     }
   }
 
