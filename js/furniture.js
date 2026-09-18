@@ -392,6 +392,44 @@ export function buildBoards(scene, track, line, look, sign) {
 }
 
 // ---------------------------------------------------------------------------
+// THE STARTING GRID, as data.
+//
+// This is exported rather than computed inside the mesh builder for one
+// reason: the race layer has to put twenty-two cars on these slots, and if it
+// works out where they are a second time then there are two implementations of
+// the same geometry that can silently drift apart. That is exactly how
+// `track.pit.side` came to say "left" about a pit lane that is 17 m to the
+// right. One derivation, one consumer list.
+//
+// Positions come back in SIM coordinates — metres along the centreline, metres
+// to the left of it, and the heading in radians — because that is the frame
+// the simulation spawns cars in. The renderer converts; nothing else has to.
+//
+// Slot 0 is pole. Pole sits on the side the FIRST CORNER turns away from,
+// which is the real convention and worth about half a car's length into turn
+// one; the rest alternate at 8 m intervals down the straight behind the line.
+// ---------------------------------------------------------------------------
+export function gridSlots(track, count = 22) {
+  const t = track;
+  const first = (t.corners || [])[0];
+  // corner.dir < 0 is a right-hander, so pole goes left of the centreline.
+  const poleSide = first && first.dir < 0 ? 1 : -1;
+  const slots = [];
+  for (let k = 0; k < count; k++) {
+    const s = -6 - k * 8;
+    const i = t.idx(s);
+    slots.push({
+      n: k + 1,
+      s: t.wrap(s),
+      lat: (k % 2 ? -poleSide : poleSide) * t.w[i] * 0.46,
+      hdg: t.hdg[i],
+      i,
+    });
+  }
+  return slots;
+}
+
+// ---------------------------------------------------------------------------
 // Start / finish: a real chequered strip, and a gantry over it.
 //
 // DESIGN.md has carried "the start/finish marking is a plain white slab, and
@@ -438,21 +476,17 @@ export function buildStartFinish(scene, track, look, sign) {
   // straight reads as an unfinished level rather than as a starting grid. It is
   // also where twenty-two cars are going to have to be put.
   const grid = new Builder();
-  const first = (t.corners || [])[0];
-  const poleSide = first && first.dir < 0 ? 1 : -1;
-  for (let k = 0; k < 22; k++) {
-    const s = -6 - k * 8;
-    const i = t.idx(s), j = t.idx(s + 4.2);
-    const w = t.w[i];
+  for (const slot of gridSlots(t)) {
+    const i = slot.i, j = t.idx(slot.s + 4.2);
     // Boxes sit about half a track-width off centre, alternating sides.
-    const c = (k % 2 ? -poleSide : poleSide) * w * 0.46;
+    const c = slot.lat;
     const box = (a, b) => grid.quadUp([
       at(t, i, c + a), at(t, j, c + a), at(t, j, c + b), at(t, i, c + b),
     ], 0.012);
     box(-1.45, -1.30);          // the two side lines of the slot
     box(1.30, 1.45);
     // and the line across its front, which is the one a driver lines up on
-    const iF = t.idx(s + 4.05), jF = t.idx(s + 4.2);
+    const iF = t.idx(slot.s + 4.05), jF = t.idx(slot.s + 4.2);
     grid.quadUp([
       at(t, iF, c - 1.45), at(t, jF, c - 1.45), at(t, jF, c + 1.45), at(t, iF, c + 1.45),
     ], 0.012);
