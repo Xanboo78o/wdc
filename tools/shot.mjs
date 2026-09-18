@@ -41,7 +41,7 @@ const flag = (name, def = null) => {
 };
 // Positional args are anything not starting with `--` and not sitting in the
 // slot right after a flag that takes a value.
-const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q', 'probe']);
+const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q', 'probe', 'base']);
 const positional = args.filter((a, i) => !a.startsWith('--') &&
   !(i > 0 && args[i - 1].startsWith('--') && VALUE_FLAGS.has(args[i - 1].slice(2))));
 const target = positional[0] || 'monza:f1';
@@ -129,7 +129,12 @@ async function connect(url) {
 }
 
 // ---------------------------------------------------------------------------
-const server = ensureServer();
+// --base https://xanboo78o.github.io/wdc  shoots the LIVE site instead of the
+// working copy. Worth doing after a push: a path that works off the local
+// filesystem and 404s on Pages is a real class of bug, and so is an old module
+// served from cache.
+const base = flag('base');
+const server = base ? null : ensureServer();
 if (server) await sleep(900);
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -141,7 +146,7 @@ if (photo) q.set('photo', photo);
 // a system gets switched off for one shot to find out what it was responsible
 // for.
 for (const [k, v] of new URLSearchParams(flag('q', '') || '')) q.set(k, v);
-const url = `http://127.0.0.1:${PORT}/index.html?${q}`;
+const url = `${base || `http://127.0.0.1:${PORT}`}/index.html?${q}`;
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'wdc-chrome-'));
 const chrome = spawn('/usr/bin/chromium', [
