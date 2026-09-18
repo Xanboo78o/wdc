@@ -121,7 +121,12 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
 
   let acc = 1e9, want = 0, thr = 0, brk = 0;
   let info = { need: 0, err: 0, cross: 0, budget: 1, mistake: null };
-  return function drive(car, proj, dt) {
+  // `ctx` is racecraft, decided by whoever knows the running order — which is
+  // never this file. It carries a lateral bias in metres (move off the line to
+  // attack or defend) and an optional speed cap (do not drive into the back of
+  // someone). Keeping it out here means the autopilot stays a driver and the
+  // race layer stays the rulebook.
+  return function drive(car, proj, dt, ctx = null) {
     acc += dt;
     if (acc < 1 / cfg.hz) {
       const max = cfg.rackRate * dt;
@@ -148,7 +153,7 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     // ---- where do I want to be, laterally? --------------------------------
     // Everything about racecraft is a change to this one number, which is why
     // the controller is built around it rather than around a fixed path.
-    let wantOff = line.off[i];
+    let wantOff = line.off[i] + (ctx?.offBias || 0);
     if (d.mistake?.kind === 'wide') wantOff += Math.sign(line.cur[i] || 1) * -1.6;
     const lim = Math.max(0.3, track.w[i] - 1.0);
     wantOff = Math.max(-lim, Math.min(lim, wantOff));
@@ -212,6 +217,7 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     const look = Math.min(60, v * 0.30);
     let need = line.v[idxAt(look)] * mod;
     if (lost) need = Math.min(need, 13);                 // you cannot rejoin at 250 km/h
+    if (ctx?.speedCap != null) need = Math.min(need, ctx.speedCap);
 
     const err = need - v;
     thr = err > 0.4 ? Math.min(1, err / 2.5) : 0;

@@ -151,8 +151,13 @@ export function resolveCars(a, b, restitution = 0.18) {
     // knows who was behind, and that is what the rulebook cares about.
     for (const [car, inv] of [[a, invA], [b, invB]]) {
       const dv = Math.abs(j) * inv;
-      if (dv > 1.0) {
-        const harm = Math.min(0.5, (dv - 1.0) / 30);
+      // SUPERLINEAR, from a threshold that ignores rubbing. Carbon composite
+      // does not wear out from contact — it survives a rub or it shatters —
+      // and a linear curve from a low threshold made light contact lethal by
+      // accumulation: cars retiring with fifteen taps and no single big one,
+      // which is not how a race weekend looks.
+      if (dv > 2.5) {
+        const harm = Math.min(0.6, Math.pow((dv - 2.5) / 22, 1.6));
         car.damage = Math.min(1, (car.damage || 0) + harm);
         car.crush = car.crush || { front: 0, rear: 0, left: 0, right: 0 };
         const c2 = car === a ? ca : cb;
@@ -249,8 +254,10 @@ export function resolveBarrier(car, track, hint = null) {
     //    mass) is the honest measure — it is the velocity the impact actually
     //    took out of the car, so a heavy car is not automatically tougher.
     const dv = Math.abs(j) / S.m;
-    if (dv > 1.2) {
-      const harm = Math.min(0.6, (dv - 1.2) / 26);
+    // Same curve as car-to-car: brushing a barrier is survivable, hitting one
+    // is not, and the difference should be the impact rather than the count.
+    if (dv > 2.2) {
+      const harm = Math.min(0.7, Math.pow((dv - 2.2) / 20, 1.6));
       car.damage = Math.min(1, (car.damage || 0) + harm);
       car.crush = car.crush || { front: 0, rear: 0, left: 0, right: 0 };
       car.crush[hit.part] = Math.min(1, car.crush[hit.part] + harm * 1.7);

@@ -94,9 +94,15 @@ export class Track {
   }
   // nearest centreline sample, searched around a hint so Suzuka's crossover
   // can't snap a car onto the bridge underneath it
-  project(x, y, hint = null) {
+  // `win` is how far either side of the hint to search. The default 45 samples
+  // is 90 m of track, which was fine for one car and is 792,000 distance tests
+  // a second at 22 cars and 400 Hz. A car at 320 km/h covers 0.22 m per
+  // substep — an eighth of one 2 m sample — so a window of a few samples is
+  // enormously generous. Pass a small one when you have a fresh hint, and none
+  // at all when you do not.
+  project(x, y, hint = null, win = 45) {
     let lo = 0, hi = this.n, step = 1;
-    if (hint != null) { lo = hint - 45; hi = hint + 45; }
+    if (hint != null) { lo = hint - win; hi = hint + win; }
     let best = 0, bd = Infinity;
     for (let k = lo; k < hi; k += step) {
       const i = ((k % this.n) + this.n) % this.n;
