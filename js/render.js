@@ -20,9 +20,8 @@ import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar } from './car.js';
 import { World, loadElev } from './world.js';
+import { loadSurface, defaultSurface, KERB_SHAPE } from './surface.js';
 
-const KERB_W = 0.62;
-const KERB_H = 0.055;
 const ROAD_STRIPS = 11;      // lateral divisions of the racing surface
 
 // ---------------------------------------------------------------------------
@@ -118,6 +117,35 @@ function ribbon(track, innerAt, outerAt, y, bank = null) {
   return b;
 }
 
+// A ribbon cut into one piece per surface material, so a lap can change from
+// grass to gravel to asphalt where it really does. Returns { material: Builder }
+// and only for the materials that actually occur.
+function split(track, innerAt, outerAt, y, bank, matAt) {
+  const t = track, out = {};
+  for (let i = 0; i < t.n; i++) {
+    const j = (i + 1) % t.n;
+    const m = matAt(i);
+    (out[m] ||= new Builder());
+    const b = out[m];
+    const hi = t.hdg[i], hj = t.hdg[j];
+    let ai = innerAt(i), bi = outerAt(i), aj = innerAt(j), bj = outerAt(j);
+    if (ai === bi) continue;
+    if (ai > bi) { const q = ai; ai = bi; bi = q; }
+    if (aj > bj) { const q = aj; aj = bj; bj = q; }
+    const P = (h, x, yy, lat) => [x - Math.sin(h) * lat, Z(yy + Math.cos(h) * lat)];
+    const p0 = P(hi, t.x[i], t.y[i], ai), p1 = P(hi, t.x[i], t.y[i], bi);
+    const q0 = P(hj, t.x[j], t.y[j], aj), q1 = P(hj, t.x[j], t.y[j], bj);
+    const yi0 = y + (bank ? bankY(bank, t, i, ai) : 0);
+    const yi1 = y + (bank ? bankY(bank, t, i, bi) : 0);
+    const yj0 = y + (bank ? bankY(bank, t, j, aj) : 0);
+    const yj1 = y + (bank ? bankY(bank, t, j, bj) : 0);
+    b.quad([p0[0], yi0, p0[1]], [p1[0], yi1, p1[1]], [q1[0], yj1, q1[1]], [q0[0], yj0, q0[1]],
+      [0, 1, 0],
+      [[ai, i * t.ds], [bi, i * t.ds], [bj, j * t.ds], [aj, j * t.ds]]);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Kerbs, with a PROFILE rather than a painted stripe on the floor.
 //
@@ -130,64 +158,55 @@ function ribbon(track, innerAt, outerAt, y, bank = null) {
 // interpolate red into white across every quad, and the alternating blocks
 // come out as a smooth pink gradient. That was reported as a bug once already.
 // ---------------------------------------------------------------------------
-function kerbs(track, bank) {
+function kerbs(track, bank, surf) {
   const t = track;
   const b = new Builder({ color: true });
-  const inCorner = new Uint8Array(t.n);
+  const turfB = new Builder();
   const side = new Int8Array(t.n);
   for (const c of t.corners || []) {
-    for (let s = c.s0 - 6; s <= c.s1 + 6; s += t.ds) {
-      const i = t.idx(s);
-      inCorner[i] = 1; side[i] = c.dir < 0 ? 1 : -1;
-    }
+    for (let s = c.s0 - 6; s <= c.s1 + 6; s += t.ds) side[t.idx(s)] = c.dir < 0 ? 1 : -1;
   }
   for (let i = 0; i < t.n; i++) {
     const j = (i + 1) % t.n;
-    if (!inCorner[i] || !inCorner[j] || side[i] !== side[j]) continue;
+    const type = surf.kerb[i];
+    if (!type || surf.kerb[j] !== type || !side[i] || side[i] !== side[j]) continue;
+    // Shape comes from the TYPE, which comes from the corner's radius. A
+    // hairpin kerb and a fast-corner kerb are not the same object: one is
+    // there to punish you, one is there to be used every lap.
+    const K = KERB_SHAPE[type] || KERB_SHAPE[2];
     const sg = side[i];
     const hi = t.hdg[i], hj = t.hdg[j];
     const P = (h, x, y, lat) => [x - Math.sin(h) * lat, Z(y + Math.cos(h) * lat)];
     const L = (lat) => [P(hi, t.x[i], t.y[i], sg * lat), P(hj, t.x[j], t.y[j], sg * lat)];
-    // The kerb rides on the banked surface like everything else, so it has to
-    // read its height at its OWN lateral offset rather than sitting at zero.
     const Y = (lat, k) => bankY(bank, t, k ? j : i, sg * lat);
-    const col = (Math.floor(i * t.ds / 2.6) % 2) ? 0xc7382c : 0xe4e4e0;
-    const [i0, j0] = L(t.w[i] - 0.10);
-    const [i1, j1] = L(t.w[i]);
-    const [i2, j2] = L(t.w[i] + KERB_W);
-    const [i3, j3] = L(t.w[i] + KERB_W + 0.14);
+    const col = (Math.floor(i * t.ds / K.block) % 2) ? 0xc7382c : 0xe4e4e0;
+    const w0 = t.w[i] - 0.10, w1 = t.w[i], w2 = t.w[i] + K.w, w3 = t.w[i] + K.w + 0.14;
+    const [i0, j0] = L(w0), [i1, j1] = L(w1), [i2, j2] = L(w2), [i3, j3] = L(w3);
     // inner chamfer, flat top, outer chamfer
-    const w0 = t.w[i] - 0.10, w1 = t.w[i], w2 = t.w[i] + KERB_W, w3 = t.w[i] + KERB_W + 0.14;
     b.quadN([i0[0], Y(w0, 0), i0[1]], [j0[0], Y(w0, 1), j0[1]],
-      [j1[0], Y(w1, 1) + KERB_H, j1[1]], [i1[0], Y(w1, 0) + KERB_H, i1[1]],
+      [j1[0], Y(w1, 1) + K.h, j1[1]], [i1[0], Y(w1, 0) + K.h, i1[1]],
       [[0, 0], [t.ds, 0], [t.ds, 0.12], [0, 0.12]], col);
-    b.quadN([i1[0], Y(w1, 0) + KERB_H, i1[1]], [j1[0], Y(w1, 1) + KERB_H, j1[1]],
-      [j2[0], Y(w2, 1) + KERB_H, j2[1]], [i2[0], Y(w2, 0) + KERB_H, i2[1]],
-      [[0, 0], [t.ds, 0], [t.ds, KERB_W], [0, KERB_W]], col);
-    b.quadN([i2[0], Y(w2, 0) + KERB_H, i2[1]], [j2[0], Y(w2, 1) + KERB_H, j2[1]],
+    b.quadN([i1[0], Y(w1, 0) + K.h, i1[1]], [j1[0], Y(w1, 1) + K.h, j1[1]],
+      [j2[0], Y(w2, 1) + K.h, j2[1]], [i2[0], Y(w2, 0) + K.h, i2[1]],
+      [[0, 0], [t.ds, 0], [t.ds, K.w], [0, K.w]], col);
+    b.quadN([i2[0], Y(w2, 0) + K.h, i2[1]], [j2[0], Y(w2, 1) + K.h, j2[1]],
       [j3[0], Y(w3, 1), j3[1]], [i3[0], Y(w3, 0), i3[1]],
       [[0, 0], [t.ds, 0], [t.ds, 0.15], [0, 0.15]], col);
+
+    // Astroturf outside the kerb on corner EXITS, which is where cars run
+    // wide — and which is the strip that actually decides whether running wide
+    // costs you anything.
+    if (surf.turf[i] && surf.turf[j]) {
+      const w4 = w3 + 1.25;
+      const [i4, j4] = L(w4);
+      turfB.quadN([i3[0], Y(w3, 0) + 0.012, i3[1]], [j3[0], Y(w3, 1) + 0.012, j3[1]],
+        [j4[0], Y(w4, 1) + 0.012, j4[1]], [i4[0], Y(w4, 0) + 0.012, i4[1]],
+        [[0, i * t.ds], [t.ds, i * t.ds], [t.ds, 1.25], [0, 1.25]]);
+    }
   }
-  return b;
+  return { kerb: b, turf: turfB };
 }
 
-// ---------------------------------------------------------------------------
-// CRUMPLE.
-//
-// js/collide.js already resolves contact at the bodywork corners and records
-// how hard each end took it, in `car.crush = {front, rear, left, right}`. This
-// turns that into bodywork you can see — asked for in capitals: "I WANT TO SEE
-// MY CAR CRUMBLE AND BOUNCE OFF OF A BARRIER. NOT AN ANIMATION."
-//
-// So it is not an animation. There is no crash sequence and no keyframes: every
-// part's deformed pose is a pure function of a damage number that came out of a
-// contact impulse. Hit the same barrier the same way and it deforms identically,
-// because the impulse was identical.
-//
-// Parts are classified by WHERE THEY SIT on the car rather than by being tagged
-// at construction, so this needs no changes to buildCar and nothing to keep in
-// sync when the model gains a part.
-// ---------------------------------------------------------------------------
 function crushParts(group, wheels) {
   const skip = new Set(Object.values(wheels || {}));
   const out = { front: [], rear: [], left: [], right: [] };
@@ -271,11 +290,12 @@ export class View {
   static async create(canvas, track, line, opts = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     // Textures, sky and terrain all come off the network; fetch them together.
-    const [look, elev] = await Promise.all([
+    const [look, elev, surf] = await Promise.all([
       Look.load(renderer, track.key, { textures: opts.textures !== false }),
       opts.flat ? null : loadElev(track.key),
+      loadSurface(track.key),
     ]);
-    return new View(renderer, look, track, line, { ...opts, elev });
+    return new View(renderer, look, track, line, { ...opts, elev, surf });
   }
 
   constructor(renderer, look, track, line, opts = {}) {
@@ -308,6 +328,10 @@ export class View {
     // Real surveyed elevation, from NASA SRTM. Null on a fresh clone that has
     // not run tools/getelev.mjs, and the world is simply flat then.
     this.world = new World(track, opts.elev);
+    // What every metre of the circuit is made of — baked by tools/baksurf.mjs.
+    // The fallback reproduces exactly what the renderer did before there were
+    // tags, so a fresh clone still draws a circuit.
+    this.surf = opts.surf || defaultSurface(track);
     this.rig = sunRig(this.scene, sky, { shadows: this.shadows });
     const t0 = (typeof performance !== 'undefined') ? performance.now() : 0;
     this.stats = this._world(opts.env);
@@ -424,24 +448,29 @@ export class View {
     const skirt = buildSkirt(t, look, this.sky, this.world, buildGround.hole || 260);
     if (skirt) S.add(skirt);
 
-    // Run-off: gravel at Monza and Suzuka, asphalt everywhere else. Grip is
-    // handled in main.js; this is only what it looks like.
-    const gravel = t.wall === 'gravel';
-    const runMat = gravel
-      ? look.mat('gravel', { size: 2.4, tint: 0xb6a487, roughness: 1, side: THREE.DoubleSide, normalScale: 1.5 })
-      : look.mat('apron', { size: 3.2, tint: 0x83858a, roughness: 0.97, side: THREE.DoubleSide, normalScale: 1.4 });
-    const runL = ribbon(t, i => t.w[i], i => t.w[i] + t.runL[i], -0.03, bank);
-    const runR = ribbon(t, i => -t.w[i], i => -(t.w[i] + t.runR[i]), -0.03, bank);
-    for (const b of [runL, runR]) {
-      const m = b.mesh(runMat, { shadow: false });
-      if (m) { this.world.lift(m.geometry); S.add(m); }
+    // RUN-OFF, BY MATERIAL.
+    //
+    // It used to be one material for a whole circuit, which is wrong in a way
+    // you notice without being able to name it: Monza does not have a gravel
+    // trap running the length of the main straight, it has mown grass, and
+    // gravel only where a car leaving the road would actually land. The tags
+    // come from data/surf/, so the rules live in one readable place rather
+    // than as conditionals in here.
+    const RUNMAT = [
+      look.mat('gravel', { size: 2.4, tint: 0xb6a487, roughness: 1, side: THREE.DoubleSide, normalScale: 1.5 }),
+      look.mat('apron', { size: 3.2, tint: 0x83858a, roughness: 0.97, side: THREE.DoubleSide, normalScale: 1.4 }),
+      look.mat('grass', { size: 3.4, tint: 0x6d7a45, roughness: 1, side: THREE.DoubleSide, normalScale: 1.2 }),
+      look.mat('concrete', { size: 3.0, tint: 0xb8b6b0, roughness: 0.95, side: THREE.DoubleSide }),
+    ];
+    for (const [side, tag] of [[1, this.surf.runL], [-1, this.surf.runR]]) {
+      const parts = split(t, i => side * t.w[i],
+        i => side * (t.w[i] + (side > 0 ? t.runL[i] : t.runR[i])), -0.03, bank, i => tag[i]);
+      for (const m in parts) {
+        const mesh = parts[m].mesh(RUNMAT[m] || RUNMAT[1], { shadow: false });
+        if (mesh) { this.world.lift(mesh.geometry); S.add(mesh); }
+      }
     }
 
-    // 3 m of asphalt per tile: at 2 m the scan's directional streaking repeats
-    // often enough along a straight to read as a pattern, and much beyond 3 the
-    // aggregate stops being the right size to measure speed against.
-    // normalScale stays near 1 — pushed to 1.8 the relief stopped looking like
-    // asphalt and started looking like cracked dried mud.
     const road = roadSurface(t, this.line, bank).mesh(look.mat('tarmac', {
       size: 3.0, roughness: 0.94, metalness: 0.0, side: THREE.DoubleSide,
       vertexColors: true, env: 0.8, normalScale: 1.05,
@@ -463,10 +492,16 @@ export class View {
       if (m) { this.world.lift(m.geometry); S.add(m); }
     }
 
-    const kb = kerbs(t, bank).mesh(look.mat('concrete', {
+    const kp = kerbs(t, bank, this.surf);
+    const kb = kp.kerb.mesh(look.mat('concrete', {
       size: 1.4, roughness: 0.62, side: THREE.DoubleSide, vertexColors: true,
     }));
     if (kb) { this.world.lift(kb.geometry); S.add(kb); }
+    const tf = kp.turf.mesh(look.mat('grass', {
+      size: 1.1, tint: 0x3f6b34, roughness: 1, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2,
+    }), { shadow: false });
+    if (tf) { this.world.lift(tf.geometry); S.add(tf); }
 
     // The real surroundings, if they have been baked. Without these the world
     // ends in a flat plane against the sky, which reads as a video game
