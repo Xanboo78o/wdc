@@ -47,6 +47,13 @@ const CEILING = {
 };
 const ceilingFor = (track, spec) => CEILING[track.key]?.[spec.key] ?? 0.82;
 
+// What fraction of its grip a driver re-solves at once the front wing is gone.
+// This is a FIRST MEASURED VALUE, not a swept optimum: 0.78 was picked as a
+// plausible "the car has lost its front end" number and then measured — see
+// makeAutopilot for what it did. Nobody has tried 0.70 or 0.86 yet, and
+// tools/fieldcheck.mjs is the thing to try them with.
+const WINGLESS_GRIP = 0.78;
+
 // `gripFrac` is a fraction of THAT ceiling, and it is the only thing that sets
 // pace. It re-solves the speed profile rather than scaling it, so a slower tier
 // is slower where a slower driver actually is — in the corners — and still
@@ -117,7 +124,32 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
   d.grip = d.gripOverride ?? Math.max(0.35, Math.min(1.05, d.gripFrac * ceilingFor(track, spec)));
   // The profile is solved at THIS driver's grip, so pace differences live in
   // the physics rather than in a speed multiplier.
-  const line = lines.at(d.T.line, d.grip);
+  let line = lines.at(d.T.line, d.grip);
+
+  // ---- and what happens when the car changes underneath the driver --------
+  // Losing a front wing costs 56% of the front downforce. Until this existed
+  // the driver never noticed: it kept aiming at corner speeds that needed a
+  // wing it no longer had, understeered off, hit something, and retired.
+  //
+  // That is not a theory. `tools/fieldcheck.mjs`, four circuits x four seeds:
+  // 4.81 cars per race lost a front wing and 4.38 of them retired — about
+  // ninety percent — and those were sixty percent of ALL retirements. It is
+  // the single biggest thing emptying a twenty-two car grid.
+  //
+  // The fix is the one this file is already built on. A driver with less grip
+  // is not a fast driver with the speed turned down; they are a driver whose
+  // speed profile was solved at less grip. So re-solve it, once, the moment the
+  // wing goes: corner speeds fall, and the straights, which are drag-limited,
+  // do not. The real answer is a pit stop for a new nose. This is what a driver
+  // does on the lap before one — drives the car they actually have.
+  //
+  // Measured, same four circuits and four seeds, before and after:
+  //   retired 7.25 -> 5.25 of 22     of the wingless, 91% -> 56%
+  //   passes    104 ->  100          contacts 255 -> 247
+  // Retirements down 28% and the overtaking did not move, which is the shape a
+  // change has to have here — a grid can always be made to stop crashing by
+  // making it stop racing.
+  let wingless = false;
 
   let acc = 1e9, want = 0, thr = 0, brk = 0;
   let info = { need: 0, err: 0, cross: 0, budget: 1, mistake: null };
@@ -138,6 +170,13 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     const v = car.speed;
     const i = proj.i;
     const idxAt = m => track.idx(proj.s + m);
+
+    // One test at 120 Hz, and one solve in the life of a damaged car. It cannot
+    // be un-noticed, because the wing does not come back.
+    if (!wingless && car.lost && car.lost.frontWing) {
+      wingless = true;
+      line = lines.at(d.T.line, Math.max(0.35, d.grip * WINGLESS_GRIP));
+    }
 
     // ---- mistakes: scheduled, with consequences ---------------------------
     // Not jitter. A real error is a lockup, a missed apex, or a snap on exit,

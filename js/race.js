@@ -11,6 +11,12 @@
 import { makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor } from './physics.js';
 import { makeAutopilot, makeDriver } from './autopilot.js';
 import { resolveBarrier, resolveCars } from './collide.js';
+import { wakeAt, newWake } from './aero.js';
+
+// Module-level scratch for the wake sample. neighbours() is single-threaded and
+// reads the result immediately, so one object serves the whole grid rather than
+// allocating 462 of them per pass.
+const W = newWake();
 
 const NAMES = [
   'VERSTAPPEN', 'NORRIS', 'LECLERC', 'PIASTRI', 'SAINZ', 'RUSSELL', 'HAMILTON',
@@ -54,7 +60,7 @@ export class Race {
         ahead: null, behind: null, aheadGapT: 99, behindGapT: 99,
         ctx: null, lastMove: 0, movedAt: -99,
         warnings: 0, penalty: 0, offNow: false, lastLimit: -99,
-        contacts: 0, retired: false, finished: false, finishTime: null,
+        contacts: 0, retired: false, finished: false, finishTime: null, bump: null,
         pitRequest: false, inPit: false, pitTimer: 0, pitStops: 0, stuck: 0,
       });
     }
@@ -74,7 +80,11 @@ export class Race {
     const was = this.entries.map(e => e.pos);
     this.standings = this.entries.slice().sort((a, b) => {
       if (a.finished !== b.finished) return a.finished ? -1 : 1;
-      if (a.finished && b.finished) return a.finishTime - b.finishTime;
+      // Penalties are applied at the flag, because there is no pit lane to
+      // serve them in yet. Until this line they were decoration: a car could
+      // collect twenty-five seconds of them and still be classified ahead of
+      // the car it took out, which makes the whole rulebook a label.
+      if (a.finished && b.finished) return (a.finishTime + a.penalty) - (b.finishTime + b.penalty);
       return this.progress(b) - this.progress(a);
     });
     this.standings.forEach((e, i) => { e.pos = i + 1; });
@@ -106,13 +116,17 @@ export class Race {
         if (o === e || o.retired) continue;
         const ds = t.gap(o.proj.s, e.proj.s);
         const dl = Math.abs(o.proj.lat - e.proj.lat);
-        if (ds > 0 && ds < 70) {
-          // Following guts the FRONT wing first, which is why it understeers
-          // rather than simply going slower. Alignment matters: you only get
-          // the wake if you are actually behind them, not alongside.
-          const align = Math.max(0, 1 - dl / 7.5);
-          dirty = Math.max(dirty, align * Math.pow(Math.max(0, 1 - ds / 42), 1.5));
-          if (dl < 4.5) tow = Math.max(tow, (1 - dl / 4.5) * Math.max(0, 1 - ds / 45));
+        if (ds > 0 && ds < 90) {
+          // One wake, not two effects. A car's drag IS momentum taken out of
+          // the air, and dirty air and the tow are that same deficit seen from
+          // two sides — so they come from one call and cannot drift apart.
+          // The range gate is wakeAt's own, which is why this one is 90 rather
+          // than the 70 it used to be: two places deciding how far a wake
+          // reaches is exactly the kind of pair that drifts.
+          if (wakeAt(W, ds, dl, o.car.spec)) {
+            if (W.dirty > dirty) dirty = W.dirty;
+            if (W.tow > tow) tow = W.tow;
+          }
         }
         if (ds > 0 && ds < bestA) { bestA = ds; e.ahead = o; e.aheadGapT = ds / Math.max(e.car.speed, 12); }
         if (ds < 0 && -ds < bestB) { bestB = -ds; e.behind = o; e.behindGapT = -ds / Math.max(o.car.speed, 12); }
@@ -137,6 +151,27 @@ export class Race {
     const t = this.track, i = e.proj.i, d = e.driver;
     const lim = Math.max(0.3, t.w[i] - 1.0);
     let bias = 0, speedCap = null;
+
+    // MEASURED AND REJECTED: an opening-lap caution.
+    //
+    // The obvious theory was that twenty-two cars arriving at turn one together
+    // is what destroys a race, so rivals should run longer gaps and refuse half
+    // a move for the first twenty seconds. Four single races appeared to show
+    // it made things WORSE, which was not true either — a race is chaotic and
+    // one contact at turn one rewrites everything after it, so a single race
+    // cannot measure a tuning constant at all.
+    //
+    // `tools/fieldcheck.mjs` (4 circuits x 4 seeds, both ways) settled it:
+    //   caution off   7.25 retired of 22   104 passes   255 contacts
+    //   caution on    7.13 retired of 22    85 passes   208 contacts
+    // No effect on retirements, and it cost a fifth of the overtaking. A grid
+    // can always be made to stop crashing by making it stop racing, and this
+    // one did not even stop crashing.
+    //
+    // The same table says why: only 0.5 to 4.25 of those retirements happen in
+    // the first thirty seconds. MOST OF THEM ARE NOT TURN ONE. They are spread
+    // through the race, which points at the thing DESIGN.md already names — a
+    // car that has lost its front wing keeps driving as though it has one.
 
     if (e.ahead && e.aheadGapT < 1.4 && !e.inPit) {
       // get out of the wake and take the inside for the next braking zone
@@ -302,6 +337,12 @@ export class Race {
                       dirty: car.dirty, tow: car.tow, rollMul: dragFor(surface) });
       const hit = resolveBarrier(car, t, e.hint);
       if (hit && hit.harm) { e.contacts++; this.log('crash', `${e.name} INTO THE BARRIER`, e); }
+      // The player's own contacts, handed up for the rumble and the toast. The
+      // screen must not test for a hit a second time: two places deciding what
+      // counts as contact is how they come to disagree.
+      if (hit && e.isPlayer && hit.closing > 3.5) {
+        e.bump = { what: 'barrier', closing: hit.closing, harm: hit.harm, part: hit.part };
+      }
       if (car.damage >= 1 && !e.retired) { e.retired = true; this.log('crash', `${e.name} RETIRES`, e); }
       // A car on its roof is not rejoining. Retire it once it has stopped
       // sliding, or it keeps being classified and crawls round for the rest of
@@ -389,6 +430,10 @@ export class Race {
         const ds = Math.abs(t.gap(live[j].proj.s, live[i].proj.s));
         if (ds > 12) break;                 // sorted, so nothing further can be closer
         const hit = resolveCars(live[i].car, live[j].car);
+        if (hit && (live[i].isPlayer || live[j].isPlayer) && hit.closing > 2) {
+          const you = live[i].isPlayer ? live[i] : live[j];
+          you.bump = { what: 'car', closing: hit.closing, harm: hit.harm };
+        }
         if (hit && hit.harm > 1.2) {
           const a = live[i], b = live[j];
           a.contacts++; b.contacts++;

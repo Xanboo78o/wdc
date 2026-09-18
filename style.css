@@ -91,8 +91,61 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 #msg{left:50%;top:15%;transform:translateX(-50%);
   font-size:13px;letter-spacing:.24em;color:var(--warn)}
 
+/* ---------------- race options ---------------- */
+#raceOpts{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+#raceOpts.off{opacity:.32;pointer-events:none;filter:saturate(.3)}
+#raceOpts .opt h2{margin:0 0 7px}
+.cards.tight .card{min-width:0;padding:7px 9px;text-align:center}
+.cards.tight .card b{font-size:12px;letter-spacing:.08em}
+.cards.tight .card small{font-size:8.5px;letter-spacing:.1em}
+
+/* ---------------- timing tower ---------------- */
+/* The tower is the race. Position, who is in front, and by how much — it is
+   the only part of the HUD that tells you whether you are winning. */
+/* Opaque enough to read a DNF against a bright trackside hoarding. At 60% the
+   grey of a retired row and the red of its DNF both washed out completely
+   wherever a sponsor board happened to be behind them. */
+#tower{top:64px;left:20px;width:242px;
+  background:rgba(9,11,14,.82);border:1px solid var(--line);border-radius:9px;
+  padding:6px 7px;font-size:11px;letter-spacing:.06em}
+.trow{display:flex;align-items:center;gap:6px;padding:2px 3px;border-radius:4px;line-height:1.5}
+.trow.me{background:rgba(53,214,160,.16);box-shadow:inset 0 0 0 1px rgba(53,214,160,.3)}
+.trow.out{opacity:.5}
+.trow b{width:19px;text-align:right;color:var(--dim);font-weight:700;font-size:10.5px}
+.trow i{width:3px;height:12px;border-radius:2px;flex:none;display:block}
+.trow span{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:600}
+.trow em{font-style:normal;color:var(--dim);font-size:10px;min-width:44px;text-align:right}
+.trow em.pit{color:var(--warn)}
+.trow em.dnf{color:var(--bad)}
+
+/* ---------------- race control feed ---------------- */
+#feed{top:150px;right:20px;width:262px;text-align:right;font-size:10.5px;letter-spacing:.07em}
+#feed div{color:var(--dim);margin-top:4px;line-height:1.45}
+#feed div.penalty{color:var(--warn)}
+#feed div.crash{color:var(--bad)}
+#feed div.flag{color:var(--ink)}
+
+/* ---------------- start lights ---------------- */
+#startLights{left:50%;top:13%;transform:translateX(-50%);display:flex;gap:12px;
+  padding:12px 16px;background:rgba(6,8,11,.66);border:1px solid #23282f;border-radius:12px}
+#startLights i{width:30px;height:30px;border-radius:50%;background:#1b1f26;
+  box-shadow:inset 0 0 0 2px #262c34;display:block}
+#startLights i.on{background:#ff2a18;box-shadow:0 0 22px rgba(255,42,24,.75),inset 0 0 0 2px #ff6a58}
+
+/* ---------------- results ---------------- */
+#results{gap:18px}
+#resTable{width:100%;max-width:560px;max-height:52vh;overflow:auto;
+  background:#12161d;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+#resTable .trow{font-size:12.5px;padding:3px 4px}
+#resTable .trow em{min-width:78px}
+
+#times .row.pos em{font-size:26px;font-weight:800;color:var(--good)}
+
 @media (max-width:640px){
   #slip{width:calc(100% - 40px)}
   .spd b{font-size:40px}
   #times{min-width:170px}
+  #tower{width:186px;font-size:10px}
+  #feed{display:none}
+  #raceOpts{grid-template-columns:1fr}
 }

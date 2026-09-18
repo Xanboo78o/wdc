@@ -383,6 +383,28 @@ The four ways a car gets airborne, all of them impulses through
     the race: an upside-down car dragged the measured field spread from 12 s to
     **162 s**, because its "best lap" was still counting.
 
+### Gotchas paid for on the ground under the circuit
+32. **A terrain grid under the road needs clearance proportional to its CELL
+    SIZE, not to a number that looks generous.** `buildSkirt` fills the hole
+    the terrain plate leaves around the circuit, at 26 m cells, and sat 5 cm
+    below the road. Between two of its vertices it is a flat CHORD, and a 26 m
+    chord over a surveyed elevation profile deviates by more than 5 cm — so the
+    grass won the depth test wherever the road dipped, and Monza's main
+    straight rendered as green with irregular patches of asphalt showing
+    through. It was reported as a surface-material bug and it is not: the
+    materials were right and the geometry was on top of them. The fix sinks the
+    grid under the corridor and tapers back to zero outside it.
+33. **Taper it to the circuit's OWN width, not to a constant.** A fixed 34 m
+    taper is right at Monza, whose corridor is 34 m a side, and digs a trench
+    outside the barriers at Monaco, whose corridor is 15. Measured per circuit,
+    the drop at the run-off edge is 3-8 cm at a 0.2-0.6% gradient everywhere —
+    invisible, which is the point.
+34. **"It renders correctly past the start/finish line" is not evidence about
+    the line.** The broken stretch was the last 180 m of the lap, which reads
+    like an array-wrap bug and is not one — the surface data said GRASS on both
+    sides of the line, identically. What differed was the elevation profile's
+    curvature against the grid, which has nothing to do with s=0.
+
 ## Zandvoort's banking
 
 Drawn, as of the taper landing in the bake. `js/bank.js` is the model and it
@@ -424,6 +446,69 @@ banked in the survey.
 - Rear weight bias: `b < a`. Backwards makes the car push into corners then
   snap on exit.
 
+## Twenty-two cars, on screen
+
+`js/race.js` could run a full race from the day it was written, and the only
+place anyone could watch one was a table of numbers in a terminal. `js/field.js`
+is what put it in front of the windscreen. It owns nothing about racing: it is
+handed the race's entries every frame and draws them from the same car objects
+the physics writes — no interpolation, no smoothing. A renderer that tidies up
+its inputs hides the bugs you most need to see.
+
+### Draw calls are the budget, not triangles
+
+Measured at Monza, all twenty-one rivals on screen:
+
+| | draw calls |
+|---|---|
+| hot lap, one car | 161 |
+| 22 cars, one full model each | 1580 |
+| 22 cars, as shipped | **716 on the grid, 329 mid-race** |
+
+A car is 63 separate meshes — every winglet, every sticker, every wheel face —
+and the shadow pass draws all of them a second time. Triangles were never the
+problem. Three things fixed it:
+
+- **One reference car, cloned.** `buildCar` lofts a body and paints a 1024x1024
+  sponsor atlas. Doing that twenty-two times is twenty-two megabytes of
+  identical decals in video memory. `Object3D.clone(true)` shares geometry and
+  materials and copies only the transforms, which is exactly the split we want.
+  Only the paint is per-car, and it is found BY COLOUR — the reference is built
+  in a known colour and every material wearing it is a paint material — so
+  reordering `car.js` cannot break it.
+- **Two levels of detail, RANKED and not thresholded.** The four nearest cars
+  keep all 63 meshes, because that is what lets them fold when they hit
+  something. Everything else is the same geometry merged to one mesh per
+  material (9 draws) and cannot crumple, which nobody can see from ninety
+  metres. *A distance threshold bounds nothing:* at the lights the whole grid is
+  inside eight metres a car, so any threshold generous enough for a battle puts
+  fourteen full cars on screen at the one moment the frame rate matters most.
+  Ranking gives a hard ceiling — a start costs the same as a straight.
+- **Shadows off past 60 m.** Half the cost of a car is its second trip through
+  the shadow map.
+
+### `__wdc.draws` was measuring frame one, and frame one has no camera
+
+The first honest number here was 250, and it was nonsense. `render.js` publishes
+the draw count once, on the first frame — which is correct for a static world
+and useless for a grid, because on frame one `view.camera.position` is still at
+the origin, so `field.js` culls every rival and the count says the field is
+free. `main.js` now republishes `draws`/`tris` after every `view.frame`, so the
+number a tool reads is the last frame's real cost. **Before treating a
+measurement as a property of the thing, ask what the rig contributed** — this is
+the same family as `--quick`'s fifteen seconds being asset load and shader
+compile rather than the page.
+
+### `?spool=N` — because a photograph cannot prove a thing happens
+
+Headless chromium runs at a fifth of a frame per second under SwiftShader and
+the loop is frame-limited, so however long a screenshot waits it comes back at
+lap 0:00.7 with the grid still on the grid. `?spool=25` steps the race twenty-
+five seconds before the first frame with a bot standing in at the player's
+wheel. It is what makes a photograph of a race in progress — real gaps on the
+tower, DNFs, a penalty — possible at all. Same family as `?crush=` and
+`?launch=`.
+
 ## Harnesses — use these instead of guessing
 
 ```
@@ -432,7 +517,64 @@ node tools/trace.mjs [track] [class] [tier]              # WHY: timeline + dense
 node tools/ceiling.mjs [track|all] [class]               # how much grip the controller can use
 node tools/crash.mjs [track] [class]                     # contact: can bodywork end up INSIDE a barrier?
 node tools/flight.mjs [track] [class]                    # the vertical axis: does it fly, and does it come back?
+node tools/race.mjs [track] [class] [laps] [grid] [tier]  # ONE race, printed in full
+node tools/fieldcheck.mjs [--seeds N] [--tracks a,b]     # MANY races: is a change real, or noise?
 ```
+
+### A single race cannot measure anything about a race
+
+`race.mjs` answers "does this work at all". It cannot answer "is this change
+better", and for one afternoon it looked like it could. A race is chaotic — one
+contact at turn one rewrites every position after it — so two races differing by
+a single constant are not two measurements of that constant, they are two flips
+of a coin.
+
+The worked example, kept because it was nearly built on: an opening-lap caution
+for the rivals (longer gaps, no half-moves for the first twenty seconds).
+Four single races said it made retirements WORSE at three circuits out of four.
+`fieldcheck.mjs` over four circuits x four seeds said:
+
+```
+caution off   7.25 retired of 22   104 passes   255 contacts
+caution on    7.13 retired of 22    85 passes   208 contacts
+```
+
+No effect on retirements, and it cost a fifth of the overtaking. Rejected, and
+the reasoning is in `race.js` at the point where it would have gone, so nobody
+builds it again. **PASSES is the second number on purpose:** a grid can always
+be made to stop crashing by making it stop racing, and the two have to move in
+opposite directions before a change is worth anything.
+
+The same table also killed the premise: only 0.5 to 4.25 of those ~7
+retirements happen in the first thirty seconds, so **most of them are not turn
+one at all.**
+
+### What was actually emptying the grid: the front wing
+
+One more column on the same tool, testing the CAUSE rather than the symptom —
+*of the cars that lost a front wing, how many retired?* — and it was obvious:
+
+```
+4.81 cars per race lose a front wing, and 4.38 of them retire.
+At Suzuka it was 6.75 of 6.75. Every single one.
+That is ~60% of all retirements in the game.
+```
+
+This file had been predicting it in prose for two days. Losing a front wing
+costs 56% of the front downforce and **the driver did not know**: it kept aiming
+at corner speeds that needed a wing it no longer had. `js/autopilot.js` now
+re-solves the speed profile once, at 0.78x grip, the moment `car.lost.frontWing`
+appears — the honest version this project is built on, not a speed multiplier.
+
+```
+                 before   after
+retired of 22     7.25     5.25      of the wingless: 91% -> 56%
+passes             104      100
+contacts           255      247
+```
+
+Retirements down 28%, overtaking unmoved. The real answer is still a pit stop
+for a new nose; this is what a driver does on the lap before one.
 `tools/flight.mjs` is the gate for anything that touches `z`, `pitch`, `roll`,
 lift or a launch. It measures the four ways a car gets airborne and asserts the
 thing that matters more than any of them: **every flight has to end.** A car
@@ -542,22 +684,42 @@ does not exist.
 Git hooks are not committed, so **after a fresh clone the hook has to be
 reinstalled** or stamping silently stops happening:
 
+**Install the GUARDED version.** The naive hook — `stamp && git add index.html`
+— stages the whole file, not just the stamp, so with two people in one checkout
+it sweeps whatever uncommitted work is sitting in `index.html` into an
+unrelated commit. That happened on 2026-09-18: 81 lines of another session's
+menu and HUD work went into a commit about aerodynamics. Staging precisely is
+no protection when a HOOK stages for you — you check `git diff --cached` before
+the hook runs.
+
 ```sh
-printf '#!/bin/sh\nnode tools/stamp.mjs "$(date +%%s)" >/dev/null 2>&1 && git add index.html\nexit 0\n' > .git/hooks/pre-commit
+cat > .git/hooks/pre-commit <<'HOOK'
+#!/bin/sh
+# Only stamp when index.html has no OTHER uncommitted work in it: `git add`
+# stages the whole file and would sweep that work into this commit.
+if git diff --quiet -- index.html; then
+  node tools/stamp.mjs "$(date +%s)" >/dev/null 2>&1 && git add index.html
+else
+  echo "pre-commit: index.html has uncommitted changes - NOT stamping."
+  echo "            Commit index.html on its own, then commit this."
+fi
+exit 0
+HOOK
 chmod +x .git/hooks/pre-commit
 ```
 
 ## Not done yet
 
-- **Racecraft is not built yet.** The driver can lap cleanly; it cannot yet
-  attack, defend, or race anyone. `dirtyair/js/ai.js` has the attack/defend
-  layer worth adapting (one committed move, take the inside for the braking
-  zone, don't drive into someone alongside) and `dirtyair/js/race.js` has the
-  session layer: grid, dirty-air/tow neighbour loop, collisions with damage and
-  blame, pit lane (densify the OSM pit nodes first), track limits, DRS.
-- **No grid yet.** Target is 21 opponents; nothing has been performance-tested
-  at 22 cars, and `track.project()` searching 90 samples per car per substep is
-  the obvious first thing that will need rate-limiting.
+- **A pit lane that a car can actually use.** `js/pit.js` draws one and the
+  entries carry `pitRequest` / `inPit` / `pitTimer` / `pitStops`, and nothing
+  sets any of them. This is the missing piece behind the retirement count: a
+  car with no front wing has no way to fix it.
+- **Local co-op.** Asked for at the same time as the bots and deliberately left
+  until after them: a second player means a second camera, a split viewport and
+  a second `Hands` bound to the other half of the keyboard or a second pad.
+  `race.js` already takes a player entry, so the session layer needs nothing —
+  this is a `main.js` and `render.js` job.
+- **Qualifying.** The grid order is whatever you pick in the menu.
 - No qualifying, and **no pit stop for a new front wing** — which now matters,
   because losing one is no longer cosmetic: `car.lost.frontWing` takes 56% of
   the front downforce away and the car understeers off the road. The autopilot

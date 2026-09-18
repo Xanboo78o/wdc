@@ -6,21 +6,31 @@
 // and the car is literally faster on a 144 Hz screen than a 60 Hz one, which
 // is the single most common way a browser "sim" quietly turns out not to be.
 import { Track } from './track.js';
-import { buildLine } from './line.js';
-import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor } from './physics.js';
+import { buildLines } from './line.js';
+import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor, registerAero } from './physics.js';
+import { makeAero } from './aero.js';
 import { Hands, steerLock } from './input.js';
 import { View } from './render.js';
 import { loadEnv } from './env.js';
 import { resolveBarrier } from './collide.js';
+import { Race } from './race.js';
+import { gridSlots } from './grid.js';
+import { TIERS, makeAutopilot, makeDriver } from './autopilot.js';
+import { Field } from './field.js';
 
 const $ = id => document.getElementById(id);
 const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV'];
 
 const state = {
-  track: null, line: null, car: null, view: null,
+  track: null, line: null, lines: null, car: null, view: null,
   peak: 0, hint: 0, sPrev: 0,
   lap: 0, lapT: 0, last: null, best: null, started: false,
   offT: 0, invalid: false, msgT: 0,
+  // Race mode. `race` is the session out of js/race.js, `field` draws the other
+  // twenty-one, and `me` is the player's entry inside the race — everything the
+  // HUD needs about the player in a race hangs off that one object rather than
+  // being copied into `state` and going stale.
+  race: null, field: null, me: null, evT: 0, feed: [], lightsWere: 0, shown: false,
 };
 const hands = new Hands();
 
@@ -35,27 +45,46 @@ const TRACKS = [
   ['monaco', 'Monaco', 'MONACO'],
 ];
 let pickTrack = 'monza', pickCar = 'f4';
+// Race settings. `pickGrid` counts EVERY car including yours, so 22 is the real
+// thing and 6 is a sprint you can actually see all of.
+let pickMode = 'hotlap', pickGrid = 22, pickTier = 'medium', pickLaps = 3, pickStart = 'mid';
+
+// One card list, built the same way everywhere: the value, the big label, the
+// small one under it, and what to do when it is clicked.
+function cards(el, items, current, set, tight) {
+  const box = $(el);
+  box.innerHTML = '';
+  for (const [value, big, small] of items) {
+    const b = document.createElement('button');
+    b.className = 'card' + (value === current ? ' on' : '');
+    b.innerHTML = `<b>${big}</b>${small ? `<small>${small}</small>` : ''}`;
+    b.onclick = () => { set(value); buildMenu(); };
+    box.appendChild(b);
+  }
+}
 
 function buildMenu() {
-  const tl = $('trackList');
-  tl.innerHTML = '';
-  for (const [key, name, country] of TRACKS) {
-    const b = document.createElement('button');
-    b.className = 'card' + (key === pickTrack ? ' on' : '');
-    b.innerHTML = `<b>${name}</b><small>${country}</small>`;
-    b.onclick = () => { pickTrack = key; buildMenu(); };
-    tl.appendChild(b);
-  }
-  const cl = $('carList');
-  cl.innerHTML = '';
-  for (const k of ['f4', 'f1']) {
-    const s = CARS[k];
-    const b = document.createElement('button');
-    b.className = 'card' + (k === pickCar ? ' on' : '');
-    b.innerHTML = `<b>${s.name}</b><small>${s.full}</small>`;
-    b.onclick = () => { pickCar = k; buildMenu(); };
-    cl.appendChild(b);
-  }
+  cards('trackList', TRACKS.map(([k, n, c]) => [k, n, c]), pickTrack, v => pickTrack = v);
+  cards('carList', ['f4', 'f1'].map(k => [k, CARS[k].name, CARS[k].full]), pickCar, v => pickCar = v);
+  cards('modeList', [
+    ['hotlap', 'HOT LAP', 'EMPTY CIRCUIT'],
+    ['race', 'RACE', 'WHEEL TO WHEEL'],
+  ], pickMode, v => pickMode = v);
+  cards('gridList', [[6, '6'], [12, '12'], [16, '16'], [22, '22']], pickGrid, v => pickGrid = v);
+  cards('tierList', Object.keys(TIERS).map(k => [k, TIERS[k].name]), pickTier, v => pickTier = v);
+  cards('lapList', [[2, '2'], [3, '3'], [5, '5'], [10, '10']], pickLaps, v => pickLaps = v);
+  cards('startList', [
+    ['pole', 'POLE'], ['front', 'FRONT'], ['mid', 'MIDFIELD'], ['back', 'LAST'],
+  ], pickStart, v => pickStart = v);
+  $('raceOpts').classList.toggle('off', pickMode !== 'race');
+}
+
+// Which slot on the grid you line up in, 1 being pole.
+function startSlot(grid) {
+  if (pickStart === 'pole') return 1;
+  if (pickStart === 'front') return Math.min(grid, 3);
+  if (pickStart === 'back') return grid;
+  return Math.max(1, Math.round(grid * 0.55));
 }
 
 async function start() {
@@ -65,15 +94,69 @@ async function start() {
   // let the browser paint the loading line before the line solver blocks
   await new Promise(r => setTimeout(r, 30));
 
+  const q = new URLSearchParams(location.search);
+  // Solved aerodynamics, baked offline by tools/aerobake.mjs. This MUST run
+  // before the first makeCar: a car captures its aero map at construction, so
+  // registering afterwards silently leaves that car on the old constants —
+  // and a grid where the player is on one aero model and the bots are on
+  // another is the kind of bug that reads as "the AI is cheating".
+  for (const k of ['f1', 'f4']) {
+    try {
+      const r = await fetch(`./data/aero/${k}.json`);
+      if (r.ok) registerAero(k, makeAero(await r.json()));
+    } catch { /* fall back to the constants; the car still drives */ }
+  }
   const t = await Track.load(pickTrack);
   const spec = CARS[pickCar];
-  const line = buildLine(t, spec);
-  state.track = t; state.line = line;
+  // buildLines gives the racing line AND the centreline, plus `at(which, grip)`
+  // — which is what lets a slower rival re-solve the speed profile at less grip
+  // instead of driving the fast line slowly. A hot lap only ever uses `.race`.
+  const lines = buildLines(t, spec);
+  const line = lines.race;
+  state.track = t; state.line = line; state.lines = lines;
   state.peak = peakSlip(spec);
-  state.car = makeCar({ cls: pickCar });
-  resetCar();
 
-  const q = new URLSearchParams(location.search);
+  if (pickMode === 'race') {
+    // Everything here can also come off the URL, so a headless check can boot
+    // a full grid without a human clicking four card lists:
+    //   ?auto=monza:f1&race=1&grid=22&tier=hard&laps=2&start=10&seed=7
+    const grid = Math.max(2, Math.min(22, +q.get('grid') || pickGrid));
+    const laps = Math.max(1, Math.min(60, +q.get('laps') || pickLaps));
+    const tier = TIERS[q.get('tier')] ? q.get('tier') : pickTier;
+    const slot = Math.max(1, Math.min(grid, +q.get('start') || startSlot(grid)));
+    $('load').innerHTML = `<div class="loadbox">BUILDING A GRID OF ${grid}…</div>`;
+    await new Promise(r => setTimeout(r, 30));
+    state.race = new Race({
+      track: t, lines, spec, slots: gridSlots(t, grid), laps, grid,
+      playerGrid: slot, tier, player: true,
+      seed: +q.get('seed') || (1 + Math.floor(Math.random() * 9973)),
+    });
+    state.me = state.race.entries.find(e => e.isPlayer);
+    state.car = state.me.car;
+
+    // Debug: fast-forward the race before the first frame, with a bot standing
+    // in at your wheel.  ?spool=25
+    //
+    // It exists because a headless browser runs at a fifth of a frame a second
+    // under swiftshader, and the loop is frame-limited — so however long a
+    // screenshot waits, it comes back at lap 0:00.7 with the grid still on the
+    // grid. A photograph proves a thing RENDERS, never that a thing HAPPENS,
+    // and this is what lets a photograph of a race in progress exist at all.
+    const spool = Math.max(0, Math.min(900, +q.get('spool') || 0));
+    if (spool) {
+      const ghost = makeAutopilot(t, lines, spec, state.peak,
+        { driver: makeDriver(11, 'medium', t.corners.length || 24) });
+      const me = state.me;
+      for (let n = Math.round(spool / FIXED_DT); n > 0; n--) {
+        ghost(me.car, me.proj, FIXED_DT, me.ctx);
+        state.race.tick(FIXED_DT,
+          { throttle: me.car.throttle, brake: me.car.brake, delta: me.car.delta });
+      }
+    }
+  } else {
+    state.car = makeCar({ cls: pickCar });
+    resetCar();
+  }
   // Driver aids are tunable from the URL, including all the way off. They are
   // real systems — TC limits drive torque to what the rear tyre can still take
   // once cornering has used its share of the friction circle, ABS releases
@@ -118,6 +201,21 @@ async function start() {
   } else {
     location.reload(); return;          // changing circuit rebuilds the world
   }
+
+  // The rest of the grid. It is built after the View because it needs the
+  // View's material cache and its sky-lit environment map — a car built against
+  // a different `look` than the world it stands in reads as a sticker.
+  if (state.race) {
+    state.field = new Field(state.view, state.race.entries);
+    const c = state.field.cost();
+    if (typeof window !== 'undefined' && window.__wdc) {
+      window.__wdc.cars = c.cars + 1;
+      window.__wdc.meshesPerCar = c.meshesPerCar;
+      window.__wdc.farMeshesPerCar = c.farMeshesPerCar;
+    }
+  }
+  for (const id of ['tower', 'feed', 'startLights']) $(id).classList.toggle('hidden', !state.race);
+  $('posRow').classList.toggle('hidden', !state.race);
 
   $('trackName').textContent = t.full;
   $('carName').textContent = `${spec.full}  ·  peak grip at ${(state.peak * 180 / Math.PI).toFixed(1)}°`;
@@ -170,13 +268,41 @@ function loop(now) {
     toast('CAMERA ' + CAMS[view.mode]);
   }
   if (hands.tapped('KeyL')) toast('IDEAL LINE ' + (view.toggleLine() ? 'ON' : 'OFF'));
-  if (hands.tapped('KeyR') || hands.tapped('pad:b')) { resetCar(); toast('RESET'); }
+  if (hands.tapped('KeyR') || hands.tapped('pad:b')) {
+    // In a race there is no reset. You rejoin where you went off, with the
+    // damage you earned — anything else is a different game.
+    if (state.race) { rejoin(); toast('REJOIN'); } else { resetCar(); toast('RESET'); }
+  }
   if (hands.tapped('Escape')) { location.reload(); return; }
 
   let rough = 0;
   let steps = 0;
+  const race = state.race;
   while (acc >= FIXED_DT && steps < 240) {
     acc -= FIXED_DT; steps++;
+
+    // ---- race: the session steps every car, including yours ---------------
+    if (race) {
+      const inp = hands.update(FIXED_DT);
+      if (spec.drs && hands.tapped('Space')) car.drsOpen = !car.drsOpen;
+      race.tick(FIXED_DT, {
+        throttle: inp.throttle, brake: inp.brake,
+        delta: inp.wheel * steerLock(car.speed),
+      });
+      if (car.brake > 0.05) car.drsOpen = false;
+      // Contact the player was part of, reported by the race layer rather than
+      // felt for a second time here — two places deciding what counts as a hit
+      // is how they end up disagreeing.
+      const bump = state.me.bump;
+      if (bump) {
+        state.me.bump = null;
+        hands.rumble(Math.min(1, bump.closing / 14), 0.5, 160);
+        toast(bump.what === 'car'
+          ? (bump.harm > 1.2 ? 'CONTACT — WHEEL TO WHEEL' : 'RUBBING')
+          : (bump.harm > 0.12 ? `HEAVY CONTACT — ${String(bump.part).toUpperCase()}` : 'CONTACT'));
+      }
+      continue;
+    }
 
     const inp = hands.update(FIXED_DT);
     car.throttle = inp.throttle;
@@ -226,10 +352,45 @@ function loop(now) {
   }
   hands.endFrame();
 
+  // In a race the surface under the player is worked out by the race layer, so
+  // rather than test it a second time and risk the two disagreeing, read it off
+  // the projection the race already made. This only drives camera shake.
+  if (race) {
+    const me = state.me, pr = me.proj, al = Math.abs(pr.lat);
+    rough = al > pr.w + 1.2 ? 0.45 : al > pr.w ? 0.22 : 0;
+    // The lap clock in a race belongs to the race, not to a second copy of the
+    // timing code living here. Mirror it into `state` so the existing HUD keeps
+    // reading one set of fields whichever session type is running.
+    state.lap = me.lap + 1;
+    state.lapT = race.state === 'grid' ? 0 : Math.max(0, race.time - me.lapStart);
+    state.last = me.lastLap;
+    state.best = me.bestLap;
+    state.invalid = false;
+  }
+
   // how far past the peak the rear tyre is — this drives the smoke AND the HUD
   const over = Math.max(0, (Math.abs(car.slipR) - state.peak) / state.peak);
+  // The field is posed BEFORE the view draws, because view.frame ends with the
+  // render call. Smoke goes in first too: it writes into the renderer's puff
+  // pool, which view.frame then ages by one frame.
+  if (state.field) {
+    state.field.frame(race.entries, frame);
+    state.field.smoke(race.entries, state.peak);
+  }
   view.frame(car, frame, { slipOver: over, rough });
+  // Republish what the LAST frame actually cost. render.js publishes this once,
+  // on the first frame, which is honest for a static world and useless for a
+  // grid: on frame one the camera has not been placed yet, so every rival is
+  // culled and the count says the field is free. Overwriting it here means the
+  // number a tool reads is the number the frame in front of you paid.
+  if (typeof window !== 'undefined' && window.__wdc) {
+    const info = view.renderer.info.render;
+    window.__wdc.draws = info.calls;
+    window.__wdc.tris = info.triangles;
+    if (state.field) window.__wdc.carsDrawn = state.field.drawn;
+  }
   hud(over, rough);
+  if (race) raceHud(frame);
   if (state.msgT > 0 && (state.msgT -= frame) <= 0) $('msg').textContent = '';
 }
 
@@ -271,14 +432,184 @@ function hud(over, rough) {
 }
 
 // ---------------------------------------------------------------------------
+// RACE HUD. Everything here reads the race and writes the screen; it decides
+// nothing. If the tower says you are fourth, it is because race.js sorted you
+// fourth, and if it disagrees with the finishing order then the bug is in one
+// place rather than in two that have to be kept in step.
+// ---------------------------------------------------------------------------
+let towerRows = null;
+let towerAcc = 9;
+
+function buildTower(race) {
+  const box = $('tower');
+  box.innerHTML = '';
+  towerRows = race.entries.map(() => {
+    const d = document.createElement('div');
+    d.className = 'trow';
+    d.innerHTML = '<b></b><i></i><span></span><em></em>';
+    box.appendChild(d);
+    return { d, pos: d.children[0], chip: d.children[1], name: d.children[2], gap: d.children[3] };
+  });
+}
+
+// The interval to the car in front, in seconds, the way a timing screen shows
+// it: distance between them divided by how fast the one behind is travelling.
+// A lap down is a lap down and no number of seconds describes it usefully.
+function interval(race, ahead, e) {
+  const d = race.progress(ahead) - race.progress(e);
+  if (d > race.track.length * 0.97) {
+    const laps = Math.round(d / race.track.length);
+    return `+${laps} LAP${laps > 1 ? 'S' : ''}`;
+  }
+  return '+' + (d / Math.max(e.car.speed, 14)).toFixed(1);
+}
+
+function rowText(race, e, i) {
+  if (e.retired) return ['dnf', 'DNF'];
+  // Before the lights there are no gaps, only a grid. An interval computed from
+  // a stationary car is 8 m over a floor speed, which prints a confident +0.6
+  // for every single row and means nothing at all.
+  if (race.state === 'grid') return ['', ''];
+  // A car that has finished keeps driving — it does not vanish — so its
+  // `progress` keeps climbing and an interval computed from it is nonsense.
+  // A classified car's gap is the difference in race time, penalties included,
+  // which is also what decided the order it is being listed in.
+  if (e.finished) {
+    if (i === 0) return ['', fmt(e.finishTime + e.penalty)];
+    const lead = race.standings[0];
+    return ['', '+' + ((e.finishTime + e.penalty) - (lead.finishTime + lead.penalty)).toFixed(1)];
+  }
+  if (e.inPit) return ['pit', 'PIT'];
+  if (i === 0) return ['', 'LEADER'];
+  return ['', interval(race, race.standings[i - 1], e)];
+}
+
+function raceHud(dt) {
+  const race = state.race, me = state.me;
+
+  // ---- five lights, then the wait ----------------------------------------
+  const L = $('startLights');
+  if (race.state === 'grid') {
+    const on = Math.max(0, Math.min(5, Math.floor((3.2 - race.lights) / 0.5)));
+    if (on !== state.lightsWere) {
+      for (let i = 0; i < 5; i++) L.children[i].classList.toggle('on', i < on);
+      state.lightsWere = on;
+    }
+  } else if (!L.classList.contains('hidden')) {
+    L.classList.add('hidden');
+  }
+
+  // ---- position, and the lap you are on ----------------------------------
+  $('posV').textContent = me.retired ? 'DNF' : 'P' + me.pos;
+  $('lapNo').textContent = `${Math.min(race.laps, me.lap + 1)}/${race.laps}`;
+  if (me.penalty > 0) $('posV').textContent += ` +${me.penalty}s`;
+
+  // ---- race control ------------------------------------------------------
+  const fresh = race.events.filter(ev => ev.t > state.evT);
+  if (fresh.length) {
+    state.evT = fresh[fresh.length - 1].t;
+    for (const ev of fresh) {
+      state.feed.push(ev);
+      // A toast for what happened to YOU, and for the flags. Twenty-two cars
+      // generate far too many events to put all of them across the middle of
+      // the screen — the rest belong in the feed, where they read as a race
+      // going on around you rather than as a notification storm.
+      if (ev.car === me.idx || ev.kind === 'flag') toast(ev.text);
+    }
+    while (state.feed.length > 4) state.feed.shift();
+    $('feed').innerHTML = state.feed.map(ev => `<div class="${ev.kind}">${ev.text}</div>`).join('');
+  }
+
+  // ---- the tower ---------------------------------------------------------
+  // Eight times a second, not sixty. Twenty-two rows of four text nodes is a
+  // real cost at frame rate and gaps do not change fast enough to notice.
+  towerAcc += dt;
+  if (towerAcc > 0.125) {
+    towerAcc = 0;
+    if (!towerRows) buildTower(race);
+    const st = race.standings;
+    for (let i = 0; i < st.length; i++) {
+      const e = st[i], r = towerRows[i];
+      const [cls, gap] = rowText(race, e, i);
+      r.pos.textContent = i + 1;
+      r.chip.style.background = e.col;
+      r.name.textContent = e.name;
+      r.gap.textContent = gap;
+      r.gap.className = cls;
+      r.d.className = 'trow' + (e.isPlayer ? ' me' : '') + (e.retired ? ' out' : '');
+    }
+  }
+
+  // ---- and the end of it -------------------------------------------------
+  // Crossing the line yourself is NOT the end of the race, so it does not put a
+  // screen over it: you watch the rest of the field come home, which is half of
+  // what finishing third is. The results appear when the race is actually over,
+  // or straight away if you are out of it — and while you sit there retired,
+  // they keep updating, because the race is still going on without you.
+  if (race.state === 'over' || me.retired) {
+    if (!state.shown) { state.shown = true; state.resAcc = 0; showResults(); }
+    else if (race.state !== 'over' && (state.resAcc += dt) > 0.5) { state.resAcc = 0; showResults(); }
+  }
+}
+
+function showResults() {
+  const race = state.race, me = state.me;
+  $('resTitle').innerHTML = me.retired ? 'RACE <span>OVER</span>' : 'CHEQUERED <span>FLAG</span>';
+  $('resSub').textContent = me.retired
+    ? 'you did not make the finish'
+    : `P${me.pos} of ${race.entries.length}` +
+      (me.bestLap ? ` · best lap ${fmt(me.bestLap)}` : '') +
+      (me.penalty ? ` · ${me.penalty}s of penalties` : '');
+  $('resTable').innerHTML = race.standings.map((e, i) => {
+    const [cls, gap] = rowText(race, e, i);
+    const best = e.bestLap ? `<u style="color:#6c7687;font-size:10px">${fmt(e.bestLap)}</u>` : '';
+    const pen = e.penalty ? ` <u style="color:var(--warn)">+${e.penalty}s</u>` : '';
+    return `<div class="trow${e.isPlayer ? ' me' : ''}${e.retired ? ' out' : ''}">` +
+      `<b>${i + 1}</b><i style="background:${e.col}"></i>` +
+      `<span>${e.name}${pen} ${best}</span>` +
+      `<em class="${cls}">${gap}</em></div>`;
+  }).join('');
+  $('results').classList.remove('hidden');
+}
+
+// Rejoin, for when you are beached in a gravel trap and the race is still
+// going. Same thing race.js does for a stuck bot: put the car back on the
+// racing line a little way behind where it stopped, pointing the right way, at
+// a speed you could plausibly have rejoined at. It does NOT repair anything.
+function rejoin() {
+  const { track, line, me } = state;
+  const car = me.car;
+  const s = me.proj.s - 12;
+  const p = track.point(s, line.off[track.idx(s)] || 0);
+  car.x = p.x; car.y = p.y; car.hdg = p.hdg;
+  car.vx = 10; car.vy = 0; car.r = 0;
+  car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0;
+  car.airborne = false; car.onRoof = false;
+  me.stuck = 0;
+}
+
+// ---------------------------------------------------------------------------
 hands.attach();
+
+// The URL pre-selects the menu rather than bypassing it, so ?race=1 on its own
+// opens the menu with RACE already chosen and every setting visible — which is
+// also how you find out that a headless run and a human run set up the same
+// session. A flag that only works down the automated path is a flag nobody
+// tests.
+const Q = new URLSearchParams(location.search);
+if (Q.has('race')) pickMode = Q.get('race') === '0' ? 'hotlap' : 'race';
+if (Q.has('grid')) pickGrid = Math.max(2, Math.min(22, +Q.get('grid') || 22));
+if (TIERS[Q.get('tier')]) pickTier = Q.get('tier');
+if (Q.has('laps')) pickLaps = Math.max(1, Math.min(60, +Q.get('laps') || 3));
+
 buildMenu();
 $('go').onclick = start;
+$('resBack').onclick = () => location.reload();
 
 // Test hook: ?auto=monza:f1 boots straight into a session. It exists so a
 // headless browser can prove the page actually runs without a human clicking
 // anything — the menu is not where the bugs live.
-const auto = new URLSearchParams(location.search).get('auto');
+const auto = Q.get('auto');
 if (auto !== null) {
   const [t, c] = auto.split(':');
   if (t) pickTrack = t;

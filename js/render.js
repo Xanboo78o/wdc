@@ -207,7 +207,7 @@ function kerbs(track, bank, surf) {
   return { kerb: b, turf: turfB };
 }
 
-function crushParts(group, wheels) {
+export function crushParts(group, wheels) {
   const skip = new Set(Object.values(wheels || {}));
   const out = { front: [], rear: [], left: [], right: [] };
   group.traverse(m => {
@@ -230,7 +230,7 @@ function crushParts(group, wheels) {
   return out;
 }
 
-function applyCrush(parts, crush) {
+export function applyCrush(parts, crush) {
   if (!parts) return;
   for (const key of ['front', 'rear', 'left', 'right']) {
     const c = Math.min(1, (crush && crush[key]) || 0);
