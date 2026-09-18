@@ -11,11 +11,17 @@ what is in here was paid for with a debugging session, once, already.
 
 ## The pitch
 
-Real tyres, real circuits, cheap paint. The graphics budget is deliberately
-small so the simulation budget can be large. The thing on screen that matters
-is not the car — it is the **slip bars**: how far into the tyre you currently
-are, with a marker at the angle where grip actually peaks. Everything else is
-decoration around that one readout.
+Real tyres, real circuits, real surfaces. The thing on screen that matters is
+not the car — it is the **slip bars**: how far into the tyre you currently are,
+with a marker at the angle where grip actually peaks.
+
+The graphics budget used to be deliberately tiny. It is not any more, and the
+reason is not vanity: it is the complaint *"makes 210=210 not 210=60"*. Speed
+is not a number, it is **optical flow**. A flat grey ribbon on a green plane
+gives the eye nothing to measure, so 210 km/h reads as walking pace no matter
+what the HUD says. Aggregate at its true size, guard rail posts every 4 m,
+hoardings every 8, braking boards every 50 and marshal posts every 300 are a
+RULER laid along the lap, and they are most of the sensation.
 
 ## Locked decisions
 
@@ -154,6 +160,128 @@ More gotchas, paid for:
     around a 2 km circuit. Take the seaward direction from the UNCLAMPED line,
     or squashing points onto the box edge flips which side the sea is on.
 
+## The look: where every pixel came from
+
+Nothing in `data/` is procedurally generated except text, which cannot be
+photographed. Both piles are **CC0 public domain**, which is what makes them
+safe on GitHub Pages, and both have their own fetch tool and a SOURCE.md that
+travels with the files.
+
+```
+node tools/gettex.mjs [name|all] [--force]   # PBR materials, ambientCG
+node tools/getsky.mjs [name|all] [--force]   # sky HDRIs, Poly Haven
+```
+
+`data/tex/` is ten photoscanned PBR sets, 2.1 MB, three files each:
+
+| file | what | colour space |
+|---|---|---|
+| `-c.jpg` | colour / albedo | sRGB |
+| `-n.jpg` | tangent-space normal, **GL convention** | linear |
+| `-orm.jpg` | AO in R, roughness in G, metalness in B | linear |
+
+That last one is the glTF ORM packing, and three.js reads it natively: point
+`aoMap`, `roughnessMap` and `metalnessMap` at the same texture and each takes
+its own channel. Three maps instead of five halves the bytes and halves the
+texture units a material burns.
+
+### UVs are metres
+
+The one idea the whole graphics layer rests on. Every surface is UV-mapped in
+real-world metres, so a material only says how big its photograph is on the
+ground and sets `repeat = 1/size`. A 7.6 m road at Monaco and a 28 m gravel
+trap at Monza then show aggregate at exactly the same physical size, with no
+hand-tuned tiling number anywhere. `js/tex.js` is the only file that knows.
+
+### The sky lights the world, and it is measured
+
+`tools/getsky.mjs` decodes the HDR's float pixels in Node and reads out, per
+capture: where the sun actually is (luminance-weighted centroid of everything
+above 60% of peak), what colour it is, how hard its shadows should be
+(`punch`, the sun's peak against the median sky), the colour overhead, and the
+colour of the horizon band. `data/sky/skies.json` stores all of it, the
+renderer points its directional light along that vector and tints the fog with
+that horizon, and the result is that the shadows agree with the clouds you can
+see behind them. Each circuit gets the sky its race is actually run under.
+
+### Where the detail budget goes
+
+By DISTANCE, and by measurement rather than by feel. Monza runs **165 draw
+calls and 1.16M triangles** a frame, which is the number to watch when the
+22-car grid arrives.
+
+- one mesh for every hoarding on the lap, one for every guard rail, one
+  instanced mesh for every tyre in every tyre wall
+- 9,000 people in the grandstands are two instanced meshes (bodies, heads)
+- buildings within 340 m get windows, a ground floor and a cornice; beyond
+  that they are tinted textured extrusions, which at 300 m is the same picture
+  for a twentieth of the cost. Capped at 26,000 windows and spent nearest-first
+
+## Gotchas paid for on the look pass
+
+11. **`Builder.box`'s `ry` IS `Object3D.rotation.y`.** For a sim heading `h`
+    pass `h`, not `-h` — the sim->three reflection is already inside the
+    frame, and negating a second time mirrors the box about the track
+    direction. Invisible on anything square, which is how it survived; on the
+    14 m start gantry beam it put the whole span at the wrong angle and the
+    banner meant to sit on its face ended up half buried inside it.
+
+12. **Derive a normal from the winding when the orientation is the product of
+    sign choices.** `Builder.quadN` exists for this. Asserting a normal that
+    disagrees with the winding is what makes a surface look lit from inside:
+    with `DoubleSide`, three negates the supplied normal for back-facing
+    fragments, so a normal that already points the wrong way gets flipped to
+    point the wrong way *again*.
+
+13. **In three's x/z plane after the reflection, an UP-facing ring has a
+    NEGATIVE shoelace area.** The opposite of the maths convention everyone
+    reaches for. `quadUp`, `fan` and `prism` all measure and correct rather
+    than trust, because this is the mistake that made the tarmac render black.
+
+14. **A wire fence must be BLENDED, not alpha-tested.** A mesh is mostly
+    holes, so once it is far enough away for mipmapping to average whole
+    squares together the alpha lands either side of the threshold at random
+    and the fence becomes a field of black specks hanging in the sky. It looks
+    like a particle bug. Blending degrades into the grey haze a real catch
+    fence actually becomes.
+
+15. **Vertex colour caps at 1.0 if it goes through `THREE.Color`.**
+    `getHex()` quantises to 0-255. The racing surface needs to go both ways
+    around the scanned albedo — darker where the rubber is, *brighter* on the
+    pale tarmac nobody drives on — so `Builder.pushColour` takes a float
+    triple and puts it in the buffer unclamped.
+
+16. **Measure a texture before trusting it.** The first tarmac (Asphalt033)
+    has a colour-map standard deviation of 4/255 — it is almost flat grey,
+    with all its detail in the normal map, and under soft sky light it reads
+    as painted cardboard. Asphalt016 measures 15/255 at the same brightness.
+    `magick <file> -colorspace Gray -format "%[fx:standard_deviation]" info:`
+
+17. **`track.pit.side` does not reliably say which side the pit lane is on.**
+    Monza says left and the lane is 17 m to the RIGHT; Baku says right and it
+    is 7.5 m to the left. `js/pit.js` derives the side from where the surveyed
+    points actually are. Trusting the flag puts every garage between the pit
+    lane and the racing line.
+
+18. **The pit complex and the circuit's own furniture fight over the same
+    ground.** At Monza the right-hand barrier lands 4.7 m from the pit
+    centreline, so guard rail and advertising were built standing in the pit
+    lane; and 81 OSM buildings tagged `garage` sit exactly where the real pit
+    block is, so the synthetic garages were built through a brick wall.
+    `pitCorridor(track)` publishes both clearances and the barrier builder and
+    the city builder both keep out.
+
+19. **A canvas atlas that overflows fails SILENTLY and invisibly.** 4x8 is 32
+    cells; Monza needs 35. The two that fell off the end indexed a row past
+    the bottom of the canvas, sampled off the edge of the texture, and drew as
+    a black rectangle wrapped across the start gantry. `Atlas.cell` refuses to
+    overflow now, and warns.
+
+20. **A surveyed colour is whatever somebody typed into OpenStreetMap.** At
+    Baku somebody typed "navy blue". `THREE.Color` cannot parse it and
+    complains once per building rather than throwing, so it fills the console
+    and looks like a renderer fault. Validate, fall back to the palette.
+
 ## Inherited gotchas (from DIRTY AIR — still load-bearing here)
 
 - Low-speed regularisation is mandatory: floor the slip-angle denominator at
@@ -180,6 +308,29 @@ node tools/ceiling.mjs [track|all] [class]               # how much grip the con
 ```
 `tools/harness.mjs` is shared by all three so they can never drift apart and
 start reporting on two different simulations.
+
+And one for the graphics, which is the only reason anything in the look pass
+is verified rather than asserted:
+
+```
+node tools/shot.mjs [track:car] [--photo s,lat,y,lead,aimLat] [--probe u,v]
+                    [--q a=1&b=2] [--out name] [--lo]
+```
+
+It drives headless chromium over the DevTools protocol. Chromium's own
+`--screenshot` flag is not enough: it fires on load, before the textures and
+the sky have come off the network and before a single frame has been drawn.
+This one **waits for the world to exist** (`render.js` publishes `window.__wdc`
+when the circuit is built, and it polls for that rather than sleeping), reports
+console errors and uncaught exceptions, parks the camera anywhere on the
+circuit with `--photo`, and with `--probe` raycasts through a point on the
+screen and names what is actually there. Six real bugs came out of it in one
+afternoon. The first thing `--probe` was pointed at turned out to be an
+engineer's monitor 1.3 m from the lens rather than the bug it looked like.
+
+`?notex` runs the whole world on flat colours, which is both a setting for a
+weak machine and the fastest way to tell a material problem from a geometry
+one. A fresh clone that has not run `gettex.mjs` boots this way on its own.
 
 ## The difficulty ladder is measured, not chosen
 
@@ -244,6 +395,16 @@ chmod +x .git/hooks/pre-commit
 - No wheel/force-feedback layer. The WebHID pedal pairing in
   `apex-racer/js/main.js` (lines ~432–487) is the thing to port when the DIY
   pedals exist — see `apex-racer/docs/RIG-BUILD.md`.
-- The start/finish marking is a plain white slab rather than a proper
-  checkered line — it is the first thing you see on load, so it is worth 10
-  minutes at some point.
+- **Zandvoort's banking is not drawn.** The circuit banks 18 degrees at
+  Tarzanbocht and at Arie Luyendyk and the physics already uses it, but the
+  renderer draws both flat. This is a DATA problem before it is a rendering
+  one: `track.bank` is a hard 0 -> 18 -> 0 step with no taper, so drawing it
+  directly would put a 3.6 m vertical cliff at each end of the banked section.
+  It needs a ramp baked into the track data first, and the car's rendered
+  height and roll have to follow the same function or it will float.
+- No sound at all, still.
+- The car is primitives — real dimensions (5.63 m long, 2.0 m wide, 3.6 m
+  wheelbase), real DRS flap, suspension arms, a driver in a helmet, but
+  primitives. `js/collide.js` accumulates `car.crush` per corner from real
+  contact impulses and nothing reads it yet: deforming the bodywork from it
+  costs no physics and is the obvious next thing.
