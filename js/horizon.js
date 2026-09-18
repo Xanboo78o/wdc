@@ -327,13 +327,28 @@ export function buildGround(track, look, sky, world = null) {
       k++; u += 2;
     }
   }
+  // LEAVE A HOLE WHERE THE CIRCUIT IS.
+  //
+  // The plate's cells are a couple of hundred metres across, so a single
+  // triangle can span the whole track corridor — and its flat chord cuts
+  // straight through a road that is following a fine surveyed profile
+  // underneath it. Where the circuit sits in a dip, the terrain closed over
+  // the track. `buildSkirt` fills this hole at track resolution, where the
+  // ground and the road are guaranteed to agree because they read the same
+  // profile at the same spacing.
+  const HOLE = 260;
+  buildGround.hole = HOLE;
+  const near = (k) => distToTrack(track, pos[k * 3], pos[k * 3 + 2]) < HOLE;
   const idx = [];
+  let dropped = 0;
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       const a = j * (N + 1) + i, b = a + 1, cc = a + N + 1, d = cc + 1;
+      if (near(a) || near(b) || near(cc) || near(d)) { dropped++; continue; }
       idx.push(a, cc, b, b, cc, d);
     }
   }
+  void dropped;
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
@@ -348,6 +363,92 @@ export function buildGround(track, look, sky, world = null) {
   mesh.position.y = -0.06;
   mesh.receiveShadow = true;
   mesh.frustumCulled = false;
+  return mesh;
+}
+
+/**
+ * The skirt: the ground immediately around the circuit, at a resolution the
+ * road can live with.
+ *
+ * It exists because of the hole buildGround leaves. A 24 km plate cannot be
+ * fine enough near the road without being enormous, and one of its 220 m
+ * triangles chording across the corridor closes the terrain over a track that
+ * is following a fine surveyed profile underneath it.
+ *
+ * ---------------------------------------------------------------------------
+ * THE FIRST VERSION OF THIS WAS A RIBBON SWEPT ALONG THE TRACK, and it was a
+ * disaster for a reason worth writing down. It had only 58,000 triangles — but
+ * they were 2 m along the track by up to 94 m across, a 47:1 aspect ratio, and
+ * on the inside of every corner the ribbon folded back through itself and
+ * stacked layer on layer of the same ground. Long thin overlapping triangles
+ * covering most of the lower screen took a single frame from milliseconds to
+ * over a minute. Triangle COUNT was never the problem; shape and overdraw
+ * were.
+ *
+ * A plain square grid has neither problem: 26 m cells, no folds, nothing drawn
+ * twice, and only the cells near the circuit are kept.
+ */
+export function buildSkirt(track, look, sky, world, hole) {
+  const t = track, bb = t.bbox;
+  const land = LAND[t.key] || LAND._;
+  const span = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0);
+  const horizon = new THREE.Color(sky?.horizon || '#a7aabb');
+  const base = new THREE.Color(land.col);
+  const c = new THREE.Color();
+
+  const PAD = 420, CELL = 26;
+  const x0 = bb.x0 - PAD, x1 = bb.x1 + PAD;
+  const z0 = Z(bb.y1) - PAD, z1 = Z(bb.y0) + PAD;
+  const nx = Math.ceil((x1 - x0) / CELL), nz = Math.ceil((z1 - z0) / CELL);
+  const dx = (x1 - x0) / nx, dz = (z1 - z0) / nz;
+
+  const pos = new Float32Array((nx + 1) * (nz + 1) * 3);
+  const uv = new Float32Array((nx + 1) * (nz + 1) * 2);
+  const col = new Float32Array((nx + 1) * (nz + 1) * 3);
+  const dist = new Float32Array((nx + 1) * (nz + 1));
+  let k = 0, u = 0;
+  for (let j = 0; j <= nz; j++) {
+    for (let i = 0; i <= nx; i++) {
+      const x = x0 + i * dx, z = z0 + j * dz;
+      const d = distToTrack(t, x, z);
+      dist[k] = d;
+      pos[k * 3] = x; pos[k * 3 + 1] = world ? world.heightAt(x, z) : 0; pos[k * 3 + 2] = z;
+      uv[u] = x; uv[u + 1] = z;
+      const big = seeded(Math.floor(x / 700), Math.floor(z / 700));
+      const small = seeded(Math.floor(x / 190) + 41, Math.floor(z / 190) + 17);
+      c.copy(base).multiplyScalar(0.74 + big * 0.42 + (small - 0.5) * 0.17)
+        .lerp(horizon, hazeAt(d, span));
+      col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
+      k++; u += 2;
+    }
+  }
+
+  // Keep only what fills the plate's hole, with a margin of overlap so there
+  // is never a seam of sky between the two.
+  const keep = hole + 60;
+  const idx = [];
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const a = j * (nx + 1) + i, b = a + 1, cc = a + nx + 1, d = cc + 1;
+      if (dist[a] > keep && dist[b] > keep && dist[cc] > keep && dist[d] > keep) continue;
+      idx.push(a, cc, b, b, cc, d);
+    }
+  }
+  if (!idx.length) return null;
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setAttribute('uv1', new THREE.BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(g, look.mat(
+    t.key === 'zandvoort' ? 'sand' : 'grass',
+    { size: 6, roughness: 1, vertexColors: true, env: 0.55 }));
+  mesh.position.y = -0.05;
+  mesh.receiveShadow = true;
   return mesh;
 }
 

@@ -47,7 +47,7 @@ const positional = args.filter((a, i) => !a.startsWith('--') &&
 const target = positional[0] || 'monza:f1';
 const photo = flag('photo');
 const outName = flag('out', target.replace(':', '-'));
-const waitMs = +flag('wait', 2500);
+const waitMs = +flag("wait", 1200);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -199,6 +199,13 @@ try {
       .catch(e => '"probe failed: ' + e.message + '"');
     console.log('  probe ' + (probe) + ': ' + hits);
   }
+
+  // Report what we know BEFORE the screenshot. A capture that times out used
+  // to tell you nothing at all; the build stats and the frame time say whether
+  // the world failed to build or is simply taking a minute to draw.
+  if (stats) console.log('  world: ' + JSON.stringify(stats));
+  console.log(`  build ${await cdp.eval('window.__wdcBuildMs || 0')} ms` +
+    (fps != null ? `, ${fps} fps` : ', frame rate unmeasurable'));
 
   const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
   const file = path.join(OUT, `${outName}.png`);

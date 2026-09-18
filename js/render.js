@@ -17,7 +17,7 @@ import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
 import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
-import { buildHorizon, buildGround } from './horizon.js';
+import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar } from './car.js';
 import { World, loadElev } from './world.js';
 
@@ -309,7 +309,9 @@ export class View {
     // not run tools/getelev.mjs, and the world is simply flat then.
     this.world = new World(track, opts.elev);
     this.rig = sunRig(this.scene, sky, { shadows: this.shadows });
+    const t0 = (typeof performance !== 'undefined') ? performance.now() : 0;
     this.stats = this._world(opts.env);
+    if (typeof window !== 'undefined') window.__wdcBuildMs = Math.round(performance.now() - t0);
     // Publish what actually got built. `tools/shot.mjs` polls for this rather
     // than sleeping for a guessed number of seconds, and a screenshot of a
     // circuit with 0 buildings and 0 people in it is then obviously a failure
@@ -416,6 +418,10 @@ export class View {
     // the region rather than a default green — it is what fills every gap the
     // survey does not cover.
     S.add(buildGround(t, look, this.sky, this.world));
+    // Fills the hole buildGround leaves around the circuit, at track
+    // resolution, so the terrain can never close over the road.
+    const skirt = buildSkirt(t, look, this.sky, this.world, buildGround.hole || 260);
+    if (skirt) S.add(skirt);
 
     // Run-off: gravel at Monza and Suzuka, asphalt everywhere else. Grip is
     // handled in main.js; this is only what it looks like.

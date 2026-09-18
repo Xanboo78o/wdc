@@ -400,14 +400,19 @@ export function buildCar(look, colour = 0xd8352a) {
   // profile pinches to 55% of its width at the bore, so a rim as wide as the
   // tread pokes straight out through the sidewall — which is what the first
   // render showed, a bright cylinder sticking out of each wheel.
+  // R * 0.585, not R * 0.545. The tyre's bore is at R * 0.58, so a rim any
+  // narrower leaves a 13 mm annular gap all the way round the bead — and you
+  // can see straight through the wheel. It has to overlap the bead, not meet
+  // it.
+  const BORE = R * 0.585;
   const rimGeo = (width) => {
     const w = width * 0.55;
-    const g = new THREE.CylinderGeometry(R * 0.545, R * 0.545, w, 22);
+    const g = new THREE.CylinderGeometry(BORE, BORE, w, 22);
     g.rotateX(Math.PI / 2);
     return g;
   };
   const faceGeo = (width, side) => {
-    const g = new THREE.CircleGeometry(R * 0.545, 22);
+    const g = new THREE.CircleGeometry(BORE, 22);
     g.rotateY(side > 0 ? 0 : Math.PI);
     g.translate(0, 0, side * width * 0.275);
     return g;
