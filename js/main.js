@@ -83,6 +83,19 @@ async function start() {
   //   ?tc=1&sc=1         maximum help while you learn a circuit
   const aid = (k, d) => { const v = q.get(k); return v == null ? d : Math.max(0, Math.min(1, parseFloat(v) || 0)); };
   state.car.aids = { tc: aid('tc', 0.6), abs: aid('abs', 0.6), sc: aid('sc', 0.35) };
+  // Debug: preset bodywork damage so the crumple can be photographed without
+  // having to crash into something first.  ?crush=front:0.9,left:0.5
+  //
+  // ORDER MATTERS: this runs AFTER resetCar(), which zeroes crush because a
+  // reset car is a repaired car. Move it above resetCar while tidying and the
+  // preset silently stops working with nothing to show for it.
+  if (q.has('crush')) {
+    state.car.crush = { front: 0, rear: 0, left: 0, right: 0 };
+    for (const bit of q.get('crush').split(',')) {
+      const [k, v] = bit.split(':');
+      if (k in state.car.crush) state.car.crush[k] = Math.max(0, Math.min(1, parseFloat(v) || 0));
+    }
+  }
   const env = q.has('noenv') ? null : await loadEnv(pickTrack);
   // View.create is async because the circuit is painted with real photographed
   // materials and lit by a real sky, both of which come off the network.
@@ -113,6 +126,8 @@ function resetCar() {
   car.delta = 0; car.throttle = 0; car.brake = 0;
   car.tyre.Tf = 70; car.tyre.Tr = 70; car.tyre.wf = 0; car.tyre.wr = 0;
   car.drsOpen = false;
+  car.damage = 0;
+  car.crush = { front: 0, rear: 0, left: 0, right: 0 };   // a reset car is a repaired car
   state.hint = i; state.sPrev = 0;
   state.lapT = 0; state.invalid = false; state.offT = 0;
   hands.wheel = 0;

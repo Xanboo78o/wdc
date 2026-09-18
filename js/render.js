@@ -150,6 +150,81 @@ function kerbs(track) {
   return b;
 }
 
+// ---------------------------------------------------------------------------
+// CRUMPLE.
+//
+// js/collide.js already resolves contact at the bodywork corners and records
+// how hard each end took it, in `car.crush = {front, rear, left, right}`. This
+// turns that into bodywork you can see — asked for in capitals: "I WANT TO SEE
+// MY CAR CRUMBLE AND BOUNCE OFF OF A BARRIER. NOT AN ANIMATION."
+//
+// So it is not an animation. There is no crash sequence and no keyframes: every
+// part's deformed pose is a pure function of a damage number that came out of a
+// contact impulse. Hit the same barrier the same way and it deforms identically,
+// because the impulse was identical.
+//
+// Parts are classified by WHERE THEY SIT on the car rather than by being tagged
+// at construction, so this needs no changes to buildCar and nothing to keep in
+// sync when the model gains a part.
+// ---------------------------------------------------------------------------
+function crushParts(group, wheels) {
+  const skip = new Set(Object.values(wheels || {}));
+  const out = { front: [], rear: [], left: [], right: [] };
+  group.traverse(m => {
+    if (!m.isMesh || skip.has(m)) return;
+    const p = m.position;
+    let bin = null;
+    if (p.x > 1.45) bin = 'front';
+    else if (p.x < -1.45) bin = 'rear';
+    else if (Math.abs(p.z) > 0.40 && Math.abs(p.x) < 1.25) bin = p.z > 0 ? 'left' : 'right';
+    if (!bin) return;
+    // A stable wobble per part, from its own position — so a given car always
+    // folds the same way rather than re-rolling on every impact.
+    const s = Math.sin(p.x * 37.13 + p.y * 71.7 + p.z * 13.9) * 43758.5453;
+    out[bin].push({
+      m, wob: (s - Math.floor(s)) * 2 - 1,
+      home: { px: p.x, py: p.y, pz: p.z, rx: m.rotation.x, ry: m.rotation.y, rz: m.rotation.z },
+      endplate: Math.abs(p.z) > 0.70 && p.x > 1.45,
+    });
+  });
+  return out;
+}
+
+function applyCrush(parts, crush) {
+  if (!parts) return;
+  for (const key of ['front', 'rear', 'left', 'right']) {
+    const c = Math.min(1, (crush && crush[key]) || 0);
+    for (const it of parts[key]) {
+      const h = it.home, m = it.m;
+      if (c < 0.001) {
+        m.position.set(h.px, h.py, h.pz);
+        m.rotation.set(h.rx, h.ry, h.rz);
+        m.scale.set(1, 1, 1);
+        m.visible = true;
+        continue;
+      }
+      if (key === 'front' || key === 'rear') {
+        // the end folds back toward the tub and drops
+        m.position.x = h.px * (1 - 0.30 * c);
+        m.position.y = h.py - 0.13 * c;
+        m.position.z = h.pz + it.wob * 0.10 * c;
+        m.rotation.z = h.rz + it.wob * 0.55 * c;
+        m.rotation.y = h.ry + it.wob * 0.30 * c;
+        m.scale.x = 1 - 0.45 * c;
+        // wing endplates are the first thing to leave an F1 car
+        m.visible = !(it.endplate && c > 0.55);
+      } else {
+        // a side impact pushes the pod in against the tub
+        m.position.z = h.pz * (1 - 0.50 * c);
+        m.position.y = h.py - 0.05 * c;
+        m.rotation.x = h.rx + it.wob * 0.40 * c;
+        m.scale.z = 1 - 0.55 * c;
+        m.scale.y = 1 - 0.20 * c;
+      }
+    }
+  }
+}
+
 function puffTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -346,6 +421,7 @@ export class View {
 
     const car = buildCar(look, 0xd8352a);
     this.car = car.group; this.wheels = car.wheels; this.frontAxle = car.front; this.drs = car.drs;
+    this.crushParts = crushParts(car.group, car.wheels);
     this.scene.add(this.car);
     this._smoke();
 
@@ -503,6 +579,8 @@ export class View {
     // animation on top of it.
     this.car.rotation.z = -car.gLat * 0.030;
     this.car.rotation.x = -car.gLong * 0.022;
+    // Bodywork damage, straight off the contact impulses in collide.js.
+    applyCrush(this.crushParts, car.crush);
     // The DRS flap is a real flap: it opens when the wing is stalled, because
     // that is the only reason the car is faster on the straight.
     if (this.drs) this.drs.rotation.z = car.drsOpen ? -1.0 : 0;
