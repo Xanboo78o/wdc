@@ -16,6 +16,9 @@
 // dressing the bit by the pits and hoping nobody drives round the back.
 import * as THREE from 'three';
 import { Z, Builder, Atlas, fitText } from './geom.js';
+// The grid lives in a module that imports NOTHING, so the headless race gate
+// can call the same function this file paints from. See js/grid.js.
+import { gridSlots } from './grid.js';
 
 // Real-world dimensions, because guessing them is what makes a scene read as a
 // video game. A W-beam guard rail is 310 mm deep with its top edge at 750 mm;
@@ -389,44 +392,6 @@ export function buildBoards(scene, track, line, look, sign) {
   if (m1) scene.add(m1);
   if (m2) scene.add(m2);
   return [m1, m2];
-}
-
-// ---------------------------------------------------------------------------
-// THE STARTING GRID, as data.
-//
-// This is exported rather than computed inside the mesh builder for one
-// reason: the race layer has to put twenty-two cars on these slots, and if it
-// works out where they are a second time then there are two implementations of
-// the same geometry that can silently drift apart. That is exactly how
-// `track.pit.side` came to say "left" about a pit lane that is 17 m to the
-// right. One derivation, one consumer list.
-//
-// Positions come back in SIM coordinates — metres along the centreline, metres
-// to the left of it, and the heading in radians — because that is the frame
-// the simulation spawns cars in. The renderer converts; nothing else has to.
-//
-// Slot 0 is pole. Pole sits on the side the FIRST CORNER turns away from,
-// which is the real convention and worth about half a car's length into turn
-// one; the rest alternate at 8 m intervals down the straight behind the line.
-// ---------------------------------------------------------------------------
-export function gridSlots(track, count = 22) {
-  const t = track;
-  const first = (t.corners || [])[0];
-  // corner.dir < 0 is a right-hander, so pole goes left of the centreline.
-  const poleSide = first && first.dir < 0 ? 1 : -1;
-  const slots = [];
-  for (let k = 0; k < count; k++) {
-    const s = -6 - k * 8;
-    const i = t.idx(s);
-    slots.push({
-      n: k + 1,
-      s: t.wrap(s),
-      lat: (k % 2 ? -poleSide : poleSide) * t.w[i] * 0.46,
-      hdg: t.hdg[i],
-      i,
-    });
-  }
-  return slots;
 }
 
 // ---------------------------------------------------------------------------
