@@ -13,13 +13,14 @@
 // on track. A garage with nothing in it is a car park with a roof.
 //
 // ---------------------------------------------------------------------------
-// One thing that had to be measured rather than trusted: `track.pit.side` does
-// NOT reliably say which side of the circuit the lane is on. At Monza it says
-// left and the lane is 17 m to the RIGHT of the centreline; at Baku it says
-// right and the lane is 7.5 m to the left. So the side is derived here, from
-// where the surveyed points actually are, and the garages are placed on the
-// far side of the lane from the track. Trusting the flag puts every garage
-// between the pit lane and the racing line.
+// One thing that had to be measured rather than trusted: the BAKED
+// `pit.side` flag does not say which side of the circuit the lane is on. It is
+// wrong at Monza (says left, the surveyed lane is 17.3 m to the RIGHT), at
+// Suzuka (says left, is 14.0 m right) and at Baku (says right, is 7.5 m left)
+// — three of five. `js/track.js` now derives it from the lane's own geometry
+// in the Track constructor and keeps the original as `pit.sideRaw`, so
+// `pit.side` is safe to read and `pit.offset` gives the distance as well as
+// the sign. The garages go on the far side of the lane from the track.
 // ---------------------------------------------------------------------------
 import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
@@ -79,20 +80,6 @@ function headings(pts) {
   return h;
 }
 
-// Which way is away from the racing circuit? Measured, not assumed — see the
-// note at the top of this file.
-function awaySign(track, pts) {
-  const mid = pts[(pts.length / 2) | 0];
-  let bi = 0, bd = Infinity;
-  for (let i = 0; i < track.n; i += 4) {
-    const d = (track.x[i] - mid[0]) ** 2 + (track.y[i] - mid[1]) ** 2;
-    if (d < bd) { bd = d; bi = i; }
-  }
-  const h = track.hdg[bi];
-  const lat = -Math.sin(h) * (mid[0] - track.x[bi]) + Math.cos(h) * (mid[1] - track.y[bi]);
-  return lat >= 0 ? 1 : -1;
-}
-
 // The pit corridor, in sim metres, for anything that needs to keep out of the
 // way of it. Monza has 81 OSM buildings tagged `garage` right where the real
 // pit block stands, and without this the synthetic garages are built straight
@@ -114,7 +101,12 @@ export function buildPitLane(scene, track, look, sign) {
 
   const P = resample(pit.pts, 2);
   const H = headings(P);
-  const away = awaySign(track, P);
+  // Which side of the circuit the lane is on. `Track` derives this in its
+  // constructor now rather than reading the baked flag, which was wrong on
+  // three of the five circuits — Monza says left and the surveyed lane is
+  // 17.3 m to the right. `pit.offset` carries the distance too, if a future
+  // pass wants the number rather than the sign.
+  const away = pit.side || 1;
 
   // A point `lat` metres to the side of pit sample i, in three-space. Positive
   // lat is toward the garages, whichever side of the circuit that is.
