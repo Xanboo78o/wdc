@@ -165,6 +165,37 @@ function building(wall, glass, roofB, b, detail, trackKey) {
   const ring = p.map(q => [q[0], Z(q[1])]);
   const storeys = b.lv || Math.max(1, Math.round((h - 1) / STOREY));
 
+  // --- `building=roof` is a ROOF, with nothing under it ---------------------
+  // OSM uses it for a structure that is a roof on supports and open at the
+  // sides: canopies, covered parking, and at a circuit the roofed viewing
+  // structures. Suzuka has 31 of them and Monaco 22, and extruded as solid
+  // prisms they are the blank grey slabs that made Suzuka look unfinished.
+  // A slab on columns is barely more geometry and reads completely differently,
+  // because you can see daylight under it.
+  if (kind === 'roof') {
+    const top = Math.max(2.6, h);
+    wall.fan(ring, top, roofCol);                      // the roof itself
+    wall.fan(ring.slice().reverse(), top - 0.35, roofCol);  // and its underside
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], c = ring[(i + 1) % ring.length];
+      const dx = c[0] - a[0], dz = c[1] - a[1];
+      const m = Math.hypot(dx, dz);
+      if (m < 0.4) continue;
+      // a fascia round the edge, so the roof has a thickness
+      wall.quadN([a[0], top - 0.35, a[1]], [c[0], top - 0.35, c[1]],
+        [c[0], top, c[1]], [a[0], top, a[1]],
+        [[0, 0], [m, 0], [m, 0.35], [0, 0.35]], roofCol);
+      // columns along the edge, roughly every 6 m and at least at the corners
+      const cols = Math.max(1, Math.round(m / 6));
+      for (let k = 0; k < cols; k++) {
+        const f = (k + 0.5) / cols;
+        wall.box(a[0] + dx * f, (top - 0.35) / 2, a[1] + dz * f,
+          0.3, top - 0.35, 0.3, 0, base, 1);
+      }
+    }
+    return 0;
+  }
+
   if (!detail) {
     wall.prism(ring, 0, h, base, true, 1, roofCol);
     return 0;

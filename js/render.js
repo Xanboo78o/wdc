@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { Look, sunRig, fogFor } from './tex.js';
+import { bankTable, bankY, bankRoll } from './bank.js';
 import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
 import { buildGrandstands } from './crowd.js';
@@ -38,7 +39,7 @@ const ROAD_STRIPS = 11;      // lateral divisions of the racing surface
 // UVs are metres (u across, v along), so the asphalt scan lands at true size
 // whether the road is 7.6 m wide at Monaco or 11.5 m at Monza.
 // ---------------------------------------------------------------------------
-function roadSurface(track, line) {
+function roadSurface(track, line, bank) {
   const t = track, n = t.n;
   const b = new Builder({ color: true });
   const c = new THREE.Color();
@@ -68,12 +69,17 @@ function roadSurface(track, line) {
       const li0 = -t.w[i] + 2 * t.w[i] * f0, li1 = -t.w[i] + 2 * t.w[i] * f1;
       const lj0 = -t.w[j] + 2 * t.w[j] * f0, lj1 = -t.w[j] + 2 * t.w[j] * f1;
       const a = pi(li0), d = pi(li1), e = pj(lj0), g = pj(lj1);
+      // Height comes from the banking model. It is zero everywhere except
+      // Zandvoort's two banked corners, so this costs one array lookup a
+      // vertex on every other circuit.
+      const ya0 = bankY(bank, t, i, li0), ya1 = bankY(bank, t, i, li1);
+      const yb0 = bankY(bank, t, j, lj0), yb1 = bankY(bank, t, j, lj1);
       // Wound so the face normal comes out +Y after the reflection. Get this
       // backwards and, because the material is DoubleSide, three does not cull
       // it — it lights the tarmac from underneath and the whole road renders
       // near-black beside a run-off that looks perfect.
       const cols = [colourAt(i, li0), colourAt(i, li1), colourAt(j, lj1), colourAt(j, lj0)];
-      b.quad([a[0], 0, a[1]], [d[0], 0, d[1]], [g[0], 0, g[1]], [e[0], 0, e[1]],
+      b.quad([a[0], ya0, a[1]], [d[0], ya1, d[1]], [g[0], yb1, g[1]], [e[0], yb0, e[1]],
         [0, 1, 0],
         [[li0, i * t.ds], [li1, i * t.ds], [lj1, j * t.ds], [lj0, j * t.ds]],
         cols);
@@ -82,8 +88,9 @@ function roadSurface(track, line) {
   return b;
 }
 
-// A flat ribbon between two lateral offsets, UV'd in metres.
-function ribbon(track, innerAt, outerAt, y) {
+// A ribbon between two lateral offsets, UV'd in metres. Flat, except where the
+// circuit is banked — `bank` may be null for anything that should stay level.
+function ribbon(track, innerAt, outerAt, y, bank = null) {
   const t = track, n = t.n;
   const b = new Builder();
   for (let i = 0; i < n; i++) {
@@ -97,7 +104,11 @@ function ribbon(track, innerAt, outerAt, y) {
     const P = (h, x, yy, lat) => [x - Math.sin(h) * lat, Z(yy + Math.cos(h) * lat)];
     const p0 = P(hi, t.x[i], t.y[i], ai), p1 = P(hi, t.x[i], t.y[i], bi);
     const q0 = P(hj, t.x[j], t.y[j], aj), q1 = P(hj, t.x[j], t.y[j], bj);
-    b.quad([p0[0], y, p0[1]], [p1[0], y, p1[1]], [q1[0], y, q1[1]], [q0[0], y, q0[1]],
+    const yi0 = y + (bank ? bankY(bank, t, i, ai) : 0);
+    const yi1 = y + (bank ? bankY(bank, t, i, bi) : 0);
+    const yj0 = y + (bank ? bankY(bank, t, j, aj) : 0);
+    const yj1 = y + (bank ? bankY(bank, t, j, bj) : 0);
+    b.quad([p0[0], yi0, p0[1]], [p1[0], yi1, p1[1]], [q1[0], yj1, q1[1]], [q0[0], yj0, q0[1]],
       [0, 1, 0],
       [[ai, i * t.ds], [bi, i * t.ds], [bj, j * t.ds], [aj, j * t.ds]]);
   }
@@ -116,7 +127,7 @@ function ribbon(track, innerAt, outerAt, y) {
 // interpolate red into white across every quad, and the alternating blocks
 // come out as a smooth pink gradient. That was reported as a bug once already.
 // ---------------------------------------------------------------------------
-function kerbs(track) {
+function kerbs(track, bank) {
   const t = track;
   const b = new Builder({ color: true });
   const inCorner = new Uint8Array(t.n);
@@ -134,17 +145,24 @@ function kerbs(track) {
     const hi = t.hdg[i], hj = t.hdg[j];
     const P = (h, x, y, lat) => [x - Math.sin(h) * lat, Z(y + Math.cos(h) * lat)];
     const L = (lat) => [P(hi, t.x[i], t.y[i], sg * lat), P(hj, t.x[j], t.y[j], sg * lat)];
+    // The kerb rides on the banked surface like everything else, so it has to
+    // read its height at its OWN lateral offset rather than sitting at zero.
+    const Y = (lat, k) => bankY(bank, t, k ? j : i, sg * lat);
     const col = (Math.floor(i * t.ds / 2.6) % 2) ? 0xc7382c : 0xe4e4e0;
     const [i0, j0] = L(t.w[i] - 0.10);
     const [i1, j1] = L(t.w[i]);
     const [i2, j2] = L(t.w[i] + KERB_W);
     const [i3, j3] = L(t.w[i] + KERB_W + 0.14);
     // inner chamfer, flat top, outer chamfer
-    b.quadN([i0[0], 0, i0[1]], [j0[0], 0, j0[1]], [j1[0], KERB_H, j1[1]], [i1[0], KERB_H, i1[1]],
+    const w0 = t.w[i] - 0.10, w1 = t.w[i], w2 = t.w[i] + KERB_W, w3 = t.w[i] + KERB_W + 0.14;
+    b.quadN([i0[0], Y(w0, 0), i0[1]], [j0[0], Y(w0, 1), j0[1]],
+      [j1[0], Y(w1, 1) + KERB_H, j1[1]], [i1[0], Y(w1, 0) + KERB_H, i1[1]],
       [[0, 0], [t.ds, 0], [t.ds, 0.12], [0, 0.12]], col);
-    b.quadN([i1[0], KERB_H, i1[1]], [j1[0], KERB_H, j1[1]], [j2[0], KERB_H, j2[1]], [i2[0], KERB_H, i2[1]],
+    b.quadN([i1[0], Y(w1, 0) + KERB_H, i1[1]], [j1[0], Y(w1, 1) + KERB_H, j1[1]],
+      [j2[0], Y(w2, 1) + KERB_H, j2[1]], [i2[0], Y(w2, 0) + KERB_H, i2[1]],
       [[0, 0], [t.ds, 0], [t.ds, KERB_W], [0, KERB_W]], col);
-    b.quadN([i2[0], KERB_H, i2[1]], [j2[0], KERB_H, j2[1]], [j3[0], 0, j3[1]], [i3[0], 0, i3[1]],
+    b.quadN([i2[0], Y(w2, 0) + KERB_H, i2[1]], [j2[0], Y(w2, 1) + KERB_H, j2[1]],
+      [j3[0], Y(w3, 1), j3[1]], [i3[0], Y(w3, 0), i3[1]],
       [[0, 0], [t.ds, 0], [t.ds, 0.15], [0, 0.15]], col);
   }
   return b;
@@ -422,7 +440,21 @@ export class View {
     const car = buildCar(look, 0xd8352a);
     this.car = car.group; this.wheels = car.wheels; this.frontAxle = car.front; this.drs = car.drs;
     this.crushParts = crushParts(car.group, car.wheels);
-    this.scene.add(this.car);
+    // YAW ON THE PARENT, ROLL AND PITCH ON THE CHILD.
+    //
+    // All three used to live on one object, and with three's default XYZ Euler
+    // order that is wrong: the Z rotation is applied to the UN-yawed car, so
+    // what was labelled body roll came out as pitch and what was labelled
+    // pitch came out as roll, and both were only correct at heading zero. At
+    // 0.03 rad nobody would ever see it. At 18 degrees of banking they would.
+    // Splitting the two puts roll and pitch in the car's own frame.
+    //
+    // The crush parts are captured off `car.group` and deform in their own
+    // local space, so reparenting the group leaves them untouched.
+    this.carYaw = new THREE.Group();
+    this.carYaw.add(this.car);
+    this.scene.add(this.carYaw);
+    this.hint = 0;
     this._smoke();
 
     addEventListener('resize', () => this.resize());
@@ -441,6 +473,10 @@ export class View {
     const S = this.scene;
     const look = this.look;
     const stats = {};
+    // Zandvoort banks 18 degrees at Tarzanbocht and Arie Luyendyk. Everywhere
+    // else this table is all zeroes and costs one lookup per vertex.
+    this.bank = bankTable(t);
+    const bank = this.bank;
 
     // The ground the whole circuit sits on. Big, textured, and the colour of
     // the region rather than a default green — it is what fills every gap the
@@ -468,8 +504,8 @@ export class View {
     const runMat = gravel
       ? look.mat('gravel', { size: 2.4, tint: 0xb6a487, roughness: 1, side: THREE.DoubleSide, normalScale: 1.5 })
       : look.mat('apron', { size: 3.2, tint: 0x83858a, roughness: 0.97, side: THREE.DoubleSide, normalScale: 1.4 });
-    const runL = ribbon(t, i => t.w[i], i => t.w[i] + t.runL[i], -0.03);
-    const runR = ribbon(t, i => -t.w[i], i => -(t.w[i] + t.runR[i]), -0.03);
+    const runL = ribbon(t, i => t.w[i], i => t.w[i] + t.runL[i], -0.03, bank);
+    const runR = ribbon(t, i => -t.w[i], i => -(t.w[i] + t.runR[i]), -0.03, bank);
     for (const b of [runL, runR]) { const m = b.mesh(runMat, { shadow: false }); if (m) S.add(m); }
 
     // 3 m of asphalt per tile: at 2 m the scan's directional streaking repeats
@@ -477,7 +513,7 @@ export class View {
     // aggregate stops being the right size to measure speed against.
     // normalScale stays near 1 — pushed to 1.8 the relief stopped looking like
     // asphalt and started looking like cracked dried mud.
-    const road = roadSurface(t, this.line).mesh(look.mat('tarmac', {
+    const road = roadSurface(t, this.line, bank).mesh(look.mat('tarmac', {
       size: 3.0, roughness: 0.94, metalness: 0.0, side: THREE.DoubleSide,
       vertexColors: true, env: 0.8, normalScale: 1.05,
     }), { shadow: false });
@@ -491,13 +527,13 @@ export class View {
       color: 0xeeeeea, roughness: 0.74, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
     });
-    for (const b of [ribbon(t, i => t.w[i] - 0.14, i => t.w[i], 0.006),
-      ribbon(t, i => -(t.w[i] - 0.14), i => -t.w[i], 0.006)]) {
+    for (const b of [ribbon(t, i => t.w[i] - 0.14, i => t.w[i], 0.006, bank),
+      ribbon(t, i => -(t.w[i] - 0.14), i => -t.w[i], 0.006, bank)]) {
       const m = b.mesh(lineMat, { shadow: false });
       if (m) S.add(m);
     }
 
-    const kb = kerbs(t).mesh(look.mat('concrete', {
+    const kb = kerbs(t, bank).mesh(look.mat('concrete', {
       size: 1.4, roughness: 0.62, side: THREE.DoubleSide, vertexColors: true,
     }));
     if (kb) S.add(kb);
@@ -522,7 +558,7 @@ export class View {
     stats.pit = buildPitLane(S, t, look, sign);
 
     // The ideal line, toggled with L — a reference, not a rail.
-    const lg = ribbon(t, i => this.line.off[i] - 0.10, i => this.line.off[i] + 0.10, 0.02).geometry();
+    const lg = ribbon(t, i => this.line.off[i] - 0.10, i => this.line.off[i] + 0.10, 0.02, bank).geometry();
     this.lineMesh = new THREE.Mesh(lg, new THREE.MeshBasicMaterial({
       color: 0x35d6a0, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
       depthWrite: false,
@@ -552,11 +588,11 @@ export class View {
     this.smokeI = 0;
   }
 
-  puff(x, z, vx, vz, force) {
+  puff(x, z, vx, vz, force, baseY = 0) {
     const p = this.smoke[this.smokeI];
     this.smokeI = (this.smokeI + 1) % this.smokeMax;
     p.life = 1;
-    p.x = x; p.y = 0.12; p.z = z;
+    p.x = x; p.y = baseY + 0.12; p.z = z;
     p.vx = -vx * 0.06 + (Math.random() - 0.5) * 1.6;
     p.vz = -vz * 0.06 + (Math.random() - 0.5) * 1.6;
     p.vy = 0.5 + Math.random() * 0.9 * force;
@@ -568,17 +604,30 @@ export class View {
   // dt here is a REAL frame time — camera smoothing is allowed to be
   // frame-rate dependent, the simulation is not.
   frame(car, dt, hud = {}) {
-    this.car.position.set(car.x, 0, Z(car.y));
-    this.car.rotation.y = car.hdg;
+    // Where the car is on the circuit, for the banked height and lean. The
+    // renderer keeps its own hint so it needs nothing from main.js; searching
+    // 90 samples once a FRAME is free next to doing it every physics substep.
+    const proj = this.track.project(car.x, car.y, this.hint);
+    this.hint = proj.i;
+    const surfaceY = bankY(this.bank, this.track, proj.i, proj.lat);
+
+    this.carYaw.position.set(car.x, surfaceY, Z(car.y));
+    this.carYaw.rotation.y = car.hdg;
     this.frontAxle.rotation.y = -car.delta;
-    const roll = this.wheels.rl.rotation.z;
+    const wheelRoll = this.wheels.rl.rotation.z;
     const spin = car.speed * dt / 0.36;
-    for (const k in this.wheels) this.wheels[k].rotation.z = roll - spin;
-    // body roll and pitch, read straight off the accelerations. This is the
-    // same weight transfer the tyres are already using — not a second, made-up
-    // animation on top of it.
-    this.car.rotation.z = -car.gLat * 0.030;
-    this.car.rotation.x = -car.gLong * 0.022;
+    for (const k in this.wheels) this.wheels[k].rotation.z = wheelRoll - spin;
+
+    // Body roll and pitch, in the car's own frame now.
+    //
+    // Roll is driven by the CENTRIPETAL acceleration, `vx * r`, not by
+    // `car.gLat`. gLat is `Fy/m - vx*r`, which is the rate of change of
+    // lateral velocity — and in a steady corner that is approximately zero,
+    // however hard the car is cornering. Rolling the body off it meant the car
+    // never visibly leaned in a long corner at all.
+    const latG = Math.max(-5, Math.min(5, (car.vx * car.r) / 9.81));
+    this.car.rotation.x = latG * 0.030 + bankRoll(this.bank, this.track, proj.i, proj.lat);
+    this.car.rotation.z = car.gLong * 0.022;
     // Bodywork damage, straight off the contact impulses in collide.js.
     applyCrush(this.crushParts, car.crush);
     // The DRS flap is a real flap: it opens when the wing is stalled, because
@@ -594,7 +643,7 @@ export class View {
         // rear axle, then out to each rear tyre along the car's left vector
         const px = car.x - cs * 1.30 - sn * sd;
         const py = car.y - sn * 1.30 + cs * sd;
-        if (Math.random() < Math.min(1, over * 2.2)) this.puff(px, Z(py), vwx, Z(vwy), Math.min(2, over * 3));
+        if (Math.random() < Math.min(1, over * 2.2)) this.puff(px, Z(py), vwx, Z(vwy), Math.min(2, over * 3), surfaceY);
       }
     }
     const pa = this.smokePts.geometry.attributes.position;

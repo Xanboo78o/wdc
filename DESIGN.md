@@ -282,6 +282,47 @@ calls and 1.16M triangles** a frame, which is the number to watch when the
     complains once per building rather than throwing, so it fills the console
     and looks like a renderer fault. Validate, fall back to the palette.
 
+21. **Yaw, roll and pitch cannot all live on one object.** three's default
+    Euler order is XYZ, so the Z rotation is applied to the UN-yawed mesh:
+    putting `rotation.y = heading` and `rotation.z = roll` on the same object
+    makes roll come out as PITCH everywhere except heading zero. At 0.03 rad
+    of body roll nobody notices, which is how it survived; at 18 degrees of
+    banking it is obvious. The car is a yaw PARENT with a roll/pitch CHILD now.
+
+22. **`car.gLat` is not cornering load.** It is `Fy/m - vx*r`, the rate of
+    change of lateral velocity, which in a steady corner is approximately
+    ZERO however hard the car is going round. Body roll driven off it meant
+    the car never leaned in a long corner. The renderer uses `vx * r / g`.
+    Measured over a hard F1 lap: `gLat` peaks at 4.17 with a mean of 0.11,
+    while the real cornering acceleration peaks at 5.24 with a mean of 0.73 —
+    at 199 km/h through a Monza corner `gLat` says 0.38 g and the car is
+    pulling 3.43. **The HUD still prints `gLat`**, so the G LAT readout is
+    wrong in the same way; that is in `js/main.js` and not fixed here.
+
+## Zandvoort's banking
+
+Drawn, as of the taper landing in the bake. `js/bank.js` is the model and it
+is VISUAL ONLY — the simulation is 2D, reads `track.bank[i]` as a force, and
+nothing in the geometry feeds back into it. If the two disagree, the geometry
+is lying.
+
+Two decisions carry it. It pivots at the **inside edge of the road**, not the
+centreline: rotating about the centreline drops the inside of the corner 3.6 m
+below the dunes around it, and real banking is built UP. And the camber falls
+back to zero across the **outer run-off** on a smoothstep, so every barrier,
+hoarding, tyre wall and marshal post stays at grade and nothing in
+furniture.js had to move.
+
+The direction of a banked run comes from the curvature **summed over the whole
+run**, never per sample. At Arie Luyendyk the per-sample curvature reads
+-0.0022, 0.0000, -0.0038 over three consecutive samples — sign noise, which
+would put a fold down the middle of the corner.
+
+Zandvoort's two banked corners are **Hugenholtzbocht** (turn 3, a left-hander,
+banked high on the right) and **Arie Luyendykbocht** (turn 14, a right-hander,
+banked high on the left). Not Tarzanbocht, which is the famous one and is not
+banked in the survey.
+
 ## Inherited gotchas (from DIRTY AIR — still load-bearing here)
 
 - Low-speed regularisation is mandatory: floor the slip-angle denominator at
@@ -395,13 +436,6 @@ chmod +x .git/hooks/pre-commit
 - No wheel/force-feedback layer. The WebHID pedal pairing in
   `apex-racer/js/main.js` (lines ~432–487) is the thing to port when the DIY
   pedals exist — see `apex-racer/docs/RIG-BUILD.md`.
-- **Zandvoort's banking is not drawn.** The circuit banks 18 degrees at
-  Tarzanbocht and at Arie Luyendyk and the physics already uses it, but the
-  renderer draws both flat. This is a DATA problem before it is a rendering
-  one: `track.bank` is a hard 0 -> 18 -> 0 step with no taper, so drawing it
-  directly would put a 3.6 m vertical cliff at each end of the banked section.
-  It needs a ramp baked into the track data first, and the car's rendered
-  height and roll have to follow the same function or it will float.
 - No sound at all, still.
 - The car is primitives — real dimensions (5.63 m long, 2.0 m wide, 3.6 m
   wheelbase), real DRS flap, suspension arms, a driver in a helmet, but
