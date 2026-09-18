@@ -9,30 +9,32 @@
 <script type="importmap">
 {
  "imports": {
-  "three": "./js/vendor/three.module.min.js?v=1789764102",
-  "./js/autopilot.js": "./js/autopilot.js?v=1789764102",
-  "./js/bank.js": "./js/bank.js?v=1789764102",
-  "./js/car.js": "./js/car.js?v=1789764102",
-  "./js/collide.js": "./js/collide.js?v=1789764102",
-  "./js/crowd.js": "./js/crowd.js?v=1789764102",
-  "./js/env.js": "./js/env.js?v=1789764102",
-  "./js/furniture.js": "./js/furniture.js?v=1789764102",
-  "./js/geom.js": "./js/geom.js?v=1789764102",
-  "./js/grid.js": "./js/grid.js?v=1789764102",
-  "./js/horizon.js": "./js/horizon.js?v=1789764102",
-  "./js/input.js": "./js/input.js?v=1789764102",
-  "./js/line.js": "./js/line.js?v=1789764102",
-  "./js/main.js": "./js/main.js?v=1789764102",
-  "./js/physics.js": "./js/physics.js?v=1789764102",
-  "./js/pit.js": "./js/pit.js?v=1789764102",
-  "./js/race.js": "./js/race.js?v=1789764102",
-  "./js/render.js": "./js/render.js?v=1789764102",
-  "./js/surface.js": "./js/surface.js?v=1789764102",
-  "./js/tex.js": "./js/tex.js?v=1789764102",
-  "./js/track.js": "./js/track.js?v=1789764102",
-  "./js/world.js": "./js/world.js?v=1789764102",
-  "./js/vendor/three.core.min.js": "./js/vendor/three.core.min.js?v=1789764102",
-  "./js/vendor/three.module.min.js": "./js/vendor/three.module.min.js?v=1789764102"
+  "three": "./js/vendor/three.module.min.js?v=1789773287",
+  "./js/aero.js": "./js/aero.js?v=1789773287",
+  "./js/autopilot.js": "./js/autopilot.js?v=1789773287",
+  "./js/bank.js": "./js/bank.js?v=1789773287",
+  "./js/car.js": "./js/car.js?v=1789773287",
+  "./js/collide.js": "./js/collide.js?v=1789773287",
+  "./js/crowd.js": "./js/crowd.js?v=1789773287",
+  "./js/env.js": "./js/env.js?v=1789773287",
+  "./js/field.js": "./js/field.js?v=1789773287",
+  "./js/furniture.js": "./js/furniture.js?v=1789773287",
+  "./js/geom.js": "./js/geom.js?v=1789773287",
+  "./js/grid.js": "./js/grid.js?v=1789773287",
+  "./js/horizon.js": "./js/horizon.js?v=1789773287",
+  "./js/input.js": "./js/input.js?v=1789773287",
+  "./js/line.js": "./js/line.js?v=1789773287",
+  "./js/main.js": "./js/main.js?v=1789773287",
+  "./js/physics.js": "./js/physics.js?v=1789773287",
+  "./js/pit.js": "./js/pit.js?v=1789773287",
+  "./js/race.js": "./js/race.js?v=1789773287",
+  "./js/render.js": "./js/render.js?v=1789773287",
+  "./js/surface.js": "./js/surface.js?v=1789773287",
+  "./js/tex.js": "./js/tex.js?v=1789773287",
+  "./js/track.js": "./js/track.js?v=1789773287",
+  "./js/world.js": "./js/world.js?v=1789773287",
+  "./js/vendor/three.core.min.js": "./js/vendor/three.core.min.js?v=1789773287",
+  "./js/vendor/three.module.min.js": "./js/vendor/three.module.min.js?v=1789773287"
  }
 }
 </script>
@@ -60,6 +62,20 @@
     </div>
   </div>
 
+  <div class="pickrow">
+    <div class="pick">
+      <h2>SESSION</h2>
+      <div class="cards" id="modeList"></div>
+      <small>A race is other drivers on your tyres, your physics and your grip. Nobody on the grid gets a speed cheat — skill is how much of the tyre they dare to use.</small>
+    </div>
+    <div class="pick" id="raceOpts">
+      <div class="opt"><h2>GRID</h2><div class="cards tight" id="gridList"></div></div>
+      <div class="opt"><h2>RIVAL SKILL</h2><div class="cards tight" id="tierList"></div></div>
+      <div class="opt"><h2>LAPS</h2><div class="cards tight" id="lapList"></div></div>
+      <div class="opt"><h2>YOU START</h2><div class="cards tight" id="startList"></div></div>
+    </div>
+  </div>
+
   <button id="go" class="go">GO</button>
 
   <div class="keys">
@@ -81,6 +97,7 @@
   </div>
 
   <div id="times">
+    <div class="row pos hidden" id="posRow"><span>POSITION</span><em id="posV">P1</em></div>
     <div class="row big"><span>LAP <b id="lapNo">1</b></span><em id="tCur">--:--.---</em></div>
     <div class="row"><span>LAST</span><em id="tLast">--:--.---</em></div>
     <div class="row best"><span>BEST</span><em id="tBest">--:--.---</em></div>
@@ -116,9 +133,23 @@
     </div>
   </div>
 
+  <!-- The timing tower, and race control. Both only exist in a race. -->
+  <div id="tower" class="hidden"></div>
+  <div id="feed" class="hidden"></div>
+
+  <!-- Five lights above the grid, and then the wait. -->
+  <div id="lights" class="hidden"><i></i><i></i><i></i><i></i><i></i></div>
+
   <div id="msg"></div>
 </div>
 
-<script type="module" src="./js/main.js?v=1789764102"></script>
+<!-- ===================== RESULTS ===================== -->
+<div id="results" class="screen hidden">
+  <div class="brand"><h1 id="resTitle">CHEQUERED <span>FLAG</span></h1><p id="resSub">—</p></div>
+  <div id="resTable"></div>
+  <button id="resBack" class="go">MENU</button>
+</div>
+
+<script type="module" src="./js/main.js?v=1789773287"></script>
 </body>
 </html>

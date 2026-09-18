@@ -1,5 +1,8 @@
 // physics.js — the simulation. NOTHING in this file may import a renderer.
 //
+// aero.js is the one import, and it obeys the same law: pure numbers, no I/O,
+// no DOM. It holds the wake and the solved aero map.
+//
 // That is the one rule that keeps this portable: every number here is computed
 // from forces, not from frames, so the same module runs in the browser, in a
 // headless Node harness, and (later) inside a native shell without a rewrite.
@@ -14,6 +17,21 @@
 // ---------------------------------------------------------------------------
 // Car specs. The ladder: you start in F4 and you earn the F1 car.
 // ---------------------------------------------------------------------------
+import { dirtyFront, dirtyRear, towDrag } from './aero.js';
+
+// Ride height the aero map was calibrated at. A grounded car sits here, so the
+// map returns the validated ClA/CdA exactly and a clean lap is unchanged.
+export const AERO_REF_RIDE = 0.030;
+
+// A registry, so exactly one place has to know about the map and every car
+// made afterwards gets it. The alternative was threading an `aero` argument
+// through makeCar, runLaps, the race layer and six tools — which is a lot of
+// contested files touched to deliver one object. physics.js still does no I/O:
+// whoever loads the JSON calls this.
+const AERO = {};
+export function registerAero(key, instance) { AERO[key] = instance; }
+export function getAero(key) { return AERO[key] || null; }
+
 export const CARS = {
   f4: {
     key: 'f4', name: 'F4', full: 'Formula 4',
@@ -432,6 +450,7 @@ export function makeCar(opts = {}) {
     aids: { tc: 0.60, abs: 0.60, sc: 0.35, ...(opts.aids || {}) },
     tcCut: 1, absCut: 1,
     surface: 1, damage: 0,
+    aero: AERO[spec.key] || null,   // null = fall back to the constants
     // ---- the vertical axis. All zero while the car is driving, which is what
     // keeps the planar model below bit-for-bit what it was.
     z: 0, vz: 0,                  // height above the road, and its rate
@@ -487,26 +506,40 @@ export function step(car, dt, env = {}) {
 
   // ---- aero ---------------------------------------------------------------
   const q = 0.5 * S.rho * v * v;
-  let clA = S.ClA, cdA = S.CdA, balF = S.aeroBal;
-  if (car.drsOpen && S.drs) { clA *= S.drsCl; cdA *= S.drsCd; }
-  // Bodywork that has left the car does not make downforce. The front wing is
-  // about a third of the total and ALL of it is on the front axle, so losing it
-  // is not a scratch — the car understeers off the road at the next corner.
-  // Losing the rear wing does the opposite and spins it. This is what makes a
-  // first-lap clash cost you the race rather than cost you some paint.
-  if (car.lost) {
-    if (car.lost.frontWing) { clA *= 0.72; balF *= 0.44; cdA *= 0.93; }
-    if (car.lost.rearWing) { clA *= 0.60; balF = Math.min(0.88, balF * 2.0); cdA *= 0.88; }
+  let clA, cdA, balF;
+  if (car.aero) {
+    // SIDESLIP is the aero yaw angle: the angle between where the car is
+    // pointing and where it is actually going. In a fast corner that is a
+    // couple of degrees; in a slide it is twenty, and twenty degrees costs a
+    // third of the downforce and adds sixty percent more drag. No constant can
+    // say that, and it is the difference between a slide you can catch and one
+    // you cannot — losing the car costs you the grip you needed to save it.
+    const beta = v > 2 ? Math.abs(Math.atan2(car.vy, Math.abs(car.vx))) * 180 / Math.PI : 0;
+    // Ride height. The map already carries the ground-effect curve, so
+    // groundEffect() must NOT also be applied here or the floor is counted
+    // twice — a grounded car sits exactly at the reference height.
+    const rideH = AERO_REF_RIDE + (car.z > 0 ? car.z : 0);
+    const o = car._aero || (car._aero = car.aero.newOut());
+    car.aero.coeffs(o, car, car.pitch * 180 / Math.PI, beta, rideH);
+    clA = o.clA; cdA = o.cdA; balF = o.bal;
+  } else {
+    // Fallback for a caller that has not loaded the map: the constants, and
+    // the old hand-written damage fudge. Kept so every harness still runs
+    // without a data file, NOT as a second opinion on the aerodynamics.
+    clA = S.ClA; cdA = S.CdA; balF = S.aeroBal;
+    if (car.lost) {
+      if (car.lost.frontWing) { clA *= 0.72; balF *= 0.44; cdA *= 0.93; }
+      if (car.lost.rearWing) { clA *= 0.60; balF = Math.min(0.88, balF * 2.0); cdA *= 0.88; }
+    }
+    clA *= groundEffect(car.z);
   }
+  if (car.drsOpen && S.drs) { clA *= S.drsCl; cdA *= S.drsCd; }
   const dirty = env.dirty ?? car.dirty ?? 0;
   const tow = env.tow ?? car.tow ?? 0;
-  // The floor only makes downforce while it is sealed against the road. On the
-  // ground groundEffect() is exactly 1 and nothing below changes.
-  const ge = groundEffect(car.z);
   // Following another car guts your FRONT wing first -> understeer. That is
   // the real reason overtaking is hard, and it is why the effect is asymmetric.
-  const DFf = q * clA * balF * (1 - 0.40 * dirty) * ge;
-  const DFr = q * clA * (1 - balF) * (1 - 0.12 * dirty) * ge;
+  const DFf = q * clA * balF * dirtyFront(dirty);
+  const DFr = q * clA * (1 - balF) * dirtyRear(dirty);
   // Rolling resistance scales with what the wheels are ploughing through.
   // A car at seventy degrees nose-up is a barn door, and its drag is nothing
   // like its drag in a straight line. Without this the floor's lift held a
@@ -516,7 +549,7 @@ export function step(car, dt, env = {}) {
   // The same angle that makes the lift has to make the drag.
   const broadside = car.airborne
     ? Math.abs(Math.sin(car.pitch)) + 0.4 * Math.abs(Math.sin(car.roll)) : 0;
-  const drag = q * (cdA * (1 - 0.40 * tow) + S.ClFloor * 0.55 * broadside)
+  const drag = q * (cdA * towDrag(tow) + S.ClFloor * 0.55 * broadside)
              + S.rollRes * (env.rollMul ?? 1);
 
   // ---- the vertical axis --------------------------------------------------
