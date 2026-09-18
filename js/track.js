@@ -21,6 +21,62 @@ export class Track {
     if (this.pit) {
       for (let i = 1; i < this.pit.pts.length; i++)
         this.pitLen += Math.hypot(this.pit.pts[i][0] - this.pit.pts[i - 1][0], this.pit.pts[i][1] - this.pit.pts[i - 1][1]);
+
+      // WHICH SIDE THE PIT LANE IS ON — measured, never read from the file.
+      //
+      // The baked `pit.side` flag is wrong on three of the five circuits:
+      // Monza says left and the surveyed lane is 17.3 m to the RIGHT, Suzuka
+      // says left and is 14.0 m right, Baku says right and is 7.5 m left. Only
+      // Monaco and Zandvoort happen to agree. Anything that trusts the flag
+      // sends cars across the circuit to a pit entry that is not there.
+      //
+      // The lane's own geometry cannot be wrong, so derive it: project the
+      // lane's midpoint onto the nearest centreline sample and read the sign.
+      const mid = this.pit.pts[Math.floor(this.pit.pts.length / 2)];
+      let best = 0, bd = Infinity;
+      for (let i = 0; i < n; i++) {
+        const d = (this.x[i] - mid[0]) ** 2 + (this.y[i] - mid[1]) ** 2;
+        if (d < bd) { bd = d; best = i; }
+      }
+      const hm = this.hdg[best];
+      const lat = -Math.sin(hm) * (mid[0] - this.x[best]) + Math.cos(hm) * (mid[1] - this.y[best]);
+      this.pit.sideRaw = this.pit.side;
+      this.pit.side = Math.sign(lat) || 1;      // +1 = left of travel
+      this.pit.offset = lat;                    // how far out, in metres
+    }
+
+    // BANKING NEEDS A TRANSITION.
+    //
+    // The bake stores bank as a hard step — Zandvoort is 0 -> 18 -> 0 with no
+    // taper, twice a lap. Physically that lands the full banking force on the
+    // car in a single 2.5 ms substep, which is a jolt no real camber change
+    // makes; geometrically it is a 3.6 m vertical cliff at each end, so it
+    // cannot be drawn at all. Real banking ramps in over tens of metres.
+    //
+    // Taper each banked run in and out with a smoothstep, eating into the run
+    // rather than extending past it, so a banked corner never spills camber
+    // onto the straight that approaches it.
+    if (this.bank && this.bank.some(v => v !== 0)) {
+      const src = Array.from(this.bank);
+      const out = new Float32Array(n);
+      const TAPER = 38;                          // metres of transition
+      let i = 0;
+      while (i < n) {
+        if (src[i] === 0) { out[i] = 0; i++; continue; }
+        let j = i;
+        while (j + 1 < n && src[j + 1] === src[i]) j++;
+        const runLen = (j - i + 1) * this.ds;
+        const tap = Math.min(TAPER, runLen / 3);
+        const steps = Math.max(1, Math.round(tap / this.ds));
+        for (let k = i; k <= j; k++) {
+          const inFrom = k - i, inTo = j - k;
+          const f = Math.min(1, Math.min(inFrom, inTo) / steps);
+          const s = f * f * (3 - 2 * f);         // smoothstep
+          out[k] = src[k] * s;
+        }
+        i = j + 1;
+      }
+      this.bank = out;
     }
   }
   static async load(key) {
