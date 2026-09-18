@@ -19,6 +19,7 @@ import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround } from './horizon.js';
 import { buildCar } from './car.js';
+import { World, loadElev } from './world.js';
 
 const KERB_W = 0.62;
 const KERB_H = 0.055;
@@ -269,8 +270,12 @@ export class View {
    */
   static async create(canvas, track, line, opts = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    const look = await Look.load(renderer, track.key, { textures: opts.textures !== false });
-    return new View(renderer, look, track, line, opts);
+    // Textures, sky and terrain all come off the network; fetch them together.
+    const [look, elev] = await Promise.all([
+      Look.load(renderer, track.key, { textures: opts.textures !== false }),
+      opts.flat ? null : loadElev(track.key),
+    ]);
+    return new View(renderer, look, track, line, { ...opts, elev });
   }
 
   constructor(renderer, look, track, line, opts = {}) {
@@ -300,6 +305,9 @@ export class View {
     this.mode = 0;
     this.shake = 0;
 
+    // Real surveyed elevation, from NASA SRTM. Null on a fresh clone that has
+    // not run tools/getelev.mjs, and the world is simply flat then.
+    this.world = new World(track, opts.elev);
     this.rig = sunRig(this.scene, sky, { shadows: this.shadows });
     this.stats = this._world(opts.env);
     // Publish what actually got built. `tools/shot.mjs` polls for this rather
@@ -395,7 +403,10 @@ export class View {
     // The air, and what is in the distance. First, because everything else is
     // judged against it: without layered distance and real aerial perspective
     // a circuit reads as a diorama however good its surfaces are.
-    stats.horizon = buildHorizon(S, t, env, this.sky);
+    stats.horizon = buildHorizon(S, t, env, this.sky, this.world);
+    stats.elev = this.world.on
+      ? { rise: +(Math.max(...this.world.elev.s) - Math.min(...this.world.elev.s)).toFixed(1), set: this.world.elev.dataset }
+      : null;
     // Zandvoort banks 18 degrees at Tarzanbocht and Arie Luyendyk. Everywhere
     // else this table is all zeroes and costs one lookup per vertex.
     this.bank = bankTable(t);
@@ -404,7 +415,7 @@ export class View {
     // The ground the whole circuit sits on. Big, textured, and the colour of
     // the region rather than a default green — it is what fills every gap the
     // survey does not cover.
-    S.add(buildGround(t, look, this.sky));
+    S.add(buildGround(t, look, this.sky, this.world));
 
     // Run-off: gravel at Monza and Suzuka, asphalt everywhere else. Grip is
     // handled in main.js; this is only what it looks like.
@@ -414,7 +425,10 @@ export class View {
       : look.mat('apron', { size: 3.2, tint: 0x83858a, roughness: 0.97, side: THREE.DoubleSide, normalScale: 1.4 });
     const runL = ribbon(t, i => t.w[i], i => t.w[i] + t.runL[i], -0.03, bank);
     const runR = ribbon(t, i => -t.w[i], i => -(t.w[i] + t.runR[i]), -0.03, bank);
-    for (const b of [runL, runR]) { const m = b.mesh(runMat, { shadow: false }); if (m) S.add(m); }
+    for (const b of [runL, runR]) {
+      const m = b.mesh(runMat, { shadow: false });
+      if (m) { this.world.lift(m.geometry); S.add(m); }
+    }
 
     // 3 m of asphalt per tile: at 2 m the scan's directional streaking repeats
     // often enough along a straight to read as a pattern, and much beyond 3 the
@@ -425,6 +439,7 @@ export class View {
       size: 3.0, roughness: 0.94, metalness: 0.0, side: THREE.DoubleSide,
       vertexColors: true, env: 0.8, normalScale: 1.05,
     }), { shadow: false });
+    this.world.lift(road.geometry);
     S.add(road);
     this.road = road;
 
@@ -438,13 +453,13 @@ export class View {
     for (const b of [ribbon(t, i => t.w[i] - 0.14, i => t.w[i], 0.006, bank),
       ribbon(t, i => -(t.w[i] - 0.14), i => -t.w[i], 0.006, bank)]) {
       const m = b.mesh(lineMat, { shadow: false });
-      if (m) S.add(m);
+      if (m) { this.world.lift(m.geometry); S.add(m); }
     }
 
     const kb = kerbs(t, bank).mesh(look.mat('concrete', {
       size: 1.4, roughness: 0.62, side: THREE.DoubleSide, vertexColors: true,
     }));
-    if (kb) S.add(kb);
+    if (kb) { this.world.lift(kb.geometry); S.add(kb); }
 
     // The real surroundings, if they have been baked. Without these the world
     // ends in a flat plane against the sky, which reads as a video game
@@ -452,23 +467,24 @@ export class View {
     // The pit complex is laid out BEFORE the city so the city can be told to
     // keep out of its way.
     const corridor = pitCorridor(t);
-    stats.env = buildEnv(S, env, t, look, corridor);
+    stats.env = buildEnv(S, env, t, look, corridor, this.world);
     this.corridor = corridor;
 
     const sign = signAtlas(t);
     this.sign = sign;
-    buildBarriers(S, t, look, sign, corridor);
-    buildTyreWalls(S, t, look);
-    buildBoards(S, t, this.line, look, sign);
-    buildStartFinish(S, t, look, sign);
-    buildMarshalPosts(S, t, look);
-    stats.stands = buildGrandstands(S, t, env, look);
-    stats.pit = buildPitLane(S, t, look, sign);
+    buildBarriers(S, t, look, sign, corridor, this.world);
+    buildTyreWalls(S, t, look, this.world);
+    buildBoards(S, t, this.line, look, sign, this.world);
+    buildStartFinish(S, t, look, sign, this.world);
+    buildMarshalPosts(S, t, look, this.world);
+    stats.stands = buildGrandstands(S, t, env, look, this.world);
+    stats.pit = buildPitLane(S, t, look, sign, this.world);
     this.tvCams = this._tvCameras();
     stats.tvCams = this.tvCams.length;
 
     // The ideal line, toggled with L — a reference, not a rail.
-    const lg = ribbon(t, i => this.line.off[i] - 0.10, i => this.line.off[i] + 0.10, 0.02, bank).geometry();
+    const lg = this.world.lift(
+      ribbon(t, i => this.line.off[i] - 0.10, i => this.line.off[i] + 0.10, 0.02, bank).geometry());
     this.lineMesh = new THREE.Mesh(lg, new THREE.MeshBasicMaterial({
       color: 0x35d6a0, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
       depthWrite: false,
@@ -579,7 +595,10 @@ export class View {
     // 90 samples once a FRAME is free next to doing it every physics substep.
     const proj = this.track.project(car.x, car.y, this.hint);
     this.hint = proj.i;
-    const surfaceY = bankY(this.bank, this.track, proj.i, proj.lat);
+    // Where the ground is under the car: the surveyed profile along the racing
+    // line, plus whatever camber the corner has. The same two numbers the road
+    // geometry was built from, so the car cannot float or sink.
+    const surfaceY = this.world.trackYAt(proj.s) + bankY(this.bank, this.track, proj.i, proj.lat);
 
     this.carYaw.position.set(car.x, surfaceY, Z(car.y));
     this.carYaw.rotation.y = car.hdg;
@@ -678,9 +697,14 @@ export class View {
       const t = this.track;
       const a = t.point(this.photo.s, this.photo.lat);
       const b = t.point(this.photo.s + this.photo.lead, this.photo.aimLat);
+      // Heights are ABOVE THE TRACK, not above sea level. Taken as absolute,
+      // a 1.3 m camera at Monaco ends up twenty metres underground and you
+      // photograph the underside of the city.
+      const ay = this.world.trackYAt(this.photo.s);
+      const by = this.world.trackYAt(this.photo.s + this.photo.lead);
       this.camera.up.set(0, 1, 0);
-      this.camera.position.set(a.x, this.photo.y, Z(a.y));
-      this.camera.lookAt(new THREE.Vector3(b.x, 0.9, Z(b.y)));
+      this.camera.position.set(a.x, ay + this.photo.y, Z(a.y));
+      this.camera.lookAt(new THREE.Vector3(b.x, by + 0.9, Z(b.y)));
       if (this.camera.fov !== 55) { this.camera.fov = 55; this.camera.updateProjectionMatrix(); }
       this.rig.follow(a.x, Z(a.y));
       this.renderer.render(this.scene, this.camera);

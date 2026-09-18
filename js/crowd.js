@@ -139,7 +139,7 @@ function obb(ring) {
 // Turn one `building=grandstand` footprint into a raked stand facing the
 // track, and return where everybody sits.
 // ---------------------------------------------------------------------------
-function stand(box, deck, roofB, track, ring, height) {
+function stand(box, deck, roofB, track, ring, height, y0 = 0) {
   const o = obb(ring);
   if (!o || o.len < 6 || o.dep < 3) return [];
 
@@ -159,7 +159,7 @@ function stand(box, deck, roofB, track, ring, height) {
   // Rows step up and back from the front edge, which is what a raked stand is.
   for (let r = 0; r < rows; r++) {
     const off = front - sgn * (r + 0.5) * ROW_DEPTH;
-    const y = 0.5 + r * ROW_RISE;
+    const y = y0 + 0.5 + r * ROW_RISE;
     const ax = o.cx + perp[0] * off, ay = o.cy + perp[1] * off;
 
     // The step itself: a tread to sit on and a riser under it.
@@ -208,14 +208,14 @@ function stand(box, deck, roofB, track, ring, height) {
   {
     const back = front - sgn * rows * ROW_DEPTH;
     const a = cornerAt(-o.len / 2, back), b = cornerAt(o.len / 2, back);
-    box.quadN([b[0], 0, Z(b[1])], [a[0], 0, Z(a[1])],
-      [a[0], 0.5 + rows * ROW_RISE, Z(a[1])], [b[0], 0.5 + rows * ROW_RISE, Z(b[1])],
+    box.quadN([b[0], y0, Z(b[1])], [a[0], y0, Z(a[1])],
+      [a[0], y0 + 0.5 + rows * ROW_RISE, Z(a[1])], [b[0], y0 + 0.5 + rows * ROW_RISE, Z(b[1])],
       [[0, 0], [o.len, 0], [o.len, 0.5 + rows * ROW_RISE], [0, 0.5 + rows * ROW_RISE]]);
   }
 
   // A roof, if the tagged height says there is one. Cantilevered from the
   // back, which is why the front of a grandstand is open to the sky.
-  const roofY = Math.max(0.5 + rows * ROW_RISE + 3.2, height || 0);
+  const roofY = y0 + Math.max(0.5 + rows * ROW_RISE + 3.2, height || 0);
   if (rows >= 6) {
     const a = cornerAt(-o.len / 2, front + sgn * 0.8);
     const b = cornerAt(o.len / 2, front + sgn * 0.8);
@@ -229,7 +229,7 @@ function stand(box, deck, roofB, track, ring, height) {
     for (let k = 0; k <= cols; k++) {
       const u = -o.len / 2 + (o.len * k) / cols;
       const p = cornerAt(u, back + sgn * 0.4);
-      roofB.box(p[0], roofY / 2, Z(p[1]), 0.36, roofY, 0.36, 0, 0xffffff, 1);
+      roofB.box(p[0], (roofY + y0) / 2, Z(p[1]), 0.36, roofY - y0, 0.36, 0, 0xffffff, 1);
     }
   }
   return seats;
@@ -247,7 +247,7 @@ function distToTrack(track, p) {
 }
 
 // ---------------------------------------------------------------------------
-export function buildGrandstands(scene, track, env, look) {
+export function buildGrandstands(scene, track, env, look, world = null) {
   const stands = (env?.buildings || []).filter(b => b.k === 'grandstand' && b.p.length >= 4);
   if (!stands.length) return { stands: 0, people: 0 };
 
@@ -260,7 +260,11 @@ export function buildGrandstands(scene, track, env, look) {
   // fill the ones you actually drive past.
   stands.sort((a, b) => distToTrack(track, a.p[0]) - distToTrack(track, b.p[0]));
   for (const b of stands) {
-    seats = seats.concat(stand(box, deck, roofB, track, b.p, b.h));
+    // ONE offset per stand, taken at its footprint, rather than lifting each
+    // vertex where it happens to be. A grandstand is a rigid building: letting
+    // its far end follow the terrain would shear it.
+    const y0 = world ? world.heightAt(b.p[0][0], Z(b.p[0][1])) : 0;
+    seats = seats.concat(stand(box, deck, roofB, track, b.p, b.h, y0));
     if (seats.length > MAX_PEOPLE) break;
   }
   if (seats.length > MAX_PEOPLE) seats.length = MAX_PEOPLE;

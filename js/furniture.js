@@ -134,7 +134,7 @@ export function signAtlas(track) {
 // enough that a car could reach the crowd. Fencing a 28 m gravel trap at Monza
 // would be both wrong and a wall of alpha-tested pixels across the view.
 // ---------------------------------------------------------------------------
-export function buildBarriers(scene, track, look, sign, corridor = null) {
+export function buildBarriers(scene, track, look, sign, corridor = null, world = null) {
   const t = track;
   const street = t.wall === 'wall';
   // Along the pit straight the PIT WALL is the barrier. Without this the
@@ -247,7 +247,14 @@ export function buildBarriers(scene, track, look, sign, corridor = null) {
     }
   }
 
-  const push = (b, mat, opts) => { const m = b.mesh(mat, opts); if (m) { scene.add(m); out.push(m); } };
+  // Every finished geometry is displaced onto the ground by the same one
+  // function. A vertical surface keeps its top and bottom vertices at the same
+  // (x, z), so a guard rail post moves as a unit and stays upright with its
+  // foot on the hill. See js/world.js.
+  const push = (b, mat, opts) => {
+    const m = b.mesh(mat, opts);
+    if (m) { if (world) world.lift(m.geometry); scene.add(m); out.push(m); }
+  };
 
   push(rail, street
     ? look.mat('concrete', { size: 3.2, tint: 0xd8d5cf, roughness: 0.95, side: THREE.DoubleSide })
@@ -288,7 +295,7 @@ export function buildBarriers(scene, track, look, sign, corridor = null) {
 // run-off for one to matter, which is where they are in real life: they are
 // there to be hit, so they go where cars leave the road.
 // ---------------------------------------------------------------------------
-export function buildTyreWalls(scene, track, look) {
+export function buildTyreWalls(scene, track, look, world = null) {
   const t = track;
   const stacks = [];
   for (const c of t.corners || []) {
@@ -298,7 +305,8 @@ export function buildTyreWalls(scene, track, look) {
       const run = side > 0 ? t.runL[i] : t.runR[i];
       if (run > 16) continue;                     // a big gravel trap needs none
       const lat = barrierLat(t, i, side) - side * 0.55;
-      stacks.push({ p: at(t, i, lat), h: t.hdg[i] });
+      const q = at(t, i, lat);
+      stacks.push({ p: q, h: t.hdg[i], y: world ? world.heightAt(q[0], q[1]) : 0 });
     }
   }
   if (!stacks.length) return null;
@@ -313,7 +321,8 @@ export function buildTyreWalls(scene, track, look) {
       // A real tyre wall is bolted but not surveyed — the slight stagger is
       // what stops 2,000 identical cylinders reading as a machine part.
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), st.h + level * 0.4);
-      m.compose(new THREE.Vector3(st.p[0] + (Math.random() - 0.5) * 0.06, 0.13 + level * 0.25,
+      m.compose(new THREE.Vector3(st.p[0] + (Math.random() - 0.5) * 0.06,
+        st.y + 0.13 + level * 0.25,
         st.p[1] + (Math.random() - 0.5) * 0.06), q, sc);
       mesh.setMatrixAt(k++, m);
     }
@@ -333,7 +342,7 @@ export function buildTyreWalls(scene, track, look) {
 // there is a braking zone to mark, found by reading the solved speed profile
 // rather than by assuming every corner has one — Suzuka's 130R does not.
 // ---------------------------------------------------------------------------
-export function buildBoards(scene, track, line, look, sign) {
+export function buildBoards(scene, track, line, look, sign, world = null) {
   const t = track;
   const b = new Builder();
   const legs = new Builder();
@@ -389,8 +398,7 @@ export function buildBoards(scene, track, line, look, sign) {
   const mat = new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.68, side: THREE.DoubleSide });
   const m1 = b.mesh(mat, { shadow: false });
   const m2 = legs.mesh(look.mat('metal', { size: 1.2, tint: 0x2a2e34, roughness: 0.8, metalness: 0.7 }));
-  if (m1) scene.add(m1);
-  if (m2) scene.add(m2);
+  for (const m of [m1, m2]) if (m) { if (world) world.lift(m.geometry); scene.add(m); }
   return [m1, m2];
 }
 
@@ -416,7 +424,7 @@ function chequerTexture() {
   return t;
 }
 
-export function buildStartFinish(scene, track, look, sign) {
+export function buildStartFinish(scene, track, look, sign, world = null) {
   const t = track;
   const out = [];
 
@@ -433,7 +441,7 @@ export function buildStartFinish(scene, track, look, sign) {
     map: chq, roughness: 0.75, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
   }), { shadow: false });
-  if (sm) { scene.add(sm); out.push(sm); }
+  if (sm) { if (world) world.lift(sm.geometry); scene.add(sm); out.push(sm); }
 
   // The grid, painted on the road behind the line: twenty-two staggered boxes,
   // pole on the side the first corner turns away from. It is the first thing
@@ -460,7 +468,7 @@ export function buildStartFinish(scene, track, look, sign) {
     color: 0xe8e8e4, roughness: 0.78, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
   }), { shadow: false });
-  if (gridMesh) { scene.add(gridMesh); out.push(gridMesh); }
+  if (gridMesh) { if (world) world.lift(gridMesh.geometry); scene.add(gridMesh); out.push(gridMesh); }
 
   // The gantry. Two towers, a beam, a banner and five lights.
   const st = new Builder();
@@ -477,7 +485,7 @@ export function buildStartFinish(scene, track, look, sign) {
   const span = Math.hypot(R[0] - L[0], R[1] - L[1]);
   st.box((L[0] + R[0]) / 2, H + 0.55, (L[1] + R[1]) / 2, 0.9, 1.1, span, h, 0xd8dade, 1);
   const gm = st.mesh(look.mat('metal', { size: 2.0, tint: 0xcfd3d8, roughness: 0.5, metalness: 0.75 }));
-  if (gm) { scene.add(gm); out.push(gm); }
+  if (gm) { if (world) world.lift(gm.geometry); scene.add(gm); out.push(gm); }
 
   // The banner across the beam, facing back down the track at the oncoming
   // car. It has to sit ON the beam's front face, not on its centreline: the
@@ -491,7 +499,7 @@ export function buildStartFinish(scene, track, look, sign) {
   ban.quadN([Rf[0], H + 0.08, Rf[1]], [Lf[0], H + 0.08, Lf[1]],
     [Lf[0], H + 1.02, Lf[1]], [Rf[0], H + 1.02, Rf[1]], uv);
   const bm = ban.mesh(new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.7, side: THREE.DoubleSide }), { shadow: false });
-  if (bm) { scene.add(bm); out.push(bm); }
+  if (bm) { if (world) world.lift(bm.geometry); scene.add(bm); out.push(bm); }
 
   // Five start lights, dark. They are props for now; when there is a race
   // start to run they are already in the right place.
@@ -502,7 +510,7 @@ export function buildStartFinish(scene, track, look, sign) {
     const f = (k + 0.5) / 5;
     const x = L[0] + (R[0] - L[0]) * f, z = L[1] + (R[1] - L[1]) * f;
     const mesh = new THREE.Mesh(lg, lm);
-    mesh.position.set(x, H - 0.35, z);
+    mesh.position.set(x, H - 0.35 + (world ? world.heightAt(x, z) : 0), z);
     mesh.rotation.y = h;
     mesh.castShadow = true;
     lights.add(mesh);
@@ -517,7 +525,7 @@ export function buildStartFinish(scene, track, look, sign) {
 // panel. They are small, but they are the thing that tells you a circuit is
 // STAFFED, and at 300 m intervals they are another rung on the speed ruler.
 // ---------------------------------------------------------------------------
-export function buildMarshalPosts(scene, track, look) {
+export function buildMarshalPosts(scene, track, look, world = null) {
   const t = track;
   const hut = new Builder();
   const roof = new Builder();
@@ -547,7 +555,10 @@ export function buildMarshalPosts(scene, track, look) {
   if (!placed) return null;
 
   const out = [];
-  const add = (b, m, o) => { const x = b.mesh(m, o); if (x) { scene.add(x); out.push(x); } };
+  const add = (b, m, o) => {
+    const x = b.mesh(m, o);
+    if (x) { if (world) world.lift(x.geometry); scene.add(x); out.push(x); }
+  };
   add(hut, look.mat('concrete', { size: 2.4, tint: 0xd6d9dd, roughness: 0.92 }));
   add(roof, look.mat('metal', { size: 2.0, tint: 0xd8352a, roughness: 0.55, metalness: 0.4 }));
   add(flag, new THREE.MeshStandardMaterial({ color: 0xf5c518, roughness: 0.6, side: THREE.DoubleSide }), { shadow: false });

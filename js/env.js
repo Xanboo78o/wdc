@@ -138,7 +138,7 @@ function safeColour(v) {
 // One building. `detail` decides whether it gets windows, a ground floor and a
 // cornice, or whether it is a plain extrusion.
 // ---------------------------------------------------------------------------
-function building(wall, glass, roofB, b, detail, trackKey) {
+function building(wall, glass, roofB, b, detail, trackKey, y0 = 0) {
   let p = b.p;
   if (p.length < 3) return 0;
   // OSM does not guarantee which way round a footprint is wound. Builder
@@ -161,7 +161,9 @@ function building(wall, glass, roofB, b, detail, trackKey) {
   const base = safeColour(b.c) || pick(PALETTE[kind] || PALETTE._, r1);
   const roofCol = safeColour(b.rc) || pick(ROOFS[kind] || ROOFS._, r2);
 
-  // Three-space ring.
+  // Three-space ring. `y0` is ONE height for the whole building, taken at its
+  // footprint — a building is rigid, and letting each vertex follow the
+  // terrain under it would shear a 30 m block on Monaco's hillside by metres.
   const ring = p.map(q => [q[0], Z(q[1])]);
   const storeys = b.lv || Math.max(1, Math.round((h - 1) / STOREY));
 
@@ -173,7 +175,7 @@ function building(wall, glass, roofB, b, detail, trackKey) {
   // A slab on columns is barely more geometry and reads completely differently,
   // because you can see daylight under it.
   if (kind === 'roof') {
-    const top = Math.max(2.6, h);
+    const top = y0 + Math.max(2.6, h);
     wall.fan(ring, top, roofCol);                      // the roof itself
     wall.fan(ring.slice().reverse(), top - 0.35, roofCol);  // and its underside
     for (let i = 0; i < ring.length; i++) {
@@ -189,15 +191,15 @@ function building(wall, glass, roofB, b, detail, trackKey) {
       const cols = Math.max(1, Math.round(m / 6));
       for (let k = 0; k < cols; k++) {
         const f = (k + 0.5) / cols;
-        wall.box(a[0] + dx * f, (top - 0.35) / 2, a[1] + dz * f,
-          0.3, top - 0.35, 0.3, 0, base, 1);
+        wall.box(a[0] + dx * f, (top - 0.35 + y0) / 2, a[1] + dz * f,
+          0.3, top - 0.35 - y0, 0.3, 0, base, 1);
       }
     }
     return 0;
   }
 
   if (!detail) {
-    wall.prism(ring, 0, h, base, true, 1, roofCol);
+    wall.prism(ring, y0, y0 + h, base, true, 1, roofCol);
     return 0;
   }
 
@@ -221,21 +223,21 @@ function building(wall, glass, roofB, b, detail, trackKey) {
       [a[0], y0, a[1]], [c[0], y0, c[1]], [c[0], y1, c[1]], [a[0], y1, a[1]], n,
       [[0, y0], [m, y0], [m, y1], [0, y1]], colour);
 
-    face(0, gh, groundCol);
-    face(gh, h, base);
+    face(y0, y0 + gh, groundCol);
+    face(y0 + gh, y0 + h, base);
 
     // --- the cornice ------------------------------------------------------
     // A band that steps 0.22 m PROUD for the top 0.5 m. It is a tiny amount of
     // geometry and it is what stops a roofline being a cut edge: it catches
     // the sun and throws a line of shadow down the facade.
     if (h > 5.5) {
-      const o = 0.22;
+      const top = y0 + h, o = 0.22;
       const a2 = [a[0] + n[0] * o, a[1] + n[2] * o], c2 = [c[0] + n[0] * o, c[1] + n[2] * o];
-      wall.quad([a2[0], h - 0.5, a2[1]], [c2[0], h - 0.5, c2[1]], [c2[0], h, c2[1]], [a2[0], h, a2[1]],
+      wall.quad([a2[0], top - 0.5, a2[1]], [c2[0], top - 0.5, c2[1]], [c2[0], top, c2[1]], [a2[0], top, a2[1]],
         n, [[0, 0], [m, 0], [m, 0.5], [0, 0.5]], base);
-      wall.quadN([a[0], h - 0.5, a[1]], [c[0], h - 0.5, c[1]], [c2[0], h - 0.5, c2[1]], [a2[0], h - 0.5, a2[1]],
+      wall.quadN([a[0], top - 0.5, a[1]], [c[0], top - 0.5, c[1]], [c2[0], top - 0.5, c2[1]], [a2[0], top - 0.5, a2[1]],
         [[0, 0], [m, 0], [m, o], [0, o]], base);
-      wall.quadN([a2[0], h, a2[1]], [c2[0], h, c2[1]], [c[0], h, c[1]], [a[0], h, a[1]],
+      wall.quadN([a2[0], top, a2[1]], [c2[0], top, c2[1]], [c[0], top, c[1]], [a[0], top, a[1]],
         [[0, 0], [m, 0], [m, o], [0, o]], base);
     }
 
@@ -248,8 +250,8 @@ function building(wall, glass, roofB, b, detail, trackKey) {
     if (bays >= 1 && h > 3.4 && kind !== 'roof') {
       const pad = (m - bays * BAY) / 2;
       for (let s = 0; s < storeys; s++) {
-        const cy = gh + (s + 0.5) * ((h - gh - (h > 5.5 ? 0.6 : 0)) / Math.max(1, storeys));
-        if (cy < gh + 0.7 || cy > h - 0.8) continue;
+        const cy = y0 + gh + (s + 0.5) * ((h - gh - (h > 5.5 ? 0.6 : 0)) / Math.max(1, storeys));
+        if (cy < y0 + gh + 0.7 || cy > y0 + h - 0.8) continue;
         const wh = kind === 'industrial' || kind === 'garage' ? 0.9 : 1.45;
         for (let k = 0; k < bays; k++) {
           const t0 = pad + k * BAY + BAY / 2 - 0.62, t1 = pad + k * BAY + BAY / 2 + 0.62;
@@ -269,7 +271,7 @@ function building(wall, glass, roofB, b, detail, trackKey) {
       }
     }
   }
-  roofB.fan(ring, h, roofCol);
+  roofB.fan(ring, y0 + h, roofCol);
   void trackKey;
   return windows;
 }
@@ -381,7 +383,7 @@ function scatter(env, limit) {
   return { round, conifer };
 }
 
-function treeMesh(pts, geo) {
+function treeMesh(pts, geo, world) {
   if (!pts.length) return null;
   const mat = new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true, metalness: 0 });
   const inst = new THREE.InstancedMesh(geo, mat, pts.length);
@@ -392,7 +394,7 @@ function treeMesh(pts, geo) {
     const [x, y, k] = pts[i];
     q.setFromAxisAngle(up, seeded(x, y, 4) * Math.PI * 2);
     s.set(k, k * (0.88 + seeded(x, y, 5) * 0.3), k);
-    v.set(x, 0, Z(y));
+    v.set(x, world ? world.heightAt(x, Z(y)) : 0, Z(y));
     m.compose(v, q, s);
     inst.setMatrixAt(i, m);
     // Real foliage is a spread of greens, not one. This is the difference
@@ -408,7 +410,7 @@ function treeMesh(pts, geo) {
 }
 
 // ---------------------------------------------------------------------------
-function flatMesh(polys, look, spec) {
+function flatMesh(polys, look, spec, world) {
   const b = new Builder();
   for (const poly of polys) {
     const p = poly.p || poly;
@@ -431,6 +433,7 @@ function flatMesh(polys, look, spec) {
       color: spec.col, roughness: 0.22, metalness: 0.4, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4,
     });
+  if (world) world.lift(g);
   const m = new THREE.Mesh(g, mat);
   m.receiveShadow = true;
   return m;
@@ -453,12 +456,12 @@ function inCorridor(ring, corridor) {
   return false;
 }
 
-export function buildEnv(scene, env, track, look, corridor = null) {
+export function buildEnv(scene, env, track, look, corridor = null, world = null) {
   const added = { buildings: 0, detailed: 0, windows: 0, areas: 0, sea: 0, trees: 0, cleared: 0 };
   if (!env) return added;
 
   if (env.sea && env.sea.length) {
-    const m = flatMesh(env.sea, look, { col: COVER.water.col, y: -0.055, tex: null, size: 8 });
+    const m = flatMesh(env.sea, look, { col: COVER.water.col, y: -0.055, tex: null, size: 8 }, null);
     if (m) { scene.add(m); added.sea = env.sea.length; }
   }
 
@@ -467,7 +470,7 @@ export function buildEnv(scene, env, track, look, corridor = null) {
   for (const kind in byKind) {
     const spec = COVER[kind];
     if (!spec) continue;
-    const m = flatMesh(byKind[kind], look, spec);
+    const m = flatMesh(byKind[kind], look, spec, world);
     if (m) { scene.add(m); added.areas += byKind[kind].length; }
   }
 
@@ -488,7 +491,8 @@ export function buildEnv(scene, env, track, look, corridor = null) {
     const isBrick = seeded(b.p[0][0], b.p[0][1], 7) < brickP && b.k !== 'office' && b.k !== 'stadium';
     const pile = isBrick ? brick : rendr;
     const detail = d < NEAR && windows < MAX_WINDOWS;
-    windows += building(pile.wall, pile.glass, pile.roof, b, detail, env.key);
+    const y0 = world ? world.heightAt(b.p[0][0], Z(b.p[0][1])) : 0;
+    windows += building(pile.wall, pile.glass, pile.roof, b, detail, env.key, y0);
     if (detail) detailed++;
     added.buildings++;
   }
@@ -515,7 +519,7 @@ export function buildEnv(scene, env, track, look, corridor = null) {
 
   const { round, conifer } = scatter(env, 4200);
   for (const [pts, geo] of [[round, broadleafGeometry()], [conifer, coniferGeometry()]]) {
-    const tm = treeMesh(pts, geo);
+    const tm = treeMesh(pts, geo, world);
     if (tm) { scene.add(tm); added.trees += tm.count; }
   }
 

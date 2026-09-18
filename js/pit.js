@@ -95,7 +95,7 @@ export function pitCorridor(track) {
 }
 
 // ---------------------------------------------------------------------------
-export function buildPitLane(scene, track, look, sign) {
+export function buildPitLane(scene, track, look, sign, world = null) {
   const pit = track.pit;
   if (!pit || !pit.pts || pit.pts.length < 3) return null;
 
@@ -296,14 +296,15 @@ export function buildPitLane(scene, track, look, sign) {
     // Tyres: two stacks of four either side of the door, and a loose pair.
     for (const [a, d, n] of [[2.2, 2.0, 4], [BOX_PITCH - 2.2, 2.0, 4], [BOX_PITCH / 2 - 3.4, 6.4, 3]]) {
       const p = put(a, d);
-      for (let s = 0; s < n; s++) tyreSpots.push({ x: p[0], z: p[1], y: 0.16 + s * 0.30, ry: ry + s * 0.5 });
+      const gy = world ? world.heightAt(p[0], p[1]) : 0;
+      for (let s = 0; s < n; s++) tyreSpots.push({ x: p[0], z: p[1], y: gy + 0.16 + s * 0.30, ry: ry + s * 0.5 });
     }
 
     // The crew. Standing, facing the lane, because the car is still out.
     for (const [a, d] of [[4.2, 2.2], [BOX_PITCH - 4.6, 2.6], [BOX_PITCH / 2, 5.6]]) {
       const p = put(a, d);
       crewSpots.push({
-        x: p[0], z: p[1], y: 0.02,
+        x: p[0], z: p[1], y: (world ? world.heightAt(p[0], p[1]) : 0) + 0.02,
         ry: ry + Math.PI + (Math.random() - 0.5) * 0.8, seated: false, scale: 0.98,
       });
     }
@@ -358,7 +359,7 @@ export function buildPitLane(scene, track, look, sign) {
       const d = at(i, -LANE_TRACK + 0.5);
       dark.box(d[0], 1.62, d[1], 0.58, 0.40, 0.10, ry, 0x14161a, 1);
       const q = at(i, -LANE_TRACK + 1.4);
-      crewSpots.push({ x: q[0], z: q[1], y: 1.07, ry: ry + Math.PI, seated: true, scale: 0.98 });
+      crewSpots.push({ x: q[0], z: q[1], y: (world ? world.heightAt(q[0], q[1]) : 0) + 1.07, ry: ry + Math.PI, seated: true, scale: 0.98 });
     }
   }
 
@@ -373,7 +374,13 @@ export function buildPitLane(scene, track, look, sign) {
   // --- materials ------------------------------------------------------------
   const add = (b, mat, opts, name) => {
     const m = b.mesh(mat, opts);
-    if (m) { m.name = 'pit.' + (name || 'part'); scene.add(m); }
+    if (m) {
+      // Onto the ground, like everything else track-side — the pit lane at
+      // Monaco climbs with the hill it is cut into.
+      if (world) world.lift(m.geometry);
+      m.name = 'pit.' + (name || 'part');
+      scene.add(m);
+    }
     return m;
   };
 

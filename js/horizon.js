@@ -193,7 +193,7 @@ function hazeBand(cx, cz, r, colour) {
  * flat-shaded cones and nobody will ever be closer than 400 m to one, so the
  * budget goes entirely into HOW MANY.
  */
-function farTrees(track, cx, cz, span, reach, land, horizonCol) {
+function farTrees(track, cx, cz, span, reach, land, horizonCol, world) {
   const geo = new THREE.ConeGeometry(4.2, 13, 5);
   geo.translate(0, 6.5, 0);
   // WHITE, not the tree colour. An InstancedMesh multiplies the material
@@ -227,10 +227,11 @@ function farTrees(track, cx, cz, span, reach, land, horizonCol) {
     // from the OSM survey in env.js, and this band is the mass behind them.
     const dt = distToTrack(track, x, z);
     if (dt < 260) continue;
+    const gy = world ? world.heightAt(x, z) : 0;
     const s = 0.8 + seeded(i, 21) * 0.9;
     q.setFromAxisAngle(up, seeded(i, 29) * 6.283);
     sc.set(s, s * (0.85 + seeded(i, 31) * 0.5), s);
-    v.set(x, 0, z);
+    v.set(x, gy, z);
     m.compose(v, q, sc);
     inst.setMatrixAt(n, m);
     tint.set(land.trees);
@@ -251,11 +252,14 @@ function farTrees(track, cx, cz, span, reach, land, horizonCol) {
  * gives the real shoreline out to 600 m; past that it simply stopped, so
  * Monaco's Mediterranean ended in mid-air.
  */
-function openWater(cx, cz, r, colour) {
+function openWater(cx, cz, r, colour, y) {
   const g = new THREE.CircleGeometry(r, 72);
   g.rotateX(-Math.PI / 2);
   const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: colour, fog: true }));
-  m.position.set(cx, -0.9, cz);
+  // At SEA LEVEL, which is not zero. Heights are relative to the mean height
+  // of the racing line, and at Monaco that is twenty metres up a hillside —
+  // so a sea at y = 0 sits twenty metres above the water it is meant to be.
+  m.position.set(cx, y, cz);
   m.frustumCulled = false;
   m.renderOrder = -3;
   return m;
@@ -278,7 +282,7 @@ function openWater(cx, cz, r, colour) {
  * a shader to do it with — and the ground is the only surface big enough for
  * the difference to matter.
  */
-export function buildGround(track, look, sky) {
+export function buildGround(track, look, sky, world = null) {
   const bb = track.bbox;
   const cx = (bb.x0 + bb.x1) / 2, cz = Z((bb.y0 + bb.y1) / 2);
   const span = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0);
@@ -303,7 +307,7 @@ export function buildGround(track, look, sky) {
     for (let i = 0; i <= N; i++) {
       const fx = (i / N) * 2 - 1, fz = (j / N) * 2 - 1;
       const x = cx + fx * reach, z = cz + fz * reach;
-      pos[k * 3] = x; pos[k * 3 + 1] = 0; pos[k * 3 + 2] = z;
+      pos[k * 3] = x; pos[k * 3 + 1] = world ? world.heightAt(x, z) : 0; pos[k * 3 + 2] = z;
       // UVs are metres, as everywhere else, so the grass lands at true scale.
       uv[u] = x; uv[u + 1] = z;
 
@@ -336,9 +340,7 @@ export function buildGround(track, look, sky) {
   g.setAttribute('uv1', new THREE.BufferAttribute(uv, 2));
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.setIndex(idx);
-  const nrm = new Float32Array(pos.length);
-  for (let i = 0; i < pos.length / 3; i++) nrm[i * 3 + 1] = 1;
-  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  g.computeVertexNormals();
 
   const mesh = new THREE.Mesh(g, look.mat(
     track.key === 'zandvoort' ? 'sand' : 'grass',
@@ -354,7 +356,7 @@ export function buildGround(track, look, sky) {
  * Build the air and the distance. Returns what it added and the fog it chose,
  * so the caller can report it rather than guess.
  */
-export function buildHorizon(scene, track, env, sky) {
+export function buildHorizon(scene, track, env, sky, world = null) {
   const bb = track.bbox;
   const cx = (bb.x0 + bb.x1) / 2, cz = Z((bb.y0 + bb.y1) / 2);
   const span = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0);
@@ -373,7 +375,7 @@ export function buildHorizon(scene, track, env, sky) {
     if (n) {
       seaDir = Math.atan2(sz / n - cz, sx / n - cx);
       seaSpan = 1.5;                        // about 170 degrees of open water
-      scene.add(openWater(cx, cz, 12000, land.sea));
+      scene.add(openWater(cx, cz, 14000, land.sea, (world && world.on ? world.seaY : 0) + 0.25));
     }
   }
 
@@ -406,7 +408,7 @@ export function buildHorizon(scene, track, env, sky) {
   // Suzuka sits in woodland; filling that band with trees is both true and the
   // single biggest change to how far away the horizon feels.
   if (land.trees) {
-    const tm = farTrees(track, cx, cz, span, reach, land, horizon);
+    const tm = farTrees(track, cx, cz, span, reach, land, horizon, world);
     if (tm) scene.add(tm);
   }
 
