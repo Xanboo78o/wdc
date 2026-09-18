@@ -397,6 +397,18 @@ export function buildSkirt(track, look, sky, world, hole) {
   const c = new THREE.Color();
 
   const PAD = 420, CELL = 26;
+  // How far the grid is pushed down under the road, and how far out that dies
+  // away. The taper has to finish OUTSIDE the widest run-off on this circuit,
+  // or the ground is still sinking where it becomes the visible surface and
+  // the run-off edge sits on a lip. Monza's corridor is ~22 m a side; Monaco's
+  // is a few metres, and a fixed 34 m there would dig a shallow trench right
+  // outside the barriers. So measure it per circuit instead of picking one.
+  let corridor = 0;
+  for (let i = 0; i < t.n; i++) {
+    const c = t.w[i] + Math.max(t.runL[i], t.runR[i]);
+    if (c > corridor) corridor = c;
+  }
+  const SINK_MAX = 0.35, SINK_TO = corridor + 14;
   const x0 = bb.x0 - PAD, x1 = bb.x1 + PAD;
   const z0 = Z(bb.y1) - PAD, z1 = Z(bb.y0) + PAD;
   const nx = Math.ceil((x1 - x0) / CELL), nz = Math.ceil((z1 - z0) / CELL);
@@ -412,7 +424,20 @@ export function buildSkirt(track, look, sky, world, hole) {
       const x = x0 + i * dx, z = z0 + j * dz;
       const d = distToTrack(t, x, z);
       dist[k] = d;
-      pos[k * 3] = x; pos[k * 3 + 1] = world ? world.heightAt(x, z) : 0; pos[k * 3 + 2] = z;
+      // SINK THE GRID WHERE IT PASSES UNDER THE CIRCUIT.
+      //
+      // This grid is 26 m cells. The road is drawn at 2 m resolution over a
+      // finely surveyed elevation profile. Between two grid vertices the skirt
+      // is a flat CHORD, and wherever the road's profile dips below that chord
+      // the grass wins the depth test — so the road surfaced as irregular
+      // patches of asphalt through green, reported as "the Monza main straight
+      // renders as GRASS". The 5 cm the mesh was already offset by cannot
+      // cover the chord error over a 26 m span; 55 cm can.
+      //
+      // Tapered rather than stepped, and back to zero by 34 m, because outside
+      // the corridor this grid IS the visible ground and must not move.
+      const sink = d >= SINK_TO ? 0 : SINK_MAX * (1 - d / SINK_TO) ** 2;
+      pos[k * 3] = x; pos[k * 3 + 1] = (world ? world.heightAt(x, z) : 0) - sink; pos[k * 3 + 2] = z;
       uv[u] = x; uv[u + 1] = z;
       const big = seeded(Math.floor(x / 700), Math.floor(z / 700));
       const small = seeded(Math.floor(x / 190) + 41, Math.floor(z / 190) + 17);
