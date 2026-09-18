@@ -358,6 +358,7 @@ export class View {
     const car = buildCar(look, 0xd8352a);
     this.car = car.group; this.wheels = car.wheels; this.steer = car.steer;
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
+    this.wingParts = car.wings;
     this.crushParts = crushParts(car.group, car.wheels);
     // YAW ON THE PARENT, ROLL AND PITCH ON THE CHILD.
     //
@@ -606,7 +607,10 @@ export class View {
     // geometry was built from, so the car cannot float or sink.
     const surfaceY = this.world.trackYAt(proj.s) + bankY(this.bank, this.track, proj.i, proj.lat);
 
-    this.carYaw.position.set(car.x, surfaceY, Z(car.y));
+    // car.z is height above the LOCAL road surface, so surfaceY already being
+    // the real surveyed height of that road means the two compose with nothing
+    // to reconcile.
+    this.carYaw.position.set(car.x, surfaceY + (car.z || 0), Z(car.y));
     this.carYaw.rotation.y = car.hdg;
     // STEERING. Each front wheel pivots at its OWN hub — see js/car.js for
     // what happened when they shared one group at the car's centre.
@@ -638,8 +642,28 @@ export class View {
     // however hard the car is cornering. Rolling the body off it meant the car
     // never visibly leaned in a long corner at all.
     const latG = Math.max(-5, Math.min(5, (car.vx * car.r) / 9.81));
-    this.car.rotation.x = latG * 0.030 + bankRoll(this.bank, this.track, proj.i, proj.lat);
-    this.car.rotation.z = car.gLong * 0.022;
+    // car.roll and car.pitch are the REAL attitude out of physics.js and are
+    // exactly zero unless the car has left the ground — so adding them keeps
+    // the cosmetic cornering lean while driving and hands the whole attitude
+    // over to the simulation the moment it flies.
+    //
+    // The camber term is gated on being airborne. Unlike latG, which falls to
+    // nothing on its own once the tyres are unloaded, bankRoll is a function
+    // of where the car is on the TRACK — so a car flying over Zandvoort's
+    // banking would keep leaning eighteen degrees at it for no reason.
+    const grounded = car.airborne ? 0 : 1;
+    this.car.rotation.x = (car.roll || 0) + latG * 0.030
+      + bankRoll(this.bank, this.track, proj.i, proj.lat) * grounded;
+    this.car.rotation.z = (car.pitch || 0) + car.gLong * 0.022;
+
+    // Bodywork that is no longer attached should not be drawn. physics.js
+    // already reads `car.lost` — losing the front wing costs 56% of front
+    // downforce — so hiding it is honest rather than decorative.
+    if (this.wingParts) {
+      const lost = car.lost || {};
+      for (const m of this.wingParts.front) m.visible = !lost.frontWing;
+      for (const m of this.wingParts.rear) m.visible = !lost.rearWing;
+    }
     // Bodywork damage, straight off the contact impulses in collide.js.
     applyCrush(this.crushParts, car.crush);
     // The DRS flap is a real flap: it opens when the wing is stalled, because

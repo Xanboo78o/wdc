@@ -330,27 +330,31 @@ export function buildCar(look, colour = 0xd8352a) {
   // --- wings ---------------------------------------------------------------
   // Front: two elements, tips curled up, on endplates.
   const at = (geo, x, y, z) => { geo.translate(x, y, z); return geo; };
+  // Collected so the renderer can stop drawing a wing the car has lost.
+  const wings = { front: [], rear: [] };
   // Four elements, stacked and stepped back, which is what a modern front wing
   // is. Two thin blades read as a placeholder from any angle that matters.
-  add(at(wing(0.96, 0.40, 0.055, 0.060, -0.16, 0.080), 2.50, 0.100, 0), carbon);
-  add(at(wing(0.95, 0.30, 0.048, 0.055, -0.22, 0.082), 2.34, 0.160, 0), carbon);
-  add(at(wing(0.93, 0.24, 0.042, 0.050, -0.28, 0.080), 2.22, 0.215, 0), paint);
-  add(at(wing(0.90, 0.18, 0.036, 0.045, -0.34, 0.076), 2.12, 0.262, 0), carbon);
+  wings.front.push(
+    add(at(wing(0.96, 0.40, 0.055, 0.060, -0.16, 0.080), 2.50, 0.100, 0), carbon),
+    add(at(wing(0.95, 0.30, 0.048, 0.055, -0.22, 0.082), 2.34, 0.160, 0), carbon),
+    add(at(wing(0.93, 0.24, 0.042, 0.050, -0.28, 0.080), 2.22, 0.215, 0), paint),
+    add(at(wing(0.90, 0.18, 0.036, 0.045, -0.34, 0.076), 2.12, 0.262, 0), carbon));
   // the two pylons hanging the nose off the wing
   for (const side of [1, -1]) {
     add(at(new THREE.BoxGeometry(0.34, 0.20, 0.030), 2.18, 0.20, side * 0.11), carbon);
   }
   for (const side of [1, -1]) {
     // Aligned with the wing it is bolted to, not floating behind it.
-    add(at(new THREE.BoxGeometry(0.68, 0.34, 0.024), 2.34, 0.185, side * 0.975), paint);
-    add(at(new THREE.BoxGeometry(0.26, 0.11, 0.02), 2.56, 0.335, side * 0.935), carbon);
+    wings.front.push(
+      add(at(new THREE.BoxGeometry(0.68, 0.34, 0.024), 2.34, 0.185, side * 0.975), paint),
+      add(at(new THREE.BoxGeometry(0.26, 0.11, 0.02), 2.56, 0.335, side * 0.935), carbon));
   }
 
   // Rear: main plane and a DRS flap that really opens, on a swan neck.
-  add(at(wing(0.52, 0.30, 0.036, 0.05, 0, 0), -2.44, 0.845, 0), carbon);
   const drs = add(at(wing(0.50, 0.19, 0.028, 0.045, 0, 0), -2.60, 0.945, 0), carbon);
+  wings.rear.push(add(at(wing(0.52, 0.30, 0.036, 0.05, 0, 0), -2.44, 0.845, 0), carbon), drs);
   for (const side of [1, -1]) {
-    add(at(new THREE.BoxGeometry(0.58, 0.44, 0.02), -2.50, 0.83, side * 0.53), paint);
+    wings.rear.push(add(at(new THREE.BoxGeometry(0.58, 0.44, 0.02), -2.50, 0.83, side * 0.53), paint));
   }
   add(loft([
     { x: -1.95, y: 0.44, w: 0.045, h: 0.085, n: 2.6 },
@@ -474,5 +478,5 @@ export function buildCar(look, colour = 0xd8352a) {
     g.add(m);
   }
 
-  return { group: g, wheels, steer, drs, R };
+  return { group: g, wheels, steer, drs, R, wings };
 }
