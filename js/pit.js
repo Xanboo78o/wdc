@@ -211,7 +211,7 @@ export function buildPitLane(scene, track, look, sign) {
     const iMid = idxAt(m0 + BOX_PITCH / 2);
     const F = fwdDir(iMid), G = inDir(iMid);
     const centre = at(iMid, LANE_BOX);
-    const ry = -H[iMid];         // three.js rotation for a sim heading
+    const ry = H[iMid];          // Builder.box's ry IS rotation.y — see geom.js
 
     // --- the facade: a wall with a door-shaped hole in it -------------------
     // Built as four panels around the opening rather than as a wall with a
@@ -356,13 +356,13 @@ export function buildPitLane(scene, track, look, sign) {
     // legs at both ends of this team's canopy
     for (const m of [m0 + 0.4, mEnd - 0.4]) {
       const p = at(idxAt(m), -LANE_TRACK + 1.9);
-      kit.box(p[0], 2.0, p[1], 0.16, 1.95, 0.16, -H[idxAt(m)], 0xc8ccd2, 1);
+      kit.box(p[0], 2.0, p[1], 0.16, 1.95, 0.16, H[idxAt(m)], 0xc8ccd2, 1);
     }
     // four engineers with a monitor each, facing the track
     for (let e = 0; e < 4; e++) {
       const m = m0 + 1.1 + e * ((mEnd - m0 - 2.2) / 3);
       const i = idxAt(m);
-      const ry = -H[i];
+      const ry = H[i];
       const d = at(i, -LANE_TRACK + 0.5);
       dark.box(d[0], 1.62, d[1], 0.58, 0.40, 0.10, ry, 0x14161a, 1);
       const q = at(i, -LANE_TRACK + 1.4);
@@ -379,29 +379,33 @@ export function buildPitLane(scene, track, look, sign) {
   }
 
   // --- materials ------------------------------------------------------------
-  const add = (b, mat, opts) => { const m = b.mesh(mat, opts); if (m) scene.add(m); return m; };
+  const add = (b, mat, opts, name) => {
+    const m = b.mesh(mat, opts);
+    if (m) { m.name = 'pit.' + (name || 'part'); scene.add(m); }
+    return m;
+  };
 
   add(surface, look.mat('apron', {
     size: 3.0, tint: 0x8b8e93, roughness: 0.95, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
-  }), { shadow: false });
+  }), { shadow: false }, 'surface');
   add(paint, new THREE.MeshStandardMaterial({
     color: 0xe6e6e2, roughness: 0.8, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
-  }), { shadow: false });
-  add(floor, look.mat('concrete', { size: 3.0, tint: 0xbdbfc2, roughness: 0.55, side: THREE.DoubleSide }), { shadow: false });
-  add(shell, look.mat('concrete', { size: 3.4, tint: 0xd2d4d7, roughness: 0.92, side: THREE.DoubleSide }));
-  add(canopy, look.mat('metal', { size: 2.6, tint: 0x4a4f55, roughness: 0.6, metalness: 0.5, side: THREE.DoubleSide }));
-  add(kit, look.mat('metal', { size: 1.6, vertexColors: true, roughness: 0.55, metalness: 0.7 }));
-  add(dark, look.mat('metal', { size: 1.2, vertexColors: true, roughness: 0.4, metalness: 0.5 }));
+  }), { shadow: false }, 'paint');
+  add(floor, look.mat('concrete', { size: 3.0, tint: 0xbdbfc2, roughness: 0.55, side: THREE.DoubleSide }), { shadow: false }, 'floor');
+  add(shell, look.mat('concrete', { size: 3.4, tint: 0xd2d4d7, roughness: 0.92, side: THREE.DoubleSide }), undefined, 'shell');
+  add(canopy, look.mat('metal', { size: 2.6, tint: 0x4a4f55, roughness: 0.6, metalness: 0.5, side: THREE.DoubleSide }), undefined, 'canopy');
+  add(kit, look.mat('metal', { size: 1.6, vertexColors: true, roughness: 0.55, metalness: 0.7 }), undefined, 'kit');
+  add(dark, look.mat('metal', { size: 1.2, vertexColors: true, roughness: 0.4, metalness: 0.5 }), undefined, 'dark');
   // The ceiling strips are emissive rather than lit — they ARE the light in
   // there, and adding eleven real point lights to save a texture trick would
   // cost more than the rest of this module put together.
   add(glow, new THREE.MeshStandardMaterial({
     color: 0xfff6e6, emissive: 0xfff2dc, emissiveIntensity: 1.35, roughness: 0.4,
-  }), { shadow: false });
+  }), { shadow: false }, 'glow');
   if (sign) {
-    add(boards, new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.65, side: THREE.DoubleSide }), { shadow: false });
+    add(boards, new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.65, side: THREE.DoubleSide }), { shadow: false }, 'boards');
   }
 
   // Tyres: one instanced mesh for every tyre in every garage.

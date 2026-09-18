@@ -162,6 +162,14 @@ export class Builder {
    * square to a pit box rather than square to the world. Every face is UV'd in
    * metres, which is why a 12 m garage and a 0.4 m toolbox show concrete and
    * steel at the same grain.
+   *
+   * `ry` IS `Object3D.rotation.y`, and for a sim heading h that means pass h,
+   * not -h. It reads like it should be negated, because sim y maps to three
+   * -z — but the negation is already inside this frame, so negating again
+   * mirrors the box about the track direction. On anything square that is
+   * invisible; on the 14 m start gantry beam it put the whole span at the
+   * wrong angle and the banner meant to sit on its face ended up half buried
+   * in it.
    */
   box(cx, cy, cz, sx, sy, sz, ry = 0, colour = 0xffffff, uvScale = 1) {
     const co = Math.cos(ry), si = Math.sin(ry);
@@ -312,8 +320,25 @@ export class Atlas {
     this.n = 0;
   }
 
-  /** Draw into the next free cell; returns its index. */
+  get capacity() { return this.cols * this.rows; }
+
+  /**
+   * Draw into the next free cell; returns its index.
+   *
+   * It REFUSES to overflow. A 4x8 atlas silently ran out at Monza — 20
+   * sponsors plus 6 braking boards plus 7 corner names plus the banner and the
+   * pit sign is 35 cells — and the two that fell off the end were the banner
+   * and the PIT LANE sign. They did not disappear: their cell index divided
+   * out to a row past the bottom of the canvas, so they sampled off the edge
+   * of the texture and rendered as a black rectangle wrapped across the start
+   * gantry. Nothing warned, and it looked like a UV bug rather than a
+   * capacity one.
+   */
   cell(draw) {
+    if (this.n >= this.capacity) {
+      console.warn(`Atlas full at ${this.capacity} cells — this sign will not be drawn`);
+      return -1;
+    }
     const i = this.n++;
     const x = (i % this.cols) * this.cw, y = Math.floor(i / this.cols) * this.ch;
     const g = this.g;
@@ -334,6 +359,7 @@ export class Atlas {
    * neighbour's text down one edge.
    */
   uv(i, flip = false) {
+    if (i == null || i < 0 || i >= this.capacity) i = 0;
     const cx = i % this.cols, cy = Math.floor(i / this.cols);
     const ex = 0.5 / this.canvas.width, ey = 0.5 / this.canvas.height;
     const u0 = cx / this.cols + ex, u1 = (cx + 1) / this.cols - ex;

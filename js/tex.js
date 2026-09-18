@@ -211,9 +211,11 @@ export function sunRig(scene, sky, { shadows = true } = {}) {
   // Sky above, ground bounce below. The bounce colour is deliberately warm and
   // dark: it stands in for light coming back off tarmac and grass, and it is
   // the only thing filling the shadows besides the environment map.
+  // Under overcast there is barely a sun, so almost all the light has to come
+  // from the dome. Get this balance wrong and Zandvoort reads as dusk.
   const hemi = new THREE.HemisphereLight(
     new THREE.Color(sky?.sky || '#93a8ce'), new THREE.Color(0x4a4438),
-    0.45 + (1 - punch) * 0.7);
+    0.55 + (1 - punch) * 1.15);
   scene.add(hemi);
 
   const sun = new THREE.DirectionalLight(new THREE.Color(sky?.sunColour || '#fff4e0'),

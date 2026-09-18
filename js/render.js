@@ -314,6 +314,19 @@ export class View {
       // renderer.info is only populated after a render, so the draw-call and
       // triangle counts are filled in by the first frame rather than here.
       window.__wdc = { track: track.key, sky: sky ? sky.name : 'none', tex: look.on, ...this.stats };
+      // A debug handle, so tools/shot.mjs can raycast through the scene and
+      // say what a mystery object actually is. Cheaper than another screenshot
+      // and a guess.
+      window.__wdcView = this;
+      // Raycast through a point on screen and name what is there. Every mesh
+      // this project builds is given a name at creation, so the answer is
+      // "pit.shell at 21 m" rather than "Mesh".
+      window.__wdcProbe = (u = 0, v = 0) => {
+        const rc = new THREE.Raycaster();
+        rc.setFromCamera(new THREE.Vector2(u, v), this.camera);
+        return rc.intersectObjects(this.scene.children, true).slice(0, 5)
+          .map(h => `${h.object.name || h.object.type} @ ${h.distance.toFixed(1)}m`);
+      };
       this._published = true;
     }
 
@@ -322,8 +335,13 @@ export class View {
     // far side of a world without driving there, so it lives in the renderer.
     const ph = new URLSearchParams(location.search).get('photo');
     if (ph) {
-      const [s0, lat, y, lead] = ph.split(',').map(Number);
-      this.photo = { s: s0 || 0, lat: lat || 0, y: y || 3, lead: lead || 40 };
+      const [s0, lat, y, lead, aimLat] = ph.split(',').map(Number);
+      this.photo = {
+        s: s0 || 0, lat: lat || 0, y: y || 3, lead: lead || 40,
+        // The fifth number aims the camera SIDEWAYS, which is the only way to
+        // look into a pit garage without driving a car into one.
+        aimLat: Number.isFinite(aimLat) ? aimLat : 0,
+      };
     }
 
     const car = buildCar(look, 0xd8352a);
@@ -538,7 +556,7 @@ export class View {
     if (this.photo) {
       const t = this.track;
       const a = t.point(this.photo.s, this.photo.lat);
-      const b = t.point(this.photo.s + this.photo.lead, 0);
+      const b = t.point(this.photo.s + this.photo.lead, this.photo.aimLat);
       this.camera.position.set(a.x, this.photo.y, Z(a.y));
       this.camera.lookAt(new THREE.Vector3(b.x, 0.9, Z(b.y)));
       if (this.camera.fov !== 55) { this.camera.fov = 55; this.camera.updateProjectionMatrix(); }

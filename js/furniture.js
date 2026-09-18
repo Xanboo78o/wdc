@@ -51,7 +51,10 @@ const barrierLat = (t, i, side) => side > 0 ? t.w[i] + t.runL[i] : -(t.w[i] + t.
 // letterboxed cell and their quad is sized to match.
 // ---------------------------------------------------------------------------
 export function signAtlas(track) {
-  const A = new Atlas(4, 8, 512, 128);
+  // 48 cells, not 32: the worst case is 20 sponsors + 6 braking boards + 12
+  // corner names + the banner + the pit sign, and Monaco really does have 12
+  // named corners. See Atlas.cell for what happened when it did not fit.
+  const A = new Atlas(4, 12, 512, 128);
   const cells = { sponsors: [], boards: {}, names: new Map(), banner: 0, pit: 0 };
 
   // Advertising hoardings, in the sponsor colours of a paddock that does not
@@ -92,7 +95,7 @@ export function signAtlas(track) {
 
   // Corner names, straight off the OSM survey. Zandvoort's Tarzanbocht is
   // called Tarzanbocht on the sign because that is what the map says it is.
-  const named = [...new Set((track.corners || []).map(c => c.name).filter(Boolean))].slice(0, 8);
+  const named = [...new Set((track.corners || []).map(c => c.name).filter(Boolean))].slice(0, 12);
   for (const name of named) {
     cells.names.set(name, A.cell((g, w, h) => {
       g.fillStyle = '#12161c'; g.fillRect(0, 0, w, h);
@@ -198,7 +201,7 @@ export function buildBarriers(scene, track, look, sign, corridor = null) {
         }
         // one post per beam, set back behind it
         const px = p[0] - inw[0] * 0.14, pz = p[1] - inw[2] * 0.14;
-        posts.box(px, RAIL_TOP / 2, pz, 0.14, RAIL_TOP, 0.14, -hx, 0x8f959c, 1);
+        posts.box(px, RAIL_TOP / 2, pz, 0.14, RAIL_TOP, 0.14, hx, 0x8f959c, 1);
       }
 
       // Debris fence. Leans back over the run-off at the top, the way a real
@@ -361,8 +364,8 @@ export function buildBoards(scene, track, line, look, sign) {
       const uv = sign.atlas.uv(sign.cells.boards[d], true);
       b.quadN([e[0], y0, e[1]], [a[0], y0, a[1]], [a[0], y1, a[1]], [e[0], y1, e[1]], uv);
       void inw;
-      legs.box(p[0] - fx * 0.42, y0 / 2, p[1] - fz * 0.42, 0.09, y0, 0.09, -h, 0x2a2e34, 1);
-      legs.box(p[0] + fx * 0.42, y0 / 2, p[1] + fz * 0.42, 0.09, y0, 0.09, -h, 0x2a2e34, 1);
+      legs.box(p[0] - fx * 0.42, y0 / 2, p[1] - fz * 0.42, 0.09, y0, 0.09, h, 0x2a2e34, 1);
+      legs.box(p[0] + fx * 0.42, y0 / 2, p[1] + fz * 0.42, 0.09, y0, 0.09, h, 0x2a2e34, 1);
     }
 
     // The corner's real name, on the barrier at its entry.
@@ -429,17 +432,51 @@ export function buildStartFinish(scene, track, look, sign) {
   }), { shadow: false });
   if (sm) { scene.add(sm); out.push(sm); }
 
+  // The grid, painted on the road behind the line: twenty-two staggered boxes,
+  // pole on the side the first corner turns away from. It is the first thing
+  // on screen when a session loads, and a bare chequered strip on an empty
+  // straight reads as an unfinished level rather than as a starting grid. It is
+  // also where twenty-two cars are going to have to be put.
+  const grid = new Builder();
+  const first = (t.corners || [])[0];
+  const poleSide = first && first.dir < 0 ? 1 : -1;
+  for (let k = 0; k < 22; k++) {
+    const s = -6 - k * 8;
+    const i = t.idx(s), j = t.idx(s + 4.2);
+    const w = t.w[i];
+    // Boxes sit about half a track-width off centre, alternating sides.
+    const c = (k % 2 ? -poleSide : poleSide) * w * 0.46;
+    const box = (a, b) => grid.quadUp([
+      at(t, i, c + a), at(t, j, c + a), at(t, j, c + b), at(t, i, c + b),
+    ], 0.012);
+    box(-1.45, -1.30);          // the two side lines of the slot
+    box(1.30, 1.45);
+    // and the line across its front, which is the one a driver lines up on
+    const iF = t.idx(s + 4.05), jF = t.idx(s + 4.2);
+    grid.quadUp([
+      at(t, iF, c - 1.45), at(t, jF, c - 1.45), at(t, jF, c + 1.45), at(t, iF, c + 1.45),
+    ], 0.012);
+  }
+  const gridMesh = grid.mesh(new THREE.MeshStandardMaterial({
+    color: 0xe8e8e4, roughness: 0.78, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
+  }), { shadow: false });
+  if (gridMesh) { scene.add(gridMesh); out.push(gridMesh); }
+
   // The gantry. Two towers, a beam, a banner and five lights.
   const st = new Builder();
-  const iG = t.idx(2);
+  // Far enough ahead that the whole thing is in frame from the grid: parked
+  // over the line itself, the beam sits above the top of the screen and only
+  // the two towers show, which reads as scaffolding rather than as a gantry.
+  const iG = t.idx(15);
   const wG = t.w[iG] + 1.4;
   const h = t.hdg[iG];
   const L = at(t, iG, wG), R = at(t, iG, -wG);
   const H = 7.4;
-  st.box(L[0], H / 2, L[1], 0.7, H, 0.7, -h, 0xd8dade, 1);
-  st.box(R[0], H / 2, R[1], 0.7, H, 0.7, -h, 0xd8dade, 1);
+  st.box(L[0], H / 2, L[1], 0.7, H, 0.7, h, 0xd8dade, 1);
+  st.box(R[0], H / 2, R[1], 0.7, H, 0.7, h, 0xd8dade, 1);
   const span = Math.hypot(R[0] - L[0], R[1] - L[1]);
-  st.box((L[0] + R[0]) / 2, H + 0.55, (L[1] + R[1]) / 2, 0.9, 1.1, span, -h, 0xd8dade, 1);
+  st.box((L[0] + R[0]) / 2, H + 0.55, (L[1] + R[1]) / 2, 0.9, 1.1, span, h, 0xd8dade, 1);
   const gm = st.mesh(look.mat('metal', { size: 2.0, tint: 0xcfd3d8, roughness: 0.5, metalness: 0.75 }));
   if (gm) { scene.add(gm); out.push(gm); }
 
@@ -497,8 +534,8 @@ export function buildMarshalPosts(scene, track, look) {
     const lat = barrierLat(t, i, side) + side * 1.7;
     const p = at(t, i, lat);
     const h = t.hdg[i];
-    hut.box(p[0], 1.15, p[1], 2.2, 2.3, 1.8, -h, 0xcfd3d8, 1);
-    roof.box(p[0], 2.42, p[1], 2.6, 0.16, 2.2, -h, 0xd8352a, 1);
+    hut.box(p[0], 1.15, p[1], 2.2, 2.3, 1.8, h, 0xcfd3d8, 1);
+    roof.box(p[0], 2.42, p[1], 2.6, 0.16, 2.2, h, 0xd8352a, 1);
     // The flag panel faces the track, which is the whole point of the post.
     const inw = side > 0 ? [Math.sin(h), 0, Math.cos(h)] : [-Math.sin(h), 0, -Math.cos(h)];
     const fx = Math.cos(h), fz = -Math.sin(h);

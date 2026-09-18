@@ -103,14 +103,35 @@ const pick = (list, r) => list[Math.floor(r * list.length) % list.length];
 
 // Distance from a footprint to the nearest centreline sample. Coarse on
 // purpose: it only decides how much detail to spend, so 16 m of error is free.
+//
+// Every vertex of the ring, not just the first one. Testing ring[0] alone is
+// almost right and fails on exactly the buildings that matter: a 200 m
+// warehouse whose footprint happens to start at the far end measures as 200 m
+// away and loses its windows, so the largest wall on the Baku street canyon
+// came out as an unbroken sheet of brick six storeys high.
 function distToTrack(track, ring) {
-  const p = ring[0];
   let best = Infinity;
-  for (let i = 0; i < track.n; i += 8) {
-    const d = (track.x[i] - p[0]) ** 2 + (track.y[i] - p[1]) ** 2;
-    if (d < best) best = d;
+  for (const p of ring) {
+    for (let i = 0; i < track.n; i += 8) {
+      const d = (track.x[i] - p[0]) ** 2 + (track.y[i] - p[1]) ** 2;
+      if (d < best) best = d;
+    }
   }
   return Math.sqrt(best);
+}
+
+// A surveyed colour is whatever somebody typed into OpenStreetMap, and what
+// they typed at Baku was "navy blue" — which THREE.Color cannot parse, and
+// which it complains about once per building rather than throwing. Validate
+// here and fall back to the palette, so a bad tag costs one building its
+// surveyed colour instead of filling the console.
+function safeColour(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim().toLowerCase();
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(t)) return t;
+  if (/^rgb\(/.test(t)) return t;
+  return (THREE.Color.NAMES && t.replace(/\s+/g, '') in THREE.Color.NAMES)
+    ? t.replace(/\s+/g, '') : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,8 +158,8 @@ function building(wall, glass, roofB, b, detail, trackKey) {
   const h = b.h;
   const r1 = seeded(p[0][0], p[0][1], 1);
   const r2 = seeded(p[0][0], p[0][1], 2);
-  const base = b.c || pick(PALETTE[kind] || PALETTE._, r1);
-  const roofCol = b.rc || pick(ROOFS[kind] || ROOFS._, r2);
+  const base = safeColour(b.c) || pick(PALETTE[kind] || PALETTE._, r1);
+  const roofCol = safeColour(b.rc) || pick(ROOFS[kind] || ROOFS._, r2);
 
   // Three-space ring.
   const ring = p.map(q => [q[0], Z(q[1])]);

@@ -41,7 +41,7 @@ const flag = (name, def = null) => {
 };
 // Positional args are anything not starting with `--` and not sitting in the
 // slot right after a flag that takes a value.
-const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q']);
+const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q', 'probe']);
 const positional = args.filter((a, i) => !a.startsWith('--') &&
   !(i > 0 && args[i - 1].startsWith('--') && VALUE_FLAGS.has(args[i - 1].slice(2))));
 const target = positional[0] || 'monza:f1';
@@ -172,14 +172,28 @@ try {
     if (stats) break;
     await sleep(400);
   }
-  // Then let it draw a few frames, so nothing is caught mid-upload.
+  // Then let it draw a few frames, so nothing is caught mid-upload — and read
+  // the stats again afterwards, because the draw-call and triangle counts only
+  // exist once there has been a frame to count.
   await sleep(waitMs);
+  stats = await cdp.eval('window.__wdc ? JSON.parse(JSON.stringify(window.__wdc)) : null') || stats;
 
   const fps = await cdp.eval(`(async () => {
     let n = 0; const t0 = performance.now();
     await new Promise(r => { const tick = () => { n++; performance.now() - t0 < 1500 ? requestAnimationFrame(tick) : r(); }; requestAnimationFrame(tick); });
     return +(n / ((performance.now() - t0) / 1000)).toFixed(1);
   })()`).catch(() => null);
+
+  // --probe u,v raycasts through a point on the screen (0,0 = centre, 1,1 =
+  // top right) and says what is actually there. A screenshot shows you a black
+  // rectangle; this tells you which mesh it is and how far away.
+  const probe = flag('probe');
+  if (probe) {
+    const [u, v] = String(probe).split(',').map(Number);
+    const hits = await cdp.eval(`window.__wdcProbe ? JSON.stringify(window.__wdcProbe(${u || 0}, ${v || 0})) : '"no probe hook"'`)
+      .catch(e => '"probe failed: ' + e.message + '"');
+    console.log('  probe ' + (probe) + ': ' + hits);
+  }
 
   const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
   const file = path.join(OUT, `${outName}.png`);
