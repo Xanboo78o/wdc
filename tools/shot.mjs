@@ -4,6 +4,7 @@
 //
 //   node tools/shot.mjs monza:f1
 //   node tools/shot.mjs monza:f1 --photo 5350,-14,3,40 --out pits
+//   node tools/shot.mjs --quick --all          # does every circuit still load?
 //   node tools/shot.mjs zandvoort:f4 --photo 430,0,9,60 --out tarzan
 //
 // I cannot look at a screen, so every claim about how this looks has to come
@@ -42,9 +43,24 @@ const flag = (name, def = null) => {
 // Positional args are anything not starting with `--` and not sitting in the
 // slot right after a flag that takes a value.
 const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q', 'probe', 'base']);
+// --quick loads the page, waits for the world to exist, reports console errors
+// and exits. No frame-rate probe, no screenshot, about six seconds instead of
+// ninety.
+//
+// It exists because of a thing that happened twice in one afternoon, once to
+// each session working on this repo: both of us destroyed code we had not read
+// — one by slicing a file between two landmarks, one by `git checkout` over an
+// uncommitted file — and NEITHER of us caught it by being careful. One
+// surfaced as a ReferenceError on load, the other as a hunch-grep. The load
+// check is the net, not the care. So it has to be cheap enough to run on every
+// edit rather than once before a push.
+const QUICK = args.includes('--quick');
+const ALL = args.includes('--all');
 const positional = args.filter((a, i) => !a.startsWith('--') &&
   !(i > 0 && args[i - 1].startsWith('--') && VALUE_FLAGS.has(args[i - 1].slice(2))));
-const target = positional[0] || 'monza:f1';
+const TRACKS = ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco'];
+const targets = ALL ? TRACKS.map(t => `${t}:f1`) : [positional[0] || 'monza:f1'];
+const target = targets[0];
 const photo = flag('photo');
 const outName = flag('out', target.replace(':', '-'));
 const waitMs = +flag("wait", 1200);
@@ -133,6 +149,23 @@ async function connect(url) {
 // working copy. Worth doing after a push: a path that works off the local
 // filesystem and 404s on Pages is a real class of bug, and so is an old module
 // served from cache.
+// --all runs the same check once per circuit, each in its own browser, because
+// a module that breaks only at Monaco is exactly the kind of thing a single
+// Monza check misses.
+if (ALL) {
+  const { spawnSync } = await import('child_process');
+  let bad = 0;
+  console.log(`load check, ${TRACKS.length} circuits:`);
+  for (const t of targets) {
+    const r = spawnSync(process.execPath,
+      [new URL(import.meta.url).pathname, t, ...args.filter(a => a !== '--all')],
+      { stdio: 'inherit' });
+    if (r.status) bad++;
+  }
+  console.log(bad ? `\n${bad} circuit(s) FAILED` : '\nall circuits load clean');
+  process.exit(bad ? 1 : 0);
+}
+
 const base = flag('base');
 const server = base ? null : ensureServer();
 if (server) await sleep(900);
@@ -177,6 +210,21 @@ try {
     if (stats) break;
     await sleep(400);
   }
+  if (QUICK) {
+    const errs = [...new Set(cdp.errors)].filter(e => !/favicon|PHONE_REGISTRATION|DEPRECATED_ENDPOINT/.test(e));
+    const ms = await cdp.eval('window.__wdcBuildMs || 0');
+    const label = `${target.padEnd(16)} build ${String(ms).padStart(5)} ms`;
+    if (!stats) { console.log(`  FAIL ${label}  world never built`); code = 1; }
+    else if (errs.length) {
+      console.log(`  FAIL ${label}  ${errs.length} console error(s)`);
+      for (const e of errs.slice(0, 6)) console.log('       ! ' + e.slice(0, 200));
+      code = 1;
+    } else {
+      console.log(`  ok   ${label}  ${stats.draws || '?'} draws`);
+    }
+    throw { quick: true };
+  }
+
   // Then let it draw a few frames, so nothing is caught mid-upload — and read
   // the stats again afterwards, because the draw-call and triangle counts only
   // exist once there has been a frame to count.
@@ -225,9 +273,14 @@ try {
     console.log('  no console errors');
   }
 } catch (e) {
-  console.error('shot failed:', e.message);
-  if (chromeErr) console.error(chromeErr.split('\n').filter(l => /ERROR/.test(l)).slice(0, 6).join('\n'));
-  code = 2;
+  // The quick path finishes by throwing a sentinel to skip the screenshot; it
+  // has already decided its own exit code and must not be reported as a crash.
+  if (e && e.quick) { /* handled above */ }
+  else {
+    console.error('shot failed:', e.message);
+    if (chromeErr) console.error(chromeErr.split('\n').filter(l => /ERROR/.test(l)).slice(0, 6).join('\n'));
+    code = 2;
+  }
 } finally {
   chrome.kill('SIGKILL');
   if (server) try { process.kill(-server.pid); } catch { /* already gone */ }

@@ -461,6 +461,41 @@ screen and names what is actually there. Six real bugs came out of it in one
 afternoon. The first thing `--probe` was pointed at turned out to be an
 engineer's monitor 1.3 m from the lens rather than the bug it looked like.
 
+### The load check is the net, not the care
+
+```
+node tools/shot.mjs --quick            # one circuit, ~15 s
+node tools/shot.mjs --quick --all      # all five, ~80 s
+```
+
+Loads the page, waits for the world to exist, reports console errors, exits
+non-zero. No frame-rate probe, no screenshot.
+
+It exists because of a thing that happened twice in one afternoon, once to each
+session working on this repo. One of us deleted two functions by slicing a file
+between two landmarks without reading what was in between; the other wiped an
+uncommitted file with a bare `git checkout`. Same mistake in different clothes:
+destroying code by a coarse handle instead of by reading what is there.
+
+**Neither was caught by being careful.** One surfaced as a `ReferenceError` on
+page load, the other as a hunch-grep before committing. So the rule is not "be
+more careful", it is: address code by exact text and never by span, save the
+NEW file before restoring an OLD one — and run the load check on every edit to
+a module anything else imports, not once before a push. That is what `--quick`
+is for, and why it had to be fifteen seconds rather than ninety.
+
+### `--wait` cannot catch anything that happens in the first second
+
+Under SwiftShader the page runs at 0.2-0.7 fps and the whole thing is
+FRAME-LIMITED, so waiting longer buys no simulation time at all — every
+screenshot comes back at lap 0:00.715 however long you wait. Both sessions
+burned headless runs on this independently before working it out.
+
+The consequence is that a screenshot can prove a thing RENDERS but not that a
+thing HAPPENS. Anything that has to be caught in motion — a car mid-flight, a
+crash, a lap time — needs a headless harness that steps the simulation
+(`tools/flight.mjs`, `tools/drive.mjs`, `tools/race.mjs`), not a photograph.
+
 `?notex` runs the whole world on flat colours, which is both a setting for a
 weak machine and the fastest way to tell a material problem from a geometry
 one. A fresh clone that has not run `gettex.mjs` boots this way on its own.
