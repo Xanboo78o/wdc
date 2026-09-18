@@ -8,7 +8,7 @@
 // What lives here and NOT in autopilot.js: anything that needs to know the
 // running order. A driver knows how to drive; only the session knows who is
 // ahead, who is being caught, and whose fault the contact was.
-import { makeCar, step, FIXED_DT, SURFACE, peakSlip } from './physics.js';
+import { makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor } from './physics.js';
 import { makeAutopilot, makeDriver } from './autopilot.js';
 import { resolveBarrier, resolveCars } from './collide.js';
 
@@ -299,7 +299,7 @@ export class Race {
       else if (al > pr.w) surface = SURFACE.kerb;
 
       step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv),
-                      dirty: car.dirty, tow: car.tow });
+                      dirty: car.dirty, tow: car.tow, rollMul: dragFor(surface) });
       const hit = resolveBarrier(car, t, e.hint);
       if (hit && hit.harm) { e.contacts++; this.log('crash', `${e.name} INTO THE BARRIER`, e); }
       if (car.damage >= 1 && !e.retired) { e.retired = true; this.log('crash', `${e.name} RETIRES`, e); }

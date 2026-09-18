@@ -61,6 +61,14 @@ export const CARS = {
 };
 
 export const SURFACE = { track: 1.0, kerb: 0.93, runoff: 0.58, grass: 0.42 };
+
+// Going off is not just less grip — it is DRAG. A gravel trap exists to stop a
+// car, and it works by the wheels ploughing into it; grass is softer but still
+// costs far more than tarmac. Modelling the surface only as a friction
+// coefficient made a gravel trap a place you could drive across at 200 km/h,
+// which is most of why leaving the road felt like nothing happened.
+export const SURFACE_DRAG = { 1.0: 1, 0.93: 1.4, 0.58: 9, 0.42: 5 };
+export const dragFor = surf => SURFACE_DRAG[surf] ?? 1;
 const AMBIENT = 30;
 
 // ---------------------------------------------------------------------------
@@ -151,7 +159,8 @@ export function step(car, dt, env = {}) {
   // the real reason overtaking is hard, and it is why the effect is asymmetric.
   const DFf = q * clA * S.aeroBal * (1 - 0.40 * dirty);
   const DFr = q * clA * (1 - S.aeroBal) * (1 - 0.12 * dirty);
-  const drag = q * cdA * (1 - 0.40 * tow) + S.rollRes;
+  // Rolling resistance scales with what the wheels are ploughing through.
+  const drag = q * cdA * (1 - 0.40 * tow) + S.rollRes * (env.rollMul ?? 1);
 
   // ---- vertical loads (load transfer is what makes the car feel alive) -----
   const g = 9.81;

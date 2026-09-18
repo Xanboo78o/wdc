@@ -7,7 +7,7 @@
 // is the single most common way a browser "sim" quietly turns out not to be.
 import { Track } from './track.js';
 import { buildLine } from './line.js';
-import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip } from './physics.js';
+import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor } from './physics.js';
 import { Hands, steerLock } from './input.js';
 import { View } from './render.js';
 import { loadEnv } from './env.js';
@@ -183,7 +183,8 @@ function loop(now) {
     if (spec.drs && hands.tapped('Space')) car.drsOpen = !car.drsOpen;
     if (car.brake > 0.05) car.drsOpen = false;   // DRS shuts under braking
 
-    step(car, FIXED_DT, { surface, bank: proj.bank, bankDir: Math.sign(proj.curv) });
+    step(car, FIXED_DT, { surface, bank: proj.bank, bankDir: Math.sign(proj.curv),
+                          rollMul: dragFor(surface) });
 
     // ---- barrier: real rigid-body contact, resolved at the bodywork corners
     const hit = resolveBarrier(car, track, state.hint);

@@ -254,13 +254,23 @@ export function resolveBarrier(car, track, hint = null) {
     //    mass) is the honest measure — it is the velocity the impact actually
     //    took out of the car, so a heavy car is not automatically tougher.
     const dv = Math.abs(j) / S.m;
-    // Same curve as car-to-car: brushing a barrier is survivable, hitting one
-    // is not, and the difference should be the impact rather than the count.
-    if (dv > 2.2) {
-      const harm = Math.min(0.7, Math.pow((dv - 2.2) / 20, 1.6));
+    // A BARRIER IS NOT ANOTHER CAR, and giving both the same forgiving curve
+    // was a regression reported as "theres no crash physics". Rubbing wheels
+    // has to be survivable or a 22-car race grinds itself to death by
+    // accumulation — but a wall does not yield, does not brake, and is not
+    // trying to avoid you. Hitting one at 50 km/h scored 0.00 damage under the
+    // shared curve, which from the driver's seat is no crash at all.
+    //
+    // Low threshold, so contact always shows; steep, so a real shunt ends it.
+    // 50 km/h at 35 degrees marks the car, 220 km/h destroys it.
+    if (dv > 0.8) {
+      const harm = Math.min(0.8, Math.pow((dv - 0.8) / 12, 1.3));
       car.damage = Math.min(1, (car.damage || 0) + harm);
       car.crush = car.crush || { front: 0, rear: 0, left: 0, right: 0 };
-      car.crush[hit.part] = Math.min(1, car.crush[hit.part] + harm * 1.7);
+      // Bodywork shows it harder than the mechanicals feel it — a nose can be
+      // visibly folded on a car that is still driveable, which is what makes
+      // the damage legible from the cockpit.
+      car.crush[hit.part] = Math.min(1, car.crush[hit.part] + harm * 2.2);
       hit.harm = harm;
     }
   }
