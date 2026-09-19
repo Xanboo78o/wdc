@@ -72,8 +72,8 @@
     <div class="card">
       <div class="dim">TRY THIS</div>
       <ol>
-        <li>Brake pedal = <b>1 2 3</b>, throttle pedal = <b>8 9 0</b>. Each key is one step (33%).</li>
-        <li>Building the pedals? Push slowly: the bar should climb 33 → 67 → 100%, and read 0% with your foot just resting. <a href="pedals.html" style="color:var(--mint)">Build sheet</a></li>
+        <li>Brake pedal = <b>1 2 3</b> (steps 20 → 50 → 100%: the full stop is only on a slam). Throttle pedal = <b>8 9 0</b> (33 → 67 → 100%).</li>
+        <li>Building the pedals? Push slowly: each bar should climb step by step, and read 0% with your foot just resting. <a href="pedals.html" style="color:var(--mint)">Build sheet</a></li>
         <li>Both pedals floored = 6 keys, exactly the MX Keys Mini's limit. For the clutch later: hold all 6 plus a <b>Shift</b> and see if 7 show up.</li>
       </ol>
     </div>
@@ -90,6 +90,9 @@
 // pedals floored (3 + 3) is exactly the limit and nothing is ever dropped.
 const BRAKE = ['Digit1', 'Digit2', 'Digit3'];
 const THROTTLE = ['Digit8', 'Digit9', 'Digit0'];
+// same step values as js/input.js LADDER_STEPS: the brake only gives its
+// full stop on a slam
+const STEPS = { brake: [0, 20, 50, 100], throttle: [0, 33, 67, 100] };
 const label = c => c.replace(/^Key|^Digit/, '').replace('Arrow', '↑').replace('Space', 'SPACE');
 
 const held = new Set();
@@ -108,9 +111,9 @@ function log(msg, warn) {
   $('log').prepend(d);
 }
 
-function pedal(keys, fill, pct, stepsEl) {
+function pedal(keys, fill, pct, stepsEl, which) {
   const n = keys.filter(k => held.has(k)).length;
-  const v = Math.round(100 * n / keys.length);
+  const v = STEPS[which][n];
   $(fill).style.width = v + '%';
   $(pct).textContent = v + '%';
   for (const s of $(stepsEl).children) s.classList.toggle('on', held.has(s.dataset.k));
@@ -124,8 +127,8 @@ function draw() {
     $('max').textContent = max;
     $('maxKeys').textContent = maxSet.map(label).join(' ');
   }
-  pedal(BRAKE, 'bFill', 'bPct', 'bSteps');
-  pedal(THROTTLE, 'tFill', 'tPct', 'tSteps');
+  pedal(BRAKE, 'bFill', 'bPct', 'bSteps', 'brake');
+  pedal(THROTTLE, 'tFill', 'tPct', 'tSteps', 'throttle');
 }
 
 addEventListener('keydown', e => {

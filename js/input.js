@@ -18,9 +18,9 @@ export const KEYMAP = {
 
 // KEY LADDER PEDALS (pedals.html). A spare keyboard under two cardboard
 // flaps, with foam pieces of three heights over three keys per pedal, so a
-// harder push reaches more keys. The pedal is at (keys down / keys in the
-// ladder) — 0, 1/3, 2/3, 1 — and the same rates below that ramp a keyboard
-// throttle ramp between those steps, which is what makes it feel analogue.
+// harder push reaches more keys. Each count of keys down is a step (see
+// LADDER_STEPS), and the same rates below that ramp a keyboard throttle ramp
+// between those steps, which is what makes it feel analogue.
 // Three per pedal because a Bluetooth keyboard registers six keys at once:
 // both pedals floored is exactly six, so a key is never dropped. The game
 // only COUNTS keys, so which foam piece sits over which key does not matter.
@@ -29,6 +29,18 @@ export const LADDER = {
   brake: ['Digit1', 'Digit2', 'Digit3'],
 };
 const LADDER_KEYS = new Set([...LADDER.throttle, ...LADDER.brake]);
+
+// What each step is worth, by how many keys are down (0, 1, 2, 3). The
+// throttle is even. The brake is not: the car already stops at the tyres'
+// limit on a full pedal (6.5 g from 300 km/h, tools/brakecheck.mjs — real F1
+// is 5-6 g), so more brake force would only lock the wheels. What a stronger
+// FEEL wants instead is a pedal where the top of the range takes a stamp: the
+// first two steps are for squeezing and trail-braking, and all of it only
+// arrives when you slam the pedal onto its stop.
+export const LADDER_STEPS = {
+  throttle: [0, 1 / 3, 2 / 3, 1],
+  brake: [0, 0.2, 0.5, 1],
+};
 
 // Move toward a target, no faster than `up` going up or `dn` coming down.
 const approach = (v, target, up, dn) =>
@@ -64,10 +76,9 @@ export class Hands {
   held(action) { return KEYMAP[action].some(c => this.down.has(c)); }
   // how far down a ladder pedal is, 0..1
   ladder(action) {
-    const keys = LADDER[action];
     let n = 0;
-    for (const c of keys) if (this.down.has(c)) n++;
-    return n / keys.length;
+    for (const c of LADDER[action]) if (this.down.has(c)) n++;
+    return LADDER_STEPS[action][n];
   }
   tapped(code) {
     if (this.pressed.has(code)) { this.pressed.delete(code); return true; }
