@@ -17,6 +17,8 @@ import { Race } from './race.js';
 import { gridSlots } from './grid.js';
 import { TIERS, makeAutopilot, makeDriver } from './autopilot.js';
 import { Field } from './field.js';
+import { makeBox } from './gearbox.js';
+import { Engine } from './audio.js';
 
 const $ = id => document.getElementById(id);
 const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV'];
@@ -31,6 +33,7 @@ const state = {
   // HUD needs about the player in a race hangs off that one object rather than
   // being copied into `state` and going stale.
   race: null, field: null, me: null, lightsWere: 0, shown: false,
+  box: null, engine: null,
 };
 const hands = new Hands();
 
@@ -89,6 +92,18 @@ function startSlot(grid) {
 
 async function start() {
   $('menu').classList.add('hidden');
+  // Engine audio MUST be created inside a real user gesture. A context made
+  // any later starts suspended, never makes a sound, and never reports an
+  // error either — so it is started here, from the click, and awaited at the
+  // end of this function rather than blocking the load.
+  const qa = new URLSearchParams(location.search);
+  if (qa.get('sound') !== '0') {
+    state.engine = new Engine({
+      pick: +(qa.get('eng') || 1),
+      ref: +(qa.get('engref') || 0) || undefined,
+      volume: qa.has('vol') ? +qa.get('vol') : 0.5,
+    });
+  }
   $('hud').classList.remove('hidden');
   $('load').classList.remove('hidden');
   // let the browser paint the loading line before the line solver blocks
@@ -115,6 +130,9 @@ async function start() {
   const line = lines.race;
   state.track = t; state.line = line; state.lines = lines;
   state.peak = peakSlip(spec);
+  state.box = makeBox(spec);
+  // Not awaited: a missing or slow .wav must not hold up the green light.
+  if (state.engine) state.engine.start('./');
 
   if (pickMode === 'race') {
     // Everything here can also come off the URL, so a headless check can boot
@@ -281,6 +299,7 @@ function loop(now) {
     me.pitRequest = !me.pitRequest;
     toast(me.pitRequest ? 'BOX THIS LAP' : 'PIT CANCELLED');
   }
+  if (hands.tapped('KeyM') && state.engine) toast('SOUND ' + (state.engine.toggleMute() ? 'OFF' : 'ON'));
   if (hands.tapped('Escape')) { location.reload(); return; }
 
   let rough = 0;
@@ -385,6 +404,15 @@ function loop(now) {
     state.field.frame(race.entries, frame);
     state.field.smoke(race.entries, state.peak);
   }
+  // ---- gears and engine note --------------------------------------------
+  // Read off the speed the car already has. gearbox.js changes no forces, so
+  // every validated lap time is untouched — see the header of that file.
+  if (state.box) {
+    state.box.update(frame, car.speed * 3.6, car.throttle);
+    if (state.engine) {
+      state.engine.update(state.box.rpm, car.throttle, { off: car.surface < 1 ? 1 : 0 });
+    }
+  }
   view.frame(car, frame, { slipOver: over, rough });
   // Republish what the LAST frame actually cost. render.js publishes this once,
   // on the first frame, which is honest for a static world and useless for a
@@ -396,6 +424,19 @@ function loop(now) {
     window.__wdc.draws = info.calls;
     window.__wdc.tris = info.triangles;
     if (state.field) window.__wdc.carsDrawn = state.field.drawn;
+    // Gear, revs and the state of the engine audio, published for the
+    // harnesses. `audioOk` is read off the AudioContext, not off a flag this
+    // file set — reporting a label you wrote yourself is not a measurement.
+    // A live reference to the player's car, so a harness can drive it. Same
+    // reason __wdc exists at all: the alternative is a second copy of the loop.
+    window.__wdc.car = car;
+    if (state.box) { window.__wdc.gear = state.box.gear + 1; window.__wdc.rpm = Math.round(state.box.rpm); }
+    if (state.engine) {
+      window.__wdc.audioOk = !!(state.engine.ctx && state.engine.ctx.state === 'running' && state.engine.ok);
+      window.__wdc.audioRate = state.engine.src ? +state.engine.src.playbackRate.value.toFixed(3) : 0;
+      window.__wdc.audioGain = state.engine.gain ? +state.engine.gain.gain.value.toFixed(3) : 0;
+      window.__wdc.audioFile = state.engine.file;
+    }
   }
   hud(over, rough);
   if (race) raceHud(frame);
