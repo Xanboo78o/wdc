@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KEY TESTER — pedal ladder</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { --ink: #eef0f2; --dim: #8b949c; --bg: #0f1217; --panel: #181c22; --mint: #35d6a0; --red: #e0483a; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; letter-spacing: 0.12em; margin: 0 0 4px; }
+  .dim { color: var(--dim); }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 18px; }
+  .card { background: var(--panel); border-radius: 12px; padding: 16px; flex: 1 1 280px; }
+  .big { font-size: 64px; font-weight: 800; line-height: 1; }
+  #held { display: flex; flex-wrap: wrap; gap: 8px; min-height: 56px; margin-top: 10px; }
+  .key { background: var(--mint); color: #06140f; font-weight: 800; border-radius: 8px; padding: 10px 14px; font-size: 20px; }
+  .pedal { margin-top: 10px; }
+  .pedal .name { display: flex; justify-content: space-between; font-weight: 700; letter-spacing: 0.1em; }
+  .bar { height: 34px; border-radius: 8px; background: #252a31; overflow: hidden; margin-top: 8px; }
+  .fill { height: 100%; width: 0; background: var(--mint); transition: width 60ms; }
+  .brake .fill { background: var(--red); }
+  .steps { display: flex; gap: 6px; margin-top: 8px; }
+  .step { flex: 1; text-align: center; padding: 8px 0; border-radius: 6px; background: #252a31; font-weight: 800; font-size: 18px; }
+  .step.on { background: var(--mint); color: #06140f; }
+  .brake .step.on { background: var(--red); color: #fff; }
+  #log { max-height: 220px; overflow: auto; font-size: 13px; color: var(--dim); margin-top: 8px; }
+  #log div.warn { color: #f0b429; }
+  button { background: #252a31; color: var(--ink); border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  ol { padding-left: 20px; margin: 8px 0 0; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>KEY TESTER</h1>
+  <div class="dim">Hold keys down on the MX Keys Mini. Everything you are holding shows up here. (A browser can't tell your two keyboards apart, so don't touch the laptop keys while testing.)</div>
+
+  <div class="row">
+    <div class="card">
+      <div class="dim">HOLDING RIGHT NOW</div>
+      <div class="big" id="count">0</div>
+      <div id="held"></div>
+    </div>
+    <div class="card">
+      <div class="dim">MOST KEYS AT ONCE</div>
+      <div class="big" id="max">0</div>
+      <div class="dim" id="maxKeys" style="margin-top:8px"></div>
+      <button id="reset" style="margin-top:10px">reset</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card brake">
+      <div class="pedal">
+        <div class="name"><span>BRAKE — left foot</span><span id="bPct">0%</span></div>
+        <div class="bar"><div class="fill" id="bFill"></div></div>
+        <div class="steps" id="bSteps"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="pedal">
+        <div class="name"><span>THROTTLE — right foot</span><span id="tPct">0%</span></div>
+        <div class="bar"><div class="fill" id="tFill"></div></div>
+        <div class="steps" id="tSteps"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <div class="dim">TRY THIS</div>
+      <ol>
+        <li>Hold <b>1</b>, then add <b>2</b>, then <b>3</b>, then <b>4</b> without letting go. The brake bar should climb 25 → 50 → 75 → 100%.</li>
+        <li>Same with <b>7 8 9 0</b> for the throttle.</li>
+        <li>The big one: hold <b>1 2 3 4</b> AND <b>7 8 9 0</b> at the same time (both pedals floored). If fewer than 8 light up, the keyboard can't do that many at once and we use fewer steps per pedal.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <div class="dim">WHAT HAPPENED</div>
+      <div id="log"></div>
+    </div>
+  </div>
+</main>
+<script>
+// The pedal ladders: a light press reaches only the first key, a hard press
+// reaches them all. Number keys, because the game uses none of them.
+const BRAKE = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
+const THROTTLE = ['Digit7', 'Digit8', 'Digit9', 'Digit0'];
+const label = c => c.replace(/^Key|^Digit/, '').replace('Arrow', '↑').replace('Space', 'SPACE');
+
+const held = new Set();
+let max = 0, maxSet = [];
+const $ = id => document.getElementById(id);
+
+function steps(el, keys) {
+  $(el).innerHTML = keys.map(k => `<div class="step" data-k="${k}">${label(k)}</div>`).join('');
+}
+steps('bSteps', BRAKE); steps('tSteps', THROTTLE);
+
+function log(msg, warn) {
+  const d = document.createElement('div');
+  if (warn) d.className = 'warn';
+  d.textContent = `${new Date().toLocaleTimeString()}  ${msg}`;
+  $('log').prepend(d);
+}
+
+function pedal(keys, fill, pct, stepsEl) {
+  const n = keys.filter(k => held.has(k)).length;
+  const v = Math.round(100 * n / keys.length);
+  $(fill).style.width = v + '%';
+  $(pct).textContent = v + '%';
+  for (const s of $(stepsEl).children) s.classList.toggle('on', held.has(s.dataset.k));
+}
+
+function draw() {
+  $('count').textContent = held.size;
+  $('held').innerHTML = [...held].map(k => `<span class="key">${label(k)}</span>`).join('');
+  if (held.size > max) {
+    max = held.size; maxSet = [...held];
+    $('max').textContent = max;
+    $('maxKeys').textContent = maxSet.map(label).join(' ');
+  }
+  pedal(BRAKE, 'bFill', 'bPct', 'bSteps');
+  pedal(THROTTLE, 'tFill', 'tPct', 'tSteps');
+}
+
+addEventListener('keydown', e => {
+  e.preventDefault();
+  if (e.repeat) return;
+  held.add(e.code);
+  draw();
+});
+addEventListener('keyup', e => {
+  e.preventDefault();
+  held.delete(e.code);
+  draw();
+});
+// losing focus loses the key-ups, so clear rather than latch
+addEventListener('blur', () => { held.clear(); draw(); log('window lost focus: cleared'); });
+
+let lastBoth = 0;
+setInterval(() => {
+  // the both-pedals-floored test, reported once each time it is tried
+  const b = BRAKE.filter(k => held.has(k)).length, t = THROTTLE.filter(k => held.has(k)).length;
+  const now = b + t;
+  if (now >= 6 && now !== lastBoth) log(`${now} ladder keys held at once (brake ${b}/4, throttle ${t}/4)`, now < 8);
+  lastBoth = now;
+}, 250);
+$('reset').onclick = () => { max = 0; maxSet = []; $('max').textContent = 0; $('maxKeys').textContent = ''; };
+draw();
+log('ready: hold some keys');
+</script>
+</body>
+</html>
