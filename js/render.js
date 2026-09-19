@@ -390,6 +390,25 @@ export class View {
       opts.chassis ? chassisGeometry(THREE, opts.chassis) : null);
     this.car = car.group; this.wheels = car.wheels; this.steer = car.steer;
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
+    // The car's attitude now comes from four real spring deflections in
+    // physics.js instead of a multiplier on a g-number. Measured over a hot
+    // lap that is +-1.4 deg of roll and +-0.18 deg of pitch — which is exactly
+    // right for a car this stiff, and completely invisible on a screen.
+    //
+    // SOFTEN is the camera's one lie, and it is deliberately the ONLY one: it
+    // scales the deflections, not the angles, so roll and pitch keep the ratio
+    // the real car has (it rolls about eight times more than it pitches) and a
+    // single wheel dropping off a kerb still tips the car the way it really
+    // would. ?soften=1 shows the true attitude; 0 pins it flat.
+    const sf = new URLSearchParams(location.search).get('soften');
+    this.soften = sf == null ? 6 : Math.max(0, +sf || 0);
+    this.leanK = this.soften;
+    // Wheel pivots in physics.js's corner order: FL, FR, RL, RR. A chassis
+    // model loaded with ?chassis= has no hubs, hence the guard.
+    const hb = car.hubs || null;
+    this.susp = hb ? [hb.fl, hb.fr, hb.rl, hb.rr] : null;
+    this.suspY = this.susp ? this.susp.map(h => h ? h.position.y : 0) : null;
+    this.suspZ0 = null;   // static deflection, captured on the first frame
     // An imported chassis carries its own wings in its geometry, so the
     // procedural ones must stay hidden. They cannot just be set invisible at
     // build time: the frame loop below sets `m.visible = !lost.frontWing`
@@ -738,9 +757,25 @@ export class View {
     // of where the car is on the TRACK — so a car flying over Zandvoort's
     // banking would keep leaning eighteen degrees at it for no reason.
     const grounded = car.airborne ? 0 : 1;
-    this.car.rotation.x = (car.roll || 0) + latG * 0.030
+    // Airborne, car.roll/car.pitch are the TRUE attitude — a car on its roof is
+    // at pi — so the exaggeration has to go away, and it has to go away
+    // smoothly or the car snaps upright the instant it takes off.
+    this.leanK += ((car.airborne ? 1 : this.soften) - this.leanK) * Math.min(1, dt * 6);
+    this.car.rotation.x = (car.roll || 0) * this.leanK
       + bankRoll(this.bank, this.track, proj.i, proj.lat) * grounded;
-    this.car.rotation.z = (car.pitch || 0) + car.gLong * 0.022;
+    this.car.rotation.z = (car.pitch || 0) * this.leanK;
+    // The wheels move in their arches. 60 mm of travel is a lot of visible
+    // movement at this scale, and it is the cue that reads as "this is a
+    // machine with springs" from the chase camera and from onboard.
+    if (car.wheelZ && this.susp) {
+      // Show the CHANGE from the car's resting deflection, not the absolute
+      // compression — otherwise every wheel starts 12 mm into its arch.
+      if (!this.suspZ0) this.suspZ0 = car.wheelZ.slice();
+      for (let i = 0; i < 4; i++) {
+        const h = this.susp[i];
+        if (h) h.position.y = this.suspY[i] - (car.wheelZ[i] - this.suspZ0[i]) * this.leanK;
+      }
+    }
 
     // Bodywork that is no longer attached should not be drawn. physics.js
     // already reads `car.lost` — losing the front wing costs 56% of front

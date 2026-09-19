@@ -83,6 +83,9 @@ export const CARS = {
     // than somersaulting — it is the cheapest axis to spin it about.
     Iyy: 480, Ixx: 110,
     trackF: 1.45, trackR: 1.40,
+    // Front share of lateral load transfer — the anti-roll bar split, and the
+    // car's balance. Higher = more understeer. Set by tools/balance.mjs.
+    rollDist: 0.52,
     // The underbody as a wing, for when air gets UNDER the car. An F4 car has
     // a flat floor and no real diffuser and tops out around 215 km/h, so on
     // aerodynamics alone it should never fly at all — and with this number it
@@ -93,6 +96,8 @@ export const CARS = {
     // right thing to learn in — it tells you it is sliding before it goes.
     B: 10.0, C: 1.75, E: 0.72,
     mu: 1.55, wear: 1.0, Topt: 82, Twin: 34,
+    // Grip lost to an uneven axle. A tyre property, swept by tools/balance.mjs.
+    loadSens: 0.18,
     drs: false,
   },
   f1: {
@@ -111,6 +116,9 @@ export const CARS = {
     rollRes: 260,
     Iyy: 900, Ixx: 165,
     trackF: 1.60, trackR: 1.40,
+    // Front share of lateral load transfer — the anti-roll bar split, and the
+    // car's balance. Higher = more understeer. Set by tools/balance.mjs.
+    rollDist: 0.52,
     // A modern F1 floor is the whole downforce story, and turned over it is the
     // whole lift story. This number sets the takeoff speed, and it was MEASURED
     // rather than picked: at 12.0 the car flew backwards from 203 km/h, and a
@@ -122,6 +130,8 @@ export const CARS = {
     ClFloor: 7.0,
     B: 12.5, C: 1.80, E: 0.70,
     mu: 1.91, wear: 1.0, Topt: 92, Twin: 33,
+    // Grip lost to an uneven axle. A tyre property, swept by tools/balance.mjs.
+    loadSens: 0.18,
     drs: true, drsCl: 0.80, drsCd: 0.74,
   },
 };
@@ -209,6 +219,35 @@ const TRAVEL = 0.055;       // m before the chassis is on the deck
 const BUMPSTOP = 6e6;       // N/m once it is
 const FMAX = 2.2e5;         // N — the most one corner can ever transmit
 const RATE_MAX = 11;        // rad/s — a tumbling car, not a blender
+
+// ---------------------------------------------------------------------------
+// THE SUSPENSION, on the ground.
+//
+// Heave was already modelled — car.ride squats under downforce and feeds the
+// aero map. The two modes that were missing are PITCH and ROLL, and missing
+// them is why the car was, in Adam's words, "a script on a mesh". A bicycle
+// model has no inside and outside wheel, so it cannot transfer load sideways,
+// so it has no balance and nothing to lean on. These three constants are the
+// whole of what four corners buy you.
+//
+// The front's share of lateral load transfer — physically, the anti-roll bar
+// split — lives on the CAR SPEC as `rollDist`, because it is a setup value
+// like brake balance, not a law of physics. It is THE balance knob and the
+// only one in this file a real race engineer would recognise: more of the
+// transfer at the front makes the front axle run a bigger load spread, which
+// costs it more grip through LOAD_SENS below, which is understeer. Tuned by
+// measurement in tools/balance.mjs — never by feel.
+const ROLL_DIST_DEFAULT = 0.52;
+// Grip lost to an UNEVEN axle, quadratic in the spread between its two wheels.
+// This is what makes ROLL_DIST mean anything: without load sensitivity you can
+// move as much load across the car as you like and the axle's total capacity
+// never changes, so the balance knob would be decoration.
+//
+// Deliberately a function of the SPREAD and not of absolute load, so downforce
+// — which presses both wheels down equally — is not punished. The validated
+// straight-line numbers cannot move, because on a straight the spread is zero.
+const LOAD_SENS_DEFAULT = 0.25;
+const SUSP_TAU = 0.055;     // s, how fast the platform takes up a load change
 
 const wrapPi = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 
@@ -490,6 +529,7 @@ export function makeCar(opts = {}) {
     dents: [], lost: null,
     speed: 0, slipF: 0, slipR: 0, lock: false, wheelspin: false,
     gLat: 0, gLong: 0,
+    _Fxp: 0, _Fyp: 0,             // last substep's real forces, for load transfer
     ...opts,
   };
 }
@@ -603,15 +643,76 @@ export function step(car, dt, env = {}) {
   // immediately and leaves both at 1, so everything below is untouched.
   vertical(car, dt, env, q, v);
 
-  // ---- vertical loads (load transfer is what makes the car feel alive) -----
+  // ---- vertical loads: FOUR CORNERS, not two axles ------------------------
   const g = 9.81;
   const statF = S.m * g * S.b / S.L, statR = S.m * g * S.a / S.L;
-  const tr = S.m * car.ax * S.h / S.L;
-  const Fzf = Math.max(200, statF + DFf - tr);
-  const Fzr = Math.max(200, statR + DFr + tr);
 
-  const muF = tyreGrip(S, t.Tf, t.wf) * surf;
-  const muR = tyreGrip(S, t.Tr, t.wr) * surf;
+  // LONGITUDINAL transfer, from the real longitudinal force of the previous
+  // substep.
+  //
+  // This line used to read `S.m * car.ax * S.h / S.L`, and car.ax is NOT an
+  // accelerometer: it is `Fx/m + vy*r`, the body-frame derivative. On a
+  // straight vy*r vanishes and the two agree, which is why this survived so
+  // long. The moment the car slides at speed, vy*r is large and entirely
+  // fictitious, and this line read it as BRAKING — measured at ~9g of phantom
+  // deceleration with the pedal at 0.00, which stripped the rear axle from
+  // 8.9 kN to 2.4 kN mid-corner. Less rear load, less rear grip, bigger slide,
+  // bigger vy*r: it fed itself, and that is why a high-speed slide snapped
+  // instead of sliding. Third time this file has been bitten by reading a
+  // rotating frame's derivative as an acceleration — see gLat/gLong below.
+  //
+  // One substep of lag (2.5 ms) is far below the time it really takes load to
+  // move through a spring, so it costs nothing physical and it breaks the
+  // algebraic loop for free.
+  const trX = (car._Fxp || 0) * S.h / S.L;
+
+  // LATERAL transfer, split front/rear by roll stiffness. See ROLL_DIST.
+  // +y is LEFT in this frame, so a positive Fy (turning left) leans the car
+  // over onto its RIGHT-hand wheels.
+  const Fyp = car._Fyp || 0;
+  const rollDist = S.rollDist ?? ROLL_DIST_DEFAULT;
+  const trYf = rollDist * Fyp * S.h / S.trackF;
+  const trYr = (1 - rollDist) * Fyp * S.h / S.trackR;
+
+  // A corner can be unloaded to nothing — that is a wheel in the air, and it
+  // is a real thing a stiff car does over a kerb — but never to less.
+  const FzFL = Math.max(0, statF / 2 + DFf / 2 - trX / 2 - trYf);
+  const FzFR = Math.max(0, statF / 2 + DFf / 2 - trX / 2 + trYf);
+  const FzRL = Math.max(0, statR / 2 + DFr / 2 + trX / 2 - trYr);
+  const FzRR = Math.max(0, statR / 2 + DFr / 2 + trX / 2 + trYr);
+  const Fzf = Math.max(200, FzFL + FzFR);
+  const Fzr = Math.max(200, FzRL + FzRR);
+
+  // LOAD SENSITIVITY, folded back into an axle mu so that every friction
+  // circle, cap and clamp downstream keeps reading `mu * Fz` and stays right
+  // without knowing four corners exist. An axle carrying 70/30 now makes less
+  // grip than the same axle at 50/50, which is the entire reason moving load
+  // across the car changes how it handles.
+  const ls = S.loadSens ?? LOAD_SENS_DEFAULT;
+  const spreadF = (FzFR - FzFL) / Fzf;
+  const spreadR = (FzRR - FzRL) / Fzr;
+  const muF = tyreGrip(S, t.Tf, t.wf) * surf * (1 - ls * spreadF * spreadF);
+  const muR = tyreGrip(S, t.Tr, t.wr) * surf * (1 - ls * spreadR * spreadR);
+
+  // ---- and now the suspension actually moves ------------------------------
+  // Deflection per corner straight from that corner's load, lagged toward it
+  // so the platform has a spring's time constant instead of snapping between
+  // states. The renderer leans the car off THESE — off the load the car is
+  // really carrying — rather than off a multiplier on a g-number, which is
+  // what lets a single wheel dropping off a kerb tip the car.
+  if (!car.airborne) {
+    const k = Math.min(1, dt / SUSP_TAU);
+    const tgt = [-FzFL / SPRING, -FzFR / SPRING, -FzRL / SPRING, -FzRR / SPRING];
+    for (let i = 0; i < 4; i++) car.wheelZ[i] += (tgt[i] - car.wheelZ[i]) * k;
+    const fz = (car.wheelZ[0] + car.wheelZ[1]) / 2, rz = (car.wheelZ[2] + car.wheelZ[3]) / 2;
+    const lz = (car.wheelZ[0] + car.wheelZ[2]) / 2, rz2 = (car.wheelZ[1] + car.wheelZ[3]) / 2;
+    // Braking compresses the front, so fz goes more negative, so pitch goes
+    // negative: nose down. A real single-seater is stiff enough that this is a
+    // fraction of a degree — making it readable is the renderer's job, and it
+    // does it by scaling this, not by inventing a lean of its own.
+    car.pitch = (fz - rz) / S.L;
+    car.roll = (lz - rz2) / S.trackF;
+  }
 
   // ---- slip angles --------------------------------------------------------
   // Stability control adds counter-lock when the car rotates faster than the
@@ -813,6 +914,10 @@ export function step(car, dt, env = {}) {
   // feels. Do NOT redefine car.ax/car.ay to match — those are integrated into
   // the velocities and are correct as they are.
   car.gLat = Fy / (S.m * g); car.gLong = Fx / (S.m * g);
+  // Fed back into next substep's load transfer. These are FORCES, which is
+  // what moves load around a car — not car.ax/car.ay, which carry the
+  // rotating-frame terms and are only correct for integrating the velocities.
+  car._Fxp = Fx; car._Fyp = Fy;
   car.muF = muF; car.muR = muR;
   return car;
 }
@@ -832,6 +937,33 @@ export function topSpeed(spec, drs = false) {
 
 // Steady-state cornering speed for a radius. Downforce rises with v^2, so past
 // a certain radius grip is never the limit — top speed is.
+// The grip a car can actually reach in a STEADY corner, which is not spec.mu.
+//
+// spec.mu is the tyre's peak coefficient with an evenly loaded axle, and a car
+// at the cornering limit never has one: it is leaning on its outside wheels,
+// and LOAD_SENS says an uneven axle makes less grip. So solving a racing line
+// at spec.mu asks every driver on the grid to corner about 9% faster than the
+// car can, and they all run wide — which is exactly what the keyboard harness
+// showed the moment four corners went in.
+//
+// Derived, not picked. The spread at the limit depends only on geometry and on
+// the lateral coefficient itself, so it is a fixed point: guess, compute the
+// spread, compute the grip that spread leaves, repeat. Speed drops out, because
+// downforce presses both wheels of an axle down equally and LOAD_SENS is a
+// function of the spread alone.
+export function limitMu(spec) {
+  const bf = spec.b / spec.L, br = spec.a / spec.L;   // static load fractions
+  const rd = spec.rollDist ?? ROLL_DIST_DEFAULT;
+  const ls = spec.loadSens ?? LOAD_SENS_DEFAULT;
+  let n = spec.mu;
+  for (let i = 0; i < 24; i++) {
+    const sF = Math.min(1, 2 * rd * n * spec.h / (bf * spec.trackF));
+    const sR = Math.min(1, 2 * (1 - rd) * n * spec.h / (br * spec.trackR));
+    n = spec.mu * ((1 - ls * sF * sF) * bf + (1 - ls * sR * sR) * br);
+  }
+  return n;
+}
+
 export function corneringSpeed(spec, R, mu, bank = 0) {
   R = Math.abs(R);
   // The textbook banked-curve formula blows up at these grip levels; the real

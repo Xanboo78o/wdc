@@ -442,7 +442,11 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
   };
   const rimF = rimGeo(0.305), rimR = rimGeo(0.405);
 
-  const wheels = {}, steer = {};
+  // `hubs` is every wheel's own pivot, exported so the renderer can move each
+  // one in its arch: physics.js gives 60 mm of real suspension travel per
+  // corner and a wheel that does not move in its arch is the giveaway that a
+  // car is a rigid prop.
+  const wheels = {}, steer = {}, hubs = {};
   // +Z is the car's RIGHT — see the handedness note in geom.js. The old model
   // called the wheel at +Z "fl", which was harmless while they were identical
   // cylinders and is not once they steer by different amounts.
@@ -460,7 +464,7 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
     for (const sd of [1, -1]) w.add(new THREE.Mesh(faceGeo(width, sd), hubMat));
     hub.add(w);
     g.add(hub);
-    wheels[key] = w;
+    wheels[key] = w; hubs[key] = hub;
     if (key[0] === 'f') steer[key] = hub;
   }
 
@@ -517,5 +521,5 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
     g.add(mesh);
   }
 
-  return { group: g, wheels, steer, drs, R, wings };
+  return { group: g, wheels, steer, hubs, drs, R, wings };
 }

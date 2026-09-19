@@ -1,6 +1,6 @@
 // line.js — racing line + speed profile, derived from the track AND the car.
 // Pure: no renderer, no DOM. The headless harness and the browser both use it.
-import { corneringSpeed, topSpeed } from './physics.js';
+import { corneringSpeed, topSpeed, limitMu } from './physics.js';
 
 // Minimum-CURVATURE line, not minimum length. Pulling the line taut apexes too
 // tight and is slower; what you want is the gentlest arc the corridor allows.
@@ -97,7 +97,12 @@ export function speedProfile(track, off, cur, spec, mu) {
 // follows the centreline while carrying racing-line speeds does not drive like
 // a novice, it drives like someone crashing. This is what makes SUPERCASUAL
 // work: competent car control, correct braking, wrong path.
-export function buildLines(track, spec, mu = spec.mu) {
+// The default grip is limitMu(spec), NOT spec.mu. spec.mu is what an evenly
+// loaded axle makes, and a car at the cornering limit is leaning on its
+// outside wheels — see limitMu() in physics.js. Solving the line at spec.mu
+// asks every car on the grid for about 9% more grip than it has, and they all
+// run wide in every corner.
+export function buildLines(track, spec, mu = limitMu(spec)) {
   const zero = new Float32Array(track.n);
   const ccur = lineCurvature(track, zero);
   const cpts = new Float32Array(track.n * 2);
