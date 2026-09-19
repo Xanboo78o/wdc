@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TRACK BUILDER — CHASING WDC</title>
+<link rel="icon" href="data:,">
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.min.js" } }
+</script>
+<style>
+  :root { --ink: #eef0f2; --dim: #9aa3ab; --panel: rgba(14, 16, 19, 0.72); --hot: #35d6a0; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cdd6dc;
+    font: 13px/1.35 ui-monospace, "JetBrains Mono", Menlo, monospace; color: var(--ink); }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .panel { position: fixed; background: var(--panel); border-radius: 10px; padding: 12px 14px;
+    backdrop-filter: blur(6px); }
+  #info { top: 14px; left: 14px; max-width: 360px; max-height: calc(100vh - 110px); overflow: auto; }
+  #trackName { font-size: 18px; font-weight: 700; letter-spacing: 0.08em; }
+  #trackLen { color: var(--dim); margin: 2px 0 10px; }
+  #pieces { list-style: none; margin: 0; padding: 0; }
+  #pieces li { padding: 5px 0; border-top: 1px solid rgba(255,255,255,0.08); }
+  #pieces li b { display: inline-block; min-width: 22px; color: var(--dim); }
+  #pieces li i { font-style: normal; color: var(--hot); margin-left: 4px; }
+  #pieces li small { display: block; color: var(--dim); margin-left: 22px; }
+  #pieces li.new b { color: var(--hot); }
+  #keys { bottom: 14px; left: 50%; transform: translateX(-50%); color: var(--dim); white-space: nowrap; }
+  #keys kbd { color: var(--ink); background: rgba(255,255,255,0.1); border-radius: 4px; padding: 1px 6px; }
+  #speedBox { bottom: 14px; right: 14px; text-align: right; display: none; }
+  #speed { font-size: 40px; font-weight: 700; }
+  #msg { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); font-size: 20px; font-weight: 700;
+    letter-spacing: 0.1em; text-shadow: 0 2px 8px rgba(0,0,0,0.6); transition: opacity 0.4s; opacity: 0; }
+  .drive { display: none; }
+  body.driving .drive { display: inline; }
+  body.driving .fly { display: none; }
+  body.driving #speedBox { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="info" class="panel">
+  <div id="trackName">…</div>
+  <div id="trackLen">building the land…</div>
+  <ol id="pieces"></ol>
+</div>
+<div id="keys" class="panel">
+  <span class="fly"><kbd>drag</kbd> orbit · <kbd>right-drag</kbd> pan · <kbd>wheel</kbd> zoom · <kbd>WASD</kbd> move ·
+    <kbd>F</kbd> newest piece · <kbd>H</kbd> whole track · <kbd>Enter</kbd> DRIVE IT</span>
+  <span class="drive"><kbd>arrows / WASD</kbd> drive · <kbd>C</kbd> camera · <kbd>R</kbd> restart · <kbd>Enter</kbd> back to flying</span>
+</div>
+<div id="speedBox" class="panel"><div id="speed">0</div>km/h</div>
+<div id="msg"></div>
+<script type="module" src="./js/build/app.js"></script>
+</body>
+</html>
