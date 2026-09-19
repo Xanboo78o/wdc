@@ -30,7 +30,7 @@ const state = {
   // twenty-one, and `me` is the player's entry inside the race — everything the
   // HUD needs about the player in a race hangs off that one object rather than
   // being copied into `state` and going stale.
-  race: null, field: null, me: null, evT: 0, feed: [], lightsWere: 0, shown: false,
+  race: null, field: null, me: null, lightsWere: 0, shown: false,
 };
 const hands = new Hands();
 
@@ -214,7 +214,7 @@ async function start() {
       window.__wdc.farMeshesPerCar = c.farMeshesPerCar;
     }
   }
-  for (const id of ['tower', 'feed', 'startLights']) $(id).classList.toggle('hidden', !state.race);
+  for (const id of ['tower', 'startLights']) $(id).classList.toggle('hidden', !state.race);
   $('posRow').classList.toggle('hidden', !state.race);
 
   $('trackName').textContent = t.full;
@@ -417,8 +417,14 @@ function hud(over, rough) {
   $('pedT').style.width = (car.throttle * 100).toFixed(0) + '%';
   $('pedB').style.width = (car.brake * 100).toFixed(0) + '%';
 
+  // The bar used to be scaled to 2.4x peak, which put the peak marker at 41.6%
+  // — visually the MIDDLE of the bar. Adam read a bar sitting on its marker as
+  // "the grip bars are in the middle", i.e. as having half the tyre left, when
+  // it meant he was exactly at the limit. The gauge was not wrong, it was
+  // unreadable. At 1.4x the marker sits at 71%, past it is plainly past it,
+  // and there is still room to show an overdriven tyre.
   const bar = (el, a) => {
-    const frac = Math.min(1, Math.abs(a) / (peak * 2.4));
+    const frac = Math.min(1, Math.abs(a) / (peak * 1.4));
     el.style.width = (frac * 100).toFixed(1) + '%';
     el.style.background = Math.abs(a) > peak ? '#ff4d3d' : Math.abs(a) > peak * 0.8 ? '#ffc23d' : '#35d6a0';
   };
@@ -517,20 +523,15 @@ function raceHud(dt) {
   if (me.penalty > 0) $('posV').textContent += ` +${me.penalty}s`;
 
   // ---- race control ------------------------------------------------------
-  const fresh = race.events.filter(ev => ev.t > state.evT);
-  if (fresh.length) {
-    state.evT = fresh[fresh.length - 1].t;
-    for (const ev of fresh) {
-      state.feed.push(ev);
-      // A toast for what happened to YOU, and for the flags. Twenty-two cars
-      // generate far too many events to put all of them across the middle of
-      // the screen — the rest belong in the feed, where they read as a race
-      // going on around you rather than as a notification storm.
-      if (ev.car === me.idx || ev.kind === 'flag') toast(ev.text);
-    }
-    while (state.feed.length > 4) state.feed.shift();
-    $('feed').innerHTML = state.feed.map(ev => `<div class="${ev.kind}">${ev.text}</div>`).join('');
-  }
+  // There isn't one any more, and that is the point.
+  //
+  // This used to be a scrolling feed of "X INTO THE BARRIER", "Y TRACK LIMITS
+  // (2/3)", "Z CAUSED A COLLISION". All of it was the game telling you what
+  // had just happened to you on a screen you were not looking at, while the
+  // thing itself was happening out of the windscreen. If you hit a wall you
+  // can see that you hit a wall. The only thing left is the safety car light,
+  // because a safety car is information you genuinely cannot get by looking.
+  $('scLight').style.display = race.safety > 0 ? '' : 'none';
 
   // ---- the tower ---------------------------------------------------------
   // Eight times a second, not sixty. Twenty-two rows of four text nodes is a
@@ -558,9 +559,15 @@ function raceHud(dt) {
   // what finishing third is. The results appear when the race is actually over,
   // or straight away if you are out of it — and while you sit there retired,
   // they keep updating, because the race is still going on without you.
-  if (race.state === 'over' || me.retired) {
+  //
+  // Retiring does NOT put a screen over it either. Your race ends where the car
+  // stops: the camera stays on it, it sits there in the gravel with its wing
+  // off, and the rest of them go past. Adam's word for it was "let it sink
+  // in", and a results table thrown up two seconds later is the exact opposite
+  // of that. Escape still reloads if you have had enough.
+  if (race.state === 'over') {
     if (!state.shown) { state.shown = true; state.resAcc = 0; showResults(); }
-    else if (race.state !== 'over' && (state.resAcc += dt) > 0.5) { state.resAcc = 0; showResults(); }
+    else if ((state.resAcc += dt) > 0.5) { state.resAcc = 0; showResults(); }
   }
 }
 

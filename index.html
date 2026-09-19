@@ -9,35 +9,35 @@
 <script type="importmap">
 {
  "imports": {
-  "three": "./js/vendor/three.module.min.js?v=1789783179",
-  "./js/aero.js": "./js/aero.js?v=1789783179",
-  "./js/autopilot.js": "./js/autopilot.js?v=1789783179",
-  "./js/bank.js": "./js/bank.js?v=1789783179",
-  "./js/car.js": "./js/car.js?v=1789783179",
-  "./js/collide.js": "./js/collide.js?v=1789783179",
-  "./js/crowd.js": "./js/crowd.js?v=1789783179",
-  "./js/dent.js": "./js/dent.js?v=1789783179",
-  "./js/env.js": "./js/env.js?v=1789783179",
-  "./js/field.js": "./js/field.js?v=1789783179",
-  "./js/furniture.js": "./js/furniture.js?v=1789783179",
-  "./js/geom.js": "./js/geom.js?v=1789783179",
-  "./js/grid.js": "./js/grid.js?v=1789783179",
-  "./js/horizon.js": "./js/horizon.js?v=1789783179",
-  "./js/input.js": "./js/input.js?v=1789783179",
-  "./js/line.js": "./js/line.js?v=1789783179",
-  "./js/main.js": "./js/main.js?v=1789783179",
-  "./js/mesh.js": "./js/mesh.js?v=1789783179",
-  "./js/physics.js": "./js/physics.js?v=1789783179",
-  "./js/pit.js": "./js/pit.js?v=1789783179",
-  "./js/pitstop.js": "./js/pitstop.js?v=1789783179",
-  "./js/race.js": "./js/race.js?v=1789783179",
-  "./js/render.js": "./js/render.js?v=1789783179",
-  "./js/surface.js": "./js/surface.js?v=1789783179",
-  "./js/tex.js": "./js/tex.js?v=1789783179",
-  "./js/track.js": "./js/track.js?v=1789783179",
-  "./js/world.js": "./js/world.js?v=1789783179",
-  "./js/vendor/three.core.min.js": "./js/vendor/three.core.min.js?v=1789783179",
-  "./js/vendor/three.module.min.js": "./js/vendor/three.module.min.js?v=1789783179"
+  "three": "./js/vendor/three.module.min.js?v=1789783728",
+  "./js/aero.js": "./js/aero.js?v=1789783728",
+  "./js/autopilot.js": "./js/autopilot.js?v=1789783728",
+  "./js/bank.js": "./js/bank.js?v=1789783728",
+  "./js/car.js": "./js/car.js?v=1789783728",
+  "./js/collide.js": "./js/collide.js?v=1789783728",
+  "./js/crowd.js": "./js/crowd.js?v=1789783728",
+  "./js/dent.js": "./js/dent.js?v=1789783728",
+  "./js/env.js": "./js/env.js?v=1789783728",
+  "./js/field.js": "./js/field.js?v=1789783728",
+  "./js/furniture.js": "./js/furniture.js?v=1789783728",
+  "./js/geom.js": "./js/geom.js?v=1789783728",
+  "./js/grid.js": "./js/grid.js?v=1789783728",
+  "./js/horizon.js": "./js/horizon.js?v=1789783728",
+  "./js/input.js": "./js/input.js?v=1789783728",
+  "./js/line.js": "./js/line.js?v=1789783728",
+  "./js/main.js": "./js/main.js?v=1789783728",
+  "./js/mesh.js": "./js/mesh.js?v=1789783728",
+  "./js/physics.js": "./js/physics.js?v=1789783728",
+  "./js/pit.js": "./js/pit.js?v=1789783728",
+  "./js/pitstop.js": "./js/pitstop.js?v=1789783728",
+  "./js/race.js": "./js/race.js?v=1789783728",
+  "./js/render.js": "./js/render.js?v=1789783728",
+  "./js/surface.js": "./js/surface.js?v=1789783728",
+  "./js/tex.js": "./js/tex.js?v=1789783728",
+  "./js/track.js": "./js/track.js?v=1789783728",
+  "./js/world.js": "./js/world.js?v=1789783728",
+  "./js/vendor/three.core.min.js": "./js/vendor/three.core.min.js?v=1789783728",
+  "./js/vendor/three.module.min.js": "./js/vendor/three.module.min.js?v=1789783728"
  }
 }
 </script>
@@ -134,12 +134,12 @@
       <span id="drsLight">DRS</span>
       <span id="pitLight" style="display:none">BOX</span>
       <span id="padLight" style="display:none">PAD</span>
+      <span id="scLight" style="display:none">SC</span>
     </div>
   </div>
 
-  <!-- The timing tower, and race control. Both only exist in a race. -->
+  <!-- The timing tower. There is no race control feed: see js/main.js. -->
   <div id="tower" class="hidden"></div>
-  <div id="feed" class="hidden"></div>
 
   <!-- Five lights above the grid, and then the wait. -->
   <div id="startLights" class="hidden"><i></i><i></i><i></i><i></i><i></i></div>
@@ -154,6 +154,6 @@
   <button id="resBack" class="go">MENU</button>
 </div>
 
-<script type="module" src="./js/main.js?v=1789783179"></script>
+<script type="module" src="./js/main.js?v=1789783728"></script>
 </body>
 </html>

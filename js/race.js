@@ -30,6 +30,14 @@ const COLS = ['#1fd2be', '#ff8000', '#e8002d', '#ffd400', '#3671c6', '#27f4d2',
 
 const PIT_LIMIT = 80 / 3.6;
 const NEIGH_EVERY = 4;        // substeps between neighbour/racecraft updates
+// Safety car. Deployed when marshals have to stand on a live circuit to push a
+// beached car out, which is the only thing that deploys it — there is no
+// scripted caution. An opening-lap one was built, measured over N circuits x N
+// seeds and deleted: it changed nothing (7.25 -> 7.13 retired of 22) and cost a
+// fifth of the overtaking (104 -> 85 passes). See the note further down.
+const SAFETY_TIME = 30;       // s the car stays out once it is called
+const SAFETY_SPEED = 80 / 3.6;
+const PUSH_TIME = 8;          // s for a crew to heave a car back to the tarmac
 
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
@@ -37,6 +45,7 @@ export class Race {
     this.track = track; this.lines = lines; this.spec = spec;
     this.laps = laps; this.peak = peakSlip(spec);
     this.time = 0; this.state = 'grid'; this.lights = 3.2;
+    this.safety = 0;            // s of safety car remaining, 0 = racing
     // The pit lane, made once per session: a path with an entry, an exit and a
     // box per car, not a lateral offset. js/pitstop.js owns all of it; the race
     // only decides WHEN, and then keeps its hands off a car whose `inPit` is set.
@@ -70,6 +79,7 @@ export class Race {
         warnings: 0, penalty: 0, offNow: false, lastLimit: -99,
         contacts: 0, retired: false, finished: false, finishTime: null, bump: null,
         pitRequest: false, inPit: false, pitTimer: 0, pitStops: 0, stuck: 0,
+        recover: null,
       });
     }
     this.order();
@@ -369,7 +379,18 @@ export class Race {
         car.delta = inp.delta ?? car.delta;
       } else if (e.drive) {
         e.drive(car, e.proj, dt, e.ctx);
+        // Safety car. Applied AFTER the driver for the same reason the pit
+        // controller is: a driver that runs second simply writes its own
+        // throttle back over the cap every substep.
+        if (this.safety > 0 && !e.inPit) {
+          if (car.speed > SAFETY_SPEED) {
+            car.throttle = 0;
+            car.brake = Math.max(car.brake, Math.min(0.45, (car.speed - SAFETY_SPEED) * 0.10));
+          } else car.throttle = Math.min(car.throttle, 0.32);
+        }
       }
+      // A car being pushed is not driving, whoever is nominally at its wheel.
+      if (e.recover) { car.throttle = 0; car.brake = 0; }
 
       // ---- the pit stop ---------------------------------------------------
       // AFTER the driver, never before. The pit controller overrides the
@@ -455,39 +476,58 @@ export class Race {
         }
       }
 
-      // track limits: all four wheels the other side of the white line
-      if (racing && !e.inPit) {
-        const outBy = Math.abs(e.proj.lat) - e.proj.w - 0.9;
-        if (outBy > 0 && !e.offNow) {
-          e.offNow = true;
-          const c = t.cornerAt(e.proj.s);
-          if (c && this.time - e.lastLimit > 4 && e.car.speed > 14) {
-            e.lastLimit = this.time; e.warnings++;
-            this.log('limits', `${e.name} TRACK LIMITS (${e.warnings}/3)`, e);
-            if (e.warnings % 3 === 0) {
-              e.penalty += 5;
-              this.log('penalty', `${e.name} +5s TRACK LIMITS`, e);
-            }
-          }
-        } else if (outBy < -0.4) e.offNow = false;
-      }
+      // Track limits used to live here: a counter, a message, and five seconds
+      // added to your race by a line of text. Deleted on purpose. Running wide
+      // already costs you — the runoff has nine times the rolling drag of
+      // tarmac and 58% of the grip, both in physics.js — so the circuit
+      // punishes it without anyone being told off. If a rule can only be felt
+      // by reading about it, it is not part of the game.
 
-      // beached: hand it back rather than let the race wedge
+      // Beached. Nobody teleports any more.
+      //
+      // The old version snapped the car back onto the racing line at 9 m/s the
+      // instant it had been still for four seconds, which meant putting it in
+      // a gravel trap cost you nothing and taught you nothing. Now the
+      // marshals come and push, it takes PUSH_TIME to heave a car out, and
+      // while there are people stood on a live circuit the safety car is out
+      // for everybody. That is what really happens, and it is the only version
+      // where being stuck is something you feel rather than something you read.
+      //
+      // A car serving a twelve-second nose change is also stationary and
+      // seventeen metres off the centreline, which is exactly what beached
+      // looks like — hence the inPit guard, or it gets "rescued" out of its
+      // own pit stop three times.
       if (racing && !e.finished) {
-        // A car serving a twelve-second nose change is stationary and seventeen
-        // metres off the centreline, which is exactly what "beached" looks
-        // like. Without this it gets rescued onto the racing line three times
-        // during its own pit stop.
-        if (!e.inPit && e.car.speed < 3.2 && Math.abs(e.proj.lat) > e.proj.w) e.stuck += dt;
-        else e.stuck = 0;
-        if (e.stuck > 4) {
-          const lp = t.point(e.proj.s - 14, this.lines.race.off[t.idx(e.proj.s - 14)] || 0);
-          e.car.x = lp.x; e.car.y = lp.y; e.car.hdg = lp.hdg;
-          e.car.vx = 9; e.car.vy = 0; e.car.r = 0; e.stuck = 0;
-          this.log('flag', `${e.name} REJOINS`, e);
+        if (!e.recover && !e.inPit && e.car.speed < 3.2 && Math.abs(e.proj.lat) > e.proj.w) e.stuck += dt;
+        else if (!e.recover) e.stuck = 0;
+        if (e.stuck > 4 && !e.recover) {
+          const s0 = e.proj.s - 14;
+          const lp = t.point(s0, this.lines.race.off[t.idx(s0)] || 0);
+          e.recover = { t: 0, x0: e.car.x, y0: e.car.y, h0: e.car.hdg, to: lp };
+          e.stuck = 0;
+          this.safety = Math.max(this.safety, SAFETY_TIME);
+        }
+        if (e.recover) {
+          const R = e.recover;
+          R.t += dt;
+          const k = Math.min(1, R.t / PUSH_TIME);
+          // Smoothstep: a crew heaves a car, it does not yank it.
+          const f = k * k * (3 - 2 * k);
+          e.car.x = R.x0 + (R.to.x - R.x0) * f;
+          e.car.y = R.y0 + (R.to.y - R.y0) * f;
+          let dh = R.to.hdg - R.h0;
+          while (dh > Math.PI) dh -= 2 * Math.PI;
+          while (dh < -Math.PI) dh += 2 * Math.PI;
+          e.car.hdg = R.h0 + dh * f;
+          // Held still while they push, so the tyre model is not fighting four
+          // marshals for control of the car.
+          e.car.vx = 0; e.car.vy = 0; e.car.r = 0;
+          if (k >= 1) { e.recover = null; e.car.vx = 6; }
         }
       }
     }
+
+    if (this.safety > 0) this.safety = Math.max(0, this.safety - dt);
 
     this.order();
     if (this.state === 'finish' && this.entries.every(e => e.finished || e.retired)) this.state = 'over';

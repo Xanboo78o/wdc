@@ -68,8 +68,10 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 .sliprow .track{position:relative;flex:1;height:9px;background:#191e26;border-radius:5px;overflow:hidden}
 .sliprow .track i{position:absolute;inset:0 auto 0 0;width:0;background:var(--good);
   border-radius:5px;transition:background .1s}
-/* the peak marker sits at 1/2.4 of the bar, matching the HUD scale in main.js */
-.sliprow .track u{position:absolute;top:-2px;bottom:-2px;left:41.6%;width:2px;background:#e8eaee;opacity:.75}
+/* The peak marker sits at 1/1.4 of the bar, matching the HUD scale in main.js.
+   These two numbers MUST move together — when the marker sat at 41.6% the bar
+   read as half-full at the exact moment the tyre was at its limit. */
+.sliprow .track u{position:absolute;top:-2px;bottom:-2px;left:71.4%;width:2px;background:#e8eaee;opacity:.75}
 .tyretemp{margin-top:9px;font-size:10px;letter-spacing:.14em;color:var(--dim)}
 .tyretemp b{color:var(--ink)}
 
@@ -118,12 +120,6 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 .trow em.pit{color:var(--warn)}
 .trow em.dnf{color:var(--bad)}
 
-/* ---------------- race control feed ---------------- */
-#feed{top:150px;right:20px;width:262px;text-align:right;font-size:10.5px;letter-spacing:.07em}
-#feed div{color:var(--dim);margin-top:4px;line-height:1.45}
-#feed div.penalty{color:var(--warn)}
-#feed div.crash{color:var(--bad)}
-#feed div.flag{color:var(--ink)}
 
 /* ---------------- start lights ---------------- */
 #startLights{left:50%;top:13%;transform:translateX(-50%);display:flex;gap:12px;
@@ -146,6 +142,5 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
   .spd b{font-size:40px}
   #times{min-width:170px}
   #tower{width:186px;font-size:10px}
-  #feed{display:none}
   #raceOpts{grid-template-columns:1fr}
 }
