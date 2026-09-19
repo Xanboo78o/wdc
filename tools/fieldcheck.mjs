@@ -26,6 +26,30 @@ import { FIXED_DT } from '../js/physics.js';
 const args = process.argv.slice(2);
 const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : d; };
 
+// REFUSE A FLAG THIS DOES NOT UNDERSTAND.
+//
+// `--track monza` instead of `--tracks monza` would otherwise run all four
+// circuits and print a confident table, and nothing on screen would say the
+// argument had been ignored. That is the worst shape a bug can take in a
+// measurement tool: a silently dropped input produces a wrong number with a
+// believable explanation already attached to it. It cost this repo an
+// afternoon on 2026-09-18 in `tools/shot.mjs`, which took only the FIRST
+// `--q` and quietly discarded the rest — every screenshot came back looking
+// normal and photographing the wrong thing.
+const KNOWN = new Set(['tracks', 'seeds', 'laps', 'grid', 'tier', 'car']);
+for (const a of args) {
+  if (!a.startsWith('--')) continue;
+  const name = a.slice(2);
+  if (!KNOWN.has(name)) {
+    console.error(`fieldcheck: unknown flag ${a}\n  known: ${[...KNOWN].map(k => '--' + k).join(' ')}`);
+    process.exit(2);
+  }
+  if (args.indexOf(a) !== args.lastIndexOf(a)) {
+    console.error(`fieldcheck: ${a} given more than once — only the first would be used`);
+    process.exit(2);
+  }
+}
+
 const TRACKS = String(flag('tracks', 'monza,suzuka,baku,zandvoort')).split(',');
 const SEEDS = +flag('seeds', 4);
 const LAPS = +flag('laps', 2);
