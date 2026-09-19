@@ -374,6 +374,9 @@ addEventListener('keydown', e => {
   if (mode === 'drive' && e.code === 'Escape') stopDrive();
   if (mode === 'drive' && e.code === 'KeyC') { driveCam = (driveCam + 1) % CAMS.length; camSmooth = null; toast('CAMERA ' + CAMS[driveCam]); }
   if (mode === 'drive' && e.code === 'KeyR') { spawn(spawnS); toast('RESTART'); }
+  // a pedal pressed while flying does nothing, which reads as "the pedals are
+  // broken" — say what to do instead
+  if (mode === 'fly' && /^Digit[1-3890]$/.test(e.code)) toast('PEDAL SEEN — PRESS ENTER TO DRIVE');
 });
 
 // ---------------------------------------------------------------------------

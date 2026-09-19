@@ -24,6 +24,8 @@
   #pieces li i { font-style: normal; color: var(--hot); margin-left: 4px; }
   #pieces li small { display: block; color: var(--dim); margin-left: 22px; }
   #pieces li.new b { color: var(--hot); }
+  #pedalLinks { margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); color: var(--dim); font-size: 11px; letter-spacing: 0.08em; }
+  #pedalLinks a { color: var(--hot); }
   #pieces li.part { color: var(--hot); font-weight: 700; letter-spacing: 0.12em; font-size: 11px; padding-top: 10px; }
   #keys { bottom: 14px; left: 50%; transform: translateX(-50%); color: var(--dim); white-space: nowrap; }
   #keys kbd { color: var(--ink); background: rgba(255,255,255,0.1); border-radius: 4px; padding: 1px 6px; }
@@ -46,11 +48,12 @@
   <div id="trackName">…</div>
   <div id="trackLen">building the land…</div>
   <ol id="pieces"></ol>
+  <div id="pedalLinks">PEDALS: <a href="keytest.html" target="_blank">key tester</a> · <a href="pedals.html" target="_blank">build sheet</a></div>
 </div>
 <div id="keys" class="panel">
   <span class="fly"><kbd>drag</kbd> orbit · <kbd>right-drag</kbd> pan · <kbd>wheel</kbd> zoom · <kbd>WASD</kbd> move ·
     <kbd>F</kbd> newest piece · <kbd>H</kbd> whole track · <kbd>Enter</kbd> DRIVE IT</span>
-  <span class="drive"><kbd>arrows / WASD</kbd> drive · <kbd>C</kbd> camera · <kbd>R</kbd> restart · <kbd>Enter</kbd> back to flying</span>
+  <span class="drive"><kbd>arrows / WASD</kbd> drive · <kbd>1 2 3</kbd> brake pedal · <kbd>8 9 0</kbd> throttle pedal · <kbd>C</kbd> camera · <kbd>R</kbd> restart · <kbd>Enter</kbd> back to flying</span>
 </div>
 <div id="speedBox" class="panel"><div id="speed">0</div>km/h
   <div class="ped"><i id="pedT"></i></div><div class="ped brk"><i id="pedB"></i></div></div>
