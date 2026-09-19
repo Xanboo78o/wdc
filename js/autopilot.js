@@ -171,11 +171,20 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     const i = proj.i;
     const idxAt = m => track.idx(proj.s + m);
 
-    // One test at 120 Hz, and one solve in the life of a damaged car. It cannot
-    // be un-noticed, because the wing does not come back.
-    if (!wingless && car.lost && car.lost.frontWing) {
-      wingless = true;
-      line = lines.at(d.T.line, Math.max(0.35, d.grip * WINGLESS_GRIP));
+    // One test at 120 Hz, and a solve only when the answer CHANGES.
+    //
+    // This reads both directions on purpose. A latch would have been enough
+    // today, because nothing puts a front wing back on — but js/pit.js is being
+    // written to do exactly that, and a driver that pits for a new nose and
+    // then keeps circulating at wingless pace has paid for the damage twice.
+    // Reading the state rather than latching the event means the pit lane does
+    // not have to know this code exists: it clears `car.lost.frontWing` and the
+    // driver picks its pace back up on its own. `lines.at` is cached, so going
+    // back costs a map lookup.
+    const hurt = !!(car.lost && car.lost.frontWing);
+    if (hurt !== wingless) {
+      wingless = hurt;
+      line = lines.at(d.T.line, hurt ? Math.max(0.35, d.grip * WINGLESS_GRIP) : d.grip);
     }
 
     // ---- mistakes: scheduled, with consequences ---------------------------
