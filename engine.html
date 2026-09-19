@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ENGINE — perc loop test</title>
+<!--
+  Adam's idea, built as literally as it was described: a short percussion loop,
+  played back fast, as an engine.
+
+  Two things this page exists to settle, and neither of them is a thing I can
+  judge — I cannot hear it. You can.
+
+  1. Does it work at all? Drag SPEED. If it stops sounding like drums and starts
+     sounding like an engine somewhere, that is the answer.
+  2. Where is that somewhere? The readout says what each setting means in real
+     terms — hit rate in Hz, and the engine RPM that hit rate corresponds to if
+     you call each hit a cylinder firing. That is the number the game needs.
+
+  Nothing here is wired to the car yet. This is the 0.2 s loop at 2000 BPM you
+  asked for, plus the knobs to find out whether 2000 is the right number.
+-->
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#141820; --line:#222835; --ink:#e8eaee; --dim:#79828f;
+    --hot:#ff8000; --good:#35d6a0; --warn:#ffc23d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    padding:24px 16px 64px}
+  .wrap{max-width:760px;margin:0 auto}
+  h1{font-size:15px;letter-spacing:.22em;font-weight:700;margin:0 0 2px}
+  .sub{color:var(--dim);font-size:12px;margin-bottom:22px}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel);color:var(--ink);padding:12px 20px;letter-spacing:.14em}
+  button:hover{border-color:#39414f}
+  #go{background:var(--hot);border-color:var(--hot);color:#140a00;font-weight:700;
+    font-size:15px;padding:16px 34px}
+  #go.on{background:var(--panel);border-color:var(--line);color:var(--ink);font-weight:400}
+  .row{display:flex;align-items:center;gap:14px;margin:13px 0}
+  .row label{width:132px;color:var(--dim);font-size:11px;letter-spacing:.14em;flex:none}
+  .row input[type=range]{flex:1;accent-color:var(--hot)}
+  .row em{width:112px;text-align:right;font-style:normal;font-size:13px;flex:none}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px;margin:18px 0}
+  .panel h2{font-size:11px;letter-spacing:.2em;color:var(--dim);margin:0 0 12px;font-weight:600}
+  .big{font-size:28px;font-weight:800;letter-spacing:-.01em}
+  .readout{display:flex;gap:30px;flex-wrap:wrap}
+  .readout div span{display:block;font-size:10px;letter-spacing:.18em;color:var(--dim);margin-bottom:3px}
+  canvas{width:100%;height:110px;display:block;background:#0e1116;
+    border:1px solid var(--line);border-radius:8px}
+  .note{color:var(--dim);font-size:12px;margin-top:10px}
+  .ok{color:var(--good)} .bad{color:var(--warn)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:10px;
+    letter-spacing:.14em;border:1px solid var(--line);color:var(--dim);margin-left:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>ENGINE</h1>
+  <div class="sub">a 0.2 s percussion loop, played fast &mdash; does it become an engine?</div>
+
+  <button id="go">START</button>
+  <span class="pill" id="ctxState">audio needs a click first</span>
+
+  <div class="panel">
+    <h2>the one that matters &mdash; drag it all the way</h2>
+    <div class="row">
+      <label>SPEED</label>
+      <input type="range" id="bpm" min="200" max="60000" step="50" value="2000">
+      <em><b id="bpmV">2000</b> BPM</em>
+    </div>
+    <div class="readout" style="margin-top:16px">
+      <div><span>HIT RATE</span><b class="big" id="hz">0</b> Hz</div>
+      <div><span>AS ENGINE RPM</span><b class="big" id="rpm">0</b></div>
+      <div><span>PLAYBACK RATE</span><b class="big" id="rate">1.00</b>&times;</div>
+    </div>
+    <div class="note" id="rpmNote"></div>
+  </div>
+
+  <div class="panel">
+    <h2>the loop itself &mdash; 0.2 s of percussion</h2>
+    <canvas id="wave" width="1400" height="220"></canvas>
+    <div class="row" style="margin-top:14px">
+      <label>HITS IN LOOP</label>
+      <input type="range" id="hits" min="1" max="12" step="1" value="4">
+      <em><b id="hitsV">4</b></em>
+    </div>
+    <div class="row">
+      <label>DECAY</label>
+      <input type="range" id="decay" min="2" max="60" step="1" value="14">
+      <em><b id="decayV">14</b> ms</em>
+    </div>
+    <div class="row">
+      <label>TONE</label>
+      <input type="range" id="tone" min="60" max="900" step="5" value="210">
+      <em><b id="toneV">210</b> Hz</em>
+    </div>
+    <div class="row">
+      <label>GRIT</label>
+      <input type="range" id="grit" min="0" max="100" step="1" value="45">
+      <em><b id="gritV">45</b>%</em>
+    </div>
+    <div class="row">
+      <label>UNEVENNESS</label>
+      <input type="range" id="uneven" min="0" max="60" step="1" value="0">
+      <em><b id="unevenV">0</b>%</em>
+    </div>
+    <div class="note" id="loopNote"></div>
+  </div>
+
+  <div class="panel">
+    <h2>load &mdash; the second axis</h2>
+    <div class="row">
+      <label>THROTTLE</label>
+      <input type="range" id="thr" min="0" max="100" step="1" value="100">
+      <em><b id="thrV">100</b>%</em>
+    </div>
+    <div class="row">
+      <label>VOLUME</label>
+      <input type="range" id="vol" min="0" max="100" step="1" value="35">
+      <em><b id="volV">35</b>%</em>
+    </div>
+    <div class="note">
+      Throttle does NOT change the pitch &mdash; that is the whole point. It opens a
+      filter and lifts the level, so the engine gets harder and brighter without
+      getting higher. Pull it to 0 at a high speed and you should hear an engine
+      on the overrun rather than an engine slowing down.
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>what I can measure, and what I can't</h2>
+    <div class="note" id="clean"></div>
+    <div class="note">
+      I cannot hear this page. Whether it sounds like an engine is entirely your
+      call &mdash; I have no instrument for it. The one thing above is a real
+      measurement: a loop whose last sample does not meet its first one clicks
+      once per loop, and at these rates that click is a buzz sitting at the
+      engine's own pitch, so it hides inside the sound and reads as "a bit
+      rough" rather than as a fault. That number is checked, not guessed.
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// The loop is BUILT here rather than loaded, because this is a prototype for
+// answering one question. If the answer is yes, the real version uses a
+// recorded CC0 loop — a synthesised one is a placeholder and nothing more.
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const SR = 44100;
+const LOOP_S = 0.2;                 // the 0.2 s you asked for
+let ctx = null, src = null, gain = null, filt = null, buf = null, playing = false;
+
+// One percussion hit: a noise transient for the attack and a pitched body that
+// falls away, which is what every drum is. `grit` is how much of each.
+function hit(out, at, { decay, tone, grit, gain: g }) {
+  const n = Math.min(out.length - at, Math.floor(SR * decay * 4));
+  let lp = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    const env = Math.exp(-t / decay);
+    // noise, one-pole lowpassed so it is a thwack and not a hiss
+    lp += ((Math.random() * 2 - 1) - lp) * 0.34;
+    // body: pitch falls as it decays, the thing that makes a drum a drum
+    const f = tone * (1 + 1.6 * Math.exp(-t / (decay * 0.5)));
+    const body = Math.sin(2 * Math.PI * f * t);
+    out[at + i] += g * env * (grit * lp + (1 - grit) * body);
+  }
+}
+
+function build() {
+  const N = Math.floor(SR * LOOP_S);
+  const a = new Float32Array(N);
+  const hits = +$('hits').value;
+  const decay = +$('decay').value / 1000;
+  const tone = +$('tone').value;
+  const grit = +$('grit').value / 100;
+  const uneven = +$('uneven').value / 100;
+  for (let k = 0; k < hits; k++) {
+    // Unevenness is a real engine thing: a V-engine does not fire at even
+    // intervals, and that irregularity is most of its character. At 0 this is
+    // a metronome, which is what makes a loop sound like a machine gun.
+    const jitter = uneven * 0.5 * Math.sin(k * 2.399) ;
+    const at = Math.floor(N * (k + jitter) / hits);
+    const accent = k === 0 ? 1 : 0.72 + 0.28 * Math.cos(k * 1.7);
+    hit(a, Math.max(0, Math.min(N - 2, at)), { decay, tone, grit, gain: accent });
+  }
+  // Normalise, then make the two ends meet. A loop that does not close clicks
+  // once per repetition, and at 33+ repetitions a second that is a tone.
+  let pk = 0;
+  for (let i = 0; i < N; i++) pk = Math.max(pk, Math.abs(a[i]));
+  if (pk > 0) for (let i = 0; i < N; i++) a[i] /= pk;
+  const FADE = 64;
+  for (let i = 0; i < FADE; i++) {
+    const w = i / FADE;
+    a[N - 1 - i] *= w;            // tail to zero
+    a[i] *= w;                    // head from zero
+  }
+  return a;
+}
+
+// The measurement: does the loop actually close? This is the defect itself —
+// the jump from the last sample to the first — not an inference from a
+// spectrum. (I checked the spectral version numerically and it detects
+// nothing: the click's energy lands on the engine's own harmonics.)
+function closure(a) {
+  let step = 0;
+  for (let i = 1; i < a.length; i++) step += Math.abs(a[i] - a[i - 1]);
+  step /= a.length - 1;
+  let rms = 0;
+  for (let i = 0; i < a.length; i++) rms += a[i] * a[i];
+  rms = Math.sqrt(rms / a.length);
+  const jump = Math.abs(a[0] - a[a.length - 1]);
+  return { jump, rms, step, ratio: step > 0 ? jump / step : 0, vsRms: rms > 0 ? jump / rms : 0 };
+}
+
+function draw(a) {
+  const c = $('wave'), g = c.getContext('2d');
+  const W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = '#222835'; g.beginPath(); g.moveTo(0, H/2); g.lineTo(W, H/2); g.stroke();
+  g.strokeStyle = '#ff8000'; g.lineWidth = 1.5; g.beginPath();
+  for (let x = 0; x < W; x++) {
+    const i0 = Math.floor(x / W * a.length), i1 = Math.floor((x + 1) / W * a.length);
+    let mn = 1, mx = -1;
+    for (let i = i0; i < i1 && i < a.length; i++) { if (a[i] < mn) mn = a[i]; if (a[i] > mx) mx = a[i]; }
+    g.moveTo(x + .5, H/2 - mx * H/2 * .92);
+    g.lineTo(x + .5, H/2 - mn * H/2 * .92);
+  }
+  g.stroke();
+}
+
+function rebuild() {
+  const a = build();
+  draw(a);
+  const c = closure(a);
+  const clean = c.ratio < 6;
+  $('clean').innerHTML = `loop closure: jump between last sample and first is ` +
+    `<b>${c.jump.toFixed(5)}</b>, which is <b>${c.ratio.toFixed(2)}&times;</b> the loop's ` +
+    `typical sample-to-sample step and <b>${(c.vsRms * 100).toFixed(2)}%</b> of its RMS &mdash; ` +
+    (clean ? `<span class="ok">closed, no click.</span>` : `<span class="bad">this will click once per loop.</span>`);
+  if (ctx) {
+    buf = ctx.createBuffer(1, a.length, SR);
+    buf.copyToChannel(a, 0);
+    if (playing) { restart(); }
+  }
+  update();
+}
+
+function update() {
+  const hits = +$('hits').value;
+  const bpm = +$('bpm').value;
+  // At rate 1.0 the loop repeats 1/LOOP_S times a second, giving hits/LOOP_S
+  // hits per second. BPM is just that expressed per minute.
+  const baseBpm = (hits / LOOP_S) * 60;
+  const rate = bpm / baseBpm;
+  const hz = bpm / 60;
+  // If each hit is one cylinder firing, a four-stroke V6 fires 3 times per
+  // revolution, so rpm = hz / 3 * 60. That is the number that ties this page
+  // to a real gearbox later.
+  const rpm = hz / 3 * 60;
+  $('bpmV').textContent = bpm;
+  $('hz').textContent = hz.toFixed(1);
+  $('rpm').textContent = Math.round(rpm).toLocaleString();
+  $('rate').textContent = rate.toFixed(2);
+  $('hitsV').textContent = hits;
+  $('decayV').textContent = $('decay').value;
+  $('toneV').textContent = $('tone').value;
+  $('gritV').textContent = $('grit').value;
+  $('unevenV').textContent = $('uneven').value;
+  $('thrV').textContent = $('thr').value;
+  $('volV').textContent = $('vol').value;
+
+  const warn = rate > 4 || rate < 0.25
+    ? ` <span class="bad">playback rate ${rate.toFixed(2)}&times; is past about two octaves &mdash; a single sample stretched this far stops sounding like itself. The real version needs more than one loop, crossfaded.</span>`
+    : '';
+  const zone = rpm < 1200 ? '<span class="bad">below any engine &mdash; this is still a drum loop</span>'
+    : rpm < 4000 ? 'below an F1 idle, roughly road-car territory'
+    : rpm <= 15500 ? '<span class="ok">inside an F1 real range</span>'
+    : '<span class="bad">past the limiter</span>';
+  $('rpmNote').innerHTML = `An F1 V6 idles near 4,000 rpm and is limited at 15,000, ` +
+    `which is 200&ndash;750 Hz of firing. This is <b>${Math.round(rpm).toLocaleString()} rpm</b> equivalent &mdash; ${zone}.` + warn;
+  $('loopNote').innerHTML = `${hits} hits in ${LOOP_S * 1000} ms = ${(hits / LOOP_S).toFixed(0)} hits/s ` +
+    `at 1&times; (${baseBpm.toFixed(0)} BPM), played at <b>${rate.toFixed(2)}&times;</b>.`;
+
+  if (src) src.playbackRate.value = rate;
+  if (gain) {
+    const thr = +$('thr').value / 100, vol = +$('vol').value / 100;
+    // Throttle is LOAD: level and brightness, never pitch.
+    gain.gain.value = vol * (0.25 + 0.75 * thr);
+    if (filt) filt.frequency.value = 400 + 7000 * Math.pow(thr, 1.4);
+  }
+}
+
+function restart() {
+  if (src) { try { src.stop(); } catch {} src.disconnect(); }
+  src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+  // ONE node, started once, rate modulated forever. Restarting it per frame is
+  // the classic mistake and it machine-guns.
+  src.connect(filt);
+  src.start();
+  update();
+}
+
+$('go').onclick = async () => {
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.Q.value = 0.7;
+    gain = ctx.createGain();
+    filt.connect(gain); gain.connect(ctx.destination);
+    rebuild();
+  }
+  await ctx.resume();
+  if (!playing) { playing = true; restart(); $('go').textContent = 'STOP'; $('go').classList.add('on'); }
+  else { playing = false; if (src) { try { src.stop(); } catch {} } $('go').textContent = 'START'; $('go').classList.remove('on'); }
+  $('ctxState').textContent = playing ? 'running' : 'stopped';
+};
+
+for (const id of ['hits', 'decay', 'tone', 'grit', 'uneven']) $(id).oninput = rebuild;
+for (const id of ['bpm', 'thr', 'vol']) $(id).oninput = update;
+rebuild();
+</script>
+</body>
+</html>
