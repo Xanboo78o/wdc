@@ -36,7 +36,7 @@ const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[
 // afternoon on 2026-09-18 in `tools/shot.mjs`, which took only the FIRST
 // `--q` and quietly discarded the rest — every screenshot came back looking
 // normal and photographing the wrong thing.
-const KNOWN = new Set(['tracks', 'seeds', 'laps', 'grid', 'tier', 'car']);
+const KNOWN = new Set(['tracks', 'seeds', 'laps', 'grid', 'tier', 'car', 'pits']);
 for (const a of args) {
   if (!a.startsWith('--')) continue;
   const name = a.slice(2);
@@ -56,11 +56,12 @@ const LAPS = +flag('laps', 2);
 const GRID = +flag('grid', 22);
 const TIER = flag('tier', 'medium');
 const CLS = flag('car', 'f1');
+const PITS = flag('pits', '1') !== '0';
 
 function one(track, lines, spec, seed) {
   const race = new Race({
     track, lines, spec, slots: gridSlots(track, GRID), laps: LAPS, grid: GRID,
-    tier: TIER, seed, player: false,
+    tier: TIER, seed, player: false, pits: PITS,
   });
   const maxT = LAPS * 260 + 90;
   let t = 0;
@@ -80,9 +81,10 @@ function one(track, lines, spec, seed) {
   // know it. If that is really what is emptying the grid, then retirements and
   // lost wings move together and most of the retired cars are missing one.
   const wings = race.entries.filter(e => e.car.lost && e.car.lost.frontWing).length;
+  const stops = race.entries.reduce((a, e) => a + (e.pitStops || 0), 0);
   const retiredNoWing = race.entries.filter(e => e.retired && e.car.lost && e.car.lost.frontWing).length;
   const best = Math.min(...race.entries.map(e => e.bestLap || 1e9));
-  return { retired, lap1, contacts, wings, retiredNoWing,
+  return { retired, lap1, contacts, wings, retiredNoWing, stops,
            passes: race.passes || 0, best, ideal: lines.race.lapTime };
 }
 
@@ -101,14 +103,15 @@ for (const key of TRACKS) {
     lap1: mean(runs.map(r => r.lap1)),
     wings: mean(runs.map(r => r.wings)),
     retiredNoWing: mean(runs.map(r => r.retiredNoWing)),
+    stops: mean(runs.map(r => r.stops)),
     contacts: mean(runs.map(r => r.contacts)),
     passes: mean(runs.map(r => r.passes)),
     off: mean(runs.map(r => (r.best / r.ideal - 1) * 100)),
   });
 }
 
-console.log(`${GRID} cars · ${LAPS} laps · ${TIER} · ${CLS} · ${SEEDS} seeds each\n`);
-console.log('CIRCUIT      RETIRED  WORST  IN FIRST 30s  NO FRONT WING  ...OF THEM RETIRED  CONTACTS  PASSES  BEST vs IDEAL');
+console.log(`${GRID} cars · ${LAPS} laps · ${TIER} · ${CLS} · ${SEEDS} seeds each · pit stops ${PITS ? 'ON' : 'OFF'}\n`);
+console.log('CIRCUIT      RETIRED  WORST  IN FIRST 30s  NO FRONT WING  ...OF THEM RETIRED  PIT STOPS  CONTACTS  PASSES  BEST vs IDEAL');
 for (const r of rows) {
   console.log([
     r.key.padEnd(12),
@@ -117,6 +120,7 @@ for (const r of rows) {
     r.lap1.toFixed(2).padStart(13),
     r.wings.toFixed(2).padStart(14),
     r.retiredNoWing.toFixed(2).padStart(18),
+    r.stops.toFixed(2).padStart(10),
     r.contacts.toFixed(0).padStart(9),
     r.passes.toFixed(0).padStart(7),
     (r.off.toFixed(1) + '%').padStart(13),
@@ -126,5 +130,6 @@ for (const r of rows) {
 console.log(`\nacross all circuits:  ${mean(rows.map(r => r.retired)).toFixed(2)} retired of ${GRID}` +
   `  ·  ${mean(rows.map(r => r.passes)).toFixed(0)} passes` +
   `  ·  ${mean(rows.map(r => r.contacts)).toFixed(0)} contacts` +
-  `  ·  ${mean(rows.map(r => r.wings)).toFixed(2)} cars lost a front wing`);
+  `  ·  ${mean(rows.map(r => r.wings)).toFixed(2)} cars lost a front wing` +
+  `  ·  ${mean(rows.map(r => r.stops)).toFixed(2)} pit stops`);
 console.log(`${TRACKS.length * SEEDS} races in ${((Date.now() - t0) / 1000).toFixed(0)}s`);

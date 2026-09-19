@@ -273,6 +273,14 @@ function loop(now) {
     // damage you earned — anything else is a different game.
     if (state.race) { rejoin(); toast('REJOIN'); } else { resetCar(); toast('RESET'); }
   }
+  // Ask for a pit stop. The lane controller in js/pitstop.js takes the car over
+  // once it commits, the way every racing game does it — the interesting
+  // decision is WHEN to come in, not whether you can drive at 80 km/h.
+  if (state.race && hands.tapped('KeyP')) {
+    const me = state.me;
+    me.pitRequest = !me.pitRequest;
+    toast(me.pitRequest ? 'BOX THIS LAP' : 'PIT CANCELLED');
+  }
   if (hands.tapped('Escape')) { location.reload(); return; }
 
   let rough = 0;
@@ -501,6 +509,10 @@ function raceHud(dt) {
 
   // ---- position, and the lap you are on ----------------------------------
   $('posV').textContent = me.retired ? 'DNF' : 'P' + me.pos;
+  const pit = $('pitLight');
+  pit.style.display = (me.pitRequest || me.inPit) ? '' : 'none';
+  pit.classList.toggle('on', !!me.inPit);
+  pit.textContent = me.inPit ? `PIT ${me.pitTimer > 0 ? me.pitTimer.toFixed(1) : ''}` : 'BOX';
   $('lapNo').textContent = `${Math.min(race.laps, me.lap + 1)}/${race.laps}`;
   if (me.penalty > 0) $('posV').textContent += ` +${me.penalty}s`;
 

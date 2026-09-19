@@ -12,6 +12,7 @@ import { makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor } from './physics.j
 import { makeAutopilot, makeDriver } from './autopilot.js';
 import { resolveBarrier, resolveCars } from './collide.js';
 import { wakeAt, newWake } from './aero.js';
+import { makeLane, shouldPit, updateStop } from './pitstop.js';
 
 // Module-level scratch for the wake sample. neighbours() is single-threaded and
 // reads the result immediately, so one object serves the whole grid rather than
@@ -32,10 +33,17 @@ const NEIGH_EVERY = 4;        // substeps between neighbour/racecraft updates
 
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
-                tier = 'medium', seed = 1, player = true }) {
+                tier = 'medium', seed = 1, player = true, pits = true }) {
     this.track = track; this.lines = lines; this.spec = spec;
     this.laps = laps; this.peak = peakSlip(spec);
     this.time = 0; this.state = 'grid'; this.lights = 3.2;
+    // The pit lane, made once per session: a path with an entry, an exit and a
+    // box per car, not a lateral offset. js/pitstop.js owns all of it; the race
+    // only decides WHEN, and then keeps its hands off a car whose `inPit` is set.
+    this.lane = makeLane(track, Math.min(grid, slots.length));
+    // Off for a sprint, and off for measuring what pit stops actually cost —
+    // see tools/fieldcheck.mjs --pits 0.
+    this.pits = pits;
     this.events = [];
     this.sub = 0;
 
@@ -49,7 +57,7 @@ export class Race {
       car.x = p.x; car.y = p.y; car.hdg = slot.hdg; car.vx = 0.001;
       const driver = isPlayer ? null : makeDriver(seed * 131 + k, tier, track.corners.length || 24);
       this.entries.push({
-        car, driver, isPlayer, idx: k,
+        car, driver, isPlayer, idx: k, box: k,
         name: isPlayer ? 'YOU' : NAMES[k % NAMES.length],
         num: isPlayer ? 78 : k + 1,
         col: isPlayer ? '#ffffff' : COLS[k % COLS.length],
@@ -181,13 +189,34 @@ export class Race {
     // through the race, which points at the thing DESIGN.md already names — a
     // car that has lost its front wing keeps driving as though it has one.
 
-    if (e.ahead && e.aheadGapT < 1.4 && !e.inPit) {
+    // ---- peeling off for the pit entry --------------------------------------
+    // MEASURED: wiring pit stops in made retirements WORSE, 5.25 -> 6.25 of 22
+    // across four circuits and four seeds, even though the stops themselves
+    // worked and cars finishing with a missing wing fell from 4.44 to 3.31.
+    //
+    // The cause is not the stop, it is the approach. js/pitstop.js brakes for
+    // the entry and deliberately leaves the steering to the driver — so a car
+    // was shedding 220 km/h over the last 300 m of a straight WHILE STILL ON
+    // THE RACING LINE, in traffic, at Monza. That is not a pit entry, it is a
+    // brake test.
+    //
+    // A real car moves to the pit side first, and that is a lateral bias,
+    // which lives here. Off the line, the followers' lateral gate stops seeing
+    // it as the car in front at all, which is the actual mechanism that keeps
+    // the cars behind out of the back of it.
+    const pitting = e.pitPhase === 'approach';
+    if (pitting && this.lane) {
+      bias += (Math.sign(this.lane.off) || 1) * lim * 1.5;
+    }
+
+    if (!pitting && e.ahead && e.aheadGapT < 1.4 && !e.inPit) {
       // get out of the wake and take the inside for the next braking zone
       const side = e.ahead.proj.lat > 0 ? -1 : 1;
       const pull = this.brakingZone(e.proj.s, 130) ? 0.75 + 0.5 * d.aggression : 0.35;
       bias += side * pull * Math.max(0.8, t.w[i] - 2.2) * Math.min(1, (1.4 - e.aheadGapT) / 1.0);
     }
-    if (e.behind && e.behindGapT < 0.75 && !e.inPit && this.brakingZone(e.proj.s, 150)) {
+    // A car on its way to the pits does not defend. It has somewhere to be.
+    if (!pitting && e.behind && e.behindGapT < 0.75 && !e.inPit && this.brakingZone(e.proj.s, 150)) {
       // ONE move. Pick a side, commit, and do not weave — that is the actual
       // rule, and a defender who keeps moving is both illegal and slower.
       if (this.time - e.movedAt > 3.5) {
@@ -332,6 +361,28 @@ export class Race {
       } else if (e.drive) {
         e.drive(car, e.proj, dt, e.ctx);
       }
+
+      // ---- the pit stop ---------------------------------------------------
+      // AFTER the driver, never before. The pit controller overrides the
+      // pedals on the approach and takes the car over completely in the lane,
+      // and a driver that runs second simply writes its own throttle back over
+      // the entry braking every substep.
+      //
+      // Asking to pit is the DRIVER's decision, not the rulebook's — this is
+      // the one line of it the session owns, and it owns it only because
+      // nothing else iterates the field.
+      if (racing && !e.finished && this.pits) {
+        if (!e.isPlayer && !e.pitRequest && e.pitPhase !== 'service' && shouldPit(car)) {
+          e.pitRequest = true;
+          this.log('flag', `${e.name} WILL PIT`, e);
+        }
+        const wasIn = e.inPit;
+        if (updateStop(e, t, this.lane, e.proj, dt, this.peak)) {
+          this.log('flag', `${e.name} SERVED — ${(e.pitJobs || []).join(' + ')}`, e);
+        }
+        if (e.inPit && !wasIn) this.log('flag', `${e.name} PITS`, e);
+      }
+
       if (!racing) { car.throttle = 0; car.brake = 1; car.delta = 0; }
 
       const pr = e.proj;
