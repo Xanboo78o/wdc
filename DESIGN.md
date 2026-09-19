@@ -505,6 +505,33 @@ the lap a real choice.
     autopilot's pedals wiped out the pit-entry braking every substep and the
     car arrived at the lane at racing speed.
 
+### Gotcha 40: an inside-out car keeps its silhouette, so it survives a screenshot
+Adam: *"almost everything on the cars has the building problem. i can see
+throught the layer facing me."*
+
+`loft()`'s comment said stations run "nose-to-tail along +X" and every caller in
+`car.js` writes them nose FIRST, which is x **decreasing** — the opposite of
+what the winding assumed. Measured: **3.3% of the body's faces pointed
+outward.** `wing()` had the same inversion independently, at 38%.
+
+With `FrontSide` materials — which is what `look.mat()` defaults to, while
+buildings and furniture explicitly pass `DoubleSide` — the faces nearest the
+camera are culled and you see the INNER surface of the far side. The silhouette
+is right and the colour is right, so it photographs almost normally and only
+gives itself away when you look at the car properly.
+
+The fix derives the direction rather than reversing ten call sites and hoping
+nobody adds an eleventh the other way round:
+
+```js
+const rev = stations[stations.length - 1].x < stations[0].x;
+```
+
+Now 96.7% outward from either order. **Checking this does not need a renderer:**
+take each triangle, cross its edges, and dot the result with the direction from
+the body axis to the face centroid. Positive means outward. Twenty lines in
+Node, and it is how both inversions were found and confirmed.
+
 ## Zandvoort's banking
 
 Drawn, as of the taper landing in the bake. `js/bank.js` is the model and it

@@ -62,6 +62,21 @@ function ring(w, h, n, segs) {
 function loft(stations, segs = 24, close = true) {
   const rings = stations.map(s => ring(s.w, s.h, s.n, segs));
   const pos = [], idx = [];
+  // WHICH WAY DO THE STATIONS RUN?
+  //
+  // The winding of the skin depends on it, and getting it wrong does not make
+  // the shape wrong — it makes it INSIDE OUT. The faces nearest you are culled
+  // and you see the inner surface of the far side, which keeps the silhouette
+  // and most of the colour, so it survives a screenshot and only shows up when
+  // you look at the car properly. Adam: "i can see throught the layer facing
+  // me."
+  //
+  // The comment above this function used to say stations run "nose-to-tail
+  // along +X" and every caller in this file writes them nose FIRST, which is x
+  // DECREASING. Measured: 3.3% of the body's faces pointed outward. Rather
+  // than reverse ten call sites and hope nobody adds an eleventh the other way
+  // round, derive it.
+  const rev = stations[stations.length - 1].x < stations[0].x;
   for (let k = 0; k < stations.length; k++) {
     const s = stations[k];
     for (const [z, y] of rings[k]) pos.push(s.x, s.y + y, (s.z || 0) + z);
@@ -70,12 +85,14 @@ function loft(stations, segs = 24, close = true) {
     const a = k * segs, b = (k + 1) * segs;
     for (let i = 0; i < segs; i++) {
       const j = (i + 1) % segs;
-      idx.push(a + i, b + i, b + j, a + i, b + j, a + j);
+      if (rev) idx.push(a + i, b + j, b + i, a + i, a + j, b + j);
+      else idx.push(a + i, b + i, b + j, a + i, b + j, a + j);
     }
   }
   if (close) {
     // Cap both ends with a fan to a centre vertex.
-    for (const [k, flip] of [[0, true], [stations.length - 1, false]]) {
+    for (const [k, flip] of (rev ? [[0, false], [stations.length - 1, true]]
+                                  : [[0, true], [stations.length - 1, false]])) {
       const s = stations[k];
       const c = pos.length / 3;
       pos.push(s.x, s.y, s.z || 0);
@@ -120,7 +137,9 @@ function wing(span, chord, thick, camber, twistTip, rise, segs = 18) {
     const a = i * sec, b = (i + 1) * sec;
     for (let j = 0; j < sec; j++) {
       const n = (j + 1) % sec;
-      idx.push(a + j, b + j, b + n, a + j, b + n, a + n);
+      // Same inversion as loft() had: the span runs -1 to +1 and this winding
+      // was written for the other direction, so both wings were inside out.
+      idx.push(a + j, b + n, b + j, a + j, a + n, b + n);
     }
   }
   const g = new THREE.BufferGeometry();
