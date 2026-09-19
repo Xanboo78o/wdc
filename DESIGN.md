@@ -405,6 +405,53 @@ The four ways a car gets airborne, all of them impulses through
     sides of the line, identically. What differed was the elevation profile's
     curvature against the grid, which has nothing to do with s=0.
 
+## Importing a chassis from a 3D printing site
+*(`tools/chassis.mjs` -> `data/chassis/<name>.json` -> `?chassis=<name>`)*
+
+```sh
+node tools/chassis.mjs ~/Downloads/thing.stl --name mycar
+# then open the game with ?chassis=mycar
+node tools/aerobake.mjs f1 --mesh ~/Downloads/thing.stl   # and its aerodynamics
+```
+
+The bake recovers the orientation from the bounding box — **a car is longer
+than it is wide and wider than it is tall, which is true of every car ever
+made** — scales it to the real 5.63 m, stands it on the road, and writes plain
+positions. Verified end to end on a 52,800-triangle binary STL in millimetres
+with its length on the Z axis: reoriented, scaled x0.00113, drawn correctly.
+
+**What you get and what you do not.** An STL carries geometry and nothing else:
+no UVs, so nothing can be painted on it; no parts, so the wheels are welded on.
+So the import replaces the BODYWORK and `car.js` keeps its own wheels, which is
+what lets an imported car still steer and still spin its tyres. No livery, no
+decals, no separate wings, flat shading. That is the file format, not the
+loader.
+
+**Decimation is OPT-IN and should stay that way.** Vertex clustering snaps
+vertices to a grid, and on a curved panel that reads as obvious stair-stepping
+— it is visible in a screenshot at a glance. An imported chassis is the
+PLAYER's car only, so one car at 50k triangles costs a GPU nothing. Only
+`--budget N`, or a model over 120k triangles, triggers it.
+
+### Licensing, which is the actual blocker
+Checked 2026-09-18 for WDC. Most single-seaters on Printables and Thingiverse
+are **CC-BY-NC**, which forbids commercial use and is therefore unusable here.
+The best model by a distance is **OpenRC F1** — genuinely open-source, properly
+unbranded — but it is **CC BY-SA** (ShareAlike, murky for a commercial game)
+and its author has flagged it **"No AI"**, so it is out regardless of what the
+licence permits. And a model named after a real team carries that team's trade
+dress no matter what tag the uploader attached. Look for **CC0** or plain
+**CC-BY**, unbranded.
+
+### Anything that writes `visible` every frame OWNS it
+Two bugs, same shape, both found by screenshot while wiring this up. Hiding the
+procedural bodywork at build time did nothing, because `applyCrush` sets
+`m.visible = true` on any region that is undamaged, every frame. Hiding the
+procedural wings did nothing, because the frame loop sets
+`m.visible = !lost.frontWing`, every frame. The car had two rear wings, one
+inside the other. An imported chassis therefore takes ownership: no
+`crushParts`, no `wingParts`.
+
 ## Zandvoort's banking
 
 Drawn, as of the taper landing in the bake. `js/bank.js` is the model and it
@@ -625,6 +672,25 @@ more careful", it is: address code by exact text and never by span, save the
 NEW file before restoring an OLD one — and run the load check on every edit to
 a module anything else imports, not once before a push. That is what `--quick`
 is for, and why it had to be fifteen seconds rather than ninety.
+
+### Three instrument failures, one animal
+Every one of these produced a plausible number and none of them errored:
+
+| what it did | what it looked like |
+|---|---|
+| `__wdc.draws` published on frame one, before the camera was placed | the 22-car field was free |
+| `shot.mjs` used the first `--q` and dropped the rest | the launch never happened |
+| `fieldcheck.mjs` ignored an unknown flag | a confident table about four circuits |
+
+**A silently ignored input is worse than an error**, because every wrong
+conclusion it produces arrives with a believable explanation already attached.
+The launch one is the clearest case: the frame limit below is REAL, it was
+sitting right next to the failure, and it was not the cause. A true fact
+adjacent to a bug is the most expensive kind of wrong answer.
+
+The fix in all three cases is the same: merge repeated inputs or reject them,
+refuse what you do not understand, and publish a measurement only once it
+means something.
 
 ### `--wait` cannot catch anything that happens in the first second
 

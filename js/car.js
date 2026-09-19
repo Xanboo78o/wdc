@@ -222,7 +222,7 @@ function decal(livery, cell, at, size, normal, along, flip) {
 }
 
 // ---------------------------------------------------------------------------
-export function buildCar(look, colour = 0xd8352a) {
+export function buildCar(look, colour = 0xd8352a, chassis = null) {
   const g = new THREE.Group();
   const primary = '#' + new THREE.Color(colour).getHexString();
 
@@ -476,6 +476,26 @@ export function buildCar(look, colour = 0xd8352a) {
     const m = new THREE.Mesh(decal(livery, cell, at, size, n, along, false), decalMat);
     m.renderOrder = 2;
     g.add(m);
+  }
+
+  // ---- an imported chassis ------------------------------------------------
+  //
+  // A model downloaded from a 3D printing site replaces the BODYWORK and
+  // nothing else. The wheels stay procedural because they have to turn and
+  // spin, and a print model is one solid lump with the wheels welded on — so
+  // an imported car keeps these wheels and hides its own.
+  //
+  // What you lose, stated plainly rather than discovered later: no livery, no
+  // decals, no separate wings, and flat shading, because an STL carries
+  // geometry and nothing else. No UVs means nothing can be painted on it. That
+  // is a property of the format, not of this loader.
+  if (chassis) {
+    const keep = new Set(Object.values(wheels));
+    g.traverse(m => { if (m.isMesh && !keep.has(m)) m.visible = false; });
+    const mesh = new THREE.Mesh(chassis, paint);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.userData.imported = true;
+    g.add(mesh);
   }
 
   return { group: g, wheels, steer, drs, R, wings };

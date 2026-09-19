@@ -20,6 +20,7 @@ import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar } from './car.js';
 import { makeDeformer } from './dent.js';
+import { loadChassis, chassisGeometry } from './mesh.js';
 import { World, loadElev } from './world.js';
 import { loadSurface, defaultSurface, KERB_SHAPE } from './surface.js';
 
@@ -291,12 +292,17 @@ export class View {
   static async create(canvas, track, line, opts = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     // Textures, sky and terrain all come off the network; fetch them together.
-    const [look, elev, surf] = await Promise.all([
+    // ?chassis=<name> swaps the bodywork for a model imported by
+    // tools/chassis.mjs. It loads here, with the rest of the network work,
+    // because buildCar is synchronous and the geometry has to exist first.
+    const want = new URLSearchParams(location.search).get('chassis');
+    const [look, elev, surf, chassis] = await Promise.all([
       Look.load(renderer, track.key, { textures: opts.textures !== false }),
       opts.flat ? null : loadElev(track.key),
       loadSurface(track.key),
+      want ? loadChassis(want) : null,
     ]);
-    return new View(renderer, look, track, line, { ...opts, elev, surf });
+    return new View(renderer, look, track, line, { ...opts, elev, surf, chassis });
   }
 
   constructor(renderer, look, track, line, opts = {}) {
@@ -380,11 +386,24 @@ export class View {
       };
     }
 
-    const car = buildCar(look, 0xd8352a);
+    const car = buildCar(look, 0xd8352a,
+      opts.chassis ? chassisGeometry(THREE, opts.chassis) : null);
     this.car = car.group; this.wheels = car.wheels; this.steer = car.steer;
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
-    this.wingParts = car.wings;
-    this.crushParts = crushParts(car.group, car.wheels);
+    // An imported chassis carries its own wings in its geometry, so the
+    // procedural ones must stay hidden. They cannot just be set invisible at
+    // build time: the frame loop below sets `m.visible = !lost.frontWing`
+    // every frame, which turned them straight back on and the car had two rear
+    // wings, one inside the other. Same shape of bug as applyCrush re-showing
+    // the bodywork — anything that writes `visible` every frame owns it.
+    this.wingParts = opts.chassis ? null : car.wings;
+    // An imported chassis gets NO region fold. applyCrush re-shows every mesh
+    // it owns on any frame where that region is undamaged (`m.visible = true`
+    // in its c < 0.001 branch), which silently undid hiding the procedural
+    // bodywork — the old rear wing reappeared through the imported body and
+    // the car had two. An imported body cannot fold by region anyway; its
+    // damage comes from the deformer below.
+    this.crushParts = opts.chassis ? null : crushParts(car.group, car.wheels);
     // Bodywork bent where it was actually hit, on top of the region fold.
     // PLAYER ONLY: this takes its own copy of every geometry it touches,
     // because the field clones one reference car twenty-two times and
