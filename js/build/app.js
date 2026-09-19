@@ -4,7 +4,8 @@
 import * as THREE from 'three';
 import { buildPath, trackData, surfaceYAt, pointAt } from './path.js';
 import { Ground } from './ground.js';
-import { V, buildRoad, buildBarriers, buildLandmarks, buildGround, buildSky } from './meshes.js';
+import { V, buildRoad, buildLandmarks, buildGround, buildSky } from './meshes.js';
+import { brandTexture, buildWalls, buildDetails, gantryBanner } from './dressing.js';
 import { Track } from '../track.js';
 import { CARS, makeCar, step, FIXED_DT, SURFACE, dragFor, registerAero, corneringSpeed, limitMu, topSpeed } from '../physics.js';
 import { makeAero } from '../aero.js';
@@ -63,8 +64,12 @@ scene.add(new THREE.HemisphereLight(0xdbe6f2, 0x5d5a48, 0.12));
 
 scene.add(buildGround(chunks));
 scene.add(buildRoad(path));
-scene.add(buildBarriers(path, ground));
-scene.add(buildLandmarks(path, ground));
+const brand = brandTexture(renderer.capabilities.getMaxAnisotropy());
+scene.add(buildWalls(path, ground, brand));
+scene.add(buildDetails(path, ground, brand));
+const landmarks = buildLandmarks(path, ground);
+scene.add(landmarks);
+if (landmarks.userData.beam) scene.add(gantryBanner(brand, landmarks.userData.beam));
 
 function resize() {
   const w = innerWidth, h = innerHeight;

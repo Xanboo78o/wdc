@@ -13,7 +13,7 @@ export const V = (x, y, h) => new THREE.Vector3(x, h, -y);
 
 const COL = {
   road: 0x44474c, line: 0xeeeeea, kerbRed: 0xc23a2e, kerbWhite: 0xeeeeea,
-  rail: 0xb9bdc2, post: 0x8d9197, gantry: 0x2a2d33,
+  gantry: 0x2a2d33,
 };
 
 function geo(pos, nor, idx, col) {
@@ -155,68 +155,6 @@ export function buildRoad(path) {
   return group;
 }
 
-// Steel barrier at w + run each side: a W-beam rail on posts every 4 m, both
-// standing on the ACTUAL ground there — never on an assumed height.
-export function buildBarriers(path, ground) {
-  const group = new THREE.Group();
-  const railMat = new THREE.MeshStandardMaterial({ color: COL.rail, roughness: 0.35, metalness: 0.75 });
-  const postMat = new THREE.MeshStandardMaterial({ color: COL.post, roughness: 0.5, metalness: 0.6 });
-  const posts = [];
-  for (const side of [1, -1]) {
-    const pos = [], idx = [];
-    const lat = i => side * (path.w[i] + (side > 0 ? path.runL[i] : path.runR[i]));
-    let k = 0, prevOk = false;
-    for (let i = 0; i < path.n; i++) {
-      // On the inside of a corner tighter than the barrier's offset, the
-      // offset line folds back through itself. Don't draw a rail there.
-      const inside = Math.sign(path.k[i]) === side;
-      const ok = !inside || Math.abs(lat(i)) * Math.abs(path.k[i]) < 0.8;
-      const p = pointAt(path, i, lat(i));
-      const g = ground.height(p.x, p.y);
-      const h = path.hdg[i], nx = -Math.sin(h) * side * 0.04, ny = Math.cos(h) * side * 0.04;
-      // front face (toward the road) and back face, 0.32 m tall band
-      for (const [dz, off] of [[0.42, -1], [0.74, -1], [0.42, 1], [0.74, 1]]) {
-        pos.push(p.x + nx * off, g + dz, -(p.y + ny * off));
-      }
-      if (i > 0 && ok && prevOk) {
-        const a = (k - 1) * 4, b = k * 4;
-        if (side > 0) {
-          idx.push(a, b, b + 1, a, b + 1, a + 1);          // road-facing
-          idx.push(a + 2, a + 3, b + 3, a + 2, b + 3, b + 2);
-          idx.push(a + 1, b + 1, b + 3, a + 1, b + 3, a + 3); // top
-        } else {
-          idx.push(a, a + 1, b + 1, a, b + 1, b);
-          idx.push(a + 2, b + 2, b + 3, a + 2, b + 3, a + 3);
-          idx.push(a + 1, a + 3, b + 3, a + 1, b + 3, b + 1);
-        }
-      }
-      if (ok && i % 2 === 0) posts.push({ x: p.x, y: p.y, g, h });
-      prevOk = ok;
-      k++;
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setIndex(idx);
-    g.computeVertexNormals();
-    const m = new THREE.Mesh(g, railMat);
-    m.material.side = THREE.DoubleSide;
-    m.castShadow = true; m.receiveShadow = true;
-    group.add(m);
-  }
-  const pg = new THREE.BoxGeometry(0.12, 0.8, 0.12);
-  pg.translate(0, 0.4, 0);
-  const inst = new THREE.InstancedMesh(pg, postMat, posts.length);
-  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(1, 1, 1);
-  posts.forEach((p, n) => {
-    Q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.h);
-    M.compose(V(p.x, p.y, p.g - 0.1), Q, S);
-    inst.setMatrixAt(n, M);
-  });
-  inst.castShadow = true; inst.receiveShadow = true;
-  group.add(inst);
-  return group;
-}
-
 // A start gantry over the line, and a board where the track currently ends.
 export function buildLandmarks(path, ground) {
   const group = new THREE.Group();
@@ -240,6 +178,7 @@ export function buildLandmarks(path, ground) {
     box(0.6, top - gR, 0.6, R.x, R.y, gR + (top - gR) / 2, h);
     const c = pointAt(path, i, 0);
     box(0.9, 1.4, 2 * off + 0.6, c.x, c.y, top - 0.2, h);
+    group.userData.beam = { x: c.x, y: top - 0.2, z: -c.y, span: 2 * off + 0.6, hdg: h };
     // five red start lights facing the grid
     const lamp = new THREE.MeshStandardMaterial({ color: 0x300808, emissive: 0xd01010, emissiveIntensity: 0.25 });
     for (let k = -2; k <= 2; k++) {
