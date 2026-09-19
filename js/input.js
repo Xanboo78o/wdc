@@ -57,6 +57,10 @@ export class Hands {
     this.usingPad = false; this.padName = '';
     this.pad = null;
     this._padPrev = {};
+    // An outside wheel (the phone, js/phonewheel.js): a function returning
+    // -1..1 while it is live, or null. Kept as a hook so this file never
+    // needs the network to run — the Node harnesses import it.
+    this.wheelSource = null;
     this._kd = e => {
       if (e.repeat) return;
       this.down.add(e.code);
@@ -137,7 +141,15 @@ export class Hands {
     this.usingPad = false;
     const want = (this.held('left') ? 1 : 0) - (this.held('right') ? 1 : 0);
     const WIND = 2.7, CENTRE = 5.2;
-    if (want !== 0) {
+    const ext = want === 0 && this.wheelSource ? this.wheelSource() : null;
+    if (ext != null) {
+      // The phone already IS a wheel position, so no wind-on — but it only
+      // reports ~30 times a second, so slew toward it rather than stepping,
+      // or the rack jumps every 33 ms. 9/s is centre to full lock in 0.11 s,
+      // faster than any hands; it smooths the steps, not the driver.
+      const PHONE_SLEW = 9;
+      this.wheel += Math.max(-PHONE_SLEW * dt, Math.min(PHONE_SLEW * dt, ext - this.wheel));
+    } else if (want !== 0) {
       const rate = WIND * (want * this.wheel < 0 ? 1.8 : 1);   // reversing lock is quicker
       this.wheel += Math.sign(want - this.wheel) * Math.min(rate * dt, Math.abs(want - this.wheel));
     } else {

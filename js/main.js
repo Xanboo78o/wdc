@@ -19,6 +19,7 @@ import { TIERS, makeAutopilot, makeDriver } from './autopilot.js';
 import { Field } from './field.js';
 import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
+import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from './phonewheel.js';
 
 const $ = id => document.getElementById(id);
 const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV'];
@@ -36,6 +37,8 @@ const state = {
   box: null, engine: null,
 };
 const hands = new Hands();
+// the phone steers while it is live; keys and pedals are untouched
+hands.wheelSource = () => phoneLive() ? phone.steer : null;
 
 // ---------------------------------------------------------------------------
 // menu
@@ -650,6 +653,17 @@ function rejoin() {
 
 // ---------------------------------------------------------------------------
 hands.attach();
+// Phone wheel: the pairing card (code + QR) sits under the key help on the
+// menu, and a connect or drop mid-session says so on screen.
+startPhoneWheel();
+mountPhoneCard(document.querySelector('#menu .keys'));
+{
+  let was = false;
+  onPhone(p => {
+    if (p.connected !== was && state.started) toast(p.connected ? 'PHONE WHEEL CONNECTED' : 'PHONE WHEEL LOST');
+    was = p.connected;
+  });
+}
 
 // The URL pre-selects the menu rather than bypassing it, so ?race=1 on its own
 // opens the menu with RACE already chosen and every setting visible — which is

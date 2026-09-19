@@ -12,6 +12,7 @@ import { makeAero } from '../aero.js';
 import { Hands, steerLock } from '../input.js';
 import { resolveBarrier } from '../collide.js';
 import { buildCar } from '../car.js';
+import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from '../phonewheel.js';
 
 const $ = id => document.getElementById(id);
 const q = new URLSearchParams(location.search);
@@ -190,6 +191,10 @@ function updateFly(dt) {
 let mode = 'fly';
 const hands = new Hands();
 hands.attach();
+// the phone steers while it is live (js/phonewheel.js); the pedals stay put
+hands.wheelSource = () => phoneLive() ? phone.steer : null;
+startPhoneWheel();
+mountPhoneCard($('info'), { compact: true });
 let track = null, car = null, carView = null, hint = 0, spawnS = 0, driveCam = 0, lastSpeedProfile = null;
 const CAMS = ['CHASE', 'ONBOARD', 'FAR CHASE'];
 
@@ -290,6 +295,10 @@ function stopDrive() {
 
 let acc = 0, camSmooth = null, msgT = 0;
 function toast(m) { $('msg').textContent = m; msgT = 2.4; }
+{
+  let was = false;
+  onPhone(p => { if (p.connected !== was) toast(p.connected ? 'PHONE WHEEL CONNECTED' : 'PHONE WHEEL LOST'); was = p.connected; });
+}
 
 function driveStep(frame) {
   acc += frame;
