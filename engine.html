@@ -66,11 +66,31 @@
   <span class="pill" id="ctxState">audio needs a click first</span>
 
   <div class="panel">
+    <h2>what is in the loop</h2>
+    <div class="row">
+      <label>SOURCE</label>
+      <select id="mode" style="flex:1;font:inherit;background:#0e1116;color:var(--ink);
+        border:1px solid var(--line);border-radius:8px;padding:9px 12px">
+        <option value="drum">DRUM LOOP &mdash; 0.2 s of percussion, played fast</option>
+        <option value="cycle" selected>ENGINE CYCLE &mdash; one firing, looped at the firing rate</option>
+      </select>
+    </div>
+    <div class="note">
+      Same idea both ways &mdash; a loop played at a rate. The difference is how long
+      the loop is, and that is everything. Speeding a sample up moves its TIMBRE,
+      not just its pitch: a drum body at 210 Hz played 37&times; faster to reach an
+      F1's firing rate lands at 7,900 Hz, so the thump becomes hiss. One firing
+      cycle is already the right length, so it is stretched barely an octave and
+      keeps its character. Switch between them at the same RPM and it is obvious.
+    </div>
+  </div>
+
+  <div class="panel">
     <h2>the one that matters &mdash; drag it all the way</h2>
     <div class="row">
       <label>SPEED</label>
-      <input type="range" id="bpm" min="200" max="60000" step="50" value="2000">
-      <em><b id="bpmV">2000</b> BPM</em>
+      <input type="range" id="bpm" min="200" max="60000" step="50" value="27000">
+      <em><b id="bpmV">27000</b> BPM</em>
     </div>
     <div class="readout" style="margin-top:16px">
       <div><span>HIT RATE</span><b class="big" id="hz">0</b> Hz</div>
@@ -174,7 +194,43 @@ function hit(out, at, { decay, tone, grit, gain: g }) {
   }
 }
 
+// ONE FIRING CYCLE, at REF_RPM. A cylinder firing is not a drum: it is a
+// pressure pulse that rings the exhaust column, so the character is in the
+// RESONANCE and its harmonics, not in a noise transient. Because the loop is
+// already one period long, playback rate maps straight onto RPM and never has
+// to stretch more than about an octave — which is the whole reason this keeps
+// sounding like itself where the drum loop does not.
+const REF_RPM = 6000;
+function buildCycle() {
+  // firing rate of a four-stroke V6 = rpm/60 * 6/2 = rpm/20
+  const period = SR / (REF_RPM / 20);
+  const N = Math.max(8, Math.round(period));
+  const a = new Float32Array(N);
+  const grit = +$('grit').value / 100;
+  const tone = +$('tone').value;
+  const decay = +$('decay').value / 1000;
+  const harm = 1 + 7 * (tone / 900);        // TONE now means harmonic richness
+  let lp = 0;
+  for (let i = 0; i < N; i++) {
+    const t = i / SR, ph = i / N;
+    // the pulse: fast rise, exponential fall inside the single period
+    const env = Math.exp(-ph * (3 + 22 * (0.03 / Math.max(decay, 0.002))));
+    let v = 0;
+    for (let k = 1; k <= harm; k++) v += Math.sin(2 * Math.PI * k * ph + k * 0.7) / Math.pow(k, 0.72);
+    lp += ((Math.random() * 2 - 1) - lp) * 0.5;
+    a[i] = env * ((1 - grit) * v * 0.45 + grit * lp * 0.7);
+  }
+  let pk = 0;
+  for (let i = 0; i < N; i++) pk = Math.max(pk, Math.abs(a[i]));
+  if (pk > 0) for (let i = 0; i < N; i++) a[i] /= pk;
+  // close it: one period must meet itself or the buzz is at the engine's pitch
+  const F = Math.min(12, N >> 2);
+  for (let i = 0; i < F; i++) a[N - 1 - i] *= i / F;
+  return a;
+}
+
 function build() {
+  if ($('mode').value === 'cycle') return buildCycle();
   const N = Math.floor(SR * LOOP_S);
   const a = new Float32Array(N);
   const hits = +$('hits').value;
@@ -259,9 +315,12 @@ function update() {
   const bpm = +$('bpm').value;
   // At rate 1.0 the loop repeats 1/LOOP_S times a second, giving hits/LOOP_S
   // hits per second. BPM is just that expressed per minute.
-  const baseBpm = (hits / LOOP_S) * 60;
-  const rate = bpm / baseBpm;
+  const cycleMode = $('mode').value === 'cycle';
   const hz = bpm / 60;
+  // Drum: rate is whatever makes the hits land at `bpm`. Cycle: the loop IS one
+  // firing, so rate is simply how far the target RPM is from the reference.
+  const baseBpm = (hits / LOOP_S) * 60;
+  const rate = cycleMode ? (hz / 3 * 60) / REF_RPM : bpm / baseBpm;
   // If each hit is one cylinder firing, a four-stroke V6 fires 3 times per
   // revolution, so rpm = hz / 3 * 60. That is the number that ties this page
   // to a real gearbox later.
@@ -287,8 +346,11 @@ function update() {
     : '<span class="bad">past the limiter</span>';
   $('rpmNote').innerHTML = `An F1 V6 idles near 4,000 rpm and is limited at 15,000, ` +
     `which is 200&ndash;750 Hz of firing. This is <b>${Math.round(rpm).toLocaleString()} rpm</b> equivalent &mdash; ${zone}.` + warn;
-  $('loopNote').innerHTML = `${hits} hits in ${LOOP_S * 1000} ms = ${(hits / LOOP_S).toFixed(0)} hits/s ` +
-    `at 1&times; (${baseBpm.toFixed(0)} BPM), played at <b>${rate.toFixed(2)}&times;</b>.`;
+  $('loopNote').innerHTML = cycleMode
+    ? `one firing cycle recorded at ${REF_RPM.toLocaleString()} rpm, ${(SR / (REF_RPM / 20)).toFixed(0)} samples long, ` +
+      `played at <b>${rate.toFixed(2)}&times;</b> &mdash; ${Math.abs(Math.log2(rate)).toFixed(2)} octaves from where it was made.`
+    : `${hits} hits in ${LOOP_S * 1000} ms = ${(hits / LOOP_S).toFixed(0)} hits/s ` +
+      `at 1&times; (${baseBpm.toFixed(0)} BPM), played at <b>${rate.toFixed(2)}&times;</b>.`;
 
   if (src) src.playbackRate.value = rate;
   if (gain) {
@@ -326,6 +388,7 @@ $('go').onclick = async () => {
 };
 
 for (const id of ['hits', 'decay', 'tone', 'grit', 'uneven']) $(id).oninput = rebuild;
+$('mode').onchange = rebuild;
 for (const id of ['bpm', 'thr', 'vol']) $(id).oninput = update;
 rebuild();
 </script>
