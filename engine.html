@@ -158,6 +158,20 @@
   </div>
 
   <div class="panel">
+    <h2>your setting</h2>
+    <div class="row">
+      <input id="share" readonly style="flex:1;font:inherit;background:#0e1116;color:var(--hot);
+        border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12px">
+      <button id="copy" style="padding:10px 16px;font-size:11px">COPY</button>
+    </div>
+    <div class="note">
+      Send me this line and I have every knob exactly as you left it &mdash; which
+      loop, what speed, what throttle. Opening it also restores the page, so you
+      can get back to a sound you liked.
+    </div>
+  </div>
+
+  <div class="panel">
     <h2>what I can measure, and what I can't</h2>
     <div class="note" id="clean"></div>
     <div class="note">
@@ -179,6 +193,7 @@
 // recorded CC0 loop — a synthesised one is a placeholder and nothing more.
 // ---------------------------------------------------------------------------
 const $ = id => document.getElementById(id);
+const Q = new URLSearchParams(location.search);
 const SR = 44100;
 const LOOP_S = 0.2;                 // the 0.2 s you asked for
 let ctx = null, src = null, gain = null, filt = null, buf = null, playing = false;
@@ -405,6 +420,16 @@ function update() {
     : `${hits} hits in ${LOOP_S * 1000} ms = ${(hits / LOOP_S).toFixed(0)} hits/s ` +
       `at 1&times; (${baseBpm.toFixed(0)} BPM), played at <b>${rate.toFixed(2)}&times;</b>.`;
 
+  // The whole state as one line, so "41250 bpm" never has to stand in for
+  // "which loop, at what speed, with how much throttle" again.
+  const q = new URLSearchParams({ src: mode, bpm: String(bpm), thr: $('thr').value, vol: $('vol').value });
+  if (realMode) q.set('pick', String(pick + 1));
+  else { q.set('hits', $('hits').value); q.set('decay', $('decay').value);
+         q.set('tone', $('tone').value); q.set('grit', $('grit').value); q.set('uneven', $('uneven').value); }
+  const url = location.origin + location.pathname + '?' + q;
+  $('share').value = url;
+  history.replaceState(null, '', '?' + q);
+
   if (src) src.playbackRate.value = rate;
   if (gain) {
     const thr = +$('thr').value / 100, vol = +$('vol').value / 100;
@@ -451,6 +476,20 @@ $('picks').onclick = e => {
 for (const id of ['hits', 'decay', 'tone', 'grit', 'uneven']) $(id).oninput = rebuild;
 $('mode').onchange = rebuild;
 for (const id of ['bpm', 'thr', 'vol']) $(id).oninput = update;
+$('copy').onclick = () => {
+  $('share').select();
+  navigator.clipboard?.writeText($('share').value).catch(() => document.execCommand('copy'));
+  $('copy').textContent = 'COPIED';
+  setTimeout(() => { $('copy').textContent = 'COPY'; }, 1200);
+};
+
+// Restore from the URL before the first build, so an opened link sounds like
+// the link and not like the defaults.
+if (Q.has('src')) $('mode').value = Q.get('src');
+for (const k of ['bpm', 'thr', 'vol', 'hits', 'decay', 'tone', 'grit', 'uneven'])
+  if (Q.has(k) && $(k)) $(k).value = Q.get(k);
+if (Q.has('pick')) pick = Math.max(0, Math.min(FILES.length - 1, +Q.get('pick') - 1));
+for (const x of $('picks').children) x.style.borderColor = +x.dataset.i === pick ? 'var(--hot)' : 'var(--line)';
 rebuild();
 </script>
 </body>
