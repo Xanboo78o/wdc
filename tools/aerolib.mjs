@@ -161,8 +161,11 @@ export { dot, cross, norm };
 // harness turns the real aerodynamics on with one line.
 export async function useAero(keys = ['f1', 'f4']) {
   const fs = await import('fs');
-  const { makeAero } = await import('../js/aero.js');
-  const { registerAero } = await import('../js/physics.js');
+  const { makeAero, selfTest } = await import('../js/aero.js');
+  const { registerAero, CARS } = await import('../js/physics.js');
+  // Run the self test wherever the aero is turned on, so a broken constant is
+  // reported at the point of use rather than waiting for someone to run a gate.
+  selfTest(CARS);
   const on = [];
   for (const k of keys) {
     const p = new URL(`../data/aero/${k}.json`, import.meta.url);

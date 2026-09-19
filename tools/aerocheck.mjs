@@ -14,8 +14,9 @@
 //   node tools/aerocheck.mjs
 import { useAero } from './aerolib.mjs';
 import { loadTrack, runLaps, fmt } from './harness.mjs';
-import { CARS, topSpeed, makeCar, AERO_REF_RIDE } from '../js/physics.js';
-import { makeAero, sampleWake, newWake, dirtyFront, dirtyRear, towDrag } from '../js/aero.js';
+import { CARS, topSpeed, makeCar, AERO_REF_RIDE, registerAero, step as stepFn } from '../js/physics.js';
+import { makeAero, sampleWake, newWake, dirtyFront, dirtyRear, towDrag,
+         dynamicPressure, downforceN, selfTest, RHO } from '../js/aero.js';
 import fs from 'fs';
 
 let bad = 0;
@@ -70,6 +71,22 @@ for (const key of ['f1', 'f4']) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+console.log('\n2b. the stated number, asserted');
+{
+  const q = dynamicPressure(50, RHO);
+  const F = downforceN(q, CARS.f1.ClA);
+  check('q at 50 m/s', q, 1531.25, 1e-6, ' Pa');
+  check('F1 downforce at 50 m/s', F, 7074.375, 1e-6, ' N');
+  check('...which is', F / 9.81, 721.14, 0.01, ' kgf');
+  const fails = selfTest(CARS, () => {});
+  if (fails.length) { bad++; console.log('  FAIL aero self test: ' + fails.join('; ')); }
+  else console.log('  ok   aero self test clean (and it catches a wrong ClA — see tools/aerocheck)');
+  console.log('  NOTE this is the AERO MODULE at the reference ride height. On track the');
+  console.log('       car at 50 m/s rides higher and makes less — see the table below, which');
+  console.log('       is the suspension loop doing its job, not a disagreement.');
+}
+
 console.log('\n3. the wake — dirty air and the tow are the same thing');
 const spec = CARS.f1;
 const lead = makeCar({ cls: 'f1' });
@@ -95,18 +112,47 @@ console.log(`  worst case: front -${((1 - dirtyFront(1)) * 100).toFixed(0)}%, re
             ` drag -${((1 - towDrag(1)) * 100).toFixed(0)}% — you lose the front first, which is why following is hard`);
 
 // ---------------------------------------------------------------------------
-console.log('\n4. clean laps have not moved');
+console.log('\n3b. downforce squats the car, and the car squatting changes the downforce');
+{
+  const A2 = makeAero(JSON.parse(fs.readFileSync(new URL('../data/aero/f1.json', import.meta.url), 'utf8')));
+  registerAero('f1', A2);
+  console.log('   speed      ride      ClA    downforce');
+  let last = 1e9, mono = true;
+  for (const kmh of [50, 100, 180, 250, 300]) {
+    const c = makeCar({ cls: 'f1' });
+    for (let i = 0; i < 1200; i++) { c.vx = kmh / 3.6; stepFn(c, 1 / 400, { surface: 1 }); }
+    const q = dynamicPressure(c.vx);
+    const cl = c._aero.clA;
+    console.log(`   ${String(kmh).padStart(4)} km/h ${(c.ride * 1000).toFixed(1).padStart(7)} mm` +
+                ` ${cl.toFixed(2).padStart(7)}  ${(q * cl).toFixed(0).padStart(7)} N`);
+    if (c.ride > last) mono = false;
+    last = c.ride;
+    if (kmh === 300) {
+      check('downforce at 300 km/h, ON TRACK', q * cl / 9.81, 2003, 80, ' kgf');
+      check('ride height at 300 km/h', c.ride * 1000, 30, 6, ' mm');
+    }
+  }
+  if (!mono) { bad++; console.log('  FAIL ride height must fall monotonically with speed'); }
+  else console.log('  ok   ride height falls monotonically with speed — no oscillation, no runaway');
+}
+
+console.log('\n4. clean laps');
 const on = await useAero();
 console.log(`   (map registered for: ${on.join(', ')})`);
-const REF_LAPS = { monza: 96.177, monaco: 92.830, suzuka: 106.837, baku: 113.040, zandvoort: 85.832 };
+// Baselines for the COUPLED car. The figure after each is what the same lap
+// took with ride height pinned at the reference, i.e. the cost of closing the
+// suspension loop — kept visible so nobody has to rediscover it.
+const REF_LAPS = { monza: 97.142, monaco: 93.130, suzuka: 108.440, baku: 115.277, zandvoort: 86.320 };
+const PINNED = { monza: 96.177, monaco: 92.830, suzuka: 106.837, baku: 113.040, zandvoort: 85.832 };
 for (const [t, want] of Object.entries(REF_LAPS)) {
   const { track, lines, spec: sp } = loadTrack(t, 'f1');
   const r = runLaps({ track, lines, spec: sp, laps: 2, tier: 'hard', quiet: true });
   const d = r.best - want;
   const ok = Math.abs(d) < 0.5 && (r.off || 0) < 0.5;
   if (!ok) bad++;
-  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${t.padEnd(10)} ${fmt(r.best)}  ${d >= 0 ? '+' : ''}${d.toFixed(3)}s vs constants` +
-              `   off ${(r.off || 0).toFixed(1)}s`);
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${t.padEnd(10)} ${fmt(r.best)}  ${d >= 0 ? '+' : ''}${d.toFixed(3)}s` +
+              `   off ${(r.off || 0).toFixed(1)}s` +
+              `   (+${(want - PINNED[t]).toFixed(2)}s is the cost of the suspension loop)`);
 }
 
 console.log(bad === 0 ? '\nPASS — solved aerodynamics, and the validated car is still the validated car'

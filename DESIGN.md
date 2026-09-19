@@ -532,6 +532,71 @@ take each triangle, cross its edges, and dot the result with the direction from
 the body axis to the face centroid. Positive means outward. Twenty lines in
 Node, and it is how both inversions were found and confirmed.
 
+## Ride height closes the aero loop
+*(`js/aero.js` for the forces, `js/physics.js` for the squat)*
+
+Downforce is carried by the SPRINGS. More of it squats the car; the aero map
+says a lower car makes more downforce; which squats it further. That loop is
+real — it is most of why a ground-effect car is so ride-height sensitive — and
+until now it was open: ride height was pinned at the reference and the map's
+entire ride-height axis was never exercised on track.
+
+```
+ speed      ride      ClA    downforce
+  50 km/h  54.5 mm    3.61      426 N
+ 180 km/h  47.5 mm    3.82     5851 N
+ 300 km/h  29.6 mm    4.65    19750 N   (2013 kgf — validated figure is 2003)
+```
+
+**The loop is algebraic and is broken with ONE SUBSTEP of lag**: this substep's
+aero is looked up at last substep's ride height. At 400 Hz that is 2.5 ms
+against a 50 ms heave mode, so it costs nothing physical and it is what makes
+the thing solvable without iterating inside the step.
+
+**The spring force is NOT added to the tyre load.** The spring force and the
+vertical load are the same force seen from two ends — `Fzf`/`Fzr` already carry
+the downforce. Adding both would count it twice and double the car's grip at
+speed, which would read as a tuning win right up until the lap times stopped
+making sense.
+
+Stiffness is derived, not picked: the car must squat `AERO_SQUAT` (25 mm) under
+the downforce it makes at 93% of its own drag-limited top speed. That lands the
+equilibrium at 29.6 mm and 2013 kgf at 300 km/h, so the validated anchor is
+reproduced by the coupled car rather than asserted at a fixed ride height.
+
+**What it costs: +0.30 s to +2.24 s a lap.** That is not a regression, it is
+the fixed-ClA model losing an overstatement — a real car at 180 km/h is riding
+47 mm high and does not make the downforce a linear `q * ClA` extrapolation
+promises. The gate prints the cost on every run so nobody has to rediscover it.
+
+### Units: SI, and only SI
+`m, m/s, kg, N, Pa, m^2, kg/m^3, radians, s`. km/h, degrees and kgf exist only
+where a number is printed for a human, and the conversion happens AT the print,
+never in a stored value. A unit that travels one function deeper than its
+conversion is how a sim acquires a mystery factor of 3.6 that somebody later
+"fixes" with a magic constant.
+
+### The stated number, asserted
+At 50 m/s an F1 car makes **7074.375 N** — `q = 1.225 * 50^2 / 2 = 1531.25 Pa`,
+times `ClA = 4.62 m^2`. `aero.selfTest()` checks it wherever the aero is turned
+on and logs on failure; `aerocheck` asserts it too, and it has been tested
+against a deliberately wrong ClA to prove it catches one.
+
+**Checked to 1e-6 N, not for bit equality, and that is deliberate.**
+`0.5 * 1.225 * 2500` evaluates to `1531.2500000000002` because 1.225 has no
+exact binary representation. A bit-equality assert would fail forever for a
+reason that has nothing to do with aerodynamics, and the first person to hit it
+would go looking in the physics. A millionth of a newton cannot hide a real
+error: the smallest mistake that matters here — a dropped factor of two, the
+wrong density — moves the answer by hundreds of newtons.
+
+### The fixed timestep was already the rule
+`FIXED_DT = 1/400` (400 Hz). `main.js` runs an accumulator
+(`while (acc >= FIXED_DT)`) and `step()` is never called with a frame time.
+`requestAnimationFrame` drives the accumulator and the drawing, nothing else —
+so the physics is identical on a 60 Hz monitor, a 144 Hz monitor, and a Node
+harness with no monitor at all.
+
 ## Zandvoort's banking
 
 Drawn, as of the taper landing in the bake. `js/bank.js` is the model and it

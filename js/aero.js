@@ -21,6 +21,67 @@
 // at 400 Hz.
 
 // ---------------------------------------------------------------------------
+// UNITS: SI THROUGHOUT, WITHOUT EXCEPTION.
+//
+//   length m, speed m/s, mass kg, force N, pressure Pa, area m^2,
+//   density kg/m^3, angle RADIANS, time s.
+//
+// Nothing in the simulation is ever in km/h, degrees, or kgf. Those appear
+// only where a number is printed for a human — a HUD, a harness table — and
+// the conversion happens at the print, never in a stored value. A unit that
+// travels one function deeper than its conversion is how a sim acquires a
+// mystery factor of 3.6 that somebody later "fixes" with a magic constant.
+// ---------------------------------------------------------------------------
+export const RHO = 1.225;                 // kg/m^3, sea-level ISA air density
+
+/** Dynamic pressure, Pa. q = rho * v^2 / 2. `v` is m/s. */
+export function dynamicPressure(v, rho = RHO) { return 0.5 * rho * v * v; }
+
+/** Downforce, N, from dynamic pressure (Pa) and lift area ClA (m^2). */
+export function downforceN(q, clA) { return q * clA; }
+
+/**
+ * SELF TEST. At 50 m/s an F1 car must produce 7074.375 N.
+ *
+ *   q  = 1.225 * 50^2 / 2 = 1531.25 Pa
+ *   F  = 1531.25 * 4.62   = 7074.375 N   (721.1 kgf)
+ *
+ * Checked to 1e-6 N rather than for bit equality, and that is not laziness:
+ * `0.5 * 1.225 * 2500` evaluates to 1531.2500000000002 because 1.225 has no
+ * exact binary representation. A bit-equality assert would fail forever for a
+ * reason that has nothing to do with aerodynamics, and the first person to hit
+ * it would "fix" the physics. 1e-6 N is a millionth of a newton — it cannot
+ * hide a real error, since the smallest mistake that matters here (a dropped
+ * factor of two, a wrong density) moves the answer by hundreds of newtons.
+ *
+ * Returns a list of failures; empty means pass. Logs them too, because a
+ * silent self-test is not a self-test.
+ */
+export function selfTest(cars, log = console.error) {
+  const EXPECT = [
+    { car: 'f1', v: 50, clA: 4.62, N: 7074.375 },
+    { car: 'f4', v: 50, clA: 1.35, N: 2067.1875 },
+  ];
+  const fail = [];
+  for (const e of EXPECT) {
+    const spec = cars && cars[e.car];
+    if (!spec) continue;
+    if (Math.abs(spec.ClA - e.clA) > 1e-9) {
+      fail.push(`${e.car}: ClA is ${spec.ClA} m^2, the self-test expects ${e.clA}`);
+      continue;
+    }
+    const q = dynamicPressure(e.v, spec.rho);
+    const got = downforceN(q, spec.ClA);
+    if (Math.abs(got - e.N) > 1e-6) {
+      fail.push(`${e.car}: downforce at ${e.v} m/s is ${got} N, expected ${e.N} N ` +
+                `(q=${q} Pa, ClA=${spec.ClA} m^2)`);
+    }
+  }
+  for (const f of fail) log('AERO SELF TEST FAILED — ' + f);
+  return fail;
+}
+
+// ---------------------------------------------------------------------------
 // THE WAKE.
 //
 // Dirty air and the tow are not two effects that happen to coexist. They are

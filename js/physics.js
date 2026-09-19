@@ -23,6 +23,32 @@ import { dirtyFront, dirtyRear, towDrag } from './aero.js';
 // map returns the validated ClA/CdA exactly and a clean lap is unchanged.
 export const AERO_REF_RIDE = 0.030;
 
+// ---------------------------------------------------------------------------
+// RIDE HEIGHT, and the loop it closes.
+//
+// Downforce is carried by the SPRINGS. More of it squats the car; the aero map
+// says a lower car makes more downforce; which squats it further. That loop is
+// real — it is most of why a ground-effect car is so sensitive to ride height
+// — and until now it was open: ride height was pinned at the reference and the
+// map's whole ride-height axis was never exercised on track.
+//
+// Derived, not picked. A real single-seater squats 20-30 mm between the pit
+// lane and 300 km/h, so the stiffness follows from that and from the downforce
+// the car actually makes at the top of its range, per car.
+// ---------------------------------------------------------------------------
+const AERO_SQUAT = 0.025;     // m, squat under downforce at the reference speed
+const RIDE_MIN = 0.004;       // m, the floor is on the road
+const RIDE_TAU = 0.05;        // s, heave mode time constant
+
+function heaveOf(S) {
+  if (S._heaveK) return;
+  const vRef = topSpeed(S) * 0.93;                       // m/s
+  const dfRef = 0.5 * S.rho * vRef * vRef * S.ClA;       // N
+  S._heaveK = dfRef / AERO_SQUAT;                        // N/m, all four corners
+  S._rideFree = AERO_REF_RIDE + (S.m * GRAV + dfRef) / S._heaveK;   // m, unladen
+  S._vRef = vRef;
+}
+
 // A registry, so exactly one place has to know about the map and every car
 // made afterwards gets it. The alternative was threading an `aero` argument
 // through makeCar, runLaps, the race layer and six tools — which is a lot of
@@ -454,6 +480,7 @@ export function makeCar(opts = {}) {
     // ---- the vertical axis. All zero while the car is driving, which is what
     // keeps the planar model below bit-for-bit what it was.
     z: 0, vz: 0,                  // height above the road, and its rate
+    ride: AERO_REF_RIDE,          // m, floor height — squats under downforce
     pitch: 0, roll: 0,            // real attitude now, not a render flourish
     pRate: 0, rRate: 0,
     airborne: false, airTime: 0, onRoof: false,
@@ -518,7 +545,12 @@ export function step(car, dt, env = {}) {
     // Ride height. The map already carries the ground-effect curve, so
     // groundEffect() must NOT also be applied here or the floor is counted
     // twice — a grounded car sits exactly at the reference height.
-    const rideH = AERO_REF_RIDE + (car.z > 0 ? car.z : 0);
+    // Ride height is now a STATE, not a constant: last substep's value. The
+    // loop between aero and suspension is algebraic, and breaking it with one
+    // substep of lag is what makes it solvable without iterating inside the
+    // step. At 400 Hz that lag is 2.5 ms, far below the 50 ms heave mode it is
+    // modelling, so it costs nothing physical.
+    const rideH = car.ride + (car.z > 0 ? car.z : 0);
     const o = car._aero || (car._aero = car.aero.newOut());
     car.aero.coeffs(o, car, car.pitch * 180 / Math.PI, beta, rideH);
     clA = o.clA; cdA = o.cdA; balF = o.bal;
@@ -540,6 +572,20 @@ export function step(car, dt, env = {}) {
   // the real reason overtaking is hard, and it is why the effect is asymmetric.
   const DFf = q * clA * balF * dirtyFront(dirty);
   const DFr = q * clA * (1 - balF) * dirtyRear(dirty);
+
+  // ---- the aero squats the car on its own springs -------------------------
+  //
+  // THE FORCE IS NOT ADDED TO THE TYRE LOAD HERE. The spring force and the
+  // vertical load are THE SAME FORCE seen from two ends: Fzf and Fzr below
+  // already carry DFf and DFr. Adding the spring force on top would count the
+  // downforce twice and hand the car double the grip at speed — which would
+  // look like a tuning win right up until the lap times stopped making sense.
+  heaveOf(S);
+  if (!car.airborne) {
+    const settle = S._rideFree - (S.m * GRAV + DFf + DFr) / S._heaveK;
+    car.ride += (settle - car.ride) * Math.min(1, dt / RIDE_TAU);
+    if (car.ride < RIDE_MIN) car.ride = RIDE_MIN;
+  }
   // Rolling resistance scales with what the wheels are ploughing through.
   // A car at seventy degrees nose-up is a barn door, and its drag is nothing
   // like its drag in a straight line. Without this the floor's lift held a
