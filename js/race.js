@@ -190,15 +190,24 @@ export class Race {
     // car that has lost its front wing keeps driving as though it has one.
 
     // ---- peeling off for the pit entry --------------------------------------
-    // MEASURED: wiring pit stops in made retirements WORSE, 5.25 -> 6.25 of 22
-    // across four circuits and four seeds, even though the stops themselves
-    // worked and cars finishing with a missing wing fell from 4.44 to 3.31.
+    // CORRECTION, and it is mine: I wrote "MEASURED: pit stops made retirements
+    // worse, 5.25 -> 6.25" into a commit message, and that difference is about
+    // 1.6 standard errors on 16 races a side. It is not a result. At six laps
+    // it was 5.42 -> 5.92, well inside the noise, and tools/fieldcheck.mjs now
+    // prints the standard error next to the mean so the same mistake is harder
+    // to make. I built the tool that says one race measures nothing and then
+    // treated an unresolvable difference as causal evidence.
     //
-    // The cause is not the stop, it is the approach. js/pitstop.js brakes for
+    // What the same runs DO resolve, far outside the noise: cars finishing
+    // with a missing front wing fell 4.17 -> 2.83 with pit stops on, and
+    // overtaking went UP rather than down.
+    //
+    // This change stays regardless, because it is right on its own terms
+    // rather than because a number moved. js/pitstop.js brakes for
     // the entry and deliberately leaves the steering to the driver — so a car
     // was shedding 220 km/h over the last 300 m of a straight WHILE STILL ON
     // THE RACING LINE, in traffic, at Monza. That is not a pit entry, it is a
-    // brake test.
+    // brake test. That is wrong whatever the retirement count says.
     //
     // A real car moves to the pit side first, and that is a lateral bias,
     // which lives here. Off the line, the followers' lateral gate stops seeing

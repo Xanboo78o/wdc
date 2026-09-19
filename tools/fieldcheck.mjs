@@ -89,6 +89,22 @@ function one(track, lines, spec, seed) {
 }
 
 const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+
+// HOW BIG A DIFFERENCE THIS SAMPLE CAN ACTUALLY RESOLVE.
+//
+// The whole point of this tool is that one race measures nothing, and it was
+// still possible to misuse it: a 5.25 -> 6.25 shift in retirements across 16
+// races a side got written into a commit message as "MEASURED", when the
+// per-race spread makes the standard error about 0.6 and that difference is
+// 1.6 of them. Not nothing, not established either. A mean with no spread
+// beside it invites exactly that mistake, so the spread is printed too, and
+// the rule of thumb is on the last line where it cannot be missed.
+const sd = a => {
+  if (a.length < 2) return 0;
+  const m = mean(a);
+  return Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / (a.length - 1));
+};
+const se = a => sd(a) / Math.sqrt(a.length);
 const t0 = Date.now();
 const rows = [];
 
@@ -97,7 +113,7 @@ for (const key of TRACKS) {
   const runs = [];
   for (let s = 0; s < SEEDS; s++) runs.push(one(track, lines, spec, 7 + s * 101));
   rows.push({
-    key,
+    key, retiredRuns: runs.map(r => r.retired),
     retired: mean(runs.map(r => r.retired)),
     worst: Math.max(...runs.map(r => r.retired)),
     lap1: mean(runs.map(r => r.lap1)),
@@ -127,9 +143,12 @@ for (const r of rows) {
   ].join(' '));
 }
 
-console.log(`\nacross all circuits:  ${mean(rows.map(r => r.retired)).toFixed(2)} retired of ${GRID}` +
+const allRetired = rows.flatMap(r => r.retiredRuns);
+console.log(`\nacross all circuits:  ${mean(allRetired).toFixed(2)} ± ${se(allRetired).toFixed(2)} retired of ${GRID}` +
   `  ·  ${mean(rows.map(r => r.passes)).toFixed(0)} passes` +
   `  ·  ${mean(rows.map(r => r.contacts)).toFixed(0)} contacts` +
   `  ·  ${mean(rows.map(r => r.wings)).toFixed(2)} cars lost a front wing` +
   `  ·  ${mean(rows.map(r => r.stops)).toFixed(2)} pit stops`);
 console.log(`${TRACKS.length * SEEDS} races in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+console.log(`\n± is the standard error of the mean. A difference smaller than about`);
+console.log(`twice it is not a result — run more seeds or believe nothing.`);
