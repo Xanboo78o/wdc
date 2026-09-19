@@ -48,6 +48,15 @@ const approach = (v, target, up, dn) =>
 
 const PAD_BUTTONS = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, back: 8, start: 9 };
 
+// The driver's hands, as rates. Exported so tools/human.mjs drives with the
+// SAME numbers instead of a copy that silently drifts from the game.
+//
+// WIND was 2.7 (0.37 s from centre to full lock) and read as sluggish on a
+// keyboard: "the car isn't as responsive as it should be". 4.6 is 0.22 s,
+// about as fast as hands move on a real wheel, and the centring is quicker
+// still so letting go still catches a slide faster than winding on caused it.
+export const RATES = { WIND: 4.6, CENTRE: 8.2, tUp: 3.4, tDn: 7.5, bUp: 5.5, bDn: 9 };
+
 export class Hands {
   constructor() {
     this.down = new Set();
@@ -140,7 +149,7 @@ export class Hands {
     }
     this.usingPad = false;
     const want = (this.held('left') ? 1 : 0) - (this.held('right') ? 1 : 0);
-    const WIND = 2.7, CENTRE = 5.2;
+    const { WIND, CENTRE } = RATES;
     const ext = want === 0 && this.wheelSource ? this.wheelSource() : null;
     if (ext != null) {
       // The phone already IS a wheel position, so no wind-on — but it only
@@ -156,7 +165,7 @@ export class Hands {
       const d = Math.min(CENTRE * dt, Math.abs(this.wheel));
       this.wheel -= Math.sign(this.wheel) * d;
     }
-    const tUp = 3.4, tDn = 7.5, bUp = 5.5, bDn = 9;
+    const { tUp, tDn, bUp, bDn } = RATES;
     // A held key asks for 1; a ladder pedal asks for its step; whichever is
     // further down wins. With no pedal this is exactly the old key ramp.
     const tWant = Math.max(this.held('throttle') ? 1 : 0, this.ladder('throttle'));

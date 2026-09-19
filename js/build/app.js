@@ -279,6 +279,14 @@ async function startDrive() {
   }
   // 12 m in, so the car is on the road rather than half on the grass before it
   spawnS = Math.max(12, newest.s0 - 350);
+  // ...and never inside a tunnel: starting in the dark, mid-corner, with no
+  // idea which way the road goes is not a run-up to anything. Back out to
+  // 60 m before the portal.
+  if (path.tunIn) {
+    let i = Math.round(spawnS / path.ds);
+    while (i > 6 && path.tunIn[i] > 0) i--;
+    if (i !== Math.round(spawnS / path.ds)) spawnS = Math.max(12, (i - 30) * path.ds);
+  }
   spawn(spawnS);
   mode = 'drive';
   acc = 0;

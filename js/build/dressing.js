@@ -496,6 +496,7 @@ export function buildViaducts(path, ground) {
   const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color: 0x8e9298, roughness: 0.9, side: THREE.DoubleSide });
   const DROP = 1.0, DECK = 0.9;
+  const piers = [];
   const gapAt = i => {
     const l = pointAt(path, i, path.w[i]), r = pointAt(path, i, -path.w[i]);
     return Math.min(l.z - ground.height(l.x, l.y), r.z - ground.height(r.x, r.y));
@@ -528,6 +529,12 @@ export function buildViaducts(path, ground) {
         idx.push(prev.rt, cur.rt, cur.rb, prev.rt, cur.rb, prev.rb);      // right skirt
         idx.push(prev.lb, prev.rb, cur.rb, prev.lb, cur.rb, cur.lb);      // deck underneath
       }
+      // a pier every 14 m wherever the deck is properly off the ground
+      if (i % Math.round(14 / path.ds) === 0) {
+        const c = pointAt(path, i, 0), gc = ground.height(c.x, c.y);
+        const top = c.z - DECK, h = top - gc;
+        if (h > 2.5) piers.push({ x: c.x, y: c.y, gc, h, hdg: path.hdg[i], wide: path.w[i] });
+      }
       prev = cur;
     }
     const g = new THREE.BufferGeometry();
@@ -537,6 +544,22 @@ export function buildViaducts(path, ground) {
     const m = new THREE.Mesh(g, mat);
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
+  }
+  // Piers. A deck 30 m up on nothing reads as a bug however carefully the
+  // skirts are drawn, and he asked for supports.
+  if (piers.length) {
+    const pg = new THREE.BoxGeometry(1, 1, 1);
+    pg.translate(0, 0.5, 0);                       // grow upward from the ground
+    const inst = new THREE.InstancedMesh(pg, new THREE.MeshStandardMaterial({ color: 0x9a9ea3, roughness: 0.92 }), piers.length);
+    const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3();
+    piers.forEach((p, n) => {
+      Q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.hdg);
+      S.set(2.2, p.h, Math.min(7, p.wide * 0.55));
+      M.compose(V(p.x, p.y, p.gc - 0.3), Q, S);
+      inst.setMatrixAt(n, M);
+    });
+    inst.castShadow = true; inst.receiveShadow = true;
+    group.add(inst);
   }
   return group;
 }

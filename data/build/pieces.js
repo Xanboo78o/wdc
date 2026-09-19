@@ -72,7 +72,19 @@ export const PIECES = [
   // "into the cars 2 double loop that goes up"
   // Two full circles, climbing 15 m each, so the road crosses over itself
   // twice and comes out 30 m higher pointing the same way it went in.
-  { part: 'The double loop', kind: 'straight', length: 90, note: 'run up to the loop' },
+  // Wide and walled from here: on a viaduct the normal 12 m of run-off hangs
+  // over nothing, so you could drive out on thin air, and its barriers cut
+  // across the deck below. 24 m of road with the wall right at the edge is
+  // both the fix and what he asked for — "a wider track that has supports".
+  { part: 'The double loop', kind: 'straight', length: 90, width: 24, run: 1.5, note: 'run up to the loop — road widens, walls come in' },
   { kind: 'turn', dir: 'left', angle: 720, radius: 38, climb: 30, bank: 8, note: 'the double loop — 2 full circles, +30 m, banked' },
   { kind: 'straight', length: 120, note: 'out of the top' },
+
+  // "add a snail type curve like in the trailmakers grandprix"
+  // One piece: 900 degrees winding from R110 down to R28, climbing all the
+  // way, so it coils inward like a shell and the exit off the top crosses
+  // back over its own outer coils.
+  { part: 'The snail', kind: 'straight', length: 80, width: 18, run: 2, climb: 2, note: 'into the shell' },
+  { kind: 'turn', dir: 'left', angle: 900, radius: 110, radius2: 28, climb: 22, bank: 6, note: 'THE SNAIL — two and a half turns, tightening all the way' },
+  { kind: 'straight', length: 260, climb: 7, note: 'off the top of the snail, back over its own coils' },
 ];

@@ -8,6 +8,9 @@
 // A piece is one of:
 //   { kind: 'straight', length: 700, climb: 0 }
 //   { kind: 'turn', dir: 'right', angle: 90, radius: 60, climb: 0, bank: 0 }
+// A turn may also give `radius2`, the radius it ENDS at: the corner then winds
+// steadily tighter (or wider) all the way through. A snail is one piece:
+//   { kind: 'turn', dir: 'left', angle: 900, radius: 110, radius2: 28 }
 // and any piece may also set `width` (full road width, m), `run` / `runL` /
 // `runR` (metres from the road edge to the barrier), or `tunnel: true` (the
 // road goes THROUGH the hill here, so the land is above it, not below).
@@ -33,10 +36,19 @@ function shape(p) {
   if (p.kind === 'straight') return { len: p.length, k: () => 0, kMax: 0 };
   const A = p.angle * Math.PI / 180, R = p.radius;
   const sign = p.dir === 'left' ? 1 : -1;
-  const T = easing(A, R), hold = A * R - T, len = hold + 2 * T, kMax = 1 / R;
+  const k0 = 1 / R, k1 = 1 / (p.radius2 || R), kMax = Math.max(k0, k1);
+  // Ease in, hold (winding from k0 to k1 if radius2 asks for it), ease out.
+  // The angle is what was asked for, so the LENGTH follows from it.
+  const T = easing(A, Math.min(R, p.radius2 || R));
+  const hold = Math.max(0, (A - (k0 + k1) * T / 2) / ((k0 + k1) / 2));
+  const len = hold + 2 * T;
   return {
     len, kMax,
-    k: u => sign * kMax * (u < T ? u / T : u > T + hold ? Math.max(0, len - u) / T : 1),
+    k: u => {
+      if (u < T) return sign * k0 * (u / T);
+      if (u > T + hold) return sign * k1 * Math.max(0, len - u) / T;
+      return sign * (k0 + (k1 - k0) * (hold ? (u - T) / hold : 0));
+    },
   };
 }
 
@@ -97,7 +109,7 @@ export function buildPath(pieces, { closed = false } = {}) {
     }
     info.push({
       n: pi + 1, kind: p.kind, s0, s1: s, len: sh.len,
-      dir: p.dir, angle: p.angle, radius: p.radius, climb, bank, tunnel,
+      dir: p.dir, angle: p.angle, radius: p.radius, radius2: p.radius2 || null, climb, bank, tunnel,
       note: p.note || '', part: p.part || null,
     });
   });

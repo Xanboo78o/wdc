@@ -14,7 +14,7 @@
 //   node tools/human.mjs [track] [class] [--aids=0..1]
 import { loadTrack, surfaceAt, fmt } from './harness.mjs';
 import { makeCar, step, FIXED_DT, SURFACE, peakSlip } from '../js/physics.js';
-import { steerLock } from '../js/input.js';
+import { steerLock, RATES } from '../js/input.js';
 
 const a = process.argv.slice(2).filter(x => !x.startsWith('--'));
 const flag = n => { const f = process.argv.find(x => x.startsWith(`--${n}=`)); return f ? +f.split('=')[1] : undefined; };
@@ -23,8 +23,12 @@ const line = lines.race;
 const peak = peakSlip(spec);
 const deg = r => r * 180 / Math.PI;
 
-// keyboard rates, copied from input.js so they cannot drift apart
-const WIND = 2.7, CENTRE = 5.2, tUp = 3.4, tDn = 7.5, bUp = 5.5, bDn = 9;
+// keyboard rates, IMPORTED from input.js so they cannot drift apart (they did:
+// this file kept driving at the old wind-on for a while after the game changed)
+const { tUp, tDn, bUp, bDn } = RATES;
+// --wind / --centre override the game's rates, which is how a change to the
+// steering feel gets compared against the old one on the same lap
+const WIND = flag('wind') ?? RATES.WIND, CENTRE = flag('centre') ?? RATES.CENTRE;
 
 const car = makeCar({ cls: spec.key });
 const i0 = track.idx(0);
