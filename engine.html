@@ -71,12 +71,18 @@
       <label>SOURCE</label>
       <select id="mode" style="flex:1;font:inherit;background:#0e1116;color:var(--ink);
         border:1px solid var(--line);border-radius:8px;padding:9px 12px">
+        <option value="real" selected>REAL RECORDING &mdash; 6 CC0 engine loops, pick one</option>
         <option value="drum">DRUM LOOP &mdash; 0.2 s of percussion, played fast</option>
-        <option value="cycle" selected>ENGINE CYCLE &mdash; one firing, looped at the firing rate</option>
+        <option value="cycle">ENGINE CYCLE &mdash; one firing, synthesised</option>
       </select>
     </div>
+    <div class="row" id="pickRow">
+      <label>WHICH LOOP</label>
+      <div style="flex:1;display:flex;gap:7px;flex-wrap:wrap" id="picks"></div>
+    </div>
+    <div class="note" id="pickNote"></div>
     <div class="note">
-      Same idea both ways &mdash; a loop played at a rate. The difference is how long
+      Same idea all three ways &mdash; a loop played at a rate. The difference is how long
       the loop is, and that is everything. Speeding a sample up moves its TIMBRE,
       not just its pitch: a drum body at 210 Hz played 37&times; faster to reach an
       F1's firing rate lands at 7,900 Hz, so the thump becomes hiss. One firing
@@ -229,6 +235,21 @@ function buildCycle() {
   return a;
 }
 
+// The six CC0 files, decoded once each. These are real engine, so they already
+// sit at engine frequencies and need almost no stretching — which is the whole
+// problem the first two attempts had.
+const FILES = ['loop_0','loop_1_0','loop_2_0','loop_3_0','loop_4_0','loop_5_0'];
+const decoded = {};
+let pick = 0;
+
+async function loadReal(i) {
+  if (decoded[i]) return decoded[i];
+  const r = await fetch(`data/audio/${FILES[i]}.wav`);
+  if (!r.ok) throw new Error(`${FILES[i]}.wav: HTTP ${r.status}`);
+  decoded[i] = await ctx.decodeAudioData(await r.arrayBuffer());
+  return decoded[i];
+}
+
 function build() {
   if ($('mode').value === 'cycle') return buildCycle();
   const N = Math.floor(SR * LOOP_S);
@@ -303,6 +324,22 @@ function rebuild() {
     `typical sample-to-sample step and <b>${(c.vsRms * 100).toFixed(2)}%</b> of its RMS &mdash; ` +
     (clean ? `<span class="ok">closed, no click.</span>` : `<span class="bad">this will click once per loop.</span>`);
   if (ctx) {
+    if ($('mode').value === 'real') {
+      loadReal(pick).then(b => {
+        buf = b;
+        const d = b.getChannelData(0);
+        const jump = Math.abs(d[0] - d[d.length - 1]);
+        let st = 0; for (let i = 1; i < d.length; i++) st += Math.abs(d[i] - d[i-1]);
+        st /= d.length - 1;
+        $('clean').innerHTML = `<b>${FILES[pick]}.wav</b> &mdash; ${(b.duration).toFixed(3)} s, ` +
+          `${b.sampleRate} Hz. Loop closure: jump is <b>${(st>0?jump/st:0).toFixed(2)}&times;</b> the ` +
+          `typical sample-to-sample step &mdash; ` +
+          ((st>0?jump/st:0) < 6 ? '<span class="ok">closed.</span>' : '<span class="bad">this one clicks.</span>');
+        if (playing) restart();
+        update();
+      }).catch(e => { $('clean').innerHTML = `<span class="bad">${e.message}</span>`; });
+      return;
+    }
     buf = ctx.createBuffer(1, a.length, SR);
     buf.copyToChannel(a, 0);
     if (playing) { restart(); }
@@ -315,12 +352,18 @@ function update() {
   const bpm = +$('bpm').value;
   // At rate 1.0 the loop repeats 1/LOOP_S times a second, giving hits/LOOP_S
   // hits per second. BPM is just that expressed per minute.
-  const cycleMode = $('mode').value === 'cycle';
+  const mode = $('mode').value, realMode = mode === 'real';
+  const cycleMode = mode === 'cycle';
+  $('pickRow').style.display = realMode ? '' : 'none';
   const hz = bpm / 60;
   // Drum: rate is whatever makes the hits land at `bpm`. Cycle: the loop IS one
   // firing, so rate is simply how far the target RPM is from the reference.
   const baseBpm = (hits / LOOP_S) * 60;
-  const rate = cycleMode ? (hz / 3 * 60) / REF_RPM : bpm / baseBpm;
+  // A recording already IS an engine, so the slider is simply how far you move
+  // it from where it was recorded. 1.00x is untouched. Anything past about 2x
+  // either way stops sounding like the same engine.
+  const rate = realMode ? Math.pow(2, (bpm - 27000) / 27000 * 1.6)
+             : cycleMode ? (hz / 3 * 60) / REF_RPM : bpm / baseBpm;
   // If each hit is one cylinder firing, a four-stroke V6 fires 3 times per
   // revolution, so rpm = hz / 3 * 60. That is the number that ties this page
   // to a real gearbox later.
@@ -346,6 +389,16 @@ function update() {
     : '<span class="bad">past the limiter</span>';
   $('rpmNote').innerHTML = `An F1 V6 idles near 4,000 rpm and is limited at 15,000, ` +
     `which is 200&ndash;750 Hz of firing. This is <b>${Math.round(rpm).toLocaleString()} rpm</b> equivalent &mdash; ${zone}.` + warn;
+  if (realMode) {
+    $('rpmNote').innerHTML = `Playing <b>${FILES[pick]}.wav</b> at <b>${rate.toFixed(2)}&times;</b> ` +
+      `&mdash; ${Math.abs(Math.log2(rate)).toFixed(2)} octaves from as-recorded. ` +
+      (Math.abs(Math.log2(rate)) > 1
+        ? '<span class="bad">past an octave; it will stop sounding like the same engine</span>'
+        : '<span class="ok">inside an octave, where it keeps its character</span>');
+    $('loopNote').innerHTML = `Real recording, so there is no rpm readout I can honestly give you: ` +
+      `my pitch detector reads these six files anywhere from 25 Hz to 1225 Hz, which for one engine ` +
+      `is nonsense. See data/audio/SOURCE.md. Judge it by ear.`;
+  } else
   $('loopNote').innerHTML = cycleMode
     ? `one firing cycle recorded at ${REF_RPM.toLocaleString()} rpm, ${(SR / (REF_RPM / 20)).toFixed(0)} samples long, ` +
       `played at <b>${rate.toFixed(2)}&times;</b> &mdash; ${Math.abs(Math.log2(rate)).toFixed(2)} octaves from where it was made.`
@@ -387,6 +440,14 @@ $('go').onclick = async () => {
   $('ctxState').textContent = playing ? 'running' : 'stopped';
 };
 
+$('picks').innerHTML = FILES.map((f, i) =>
+  `<button data-i="${i}" style="padding:7px 13px;font-size:11px;letter-spacing:.1em">${i + 1}</button>`).join('');
+$('picks').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  pick = +b.dataset.i;
+  for (const x of $('picks').children) x.style.borderColor = x === b ? 'var(--hot)' : 'var(--line)';
+  rebuild();
+};
 for (const id of ['hits', 'decay', 'tone', 'grit', 'uneven']) $(id).oninput = rebuild;
 $('mode').onchange = rebuild;
 for (const id of ['bpm', 'thr', 'vol']) $(id).oninput = update;
