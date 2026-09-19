@@ -19,6 +19,7 @@ import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar } from './car.js';
+import { makeDeformer } from './dent.js';
 import { World, loadElev } from './world.js';
 import { loadSurface, defaultSurface, KERB_SHAPE } from './surface.js';
 
@@ -384,6 +385,37 @@ export class View {
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
     this.wingParts = car.wings;
     this.crushParts = crushParts(car.group, car.wheels);
+    // Bodywork bent where it was actually hit, on top of the region fold.
+    // PLAYER ONLY: this takes its own copy of every geometry it touches,
+    // because the field clones one reference car twenty-two times and
+    // clone(true) SHARES geometry — denting a shared buffer would put the
+    // same dent on the whole grid. Rivals keep the region fold, which is
+    // transform-only and safe to share.
+    this.deformer = makeDeformer(car.group, car.wheels);
+
+    // ?dents=lx:ly:depth:r,...  — preset impacts in the car's own metres, so
+    // the crumple can be photographed without arranging a crash first. Sits
+    // here rather than in main.js for the same reason ?cam and ?photo do: it
+    // is a renderer debug hook and it needs nothing from the game loop.
+    // The push direction defaults to INWARD, toward the car's centreline,
+    // which is the direction a real impact moves bodywork.
+    // NOTE the target: `car` in THIS scope is buildCar's mesh bundle
+    // ({group, wheels, steer, drs, R, wings}), not the physics car. Writing
+    // dents onto it put them somewhere nothing reads, and the first
+    // screenshots came back clean with no error to say why.
+    const dq = new URLSearchParams(location.search).get('dents');
+    if (dq) {
+      this.presetDents = dq.split(',').map(bit => {
+        const [lx, ly, depth, r] = bit.split(':').map(Number);
+        const m = Math.hypot(lx || 0, ly || 0) || 1;
+        return {
+          lx: lx || 0, ly: ly || 0,
+          nx: -(lx || 0) / m, ny: -(ly || 0) / m,
+          depth: Math.max(0, Math.min(0.85, depth || 0.4)),
+          r: Math.max(0.2, r || 0.9),
+        };
+      });
+    }
     // YAW ON THE PARENT, ROLL AND PITCH ON THE CHILD.
     //
     // All three used to live on one object, and with three's default XYZ Euler
@@ -701,6 +733,9 @@ export class View {
     }
     // Bodywork damage, straight off the contact impulses in collide.js.
     applyCrush(this.crushParts, car.crush);
+    // Cheap: returns immediately unless the dent set actually changed, which
+    // only happens on contact.
+    if (this.deformer) this.deformer.apply(this.presetDents || car.dents);
     // The DRS flap is a real flap: it opens when the wing is stalled, because
     // that is the only reason the car is faster on the straight.
     if (this.drs) this.drs.rotation.z = car.drsOpen ? -1.0 : 0;

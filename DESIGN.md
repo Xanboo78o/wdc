@@ -633,10 +633,29 @@ FRAME-LIMITED, so waiting longer buys no simulation time at all — every
 screenshot comes back at lap 0:00.715 however long you wait. Both sessions
 burned headless runs on this independently before working it out.
 
-The consequence is that a screenshot can prove a thing RENDERS but not that a
-thing HAPPENS. Anything that has to be caught in motion — a car mid-flight, a
-crash, a lap time — needs a headless harness that steps the simulation
-(`tools/flight.mjs`, `tools/drive.mjs`, `tools/race.mjs`), not a photograph.
+**CORRECTED 2026-09-18, and the correction matters more than the rule.** The
+frame-limit above is real — every screenshot does come back at lap 0:00.715.
+But the conclusion originally drawn from it, "a flight cannot be photographed
+headless", was FALSE, and it was reached from a broken instrument rather than
+from the sim.
+
+`tools/shot.mjs` took only the FIRST `--q` and silently discarded the rest, so
+`--q auto=monza:f1 --q launch=11,4` loaded the page with no launch at all. The
+screenshots came back looking perfectly normal and completely wrong, and the
+frame-limit — true, and sitting right there — was a plausible enough culprit
+that nobody checked further. With the flag actually delivered, the car
+photographs plainly in mid-air above the gantry: 0.7 s of simulation is short,
+but it is ample for a launch, a dent or a crash.
+
+So the honest rule is narrower: **a screenshot proves a thing renders, and can
+only catch what happens in the first second.** Anything later than that — a lap
+time, a race result, a tyre going off — still needs a harness that steps the
+sim (`tools/flight.mjs`, `tools/drive.mjs`, `tools/race.mjs`).
+
+And the rule underneath both versions: **a silently ignored input is worse than
+an error.** Three confident wrong conclusions came out of one dropped flag,
+because every one of them had a believable explanation ready. `flagAll()` now
+merges every `--q`.
 
 `?notex` runs the whole world on flat colours, which is both a setting for a
 weak machine and the fastest way to tell a material problem from a geometry

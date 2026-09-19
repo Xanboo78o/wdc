@@ -52,6 +52,21 @@ const flag = (name, def = null) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? (args[i + 1] ?? true) : def;
 };
+// EVERY occurrence, not just the first.
+//
+// `--q a=1 --q b=2` silently used only `a=1` and threw `b=2` away. No error,
+// no warning — the page just loaded without the parameter and the screenshot
+// came back looking perfectly fine and completely wrong. It cost three
+// confident wrong conclusions in a row, including "a flight cannot be
+// photographed headless", which is false: the launch parameter was being
+// dropped, and once it arrived the car was plainly in the air.
+//
+// A flag that is ignored in silence is worse than one that errors.
+const flagAll = (name) => {
+  const out = [];
+  for (let i = 0; i < args.length; i++) if (args[i] === `--${name}`) out.push(args[i + 1]);
+  return out;
+};
 // Positional args are anything not starting with `--` and not sitting in the
 // slot right after a flag that takes a value.
 const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q', 'probe', 'base']);
@@ -192,7 +207,9 @@ if (photo) q.set('photo', photo);
 // --q a=1&b=2 passes anything else straight through to the page, which is how
 // a system gets switched off for one shot to find out what it was responsible
 // for.
-for (const [k, v] of new URLSearchParams(flag('q', '') || '')) q.set(k, v);
+for (const chunk of flagAll('q')) {
+  for (const [k, v] of new URLSearchParams(chunk || '')) q.set(k, v);
+}
 const url = `${base || `http://127.0.0.1:${PORT}`}/index.html?${q}`;
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'wdc-chrome-'));
