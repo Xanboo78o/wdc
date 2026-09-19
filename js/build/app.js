@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { buildPath, trackData, surfaceYAt, pointAt } from './path.js';
 import { Ground } from './ground.js';
 import { V, buildRoad, buildLandmarks, buildGround, buildSky } from './meshes.js';
-import { brandTexture, buildWalls, buildDetails, gantryBanner } from './dressing.js';
+import { brandTexture, buildWalls, buildDetails, buildTunnels, buildViaducts, gantryBanner } from './dressing.js';
 import { Track } from '../track.js';
 import { CARS, makeCar, step, FIXED_DT, SURFACE, dragFor, registerAero, corneringSpeed, limitMu, topSpeed } from '../physics.js';
 import { makeAero } from '../aero.js';
@@ -68,6 +68,8 @@ scene.add(buildRoad(path));
 const brand = brandTexture(renderer.capabilities.getMaxAnisotropy());
 scene.add(buildWalls(path, ground, brand));
 scene.add(buildDetails(path, ground, brand));
+scene.add(buildTunnels(path));
+scene.add(buildViaducts(path, ground));
 const landmarks = buildLandmarks(path, ground);
 scene.add(landmarks);
 if (landmarks.userData.beam) scene.add(gantryBanner(brand, landmarks.userData.beam));
@@ -173,14 +175,14 @@ function updateFly(dt) {
   if (keys.has('KeyE')) fly.dist = Math.max(4, fly.dist * (1 - dt * 1.5));
   if (keys.has('KeyQ')) fly.dist = Math.min(6000, fly.dist * (1 + dt * 1.5));
   // the orbit point rides on the ground
-  const gy = ground.height(fly.target.x, -fly.target.z);
+  const gy = ground.cameraFloor(fly.target.x, -fly.target.z);
   fly.target.y += (gy - fly.target.y) * Math.min(1, dt * 6);
   const cp = Math.cos(fly.pitch);
   camera.position.set(
     fly.target.x + Math.sin(fly.yaw) * cp * fly.dist,
     fly.target.y + Math.sin(fly.pitch) * fly.dist,
     fly.target.z + Math.cos(fly.yaw) * cp * fly.dist);
-  const floor = ground.height(camera.position.x, -camera.position.z) + 1.5;
+  const floor = ground.cameraFloor(camera.position.x, -camera.position.z) + 1.5;
   if (camera.position.y < floor) camera.position.y = floor;
   camera.lookAt(fly.target);
 }
@@ -370,7 +372,7 @@ function driveCamera(dt) {
   if (!camSmooth) camSmooth = want.clone();
   camSmooth.lerp(want, Math.min(1, dt * 9));
   camera.position.copy(camSmooth);
-  const floor = ground.height(camera.position.x, -camera.position.z) + 0.8;
+  const floor = ground.cameraFloor(camera.position.x, -camera.position.z) + 0.8;
   if (camera.position.y < floor) camera.position.y = floor;
   camera.lookAt(b.clone().addScaledVector(fwd, 5).add(new THREE.Vector3(0, 0.9, 0)));
   camera.fov = 62; camera.updateProjectionMatrix();

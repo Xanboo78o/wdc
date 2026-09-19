@@ -16,6 +16,7 @@
 //   3. Where the road crosses itself there is room for a bridge.
 // And it prints the piece list with an F1 corner speed for each turn.
 import { buildPath, pointAt, surfaceY } from '../js/build/path.js';
+import { GROUND } from '../js/build/ground.js';
 import { Ground } from '../js/build/ground.js';
 import { CARS, corneringSpeed, limitMu, topSpeed } from '../js/physics.js';
 
@@ -111,6 +112,7 @@ function terrainAt(x, y) {
   };
   const N = 6;
   for (let i = 0; i < path.n - 1; i++) {
+    if (path.tunnel[i] || path.tunnel[i + 1]) continue;   // checked the other way round below
     // the road's two triangles between sample i and i+1, as meshes.js draws them
     const L0 = pointAt(path, i, path.w[i]), R0 = pointAt(path, i, -path.w[i]);
     const L1 = pointAt(path, i + 1, path.w[i + 1]), R1 = pointAt(path, i + 1, -path.w[i + 1]);
@@ -138,6 +140,22 @@ function terrainAt(x, y) {
     (where && worst < 0.01 ? ` (road ${where.roadZ.toFixed(2)} vs ground ${where.tz.toFixed(2)} at s=${where.s}${where.lat != null ? ` lat ${where.lat.toFixed(1)}` : ''})` : '');
   (worst >= 0.01 ? ok : fail)(msg);
   (missing === 0 ? ok : fail)(`every road point has terrain under it (${missing} without)`);
+
+  // ---- and the tunnels, which are the same rule upside down ---------------
+  // Only where the tunnel is properly inside the hill: at the mouth the rock
+  // is thin on purpose (GROUND.PORTAL), and the tunnel mesh covers that.
+  let tunPts = 0, thin = null;
+  for (let i = 0; i < path.n; i++) {
+    if (path.tunIn[i] < GROUND.PORTAL) continue;
+    const p = pointAt(path, i, 0);
+    const tz = terrainAt(p.x, p.y);
+    if (tz === null) continue;
+    tunPts++;
+    const over = tz - p.z;
+    if (!thin || over < thin.over) thin = { over, s: i * path.ds };
+  }
+  if (tunPts) (thin.over >= 3 ? ok : fail)(
+    `hill over every tunnel: ${tunPts} points past the portals, thinnest ${thin.over.toFixed(1)} m of rock at s=${thin.s} (want >= 3, asked for ${GROUND.ROCK})`);
   console.log(`      ${nTris} terrain triangles within 140 m of the road`);
 }
 
@@ -164,8 +182,17 @@ function terrainAt(x, y) {
       }
     }
   }
-  if (!crossings.length) ok('the road never crosses itself');
-  for (const c of crossings) (c.dz >= 5.5 ? ok : fail)(`road crosses itself at s=${c.s1} and s=${c.s2}, ${c.dz.toFixed(1)} m apart vertically (bridge needs 5.5)`);
+  // one crossing of two roads shows up once per pair of samples that overlap;
+  // report the PLACE, with its tightest clearance
+  const spots = [];
+  for (const c of crossings) {
+    const near = spots.find(s => Math.abs(s.s1 - c.s1) < 60 && Math.abs(s.s2 - c.s2) < 60);
+    if (near) { near.dz = Math.min(near.dz, c.dz); near.n++; }
+    else spots.push({ ...c, n: 1 });
+  }
+  if (!spots.length) ok('the road never crosses itself');
+  for (const c of spots) (c.dz >= 5.5 ? ok : fail)(
+    `road crosses itself at s=${c.s1} and s=${c.s2}: ${c.dz.toFixed(1)} m apart vertically (bridge needs 5.5)`);
 }
 
 console.log(fails ? `\n${fails} FAILED${BREAK ? '  (expected: --break is meant to fail)' : ''}` : '\nall good');

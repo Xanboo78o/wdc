@@ -10,7 +10,7 @@
 // already puts the barrier (road edge + run-off), and everything else is behind
 // them or on top of them.
 import * as THREE from 'three';
-import { pointAt } from './path.js';
+import { pointAt, surfaceY } from './path.js';
 import { V } from './meshes.js';
 
 export const BRAND = {
@@ -167,7 +167,7 @@ export function buildWalls(path, ground, brand) {
         ci.push(A, B + 1, B, A, A + 1, B + 1);
         ci.push(B + 3, A + 2, A + 3, B + 3, B + 2, A + 2);
       }
-      if (k % 2 === 0) posts.push({ x: p.b.x, y: p.b.y, g: p.g + H, h: p.h });
+      if (k % 2 === 0 && !(path.tunIn && path.tunIn[p.i] > 0)) posts.push({ x: p.b.x, y: p.b.y, g: p.g + H, h: p.h });
     });
     const fg = new THREE.BufferGeometry();
     fg.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3));
@@ -192,7 +192,9 @@ export function buildWalls(path, ground, brand) {
     L.forEach((p, k) => {
       wp.push(p.b.x, p.g + H, -p.b.y, p.b.x, p.g + H + FENCE_H, -p.b.y);
       wu.push(p.arc / 0.5, 0, p.arc / 0.5, FENCE_H / 0.5);
-      if (k && p.ok && L[k - 1].ok) { const a = (k - 1) * 2, b = k * 2; wi.push(a, b, b + 1, a, b + 1, a + 1); }
+      // no catch fence inside a tunnel: the bore is the wall there
+      const inTun = path.tunIn && (path.tunIn[p.i] > 0 || (k > 0 && path.tunIn[L[k - 1].i] > 0));
+      if (k && p.ok && L[k - 1].ok && !inTun) { const a = (k - 1) * 2, b = k * 2; wi.push(a, b, b + 1, a, b + 1, a + 1); }
     });
     const wg = new THREE.BufferGeometry();
     wg.setAttribute('position', new THREE.Float32BufferAttribute(wp, 3));
@@ -376,6 +378,164 @@ export function gantryBanner(brand, beam) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(span, 1.3), mat);
     m.position.set(x + Math.cos(hdg) * 0.46 * face, y, z - Math.sin(hdg) * 0.46 * face);
     m.rotation.y = hdg + (face > 0 ? Math.PI / 2 : -Math.PI / 2);
+    group.add(m);
+  }
+  return group;
+}
+
+// ---------------------------------------------------------------------------
+// TUNNELS. The terrain rule is inverted through a tunnel (rock above the road,
+// see ground.js), so without this the car drives through solid hill: this is
+// the bore that hollows it out, plus a headwall at each mouth covering the gap
+// between the bore and the hillside.
+//
+// It runs a little PAST the flagged samples at each end, because the rock
+// thins to nothing at the portal (GROUND.PORTAL) and the mesh has to still be
+// covering the road where it does.
+// ---------------------------------------------------------------------------
+const BORE = [             // cross-section: [fraction of half-width, height m]
+  [1.00, 0.0], [1.00, 3.0], [0.93, 5.0], [0.66, 6.4], [0.00, 6.9],
+  [-0.66, 6.4], [-0.93, 5.0], [-1.00, 3.0], [-1.00, 0.0],
+];
+
+export function buildTunnels(path) {
+  const group = new THREE.Group();
+  if (!path.tunIn) return group;
+  const concrete = new THREE.MeshStandardMaterial({
+    color: 0x9a9ea3, roughness: 0.95, side: THREE.DoubleSide, emissive: 0x23262b, emissiveIntensity: 1,
+  });
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff6e0, emissive: 0xffeec4, emissiveIntensity: 2.4 });
+
+  const runs = [];
+  for (let i = 0; i < path.n; i++) {
+    if (!path.tunIn[i]) continue;
+    const last = runs[runs.length - 1];
+    if (last && i - last.i1 <= 1) last.i1 = i; else runs.push({ i0: i, i1: i });
+  }
+  const half = i => path.w[i] + (path.runL[i] + path.runR[i]) / 2 + 0.5;
+  const ring = i => BORE.map(([f, h]) => {
+    const p = pointAt(path, i, f * half(i));
+    return V(p.x, p.y, surfaceY(path, i, f * half(i)) + h);
+  });
+
+  for (const r of runs) {
+    const i0 = Math.max(0, r.i0 - 5), i1 = Math.min(path.n - 1, r.i1 + 5);
+    const pos = [], idx = [];
+    for (let i = i0; i <= i1; i++) {
+      const base = pos.length / 3;
+      for (const v of ring(i)) pos.push(v.x, v.y, v.z);
+      if (i > i0) for (let q = 0; q < BORE.length - 1; q++) {
+        const a = base - BORE.length + q, b = base + q;
+        idx.push(a, b, b + 1, a, b + 1, a + 1);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const bore = new THREE.Mesh(g, concrete);
+    bore.receiveShadow = true;
+    group.add(bore);
+
+    // headwall at each mouth, buried in the hillside
+    for (const i of [i0, i1]) {
+      const rim = ring(i), W = half(i) + 3.5, z0 = surfaceY(path, i, 0);
+      const hp = [], hi = [];
+      const push = v => { hp.push(v.x, v.y, v.z); return hp.length / 3 - 1; };
+      const R = rim.map(push);
+      const corner = (f, up) => { const p = pointAt(path, i, f * W); return push(V(p.x, p.y, z0 + up)); };
+      const oTL = corner(1, 11), oTR = corner(-1, 11), oBL = corner(1, -2), oBR = corner(-1, -2);
+      const quad = (a, b, c, d) => hi.push(a, b, c, a, c, d);
+      quad(oBL, R[0], R[1], oTL);
+      quad(oTL, R[1], R[2], oTL);
+      quad(oTL, R[2], R[3], oTL);
+      quad(oTL, R[3], R[4], oTR);
+      quad(oTR, R[4], R[5], oTR);
+      quad(oTR, R[5], R[6], oTR);
+      quad(oTR, R[6], R[7], oBR);
+      quad(oBR, R[7], R[8], oBR);
+      quad(oBR, R[8], R[0], oBL);
+      const hg = new THREE.BufferGeometry();
+      hg.setAttribute('position', new THREE.Float32BufferAttribute(hp, 3));
+      hg.setIndex(hi);
+      hg.computeVertexNormals();
+      const hw = new THREE.Mesh(hg, concrete);
+      hw.receiveShadow = true;
+      group.add(hw);
+    }
+
+    // ceiling lights every 14 m — an unlit tunnel is a black hole, and a few
+    // real point lights so the walls and the car are lit, not just the lamps
+    const lamps = [];
+    for (let i = i0; i <= i1; i += Math.round(14 / path.ds)) {
+      const p = pointAt(path, i, 0);
+      lamps.push({ v: V(p.x, p.y, surfaceY(path, i, 0) + 6.5), h: path.hdg[i] });
+    }
+    const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.16, 0.5), lampMat, lamps.length);
+    const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(1, 1, 1);
+    lamps.forEach((l, n) => { Q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), l.h); M.compose(l.v, Q, S); inst.setMatrixAt(n, M); });
+    group.add(inst);
+    const every = Math.max(1, Math.round(lamps.length / 6));
+    for (let q = 0; q < lamps.length; q += every) {
+      const pl = new THREE.PointLight(0xffe9bd, 260, 70, 2);
+      pl.position.copy(lamps[q].v).add(new THREE.Vector3(0, -0.7, 0));
+      group.add(pl);
+    }
+  }
+  return group;
+}
+
+// ---------------------------------------------------------------------------
+// VIADUCTS. Where the road runs high above the ground — the double loop
+// crossing over itself, the esses bridging the hairpin section — the terrain
+// has dropped away to the lower road (ground.js: the lower road wins), and
+// without this the upper road is a ribbon floating in mid-air. Skirts down
+// each side and a deck underneath make it a bridge.
+// ---------------------------------------------------------------------------
+export function buildViaducts(path, ground) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x8e9298, roughness: 0.9, side: THREE.DoubleSide });
+  const DROP = 1.0, DECK = 0.9;
+  const gapAt = i => {
+    const l = pointAt(path, i, path.w[i]), r = pointAt(path, i, -path.w[i]);
+    return Math.min(l.z - ground.height(l.x, l.y), r.z - ground.height(r.x, r.y));
+  };
+  const runs = [];
+  for (let i = 0; i < path.n; i++) {
+    if (path.tunIn && path.tunIn[i] > 0) continue;
+    if (gapAt(i) < DROP) continue;
+    const last = runs[runs.length - 1];
+    if (last && i - last.i1 <= 3) last.i1 = i; else runs.push({ i0: i, i1: i });
+  }
+  for (const r of runs) {
+    if (r.i1 - r.i0 < 2) continue;
+    const i0 = Math.max(0, r.i0 - 2), i1 = Math.min(path.n - 1, r.i1 + 2);
+    const pos = [], idx = [];
+    const push = v => { pos.push(v.x, v.y, v.z); return pos.length / 3 - 1; };
+    let prev = null;
+    for (let i = i0; i <= i1; i++) {
+      const w = path.w[i] + 0.35;
+      const l = pointAt(path, i, w), rt = pointAt(path, i, -w);
+      const gl = ground.height(l.x, l.y), gr = ground.height(rt.x, rt.y);
+      const cur = {
+        lt: push(V(l.x, l.y, l.z)),
+        lb: push(V(l.x, l.y, Math.max(gl - 0.4, l.z - Math.max(DECK, (l.z - gl) * 0.5)))),
+        rt: push(V(rt.x, rt.y, rt.z)),
+        rb: push(V(rt.x, rt.y, Math.max(gr - 0.4, rt.z - Math.max(DECK, (rt.z - gr) * 0.5)))),
+      };
+      if (prev) {
+        idx.push(prev.lt, prev.lb, cur.lb, prev.lt, cur.lb, cur.lt);      // left skirt
+        idx.push(prev.rt, cur.rt, cur.rb, prev.rt, cur.rb, prev.rb);      // right skirt
+        idx.push(prev.lb, prev.rb, cur.rb, prev.lb, cur.rb, cur.lb);      // deck underneath
+      }
+      prev = cur;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat);
+    m.castShadow = true; m.receiveShadow = true;
     group.add(m);
   }
   return group;

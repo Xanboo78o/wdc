@@ -20,6 +20,11 @@
 // a bridge), the ground drops to the LOWER one and the higher road stands on a
 // wall — it never ends up underground.
 //
+// A TUNNEL is the one deliberate exception, and it is the same rule upside
+// down: through a tunnel the road is INSIDE the hill, so those samples set no
+// upper limit at all and instead demand ROCK metres of land above the road.
+// The bore is cut by the tunnel mesh in dressing.js, not by the terrain.
+//
 // The level verge is not decoration. The ground is drawn as triangles, and a
 // triangle straddling the road edge interpolates between its corners; if the
 // land started climbing right at the edge, that interpolation would lift it
@@ -31,11 +36,15 @@
 import { surfaceY } from './path.js';
 
 export const GROUND = {
-  EPS: 0.05,        // m the ground sits under the road surface
+  EPS: 0.12,        // m the ground sits under the road surface. Enough that a
+                    // terrain triangle cutting the corner of a tight banked
+                    // climb (the double loop, R38) still passes underneath.
   VERGE: 5,         // m of level shoulder beyond the barrier
   CUT: 0.6,         // steepest rise away from the road (rise / run)
   FILL: 0.5,        // steepest fall away from it
   QUERY: 130,       // m around a point within which roads constrain it
+  ROCK: 7,          // m of hill the land must keep ABOVE a tunnel's road
+  PORTAL: 16,       // m over which that rock thickens from nothing at the mouth
   TILE: 48,         // m, one terrain tile
   NEAR: 3, MID: 12, FAR: 24, HORIZON: 48,   // cell sizes by distance from the road
   MARGIN: 4000,     // m of land beyond the track's bounding box (the fog eats the edge)
@@ -185,6 +194,31 @@ export class Ground {
 
   roadDist(x, y) { return this._bilin(this.nat.dist, x, y); }
 
+  // The height a camera must stay above. Normally the land — but inside a
+  // tunnel the "land" is the rock ABOVE the road, so a camera clamped to it
+  // gets shoved out through the hilltop (which is exactly what happened).
+  // There, the floor is the road.
+  cameraFloor(x, y) {
+    const p = this.path;
+    if (p.tunIn) {
+      const cx = Math.floor(x / HASH), cy = Math.floor(y / HASH);
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+        const bk = this.buckets.get((cx + ox) * 100003 + cy + oy);
+        if (!bk) continue;
+        for (const id of bk) {
+          const sg = this.seg[id];
+          if (!p.tunIn[sg.i] && !p.tunIn[sg.j]) continue;
+          const rx = x - sg.ax, ry = y - sg.ay;
+          const t = Math.max(0, Math.min(1, (rx * sg.ux + ry * sg.uy) / sg.len));
+          const lat = -rx * sg.uy + ry * sg.ux;
+          if (Math.abs(lat) > p.w[sg.i] + 14) continue;
+          return p.z[sg.i] + (p.z[sg.j] - p.z[sg.i]) * t - 0.2;
+        }
+      }
+    }
+    return this.height(x, y);
+  }
+
   // `wz` / `ws` are the road's own heights near this point, weighted by how
   // close each bit of road is (height() gathers them). Near the road they
   // outweigh the wide blur completely, so the land runs downhill WITH a road
@@ -230,6 +264,9 @@ export class Ground {
         const F = w + run + o.VERGE;
         // Neighbouring segments' slabs must overlap on the OUTSIDE of a bend,
         // where they fan apart; this tolerance is that fan at the verge's edge.
+        // 0 outside a tunnel, 1 once properly inside it
+        const depth = p.tunIn ? Math.min(p.tunIn[i], p.tunIn[j]) : 0;
+        const tunnel = depth > 0 ? smoothstep(0, o.PORTAL, depth) : 0;
         const tol = 0.5 * sg.len * (1 + F * sg.kMax) + 0.25;
         const over = Math.abs(t - tc) * sg.len;
         // centreline height along this segment; within the slab it is carried
@@ -245,6 +282,16 @@ export class Ground {
         const sA = surfaceY(p, i, side * w), sB = surfaceY(p, j, side * w);
         const edge = p.z[i] + (p.z[j] - p.z[i]) * tz + ((sA - p.z[i]) * (1 - tzc) + (sB - p.z[j]) * tzc);
         let u, l;
+        if (tunnel > 0) {
+          // Inside the hill: nothing above the road is forbidden, and the land
+          // over it has to BE a hill — thickening from nothing at the portal,
+          // so the mouth is a slope the tunnel mesh runs into rather than a
+          // cliff whose triangles cut across the road outside.
+          const d = Math.hypot(Math.max(0, over - tol), Math.max(0, Math.abs(lat) - F));
+          l = edge + o.ROCK * tunnel - o.CUT * d;
+          if (l > L) L = l;
+          continue;
+        }
         if (over <= tol) {
           const al = Math.abs(lat);
           if (al <= w) {
@@ -266,7 +313,10 @@ export class Ground {
       }
     }
     const G = this.natural(x, y, wz, ws);
-    if (U === Infinity) return G;
+    // L still applies with no upper limit in sight: deep inside a tunnel every
+    // segment in range is a tunnel one, and returning G there threw the rock
+    // away and left the road in an open trench (caught by buildcheck).
+    if (U === Infinity) return Math.max(L, G);
     return Math.min(U, Math.max(L, G));
   }
 
