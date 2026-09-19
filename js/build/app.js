@@ -388,6 +388,8 @@ function loop(now) {
     placeCar(dt);
     driveCamera(dt);
     $('speed').textContent = Math.round(car.speed * 3.6);
+    $('pedT').style.width = (car.throttle * 100).toFixed(0) + '%';
+    $('pedB').style.width = (car.brake * 100).toFixed(0) + '%';
   }
   if (mode === 'fly' && camera.fov !== 55) { camera.fov = 55; camera.updateProjectionMatrix(); }
   // the shadow box follows whatever you are looking at

@@ -16,6 +16,24 @@ export const KEYMAP = {
   drs: ['Space'], look: ['ShiftLeft', 'ShiftRight'],
 };
 
+// KEY LADDER PEDALS (pedals.html). A spare keyboard under two cardboard
+// flaps, with foam pieces of three heights over three keys per pedal, so a
+// harder push reaches more keys. The pedal is at (keys down / keys in the
+// ladder) — 0, 1/3, 2/3, 1 — and the same rates below that ramp a keyboard
+// throttle ramp between those steps, which is what makes it feel analogue.
+// Three per pedal because a Bluetooth keyboard registers six keys at once:
+// both pedals floored is exactly six, so a key is never dropped. The game
+// only COUNTS keys, so which foam piece sits over which key does not matter.
+export const LADDER = {
+  throttle: ['Digit8', 'Digit9', 'Digit0'],
+  brake: ['Digit1', 'Digit2', 'Digit3'],
+};
+const LADDER_KEYS = new Set([...LADDER.throttle, ...LADDER.brake]);
+
+// Move toward a target, no faster than `up` going up or `dn` coming down.
+const approach = (v, target, up, dn) =>
+  target > v ? v + Math.min(up, target - v) : v - Math.min(dn, v - target);
+
 const PAD_BUTTONS = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, back: 8, start: 9 };
 
 export class Hands {
@@ -31,7 +49,7 @@ export class Hands {
       if (e.repeat) return;
       this.down.add(e.code);
       this.pressed.add(e.code);
-      if (Object.values(KEYMAP).some(a => a.includes(e.code))) e.preventDefault();
+      if (LADDER_KEYS.has(e.code) || Object.values(KEYMAP).some(a => a.includes(e.code))) e.preventDefault();
     };
     this._ku = e => this.down.delete(e.code);
     this._blur = () => this.down.clear();
@@ -44,6 +62,13 @@ export class Hands {
     addEventListener('gamepadconnected', e => { this.padName = e.gamepad.id.slice(0, 28); });
   }
   held(action) { return KEYMAP[action].some(c => this.down.has(c)); }
+  // how far down a ladder pedal is, 0..1
+  ladder(action) {
+    const keys = LADDER[action];
+    let n = 0;
+    for (const c of keys) if (this.down.has(c)) n++;
+    return n / keys.length;
+  }
   tapped(code) {
     if (this.pressed.has(code)) { this.pressed.delete(code); return true; }
     return false;
@@ -109,8 +134,12 @@ export class Hands {
       this.wheel -= Math.sign(this.wheel) * d;
     }
     const tUp = 3.4, tDn = 7.5, bUp = 5.5, bDn = 9;
-    this.throttle += this.held('throttle') ? Math.min(tUp * dt, 1 - this.throttle) : -Math.min(tDn * dt, this.throttle);
-    this.brake += this.held('brake') ? Math.min(bUp * dt, 1 - this.brake) : -Math.min(bDn * dt, this.brake);
+    // A held key asks for 1; a ladder pedal asks for its step; whichever is
+    // further down wins. With no pedal this is exactly the old key ramp.
+    const tWant = Math.max(this.held('throttle') ? 1 : 0, this.ladder('throttle'));
+    const bWant = Math.max(this.held('brake') ? 1 : 0, this.ladder('brake'));
+    this.throttle = approach(this.throttle, tWant, tUp * dt, tDn * dt);
+    this.brake = approach(this.brake, bWant, bUp * dt, bDn * dt);
     return { wheel: this.wheel, throttle: this.throttle, brake: this.brake };
   }
 }

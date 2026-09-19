@@ -29,6 +29,9 @@
   #keys kbd { color: var(--ink); background: rgba(255,255,255,0.1); border-radius: 4px; padding: 1px 6px; }
   #speedBox { bottom: 14px; right: 14px; text-align: right; display: none; }
   #speed { font-size: 40px; font-weight: 700; }
+  .ped { height: 6px; width: 90px; background: rgba(255,255,255,0.12); border-radius: 3px; margin-top: 6px; overflow: hidden; margin-left: auto; }
+  .ped i { display: block; height: 100%; width: 0; background: var(--hot); }
+  .ped.brk i { background: #e0483a; }
   #msg { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); font-size: 20px; font-weight: 700;
     letter-spacing: 0.1em; text-shadow: 0 2px 8px rgba(0,0,0,0.6); transition: opacity 0.4s; opacity: 0; }
   .drive { display: none; }
@@ -49,7 +52,8 @@
     <kbd>F</kbd> newest piece · <kbd>H</kbd> whole track · <kbd>Enter</kbd> DRIVE IT</span>
   <span class="drive"><kbd>arrows / WASD</kbd> drive · <kbd>C</kbd> camera · <kbd>R</kbd> restart · <kbd>Enter</kbd> back to flying</span>
 </div>
-<div id="speedBox" class="panel"><div id="speed">0</div>km/h</div>
+<div id="speedBox" class="panel"><div id="speed">0</div>km/h
+  <div class="ped"><i id="pedT"></i></div><div class="ped brk"><i id="pedB"></i></div></div>
 <div id="msg"></div>
 <script type="module" src="./js/build/app.js"></script>
 </body>
