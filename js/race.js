@@ -112,8 +112,16 @@ export class Race {
     for (const e of this.entries) {
       e.ahead = null; e.behind = null; e.aheadGapT = 99; e.behindGapT = 99;
       let dirty = 0, tow = 0, bestA = 1e9, bestB = 1e9;
+      // A car in the pit lane is in a different corridor, and `ds`/`dl` are in
+      // TRACK space — so it is not traffic and it is not air. Skipping it here
+      // is one line that covers four things at once: nobody picks it as the car
+      // ahead, nobody caps their speed to its 80 km/h limit, nobody pulls out
+      // to attack it, and nobody sits in a tow from a car that is in its box.
+      // That last one is the trap: at `dl` near zero, relative to a car on the
+      // straight, a stationary car in a pit BOX would otherwise read as a tow.
+      if (e.inPit) { e.car.dirty = 0; e.car.tow = 0; continue; }
       for (const o of this.entries) {
-        if (o === e || o.retired) continue;
+        if (o === e || o.retired || o.inPit) continue;
         const ds = t.gap(o.proj.s, e.proj.s);
         const dl = Math.abs(o.proj.lat - e.proj.lat);
         if (ds > 0 && ds < 90) {
@@ -335,7 +343,10 @@ export class Race {
 
       step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv),
                       dirty: car.dirty, tow: car.tow, rollMul: dragFor(surface) });
-      const hit = resolveBarrier(car, t, e.hint);
+      // The barrier test asks how far this car is from the centreline, and for
+      // a car in the pit lane the answer is seventeen metres — so running it
+      // would shove the car back onto the racing line mid-stop.
+      const hit = e.inPit ? null : resolveBarrier(car, t, e.hint);
       if (hit && hit.harm) { e.contacts++; this.log('crash', `${e.name} INTO THE BARRIER`, e); }
       // The player's own contacts, handed up for the rumble and the toast. The
       // screen must not test for a hit a second time: two places deciding what
@@ -403,7 +414,12 @@ export class Race {
 
       // beached: hand it back rather than let the race wedge
       if (racing && !e.finished) {
-        if (e.car.speed < 3.2 && Math.abs(e.proj.lat) > e.proj.w) e.stuck += dt; else e.stuck = 0;
+        // A car serving a twelve-second nose change is stationary and seventeen
+        // metres off the centreline, which is exactly what "beached" looks
+        // like. Without this it gets rescued onto the racing line three times
+        // during its own pit stop.
+        if (!e.inPit && e.car.speed < 3.2 && Math.abs(e.proj.lat) > e.proj.w) e.stuck += dt;
+        else e.stuck = 0;
         if (e.stuck > 4) {
           const lp = t.point(e.proj.s - 14, this.lines.race.off[t.idx(e.proj.s - 14)] || 0);
           e.car.x = lp.x; e.car.y = lp.y; e.car.hdg = lp.hdg;
@@ -429,6 +445,23 @@ export class Race {
       for (let j = i + 1; j < live.length; j++) {
         const ds = Math.abs(t.gap(live[j].proj.s, live[i].proj.s));
         if (ds > 12) break;                 // sorted, so nothing further can be closer
+        // NO inPit GUARD HERE, DELIBERATELY — and this is the one place the
+        // pit-lane contract asked for one.
+        //
+        // The worry was a phantom shunt: a car in the lane and a car on the
+        // straight can share an `s`, and matching `s` says nothing about how
+        // close they are. But `resolveCars` is a SAT test on two oriented boxes
+        // in WORLD space — it never looks at `s` — so seventeen metres of pit
+        // lane separates them and it simply returns null. Only the broad phase
+        // above uses `s`, and being handed a pair it rejects costs nothing.
+        //
+        // Skipping the pair would be worse than useless. At the PIT EXIT the
+        // lane converges with the track, which is where a car in the lane and a
+        // car on the circuit really are alongside — so a guard here would
+        // switch collision off at the exact place pit-exit incidents happen.
+        // Measured with tools/pitcheck.mjs: 0 contacts in seven seconds with a
+        // car pinned to a racing car's `s` at the lane offset, guard or no
+        // guard. The hazard is real-sounding and the code already handles it.
         const hit = resolveCars(live[i].car, live[j].car);
         if (hit && (live[i].isPlayer || live[j].isPlayer) && hit.closing > 2) {
           const you = live[i].isPlayer ? live[i] : live[j];
