@@ -95,7 +95,7 @@ export function buildPath(pieces, { closed = false } = {}) {
     }
     info.push({
       n: pi + 1, kind: p.kind, s0, s1: s, len: sh.len,
-      dir: p.dir, angle: p.angle, radius: p.radius, climb, bank, note: p.note || '',
+      dir: p.dir, angle: p.angle, radius: p.radius, climb, bank, note: p.note || '', part: p.part || null,
     });
   });
   if (s >= next - 1e-9) emit(0, 0, pieces.length - 1);   // the very end

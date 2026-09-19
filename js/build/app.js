@@ -39,7 +39,7 @@ const camera = new THREE.PerspectiveCamera(55, 1, 0.25, 12000);
 const sunDir = new THREE.Vector3(-0.55, 0.62, 0.42).normalize();
 const sky = buildSky(sunDir);
 scene.add(sky);
-scene.fog = new THREE.FogExp2(0xcdd6dc, 0.0003);
+scene.fog = new THREE.FogExp2(0xc6d2dc, 0.00021);
 {
   // light the world with the sky itself: one PMREM render of the dome
   const skyScene = new THREE.Scene();
@@ -49,9 +49,9 @@ scene.fog = new THREE.FogExp2(0xcdd6dc, 0.0003);
   // 100 m clips it away and hands back a black environment — which looks like
   // "everything in shadow is black", not like an error.
   scene.environment = pmrem.fromScene(skyScene, 0.04, 0.1, 20000).texture;
-  scene.environmentIntensity = 0.55;
+  scene.environmentIntensity = 0.32;
 }
-const sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
+const sun = new THREE.DirectionalLight(0xfff1dc, 3.3);
 sun.castShadow = true;
 sun.shadow.mapSize.set(4096, 4096);
 const SH = 160;
@@ -59,7 +59,7 @@ Object.assign(sun.shadow.camera, { left: -SH, right: SH, top: SH, bottom: -SH, n
 sun.shadow.normalBias = 0.06;
 sun.shadow.bias = -0.0002;
 scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight(0xdbe6f2, 0x5d5a48, 0.35));
+scene.add(new THREE.HemisphereLight(0xdbe6f2, 0x5d5a48, 0.12));
 
 scene.add(buildGround(chunks));
 scene.add(buildRoad(path));
@@ -88,8 +88,9 @@ function pieceLine(p) {
 }
 $('trackName').textContent = TRACK.name || 'UNTITLED';
 $('trackLen').textContent = `${(path.length / 1000).toFixed(2)} km · ${PIECES.length} piece${PIECES.length === 1 ? '' : 's'}`;
+const newestN = ([...path.pieces].reverse().find(p => p.part) || path.pieces[path.pieces.length - 1]).n;
 $('pieces').innerHTML = path.pieces.map(p =>
-  `<li${p.n === path.pieces.length ? ' class="new"' : ''}>${pieceLine(p)}${p.note ? `<small>${p.note}</small>` : ''}</li>`).join('');
+  `${p.part ? `<li class="part">${p.part.toUpperCase()}</li>` : ''}<li${p.n >= newestN ? ' class="new"' : ''}>${pieceLine(p)}${p.note ? `<small>${p.note}</small>` : ''}</li>`).join('');
 
 // ---------------------------------------------------------------------------
 // FLY — a Blender-style orbit camera
@@ -108,7 +109,11 @@ function frameRange(s0, s1) {
   fly.yaw = path.hdg[mid] - Math.PI / 2 - 0.6;
   fly.pitch = 0.5;
 }
-const newest = path.pieces[path.pieces.length - 1];
+// The newest PART: from the last piece that starts a named part (`part:` in
+// pieces.js) to the end. One piece on its own is a part of one.
+const last = path.pieces[path.pieces.length - 1];
+const partStart = [...path.pieces].reverse().find(p => p.part) || last;
+const newest = { n: partStart.n, s0: partStart.s0, s1: last.s1, name: partStart.part };
 frameRange(Math.max(0, newest.s0 - 150), newest.s1 + 40);
 if (q.has('cam')) {
   // ?cam=s,dist,yawDeg,pitchDeg  — yaw 0 = from behind, 90 = from the left
@@ -266,7 +271,7 @@ async function startDrive() {
   mode = 'drive';
   acc = 0;
   document.body.classList.add('driving');
-  toast(newest.n > 1 ? `DRIVING INTO PIECE ${newest.n}` : 'DRIVING');
+  toast(newest.name ? `DRIVING INTO THE ${newest.name.toUpperCase()}` : newest.n > 1 ? `DRIVING INTO PIECE ${newest.n}` : 'DRIVING');
 }
 function stopDrive() {
   mode = 'fly';

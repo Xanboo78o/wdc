@@ -185,10 +185,15 @@ export class Ground {
 
   roadDist(x, y) { return this._bilin(this.nat.dist, x, y); }
 
-  natural(x, y) {
+  // `wz` / `ws` are the road's own heights near this point, weighted by how
+  // close each bit of road is (height() gathers them). Near the road they
+  // outweigh the wide blur completely, so the land runs downhill WITH a road
+  // that runs downhill, instead of leaving it in a trench; a hundred metres
+  // out they have faded to nothing and the wide lie of the land takes over.
+  natural(x, y, wz = 0, ws = 0) {
     const d = this.roadDist(x, y);
     const amp = 1.5 + 55 * smoothstep(120, 2200, d);
-    return this._bilin(this.nat.zb, x, y) + amp * fbm(x / 900 + 17.3, y / 900 - 4.1);
+    return (wz + this._bilin(this.nat.zb, x, y)) / (ws + 1) + amp * fbm(x / 900 + 17.3, y / 900 - 4.1);
   }
 
   // ---- the height of the ground at (x, y), sim frame -------------------------
@@ -197,7 +202,8 @@ export class Ground {
     // Nowhere near a road: nothing constrains the land. The distance grid is
     // coarse (40 m) and a chamfer overestimates by up to 8%, hence the slack.
     if (this.roadDist(x, y) > Q * 1.1 + 60) return this.natural(x, y);
-    let U = Infinity, L = -Infinity;
+    let U = Infinity, L = -Infinity, wz = 0, ws = 0;
+    const NS = 30;                                      // m, how far the road's height carries
     const cx0 = Math.floor((x - Q) / HASH), cx1 = Math.floor((x + Q) / HASH);
     const cy0 = Math.floor((y - Q) / HASH), cy1 = Math.floor((y + Q) / HASH);
     const seen = this._seen || (this._seen = new Uint32Array(this.seg.length));
@@ -230,6 +236,12 @@ export class Ground {
         // on at the segment's own grade, past an open end it stays level
         const tz = over <= tol ? Math.max(-tol / sg.len, Math.min(1 + tol / sg.len, t)) : Math.max(0, Math.min(1, t));
         const tzc = Math.max(0, Math.min(1, tz));
+        // the road's height, pulled into the land around it
+        const dReal = Math.hypot((t - f) * sg.len, lat);
+        if (dReal < 4 * NS) {
+          const wt = Math.exp(-0.5 * (dReal / NS) ** 2);
+          ws += wt; wz += wt * (p.z[i] + (p.z[j] - p.z[i]) * f);
+        }
         const sA = surfaceY(p, i, side * w), sB = surfaceY(p, j, side * w);
         const edge = p.z[i] + (p.z[j] - p.z[i]) * tz + ((sA - p.z[i]) * (1 - tzc) + (sB - p.z[j]) * tzc);
         let u, l;
@@ -253,8 +265,9 @@ export class Ground {
         if (l > L) L = l;
       }
     }
-    if (U === Infinity) return this.natural(x, y);
-    return Math.min(U, Math.max(L, this.natural(x, y)));
+    const G = this.natural(x, y, wz, ws);
+    if (U === Infinity) return G;
+    return Math.min(U, Math.max(L, G));
   }
 
   // ---- terrain meshes -------------------------------------------------------
@@ -345,7 +358,7 @@ export class Ground {
   // Untextured on purpose. Colour says what the land is doing: level ground is
   // grass, a cut face is earth, anything steeper than a scree slope is rock.
   _colour(x, y, nz) {
-    const grass = [0.43, 0.52, 0.30], dry = [0.55, 0.53, 0.36], earth = [0.50, 0.42, 0.32], rock = [0.50, 0.49, 0.47];
+    const grass = [0.27, 0.40, 0.15], dry = [0.44, 0.44, 0.22], earth = [0.46, 0.36, 0.25], rock = [0.46, 0.45, 0.43];
     const v = fbm(x / 140 + 3.7, y / 140 + 9.1) * 0.5 + 0.5;          // patches of drier grass
     const g = grass.map((c, k) => c + (dry[k] - c) * smoothstep(0.35, 0.8, v) * 0.6);
     const e = smoothstep(0.93, 0.8, nz), r = smoothstep(0.8, 0.66, nz);

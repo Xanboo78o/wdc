@@ -308,7 +308,7 @@ export function buildSky(sunDir) {
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
     uniforms: {
-      zenith: { value: new THREE.Color(0x5d86bd) }, horizon: { value: new THREE.Color(0xd4dde3) },
+      zenith: { value: new THREE.Color(0x4a78b8) }, horizon: { value: new THREE.Color(0xc6d2dc) },
       below: { value: new THREE.Color(0xb7bdb2) }, sun: { value: sunDir.clone().normalize() },
     },
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position);

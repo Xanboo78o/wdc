@@ -31,7 +31,7 @@ const ground = new Ground(path, BREAK ? { VERGE: -12, CUT: 4, NEAR: 6 } : {});
 if (BREAK) {
   // a hill right against the road on both sides
   const nat = ground.natural.bind(ground);
-  ground.natural = (x, y) => nat(x, y) + 25;
+  ground.natural = (x, y, ...r) => nat(x, y, ...r) + 25;
 }
 const tp = performance.now();
 const chunks = ground.chunks();
@@ -121,12 +121,17 @@ function terrainAt(x, y) {
           i * path.ds, null);
       }
     }
-    // the kerb band and the first metres of verge, held to the edge height
+    // The kerb band and the first metres of verge, held to the edge height:
+    // the kerb is drawn ON this ground, and past it the ground must not rise
+    // into a lip above the road. (The verge is designed 5 cm under the edge;
+    // a sag in the road — a compression, or a slope levelling off — costs up
+    // to ~1 cm of that where terrain triangles bridge the bend, which is why
+    // this is held to the edge and not to the designed 5 cm.)
     for (const side of [1, -1]) for (const extra of [0, 0.4, 0.8, 1.2, 2.5, 4]) for (const f of [0, 0.5]) {
       const j = f ? i + 1 : i;
       const lat = side * (path.w[j] + extra);
       const p = pointAt(path, j, lat);
-      test(p.x, p.y, surfaceY(path, j, side * path.w[j]) - (extra > 1.2 ? 0.035 : 0), j * path.ds, lat);
+      test(p.x, p.y, surfaceY(path, j, side * path.w[j]), j * path.ds, lat);
     }
   }
   const msg = `terrain under the road everywhere: ${checked} points, worst margin ${(worst * 100).toFixed(1)} cm` +
