@@ -452,6 +452,59 @@ procedural wings did nothing, because the frame loop sets
 inside the other. An imported chassis therefore takes ownership: no
 `crushParts`, no `wingParts`.
 
+## The pit stop
+*(`js/pitstop.js` — logic, imports nothing. `js/pit.js` draws the garages and
+imports three; they are deliberately different files.)*
+
+Built because the aero map made losing a front wing a real handling change —
+56% of the front downforce, balance from 44% front to 22% — and the autopilot
+learned to drive around it, but **nothing could ever fix it**. A first-lap wing
+tap was a race-ending injury with no treatment.
+
+The car is DRIVEN down the lane, not teleported along it: a controller aims at
+the lane centre and holds the limiter using the same delta/throttle/brake the
+driver uses. So a car in the pits still has grip, can still be hit by another
+car in the pit lane, and can still get it wrong. A scripted corridor would have
+been fifty lines shorter and would have made the one place where a race is won
+or lost the one place the simulation stops.
+
+`pitRequest` is set by the DRIVER, never by the race layer — the decision to
+stop is racecraft. `js/race.js` only has to honour `inPit`.
+
+A stop fixes what is on the job card and no more: a nose change clears
+`car.lost.frontWing` (**the thing that matters most — `autopilot.js` re-solves
+its speed profile at 0.78x grip the moment that flag appears, and nothing else
+ever took it away, so a car that pitted and kept driving at wingless pace had
+paid twice**), zeroes the front crush, drops the dents in the nose and leaves
+the ones down the side. Eleven and a half seconds for a nose, 2.4 for tyres —
+and that asymmetry is the point, because it is what makes limping to the end of
+the lap a real choice.
+
+### Gotchas paid for in the pit lane
+35. **`track.len` does not exist; it is `track.length`.** Every lane
+    calculation came out `NaN`, and `NaN > 180` is false — so the car silently
+    never entered the pit lane and nothing anywhere threw. The same family as
+    the dropped `--q` flag: an input that fails quietly is worse than one that
+    errors, because the wrong answer arrives looking like an ordinary negative
+    result.
+36. **A pit lane is a PATH, not a lateral offset.** Held at a constant offset,
+    the car had to move 17.3 m sideways the instant it crossed the entry line,
+    which it cannot do at speed — it slewed across the circuit and ended up
+    49.7 m off the centreline, out in the scenery. The target offset has to
+    ramp in and out, which is what the geometry does anyway.
+37. **Model the LIMITER, not perfect braking.** Approaching on a braking curve
+    alone put the car over the line at 92 km/h every time, because the braking
+    has to be exact. A real limiter is a device on the car: the engine will not
+    let you exceed the speed however hard you press. With it, the approach only
+    has to be roughly right.
+38. **Tune an entry against every circuit, not the first one.** At
+    `ENTRY_DECEL = 16` four circuits were legal and Zandvoort crossed at 98,
+    because that entry follows a fast banked corner and leaves less room.
+39. **Order matters between the driver and the pit logic.** The autopilot has
+    to steer FIRST and the pit logic override afterwards; reversed, the
+    autopilot's pedals wiped out the pit-entry braking every substep and the
+    car arrived at the lane at racing speed.
+
 ## Zandvoort's banking
 
 Drawn, as of the taper landing in the bake. `js/bank.js` is the model and it
