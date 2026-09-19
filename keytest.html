@@ -72,9 +72,9 @@
     <div class="card">
       <div class="dim">TRY THIS</div>
       <ol>
-        <li>Hold <b>1</b>, then add <b>2</b>, then <b>3</b>, then <b>4</b> without letting go. The brake bar should climb 25 → 50 → 75 → 100%.</li>
-        <li>Same with <b>7 8 9 0</b> for the throttle.</li>
-        <li>The big one: hold <b>1 2 3 4</b> AND <b>7 8 9 0</b> at the same time (both pedals floored). If fewer than 8 light up, the keyboard can't do that many at once and we use fewer steps per pedal.</li>
+        <li>Brake pedal = <b>1 2 3</b>, throttle pedal = <b>8 9 0</b>. Each key is one step (33%).</li>
+        <li>Building the pedals? Push slowly: the bar should climb 33 → 67 → 100%, and read 0% with your foot just resting. <a href="pedals.html" style="color:var(--mint)">Build sheet</a></li>
+        <li>Both pedals floored = 6 keys, exactly the MX Keys Mini's limit. For the clutch later: hold all 6 plus a <b>Shift</b> and see if 7 show up.</li>
       </ol>
     </div>
     <div class="card">
@@ -86,8 +86,10 @@
 <script>
 // The pedal ladders: a light press reaches only the first key, a hard press
 // reaches them all. Number keys, because the game uses none of them.
-const BRAKE = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
-const THROTTLE = ['Digit7', 'Digit8', 'Digit9', 'Digit0'];
+// Three steps each: the MX Keys Mini registers 6 keys at once, so both
+// pedals floored (3 + 3) is exactly the limit and nothing is ever dropped.
+const BRAKE = ['Digit1', 'Digit2', 'Digit3'];
+const THROTTLE = ['Digit8', 'Digit9', 'Digit0'];
 const label = c => c.replace(/^Key|^Digit/, '').replace('Arrow', '↑').replace('Space', 'SPACE');
 
 const held = new Set();
@@ -145,7 +147,7 @@ setInterval(() => {
   // the both-pedals-floored test, reported once each time it is tried
   const b = BRAKE.filter(k => held.has(k)).length, t = THROTTLE.filter(k => held.has(k)).length;
   const now = b + t;
-  if (now >= 6 && now !== lastBoth) log(`${now} ladder keys held at once (brake ${b}/4, throttle ${t}/4)`, now < 8);
+  if (now >= 5 && now !== lastBoth) log(`${now} ladder keys held at once (brake ${b}/3, throttle ${t}/3)`, now < 6);
   lastBoth = now;
 }, 250);
 $('reset').onclick = () => { max = 0; maxSet = []; $('max').textContent = 0; $('maxKeys').textContent = ''; };
