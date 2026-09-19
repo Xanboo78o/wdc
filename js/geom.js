@@ -89,7 +89,21 @@ export class Builder {
       if (this.uv) this.uv.push(uvs[i][0], uvs[i][1]);
       if (this.col) this.pushColour(Array.isArray(colour) && colour.length === 4 ? colour[i] : colour);
     }
-    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    // Measured, not trusted — the same rule as the polygon helper below, and
+    // for the same reason. These surfaces are DoubleSide, so a quad wound
+    // against its own normal is NOT culled and never looks missing: three
+    // flips the shading normal for the back face, lights the tarmac from
+    // underneath, and the road renders near-black with no sun on it at all.
+    // Nothing can then cast a visible shadow onto it, because a shadow is
+    // subtracted sunlight and there is none there to subtract.
+    const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
+    const wx = p2[0] - p0[0], wy = p2[1] - p0[1], wz = p2[2] - p0[2];
+    const fx = uy * wz - uz * wy, fy = uz * wx - ux * wz, fz = ux * wy - uy * wx;
+    if (fx * n[0] + fy * n[1] + fz * n[2] < 0) {
+      this.idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+    } else {
+      this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
     return this;
   }
 
