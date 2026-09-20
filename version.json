@@ -1,7 +1,7 @@
 {
- "version": "6ea1dc6",
- "note": "The light: an eye, not a camera",
- "built": "2026-09-20T19:39:19.486Z",
+ "version": "a1ba038",
+ "note": "A sky with the sun in the right place",
+ "built": "2026-09-20T20:02:32.520Z",
  "files": [
   "app.html",
   "build.html",
@@ -51,6 +51,7 @@
   "js/radio.js",
   "js/render.js",
   "js/show/app.js",
+  "js/sky.js",
   "js/surface.js",
   "js/tex.js",
   "js/track.js",
@@ -60,6 +61,7 @@
   "js/vendor/addons/utils/SkeletonUtils.js",
   "js/vendor/three.core.min.js",
   "js/vendor/three.module.min.js",
+  "js/weather.js",
   "js/world.js",
   "data/tex/apron-c.jpg",
   "data/tex/apron-n.jpg",
