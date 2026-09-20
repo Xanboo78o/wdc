@@ -44,6 +44,12 @@ hands.wheelSource = () => phoneLive() ? phone.steer : null;
 // menu
 // ---------------------------------------------------------------------------
 const TRACKS = [
+  // The hand-built one, baked out of data/build/pieces.js by
+  // tools/baketrack.mjs. It is first because it is the one being worked on,
+  // and because reaching it through the MENU is the only way to see the phone
+  // wheel's pairing code — ?auto=test:f1 skips the menu, which is why the
+  // phone would not connect to it.
+  ['test', 'The test map', 'HAND-BUILT'],
   ['monza', 'Monza', 'ITALY'],
   ['zandvoort', 'Zandvoort', 'NETHERLANDS'],
   ['suzuka', 'Suzuka', 'JAPAN'],
