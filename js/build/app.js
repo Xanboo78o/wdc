@@ -172,8 +172,13 @@ const floraMs = performance.now() - tFlora;
 
 // Loose objects: cones, tyre stacks, boards. Real bodies (js/props.js), so
 // what happens to them when you arrive is not decided here.
+//
+// OFF BY DEFAULT since 2026-09-20 — "remove the cones n stuff theyre eating my
+// fps". They are eight hundred bodies stepped every frame and drawn every
+// frame, and the test map is for testing the road, not for knocking cones over.
+// `?props` brings the whole yard back, unchanged.
 const tProps = performance.now();
-const yard = on('noprops') ? null : new PropYard(path, ground, LOOK, brand);
+const yard = on('props') ? new PropYard(path, ground, LOOK, brand) : null;
 if (yard) { yard.populate(); scene.add(yard.group); }
 const propMs = performance.now() - tProps;
 
