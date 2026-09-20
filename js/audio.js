@@ -151,10 +151,34 @@ export class Engine {
       this.roomLP.type = 'lowpass';
       this.roomLP.frequency.value = this.mix.muffle;
       this.roomLP.Q.value = 0.7;
+      // TWO OUTPUTS NEEDS A SECOND EXIT, NOT A SECOND setSinkId.
+      //
+      // AudioContext.setSinkId moves the WHOLE CONTEXT to a device, not one
+      // bus - so the first version of this, which connected both buses to
+      // ctx.destination and then called setSinkId for the room, sent
+      // EVERYTHING to the seat speaker the moment a device was chosen. It
+      // looked like two buses and behaved like one switch.
+      //
+      // The room bus leaves through its own MediaStreamDestination into an
+      // <audio> element, and setSinkId on THAT pins only that stream. One
+      // context, one set of sources, two destinations - and CANS stays on the
+      // system default, which is the laptop speakers.
       this.room.connect(this.roomLP);
-      this.roomLP.connect(this.ctx.destination);
-      if (this.mix.roomSink && this.ctx.setSinkId) {
-        this.ctx.setSinkId(this.mix.roomSink).catch(() => { /* device went away */ });
+      if (this.mix.roomSink) {
+        try {
+          const dest = this.ctx.createMediaStreamDestination();
+          this.roomLP.connect(dest);
+          this.roomEl = new Audio();           // held, or it is collected mid-lap
+          this.roomEl.srcObject = dest.stream;
+          this.roomEl.autoplay = true;
+          if (this.roomEl.setSinkId) await this.roomEl.setSinkId(this.mix.roomSink);
+          await this.roomEl.play().catch(() => {});
+        } catch {
+          // Device gone, or the browser will not pin a sink. Fall back to one
+          // output rather than to silence.
+          this.roomEl = null;
+          this.roomLP.connect(this.ctx.destination);
+        }
       }
 
       this.engine = await this._layer(baseUrl, this.file, 'lowpass');

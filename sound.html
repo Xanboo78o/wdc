@@ -436,10 +436,23 @@ async function choose(which) {
 }
 async function apply(which, id, label) {
   if (which === 'room') {
+    // ALWAYS the element, never ctx.setSinkId. setSinkId on the context moves
+    // EVERYTHING to that device, which makes a two-bus page behave like a
+    // one-output switch — and is exactly the bug that shipped into the game.
     roomSinkId = id; $('roomName').textContent = label;
+    if (!roomEl && ctx) {
+      const dest = ctx.createMediaStreamDestination();
+      roomLP.disconnect();
+      roomLP.connect(dest);
+      roomEl = new Audio();
+      roomEl.srcObject = dest.stream;
+      roomEl.autoplay = true;
+      await roomEl.play().catch(() => {});
+    }
     if (roomEl) await roomEl.setSinkId(id).catch(e => alert('setSinkId: ' + e.message));
-    else if (canRouteCtx && ctx) await ctx.setSinkId(id).catch(e => alert('setSinkId: ' + e.message));
+    save();
   } else {
+    // CANS is the context's own output, so this one IS ctx.setSinkId.
     cansSinkId = id; $('cansName').textContent = label;
     if (canRouteCtx && ctx) await ctx.setSinkId(id).catch(e => alert('setSinkId: ' + e.message));
   }
