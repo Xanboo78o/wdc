@@ -1,7 +1,7 @@
 {
- "version": "a9cb1b5",
- "note": "A bench for the sound, because I cannot hear any of it",
- "built": "2026-09-20T16:57:43.573Z",
+ "version": "15a86ab",
+ "note": "The speaker under the seat is a chassis, so filter it like one",
+ "built": "2026-09-20T17:06:15.895Z",
  "files": [
   "app.html",
   "build.html",
