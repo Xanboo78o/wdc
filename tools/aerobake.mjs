@@ -25,7 +25,7 @@ import { CARS } from '../js/physics.js';
 
 const args = process.argv.slice(2);
 const flag = n => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : null; };
-const key = args.find(a => !a.startsWith('--') && !['f1', 'f4'].includes(a) === false) || 'f1';
+const key = args.find(a => !a.startsWith('--') && CARS[a]) || 'f1';
 const spec = CARS[key] || CARS.f1;
 
 // ---------------------------------------------------------------------------
@@ -103,7 +103,54 @@ function wheel(cx, cy, cz, r, halfW, seg = 12) {
 }
 
 // Body frame: +x forward, +y left, +z up, z=0 at the road. Matches physics.js.
+// A CLOSED CAR. Same job as buildHull, different shape: a splitter instead of
+// a front wing, a roof, wheels inside arches (so they are part of the body and
+// not four bluff bodies in clean air), a flat floor with a small diffuser, and
+// a swan-neck wing on the deck. Its group NAMES match the open-wheeler's, so
+// damage ("lost the front wing") and js/aero.js need no special case.
+function buildHullGT(S) {
+  const L = S.bodyL, W = S.bodyW;
+  const nose = L * 0.5, tail = -L * 0.5;
+  const G = {};
+  const add = (g, t) => { (G[g] = G[g] || []).push(...t); };
+
+  // Splitter: a flat plate under the nose, barely inclined. On a GT car this
+  // is the front downforce, and it is why kerbs eat them.
+  add('frontWing', box(nose - 0.18, 0, 0.055, 0.30, W * 0.47, 0.014, -0.06));
+  add('frontWing', box(nose - 0.30, W * 0.44, 0.13, 0.26, 0.02, 0.07));    // dive plane L
+  add('frontWing', box(nose - 0.30, -W * 0.44, 0.13, 0.26, 0.02, 0.07));   // dive plane R
+
+  // The body: nose, arches, screen, roof, tail. Sections are real proportions
+  // for a 4.60 x 2.05 m GT3 with a 1.28 m roof.
+  add('body', loftBody([
+    { x: nose - 0.08, hy: 0.52, z0: 0.13, z1: 0.56 },
+    { x: nose - 0.85, hy: W * 0.50, z0: 0.11, z1: 0.82 },   // front arches
+    { x: nose - 1.65, hy: W * 0.46, z0: 0.11, z1: 1.06 },   // screen base
+    { x: nose - 2.45, hy: W * 0.41, z0: 0.13, z1: 1.28 },   // roof
+    { x: nose - 3.25, hy: W * 0.44, z0: 0.13, z1: 1.22 },
+    { x: nose - 4.00, hy: W * 0.50, z0: 0.13, z1: 0.98 },   // rear arches
+    { x: tail + 0.12, hy: W * 0.46, z0: 0.17, z1: 0.90 },
+  ]));
+
+  // Flat floor and a small diffuser — a GT3 has both, and neither is an F1
+  // car's floor. ClFloor on the spec is what keeps it on the ground spun
+  // backwards, and it is a third of the single-seater's for the same reason.
+  add('floor', box(-0.15, 0, 0.055, 1.70, W * 0.42, 0.012));
+  add('floor', box(tail + 0.55, 0, 0.17, 0.55, W * 0.38, 0.012, 0.26));
+
+  // The wing: wide, high, on swan necks above the deck.
+  add('rearWing', box(tail + 0.16, 0, 1.24, 0.24, W * 0.46, 0.020, -0.38));
+  add('rearWing', box(tail + 0.16, W * 0.46, 1.16, 0.22, 0.02, 0.16));
+  add('rearWing', box(tail + 0.16, -W * 0.46, 1.16, 0.22, 0.02, 0.16));
+  add('rearWing', box(tail + 0.30, 0, 1.05, 0.03, 0.30, 0.16));
+
+  // Wheels sit inside the arches: they are not in clean air, so they go in as
+  // part of the body's frontal area rather than as four exposed cylinders.
+  return G;
+}
+
 function buildHull(S) {
+  if (S.shape === 'gt') return buildHullGT(S);
   const L = S.bodyL, W = S.bodyW;
   const nose = L * 0.5, tail = -L * 0.5;
   const G = { };

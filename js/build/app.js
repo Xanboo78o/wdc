@@ -11,7 +11,7 @@ import { CARS, makeCar, step, FIXED_DT, SURFACE, dragFor, registerAero, cornerin
 import { makeAero } from '../aero.js';
 import { Hands, steerLock } from '../input.js';
 import { resolveBarrier } from '../collide.js';
-import { buildCar } from '../car.js';
+import { buildCar, buildGT3 } from '../car.js';
 import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from '../phonewheel.js';
 
 const $ = id => document.getElementById(id);
@@ -197,11 +197,13 @@ hands.attach();
 hands.wheelSource = () => phoneLive() ? phone.steer : null;
 startPhoneWheel();
 mountPhoneCard($('info'), { compact: true });
-let track = null, car = null, carView = null, hint = 0, spawnS = 0, driveCam = 0, lastSpeedProfile = null;
+let track = null, car = null, carView = null, hint = 0, spawnS = 0, lastSpeedProfile = null;
 const CAMS = ['FIRST PERSON', 'CHASE', 'FAR CHASE'];
+// ?view=chase|far picks the drive camera without pressing C (headless shots)
+let driveCam = Math.max(0, CAMS.indexOf({ chase: 'CHASE', far: 'FAR CHASE', first: 'FIRST PERSON' }[q.get('view')] || 'FIRST PERSON'));
 
 async function loadAero() {
-  for (const k of ['f1', 'f4']) {
+  for (const k of ['f1', 'f4', 'gt3']) {
     try {
       const r = await fetch(`./data/aero/${k}.json`);
       if (r.ok) registerAero(k, makeAero(await r.json()));
@@ -265,17 +267,18 @@ const look = {
 
 async function startDrive() {
   await aeroReady;
-  const cls = q.get('car') === 'f4' ? 'f4' : 'f1';
+  const cls = CARS[q.get('car')] ? q.get('car') : 'f1';       // ?car=gt3|f4|f1
   if (!track) track = makeTrack();
   if (!car) {
     car = makeCar({ cls });
     lastSpeedProfile = speedProfile(car.spec);
-    const built = buildCar(look, 0xd8352a);
+    const built = cls === 'gt3' ? buildGT3(look, 0x2f6fe0) : buildCar(look, 0xd8352a);
     const yaw = new THREE.Group(), att = new THREE.Group();
     yaw.add(att); att.add(built.group);
     built.group.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     scene.add(yaw);
-    carView = { yaw, att, body: built.group, wheels: built.wheels, steer: built.steer, R: built.R, spin: 0 };
+    carView = { yaw, att, body: built.group, wheels: built.wheels, steer: built.steer, R: built.R, spin: 0,
+      eye: built.eye || [-0.22, 0.95, 0] };
   }
   // 12 m in, so the car is on the road rather than half on the grass before it
   spawnS = Math.max(12, newest.s0 - 350);
@@ -374,7 +377,7 @@ function driveCamera(dt) {
     // roll and with the banking under the wheels — and it looks where the
     // front wheels point, which is what a driver does.
     const m = carView.att.matrixWorld;
-    const head = new THREE.Vector3(-0.22, 0.95, 0).applyMatrix4(m);
+    const head = new THREE.Vector3(...carView.eye).applyMatrix4(m);
     const fwdL = new THREE.Vector3(1, 0, 0).transformDirection(m);
     const upL = new THREE.Vector3(0, 1, 0).transformDirection(m);
     camera.position.copy(head);

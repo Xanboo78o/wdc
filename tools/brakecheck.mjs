@@ -19,7 +19,7 @@ for (let i = 0; i < args.length; i++) {
   if (args[i] === '--pedal') pedal = Math.max(0, Math.min(1, parseFloat(args[++i])));
   else { console.error(`unknown flag ${args[i]}`); process.exit(2); }
 }
-for (const k of ['f1', 'f4']) {
+for (const k of ['f1', 'f4', 'gt3']) {
   try { registerAero(k, makeAero(JSON.parse(fs.readFileSync(new URL(`../data/aero/${k}.json`, import.meta.url))))); }
   catch { console.log(`(no aero map for ${k}, constants)`); }
 }
@@ -46,10 +46,10 @@ function stop(cls, from, to) {
   return { t, x, peak, marks, locked: car.lock };
 }
 
-for (const cls of ['f1', 'f4']) {
+for (const cls of ['f1', 'gt3', 'f4']) {
   const S = CARS[cls], top = Math.round(topSpeed(S) * 3.6);
-  const from = Math.min(top - 5, cls === 'f1' ? 340 : 210);
-  const r = stop(cls, from, cls === 'f1' ? 80 : 60);
+  const from = Math.min(top - 5, cls === 'f4' ? 210 : 340);
+  const r = stop(cls, from, cls === 'f4' ? 60 : 80);
   console.log(`\n${S.full}  Fbrake ${S.Fbrake} N  pedal ${pedal}   ${from} -> ${cls === 'f1' ? 80 : 60} km/h: ${r.t.toFixed(2)} s, ${r.x.toFixed(0)} m, peak ${r.peak.toFixed(2)} g`);
   console.log('   ' + r.marks.map(([b, g]) => `${b} km/h ${g.toFixed(2)} g`).join('   '));
 }

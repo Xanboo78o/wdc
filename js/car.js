@@ -521,5 +521,131 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
     g.add(mesh);
   }
 
-  return { group: g, wheels, steer, hubs, drs, R, wings };
+  // Where the driver's eyes are, for the first-person camera. A single-seater
+  // sits low and far back, behind the halo.
+  return { group: g, wheels, steer, hubs, drs, R, wings, eye: [-0.22, 0.95, 0] };
+}
+
+// ---------------------------------------------------------------------------
+// A GT3 CAR.
+//
+// Closed cockpit, 4.60 x 2.05 m, wheels inside arches, a wing on swan necks —
+// the shape the aero map in tools/aerobake.mjs (buildHullGT) is solved from,
+// and nothing like the single-seater above. Same bundle out, so the renderer,
+// the field and the builder treat both cars identically.
+//
+// The lofts run nose-to-tail like buildCar's, for the same winding reason.
+// ---------------------------------------------------------------------------
+export function buildGT3(look, colour = 0x2f6fe0) {
+  const g = new THREE.Group();
+  const add = (geo, mat, cast = true) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = cast;
+    g.add(m);
+    return m;
+  };
+  const at = (geo, x, y, z) => { geo.translate(x, y, z); return geo; };
+
+  const paint = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.18, metalness: 0.2, envMapIntensity: 1.5 });
+  const carbon = look.mat('carbon', { size: 0.26, tint: 0x24262b, roughness: 0.38, metalness: 0.2, env: 1.2 });
+  const matt = look.mat('carbon', { size: 0.22, tint: 0x15171a, roughness: 0.7, metalness: 0.1, env: 0.7 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x0c1116, roughness: 0.08, metalness: 0.5, envMapIntensity: 2.0 });
+  const rubber = look.mat('carbon', { size: 0.5, tint: 0x15161a, roughness: 0.93, metalness: 0, env: 0.35 });
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0x74787e, roughness: 0.36, metalness: 0.9, envMapIntensity: 1.1 });
+  const hubMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.42, metalness: 0.7, side: THREE.DoubleSide });
+  const lamp = new THREE.MeshStandardMaterial({ color: 0xdfe8f2, emissive: 0xbfd4ee, emissiveIntensity: 0.8, roughness: 0.15 });
+
+  // --- the tub: the body between the arches --------------------------------
+  add(loft([
+    { x: 2.30, y: 0.38, w: 0.62, h: 0.20, n: 3.0 },     // nose
+    { x: 1.70, y: 0.44, w: 0.76, h: 0.30, n: 3.2 },
+    { x: 0.95, y: 0.50, w: 0.80, h: 0.39, n: 3.4 },     // scuttle
+    { x: 0.10, y: 0.54, w: 0.82, h: 0.44, n: 3.5 },
+    { x: -0.85, y: 0.54, w: 0.82, h: 0.44, n: 3.5 },
+    { x: -1.65, y: 0.50, w: 0.80, h: 0.38, n: 3.4 },
+    { x: -2.20, y: 0.46, w: 0.70, h: 0.30, n: 3.2 },    // tail
+    { x: -2.30, y: 0.44, w: 0.60, h: 0.24, n: 3.0 },
+  ]), paint);
+
+  // --- greenhouse: screen, roof, rear screen -------------------------------
+  add(loft([
+    { x: 1.05, y: 0.74, w: 0.66, h: 0.16, n: 3.6 },
+    { x: 0.45, y: 0.94, w: 0.62, h: 0.30, n: 4.0 },     // screen top
+    { x: -0.35, y: 1.02, w: 0.60, h: 0.30, n: 4.4 },    // roof
+    { x: -1.00, y: 0.96, w: 0.60, h: 0.28, n: 4.0 },
+    { x: -1.55, y: 0.74, w: 0.62, h: 0.16, n: 3.6 },
+  ]), glass);
+  // the roof panel itself is painted, not glass
+  add(at(new THREE.BoxGeometry(1.5, 0.05, 1.12), -0.25, 1.30, 0), paint);
+
+  // --- four arches ---------------------------------------------------------
+  for (const [ax, zo, big] of [[1.50, 0.86, 0], [1.50, -0.86, 0], [-1.45, 0.88, 1], [-1.45, -0.88, 1]]) {
+    const w = big ? 0.26 : 0.24;
+    add(at(loft([
+      { x: ax + 0.72, y: 0.42, w, h: 0.22, n: 3.2 },
+      { x: ax + 0.20, y: 0.60, w: w + 0.02, h: 0.42, n: 3.4 },
+      { x: ax - 0.25, y: 0.60, w: w + 0.02, h: 0.42, n: 3.4 },
+      { x: ax - 0.78, y: 0.44, w, h: 0.24, n: 3.2 },
+    ]), 0, 0, zo), paint);
+  }
+
+  // --- splitter, diffuser, sills -------------------------------------------
+  add(at(new THREE.BoxGeometry(0.62, 0.035, 1.98), 2.06, 0.075, 0), carbon);
+  add(at(new THREE.BoxGeometry(0.30, 0.16, 1.90), 2.33, 0.30, 0), carbon);       // bumper
+  add(at(new THREE.BoxGeometry(1.05, 0.05, 1.70), -1.90, 0.20, 0), carbon);      // diffuser roof
+  for (const side of [1, -1]) {
+    add(at(new THREE.BoxGeometry(2.2, 0.10, 0.18), 0, 0.22, side * 1.00), carbon);   // sill
+    add(at(new THREE.BoxGeometry(0.34, 0.16, 0.06), 1.05, 0.92, side * 0.98), matt); // mirror stalk
+    add(at(new THREE.BoxGeometry(0.10, 0.16, 0.28), 1.22, 0.95, side * 1.08), matt); // mirror
+    add(at(new THREE.BoxGeometry(0.10, 0.16, 0.42), 2.24, 0.52, side * 0.52), lamp, false);
+  }
+
+  // --- the wing, on swan necks ---------------------------------------------
+  const wings = { front: [], rear: [] };
+  const wg = wing(0.98, 0.34, 0.035, 0.10, -0.18, 0.0);
+  wings.rear.push(add(at(wg, -2.12, 1.26, 0), carbon));
+  for (const side of [1, -1]) {
+    wings.rear.push(add(at(new THREE.BoxGeometry(0.34, 0.30, 0.04), -2.02, 1.10, side * 0.62), carbon));
+    wings.rear.push(add(at(new THREE.BoxGeometry(0.40, 0.30, 0.03), -2.12, 1.30, side * 0.98), carbon));  // endplate
+  }
+  // a splitter is bodywork that can be torn off, like a front wing
+  wings.front.push(...g.children.slice(-0));
+
+  // --- wheels --------------------------------------------------------------
+  // 0.34 m: GT3 rubber is shorter and much wider than an F1 tyre, and it sits
+  // inside the arches rather than in clean air.
+  const R = 0.34;
+  const tyreF = tyre(R, 0.30), tyreR = tyre(R, 0.33);
+  const BORE = R * 0.62;
+  const rimGeo = width => {
+    const gg = new THREE.CylinderGeometry(BORE, BORE, width * 0.55, 22);
+    gg.rotateX(Math.PI / 2);
+    return gg;
+  };
+  const faceGeo = (width, side) => {
+    const gg = new THREE.CircleGeometry(BORE, 22);
+    gg.rotateY(side > 0 ? 0 : Math.PI);
+    gg.translate(0, 0, side * width * 0.275);
+    return gg;
+  };
+  const rimF = rimGeo(0.30), rimR = rimGeo(0.33);
+  const wheels = {}, steer = {}, hubs = {};
+  for (const [key, ax, zo, tg, rg, width] of [
+    ['fr', 1.50, 0.84, tyreF, rimF, 0.30], ['fl', 1.50, -0.84, tyreF, rimF, 0.30],
+    ['rr', -1.45, 0.86, tyreR, rimR, 0.33], ['rl', -1.45, -0.86, tyreR, rimR, 0.33],
+  ]) {
+    const hub = new THREE.Object3D();
+    hub.position.set(ax, R, zo);
+    const w = new THREE.Mesh(tg, rubber);
+    w.castShadow = true;
+    w.add(new THREE.Mesh(rg, rimMat));
+    for (const sd of [1, -1]) w.add(new THREE.Mesh(faceGeo(width, sd), hubMat));
+    hub.add(w);
+    g.add(hub);
+    wheels[key] = w; hubs[key] = hub;
+    if (key[0] === 'f') steer[key] = hub;
+  }
+
+  // A GT3 driver sits further forward, higher, and on the left.
+  return { group: g, wheels, steer, hubs, drs: null, R, wings, eye: [0.28, 0.88, -0.34] };
 }

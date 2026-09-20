@@ -30,7 +30,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (argv[i] === '--ref') opt.ref = argv[++i];
   else { console.error(`unknown flag ${argv[i]}`); process.exit(2); }
 }
-for (const k of ['f1', 'f4']) {
+for (const k of ['f1', 'f4', 'gt3']) {
   try { registerAero(k, makeAero(JSON.parse(fs.readFileSync(new URL(`../data/aero/${k}.json`, import.meta.url))))); } catch { /* constants */ }
 }
 const { TRACK, PIECES } = await import(`../data/build/pieces.js?t=${Date.now()}`);

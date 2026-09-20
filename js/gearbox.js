@@ -46,6 +46,17 @@ export const BOXES = {
     // Six gears to about 215 km/h, where an F4 car is drag-limited.
     tops: [55, 80, 108, 138, 175, 215],
   },
+  gt3: {
+    // A big naturally-aspirated GT engine: it idles low, revs to 7800, and
+    // pulls from far further down than a single-seater — which is why a GT3
+    // sounds like it is working and an F1 car sounds like it is screaming.
+    idle: 1250,
+    limit: 7800,
+    shiftUp: 7500,
+    downAt: 0.70,
+    // Six gears to the drag-limited 273 km/h.
+    tops: [95, 130, 168, 205, 240, 273],
+  },
 };
 
 export function boxFor(spec) {

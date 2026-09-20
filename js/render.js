@@ -18,7 +18,7 @@ import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish
 import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
-import { buildCar } from './car.js';
+import { buildCar, buildGT3 } from './car.js';
 import { makeDeformer } from './dent.js';
 import { loadChassis, chassisGeometry } from './mesh.js';
 import { World, loadElev } from './world.js';
@@ -386,8 +386,10 @@ export class View {
       };
     }
 
-    const car = buildCar(look, 0xd8352a,
-      opts.chassis ? chassisGeometry(THREE, opts.chassis) : null);
+    // A GT3 is a different car, not a repainted single-seater.
+    const car = opts.cls === 'gt3'
+      ? buildGT3(look, 0x2f6fe0)
+      : buildCar(look, 0xd8352a, opts.chassis ? chassisGeometry(THREE, opts.chassis) : null);
     this.car = car.group; this.wheels = car.wheels; this.steer = car.steer;
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
     // The car's attitude now comes from four real spring deflections in
@@ -515,7 +517,7 @@ export class View {
     S.add(buildGround(t, look, this.sky, this.world));
     // Fills the hole buildGround leaves around the circuit, at track
     // resolution, so the terrain can never close over the road.
-    const skirt = buildSkirt(t, look, this.sky, this.world, buildGround.hole || 260);
+    const skirt = buildSkirt(t, look, this.sky, this.world, buildGround.hole || 260, buildGround.cell || 0);
     if (skirt) S.add(skirt);
 
     // RUN-OFF, BY MATERIAL.

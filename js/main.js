@@ -71,7 +71,7 @@ function cards(el, items, current, set, tight) {
 
 function buildMenu() {
   cards('trackList', TRACKS.map(([k, n, c]) => [k, n, c]), pickTrack, v => pickTrack = v);
-  cards('carList', ['f4', 'f1'].map(k => [k, CARS[k].name, CARS[k].full]), pickCar, v => pickCar = v);
+  cards('carList', ['f4', 'gt3', 'f1'].map(k => [k, CARS[k].name, CARS[k].full]), pickCar, v => pickCar = v);
   cards('modeList', [
     ['hotlap', 'HOT LAP', 'EMPTY CIRCUIT'],
     ['race', 'RACE', 'WHEEL TO WHEEL'],
@@ -118,7 +118,7 @@ async function start() {
   // registering afterwards silently leaves that car on the old constants —
   // and a grid where the player is on one aero model and the bots are on
   // another is the kind of bug that reads as "the AI is cheating".
-  for (const k of ['f1', 'f4']) {
+  for (const k of ['f1', 'f4', 'gt3']) {
     try {
       const r = await fetch(`./data/aero/${k}.json`);
       if (r.ok) registerAero(k, makeAero(await r.json()));
@@ -217,7 +217,7 @@ async function start() {
   //   ?lo      no shadows
   if (!state.view) {
     state.view = await View.create($('cv'), t, line, {
-      shadows: !q.has('lo'), env, textures: !q.has('notex'),
+      shadows: !q.has('lo'), env, textures: !q.has('notex'), cls: pickCar,
     });
   } else {
     location.reload(); return;          // changing circuit rebuilds the world

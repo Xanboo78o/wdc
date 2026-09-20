@@ -136,6 +136,9 @@ export const CARS = {
   },
   gt3: {
     key: 'gt3', name: 'GT3', full: 'GT3',
+    // A closed car: it is shaped like a coupe, not like a single-seater, and
+    // tools/aerobake.mjs builds it a different hull because of this flag.
+    shape: 'gt',
     // A closed-cockpit GT car to current GT3 regulations, at the middle of
     // where Balance of Performance puts them: ~1300 kg with the driver aboard,
     // 550 hp, and about a fifth of an F1 car's downforce. Everything below is
