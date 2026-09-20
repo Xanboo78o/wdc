@@ -109,6 +109,13 @@ if (!args.includes('--no-icons')) {
 console.log(`version   ${version}${dirty.length ? `   (${dirty.length} files dirty — this names HEAD, not them)` : ''}`);
 console.log(`offline   ${files.length} files, ${(bytes / 1048576).toFixed(1)} MB`);
 console.log(`icon      ${shape}`);
-console.log(`\nversion.json written. On a push, .github/workflows/stamp.yml does this`);
-console.log(`for you and commits the result; run it by hand only when you want the`);
-console.log(`icon redrawn, or to see what the offline set costs.`);
+const auto = fs.existsSync(path.join(ROOT, '.github/workflows/stamp.yml'));
+console.log(`\nversion.json written — COMMIT IT WITH THE RELEASE, or the installed app`);
+console.log(`will run your new code without ever saying anything changed.`);
+if (!auto) {
+  console.log(`\nThis is still a manual step: tools/ci/stamp.yml would do it on every`);
+  console.log(`push, but it is NOT installed — pushing a workflow file needs a scope`);
+  console.log(`this machine's gh login does not have:`);
+  console.log(`    gh auth refresh -h github.com -s workflow`);
+  console.log(`    mkdir -p .github/workflows && cp tools/ci/stamp.yml .github/workflows/`);
+}

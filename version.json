@@ -1,7 +1,7 @@
 {
- "version": "83bd0f0",
- "note": "Ground that is under everything, and an instrument that can tell",
- "built": "2026-09-20T03:59:45.079Z",
+ "version": "d89f6a4",
+ "note": "Name the ground build, so an installed app notices it",
+ "built": "2026-09-20T04:02:21.316Z",
  "files": [
   "app.html",
   "build.html",

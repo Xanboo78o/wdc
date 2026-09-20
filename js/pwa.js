@@ -13,6 +13,26 @@
   if (!('serviceWorker' in navigator)) return;
   const CHECK_MS = 5 * 60 * 1000;
 
+  // NOT ON LOCALHOST, and if one is already there, take it away.
+  //
+  // The worker serves DATA cache-first. On the machine where the textures are
+  // being edited that is a trap with a known shape: change a texture, reload,
+  // get the old one off your own disk, and report that the change was never
+  // made. tools/serve.mjs sends no-store precisely so that cannot happen, and
+  // a service worker sits in front of it and undoes that.
+  //
+  // Nothing is lost: the app is installed from the deployed site, which is
+  // where offline support is worth having. ?sw=1 forces it on for testing the
+  // worker itself.
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  if (local && !new URLSearchParams(location.search).has('sw')) {
+    navigator.serviceWorker.getRegistrations()
+      .then(rs => rs.forEach(r => r.unregister()))
+      .catch(() => {});
+    caches?.delete('wdc').catch(() => {});
+    return;
+  }
+
   window.addEventListener('load', async () => {
     let reg;
     try {
