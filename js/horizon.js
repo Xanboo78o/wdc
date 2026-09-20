@@ -227,7 +227,7 @@ function farTrees(track, cx, cz, span, reach, land, horizonCol, world) {
     // from the OSM survey in env.js, and this band is the mass behind them.
     const dt = distToTrack(track, x, z);
     if (dt < 260) continue;
-    const gy = world ? world.heightAt(x, z) : 0;
+    const gy = world ? world.groundY(x, z) : 0;
     const s = 0.8 + seeded(i, 21) * 0.9;
     q.setFromAxisAngle(up, seeded(i, 29) * 6.283);
     sc.set(s, s * (0.85 + seeded(i, 31) * 0.5), s);
@@ -307,7 +307,7 @@ export function buildGround(track, look, sky, world = null) {
     for (let i = 0; i <= N; i++) {
       const fx = (i / N) * 2 - 1, fz = (j / N) * 2 - 1;
       const x = cx + fx * reach, z = cz + fz * reach;
-      pos[k * 3] = x; pos[k * 3 + 1] = world ? world.heightAt(x, z) : 0; pos[k * 3 + 2] = z;
+      pos[k * 3] = x; pos[k * 3 + 1] = world ? world.groundY(x, z) : 0; pos[k * 3 + 2] = z;
       // UVs are metres, as everywhere else, so the grass lands at true scale.
       uv[u] = x; uv[u + 1] = z;
 
@@ -338,6 +338,12 @@ export function buildGround(track, look, sky, world = null) {
   // profile at the same spacing.
   const HOLE = 260;
   buildGround.hole = HOLE;
+  // The plate's cell size, published for the same reason the hole is. A cell
+  // is dropped when ANY of its corners is inside the hole, so the ground
+  // actually removed reaches a cell DIAGONAL further out than HOLE — at these
+  // cell sizes most of a kilometre. The skirt has to be told, or the
+  // difference is a ring of missing world with the void visible through it.
+  buildGround.cell = (2 * reach) / N;
   const near = (k) => distToTrack(track, pos[k * 3], pos[k * 3 + 2]) < HOLE;
   const idx = [];
   let dropped = 0;
@@ -388,7 +394,7 @@ export function buildGround(track, look, sky, world = null) {
  * A plain square grid has neither problem: 26 m cells, no folds, nothing drawn
  * twice, and only the cells near the circuit are kept.
  */
-export function buildSkirt(track, look, sky, world, hole) {
+export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
   const t = track, bb = t.bbox;
   const land = LAND[t.key] || LAND._;
   const span = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0);
@@ -396,19 +402,12 @@ export function buildSkirt(track, look, sky, world, hole) {
   const base = new THREE.Color(land.col);
   const c = new THREE.Color();
 
-  const PAD = 420, CELL = 26;
-  // How far the grid is pushed down under the road, and how far out that dies
-  // away. The taper has to finish OUTSIDE the widest run-off on this circuit,
-  // or the ground is still sinking where it becomes the visible surface and
-  // the run-off edge sits on a lip. Monza's corridor is ~22 m a side; Monaco's
-  // is a few metres, and a fixed 34 m there would dig a shallow trench right
-  // outside the barriers. So measure it per circuit instead of picking one.
-  let corridor = 0;
-  for (let i = 0; i < t.n; i++) {
-    const c = t.w[i] + Math.max(t.runL[i], t.runR[i]);
-    if (c > corridor) corridor = c;
-  }
-  const SINK_MAX = 0.35, SINK_TO = corridor + 14;
+  const CELL = 26;
+  // How far out this grid has to go, measured off the plate instead of
+  // guessed. A fixed hole+60 left ground missing from about 300 m to 700 m
+  // out — 230 of 3523 sampled points with nothing under them at all.
+  const REACH = hole + plateCell * Math.SQRT2 + 40;
+  const PAD = Math.max(420, REACH + 2 * CELL);
   const x0 = bb.x0 - PAD, x1 = bb.x1 + PAD;
   const z0 = Z(bb.y1) - PAD, z1 = Z(bb.y0) + PAD;
   const nx = Math.ceil((x1 - x0) / CELL), nz = Math.ceil((z1 - z0) / CELL);
@@ -424,20 +423,10 @@ export function buildSkirt(track, look, sky, world, hole) {
       const x = x0 + i * dx, z = z0 + j * dz;
       const d = distToTrack(t, x, z);
       dist[k] = d;
-      // SINK THE GRID WHERE IT PASSES UNDER THE CIRCUIT.
-      //
-      // This grid is 26 m cells. The road is drawn at 2 m resolution over a
-      // finely surveyed elevation profile. Between two grid vertices the skirt
-      // is a flat CHORD, and wherever the road's profile dips below that chord
-      // the grass wins the depth test — so the road surfaced as irregular
-      // patches of asphalt through green, reported as "the Monza main straight
-      // renders as GRASS". The 5 cm the mesh was already offset by cannot
-      // cover the chord error over a 26 m span; 55 cm can.
-      //
-      // Tapered rather than stepped, and back to zero by 34 m, because outside
-      // the corridor this grid IS the visible ground and must not move.
-      const sink = d >= SINK_TO ? 0 : SINK_MAX * (1 - d / SINK_TO) ** 2;
-      pos[k * 3] = x; pos[k * 3 + 1] = (world ? world.heightAt(x, z) : 0) - sink; pos[k * 3 + 2] = z;
+      // The sink that keeps this grid's 26 m chords from surfacing through the
+      // road lives in World.groundY, because everything STANDING on the ground
+      // has to be placed on the same surface or it floats. See js/world.js.
+      pos[k * 3] = x; pos[k * 3 + 1] = world ? world.groundY(x, z) : 0; pos[k * 3 + 2] = z;
       uv[u] = x; uv[u + 1] = z;
       const big = seeded(Math.floor(x / 700), Math.floor(z / 700));
       const small = seeded(Math.floor(x / 190) + 41, Math.floor(z / 190) + 17);
@@ -450,7 +439,7 @@ export function buildSkirt(track, look, sky, world, hole) {
 
   // Keep only what fills the plate's hole, with a margin of overlap so there
   // is never a seam of sky between the two.
-  const keep = hole + 60;
+  const keep = REACH;
   const idx = [];
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {

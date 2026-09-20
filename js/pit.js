@@ -375,8 +375,10 @@ export function buildPitLane(scene, track, look, sign, world = null) {
   const add = (b, mat, opts, name) => {
     const m = b.mesh(mat, opts);
     if (m) {
-      // Onto the ground, like everything else track-side — the pit lane at
-      // Monaco climbs with the hill it is cut into.
+      // Onto the height field, NOT the sunk ground: the pit lane is a surface
+      // cars drive on and they take their height from the same field the road
+      // does. Sinking it with the grass would float every car in the lane.
+      // The Monaco pit lane still climbs with the hill it is cut into.
       if (world) world.lift(m.geometry);
       m.name = 'pit.' + (name || 'part');
       scene.add(m);

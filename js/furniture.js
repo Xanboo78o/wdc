@@ -253,7 +253,7 @@ export function buildBarriers(scene, track, look, sign, corridor = null, world =
   // foot on the hill. See js/world.js.
   const push = (b, mat, opts) => {
     const m = b.mesh(mat, opts);
-    if (m) { if (world) world.lift(m.geometry); scene.add(m); out.push(m); }
+    if (m) { if (world) world.liftGround(m.geometry); scene.add(m); out.push(m); }
   };
 
   push(rail, street
@@ -306,7 +306,7 @@ export function buildTyreWalls(scene, track, look, world = null) {
       if (run > 16) continue;                     // a big gravel trap needs none
       const lat = barrierLat(t, i, side) - side * 0.55;
       const q = at(t, i, lat);
-      stacks.push({ p: q, h: t.hdg[i], y: world ? world.heightAt(q[0], q[1]) : 0 });
+      stacks.push({ p: q, h: t.hdg[i], y: world ? world.groundY(q[0], q[1]) : 0 });
     }
   }
   if (!stacks.length) return null;
@@ -398,7 +398,7 @@ export function buildBoards(scene, track, line, look, sign, world = null) {
   const mat = new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.68, side: THREE.DoubleSide });
   const m1 = b.mesh(mat, { shadow: false });
   const m2 = legs.mesh(look.mat('metal', { size: 1.2, tint: 0x2a2e34, roughness: 0.8, metalness: 0.7 }));
-  for (const m of [m1, m2]) if (m) { if (world) world.lift(m.geometry); scene.add(m); }
+  for (const m of [m1, m2]) if (m) { if (world) world.liftGround(m.geometry); scene.add(m); }
   return [m1, m2];
 }
 
@@ -441,7 +441,11 @@ export function buildStartFinish(scene, track, look, sign, world = null) {
     map: chq, roughness: 0.75, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
   }), { shadow: false });
-  if (sm) { if (world) world.lift(sm.geometry); scene.add(sm); out.push(sm); }
+  // PAINT ON THE ROAD, so it goes on the height field the road uses and NOT
+  // on the sunk ground. Lifting a road marking onto the grass drops it the
+  // full sink UNDER the tarmac, where it is either invisible or a chequered
+  // rectangle z-fighting through it.
+  if (sm) { if (world) world.lift(sm.geometry); sm.name = 'mark.line'; scene.add(sm); out.push(sm); }
 
   // The grid, painted on the road behind the line: twenty-two staggered boxes,
   // pole on the side the first corner turns away from. It is the first thing
@@ -468,7 +472,7 @@ export function buildStartFinish(scene, track, look, sign, world = null) {
     color: 0xe8e8e4, roughness: 0.78, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
   }), { shadow: false });
-  if (gridMesh) { if (world) world.lift(gridMesh.geometry); scene.add(gridMesh); out.push(gridMesh); }
+  if (gridMesh) { if (world) world.lift(gridMesh.geometry); gridMesh.name = 'mark.grid'; scene.add(gridMesh); out.push(gridMesh); }
 
   // The gantry. Two towers, a beam, a banner and five lights.
   const st = new Builder();
@@ -485,6 +489,9 @@ export function buildStartFinish(scene, track, look, sign, world = null) {
   const span = Math.hypot(R[0] - L[0], R[1] - L[1]);
   st.box((L[0] + R[0]) / 2, H + 0.55, (L[1] + R[1]) / 2, 0.9, 1.1, span, h, 0xd8dade, 1);
   const gm = st.mesh(look.mat('metal', { size: 2.0, tint: 0xcfd3d8, roughness: 0.5, metalness: 0.75 }));
+  // The towers stand 1.4 m outside the white line — on the run-off, which is
+  // drawn on the height field. The skirt beneath them is sunk and hidden, so
+  // standing them on it would bury their feet.
   if (gm) { if (world) world.lift(gm.geometry); scene.add(gm); out.push(gm); }
 
   // The banner across the beam, facing back down the track at the oncoming
@@ -499,6 +506,7 @@ export function buildStartFinish(scene, track, look, sign, world = null) {
   ban.quadN([Rf[0], H + 0.08, Rf[1]], [Lf[0], H + 0.08, Lf[1]],
     [Lf[0], H + 1.02, Lf[1]], [Rf[0], H + 1.02, Rf[1]], uv);
   const bm = ban.mesh(new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.7, side: THREE.DoubleSide }), { shadow: false });
+  // Same lift as the gantry, or the banner parts company with the beam.
   if (bm) { if (world) world.lift(bm.geometry); scene.add(bm); out.push(bm); }
 
   // Five start lights, dark. They are props for now; when there is a race
@@ -557,7 +565,7 @@ export function buildMarshalPosts(scene, track, look, world = null) {
   const out = [];
   const add = (b, m, o) => {
     const x = b.mesh(m, o);
-    if (x) { if (world) world.lift(x.geometry); scene.add(x); out.push(x); }
+    if (x) { if (world) world.liftGround(x.geometry); scene.add(x); out.push(x); }
   };
   add(hut, look.mat('concrete', { size: 2.4, tint: 0xd6d9dd, roughness: 0.92 }));
   add(roof, look.mat('metal', { size: 2.0, tint: 0xd8352a, roughness: 0.55, metalness: 0.4 }));

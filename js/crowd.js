@@ -263,7 +263,7 @@ export function buildGrandstands(scene, track, env, look, world = null) {
     // ONE offset per stand, taken at its footprint, rather than lifting each
     // vertex where it happens to be. A grandstand is a rigid building: letting
     // its far end follow the terrain would shear it.
-    const y0 = world ? world.heightAt(b.p[0][0], Z(b.p[0][1])) : 0;
+    const y0 = world ? world.groundY(b.p[0][0], Z(b.p[0][1])) : 0;
     seats = seats.concat(stand(box, deck, roofB, track, b.p, b.h, y0));
     if (seats.length > MAX_PEOPLE) break;
   }

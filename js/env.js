@@ -350,11 +350,35 @@ function broadleafGeometry() {
   return mergeParts([trunk(3.6, 0.44), c1, c2, c3]);
 }
 
-function scatter(env, limit) {
+/**
+ * Is this point on the circuit itself?
+ *
+ * `corridor` in this file is the PIT corridor — it keeps buildings out of the
+ * garages, and knows nothing about the racing surface. So a forest or park
+ * polygon that overlaps the track scattered trees onto the run-off and, at
+ * Monza, onto the road: 15 of them standing in the racing line.
+ */
+function onCircuit(track, x, y) {
+  if (!track) return false;
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < track.n; i += 2) {
+    const dx = track.x[i] - x, dy = track.y[i] - y;
+    const d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; bi = i; }
+  }
+  // Track plus its run-off, and a metre for the trunk. Deliberately NOT more:
+  // the avenue of plane trees down the Monza straight stands just outside the
+  // run-off and is the one piece of scenery that circuit is known for.
+  const clear = track.w[bi] + Math.max(track.runL[bi], track.runR[bi]) + 1;
+  return bd < clear * clear;
+}
+
+function scatter(env, limit, track) {
   const round = [], conifer = [];
   // Surveyed trees first: 1,386 of them at Monza, which is the avenue of plane
   // trees along the main straight, standing where they stand.
   for (const t of env.trees || []) {
+    if (onCircuit(track, t[0], t[1])) continue;
     round.push([t[0], t[1], 0.72 + seeded(t[0], t[1], 3) * 0.34]);
     if (round.length >= limit * 0.5) break;
   }
@@ -377,7 +401,7 @@ function scatter(env, limit) {
         if ((pj[1] > y) !== (pk[1] > y) &&
             x < (pk[0] - pj[0]) * (y - pj[1]) / (pk[1] - pj[1]) + pj[0]) inside = !inside;
       }
-      if (inside) into.push([x, y, tall * (0.66 + Math.random() * 0.44)]);
+      if (inside && !onCircuit(track, x, y)) into.push([x, y, tall * (0.66 + Math.random() * 0.44)]);
     }
   }
   return { round, conifer };
@@ -394,7 +418,7 @@ function treeMesh(pts, geo, world) {
     const [x, y, k] = pts[i];
     q.setFromAxisAngle(up, seeded(x, y, 4) * Math.PI * 2);
     s.set(k, k * (0.88 + seeded(x, y, 5) * 0.3), k);
-    v.set(x, world ? world.heightAt(x, Z(y)) : 0, Z(y));
+    v.set(x, world ? world.groundY(x, Z(y)) : 0, Z(y));
     m.compose(v, q, s);
     inst.setMatrixAt(i, m);
     // Real foliage is a spread of greens, not one. This is the difference
@@ -404,6 +428,10 @@ function treeMesh(pts, geo, world) {
     inst.setColorAt(i, c);
   }
   inst.castShadow = true;
+  // Named so tools/groundcheck.mjs can walk the instances and count how many
+  // trees ended up on the racing surface. `onCircuit` above is the filter;
+  // this is what checks the filter actually ran.
+  inst.name = 'env.trees';
   inst.instanceMatrix.needsUpdate = true;
   if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
   return inst;
@@ -433,7 +461,7 @@ function flatMesh(polys, look, spec, world) {
       color: spec.col, roughness: 0.22, metalness: 0.4, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4,
     });
-  if (world) world.lift(g);
+  if (world) world.liftGround(g);
   const m = new THREE.Mesh(g, mat);
   m.receiveShadow = true;
   return m;
@@ -491,7 +519,7 @@ export function buildEnv(scene, env, track, look, corridor = null, world = null)
     const isBrick = seeded(b.p[0][0], b.p[0][1], 7) < brickP && b.k !== 'office' && b.k !== 'stadium';
     const pile = isBrick ? brick : rendr;
     const detail = d < NEAR && windows < MAX_WINDOWS;
-    const y0 = world ? world.heightAt(b.p[0][0], Z(b.p[0][1])) : 0;
+    const y0 = world ? world.groundY(b.p[0][0], Z(b.p[0][1])) : 0;
     windows += building(pile.wall, pile.glass, pile.roof, b, detail, env.key, y0);
     if (detail) detailed++;
     added.buildings++;
@@ -517,7 +545,7 @@ export function buildEnv(scene, env, track, look, corridor = null, world = null)
   put(brick.glass, glassMat, { shadow: false });
   put(rendr.glass, glassMat, { shadow: false });
 
-  const { round, conifer } = scatter(env, 4200);
+  const { round, conifer } = scatter(env, 4200, track);
   for (const [pts, geo] of [[round, broadleafGeometry()], [conifer, coniferGeometry()]]) {
     const tm = treeMesh(pts, geo, world);
     if (tm) { scene.add(tm); added.trees += tm.count; }

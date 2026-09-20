@@ -37,6 +37,7 @@ import { Z } from './geom.js';
 const NEAR = 55;       // inside this, the racing line's own profile wins
 const FAR = 240;       // beyond this, the terrain grid wins
 const CELL = 90;       // metres per bucket in the lookup grid
+const SINK_MAX = 0.35; // how far the visible ground is pushed under the circuit
 
 export async function loadElev(key) {
   try {
@@ -55,23 +56,29 @@ export class World {
     this.track = track;
     this.elev = elev || null;
     this.on = !!elev;
-    if (!this.on) return;
+
+    // How far out the ground is pushed down under the circuit. This is a
+    // property of the TRACK, not of the survey, so it is measured even on a
+    // flat world: the grass is sunk either way, and everything standing on it
+    // has to agree. The taper has to finish OUTSIDE the widest run-off here,
+    // or the ground is still sinking where it becomes the visible surface and
+    // the run-off edge sits on a lip. Monza's corridor is ~22 m a side and
+    // Monaco's is a few metres, so measure it rather than pick one.
+    let corridor = 0;
+    for (let i = 0; i < track.n; i++) {
+      const c = track.w[i] + Math.max(track.runL[i], track.runR[i]);
+      if (c > corridor) corridor = c;
+    }
+    this.sinkTo = corridor + 14;
 
     // A bucket grid over the centreline, so finding the nearest sample is O(1)
     // rather than a scan. `lift` runs over a few hundred thousand vertices at
     // load; at 700 samples a piece that would be a quarter of a second of
-    // nothing.
+    // nothing. Built even without elevation, because `groundY` needs it.
     const bb = track.bbox;
     this.gx0 = bb.x0 - 400; this.gz0 = Z(bb.y1) - 400;
     this.gnx = Math.ceil((bb.x1 - bb.x0 + 800) / CELL) + 1;
     this.gnz = Math.ceil((bb.y1 - bb.y0 + 800) / CELL) + 1;
-    // What the land does BEYOND the surveyed box. The DEM only covers the
-    // world box; sampling it outside clamps to whatever the boundary happened
-    // to be, which at Monaco built a twenty-kilometre flat mesa at the height
-    // of the hillside and floated the whole city on it. Past the box the
-    // ground falls away to the lowest thing the survey saw — the sea, on the
-    // three circuits that have one, and a harmless dip inland.
-    this.seaY = Math.min(...elev.grid.h);
     this.buckets = Array.from({ length: this.gnx * this.gnz }, () => []);
     for (let i = 0; i < track.n; i++) {
       const cx = Math.floor((track.x[i] - this.gx0) / CELL);
@@ -79,6 +86,14 @@ export class World {
       if (cx < 0 || cz < 0 || cx >= this.gnx || cz >= this.gnz) continue;
       this.buckets[cz * this.gnx + cx].push(i);
     }
+    if (!this.on) return;
+    // What the land does BEYOND the surveyed box. The DEM only covers the
+    // world box; sampling it outside clamps to whatever the boundary happened
+    // to be, which at Monaco built a twenty-kilometre flat mesa at the height
+    // of the hillside and floated the whole city on it. Past the box the
+    // ground falls away to the lowest thing the survey saw — the sea, on the
+    // three circuits that have one, and a harmless dip inland.
+    this.seaY = Math.min(...elev.grid.h);
   }
 
   /** Nearest centreline sample to a point, and how far away it is. */
@@ -169,6 +184,41 @@ export class World {
     if (d >= FAR) return grid;
     const f = (d - NEAR) / (FAR - NEAR);
     return onTrack + (grid - onTrack) * (f * f * (3 - 2 * f));
+  }
+
+  /** How far the ground is pushed down at distance `d` from the track. */
+  sinkAt(d) {
+    return d >= this.sinkTo ? 0 : SINK_MAX * (1 - d / this.sinkTo) ** 2;
+  }
+
+  /**
+   * Where the ground you can SEE is, as opposed to where the field says it is.
+   *
+   * The skirt that draws the grass near the circuit is 26 m cells over a road
+   * surveyed at 2 m, so between two of its vertices it is a flat chord, and
+   * wherever the road dips below that chord the grass wins the depth test and
+   * the main straight renders as patches of turf. It is pushed down to stop
+   * that, and 5 cm of mesh offset cannot cover a chord error over 26 m.
+   *
+   * Everything STANDING on the ground has to be pushed down by the same
+   * amount or it floats by exactly the gap. Hoardings, guard rails, marshal
+   * posts and the trees at the track edge all hovered over their own shadows
+   * because the grass was sunk under them and they were not.
+   */
+  groundY(x, z) {
+    const sink = this.sinkAt(this.nearest(x, z).d);
+    return (this.on ? this.heightAt(x, z) : 0) - sink;
+  }
+
+  /** `lift`, onto the visible ground rather than onto the height field. */
+  liftGround(geo) {
+    if (!geo) return geo;
+    const p = geo.attributes.position;
+    const a = p.array;
+    for (let k = 0; k < a.length; k += 3) a[k + 1] += this.groundY(a[k], a[k + 2]);
+    p.needsUpdate = true;
+    geo.computeBoundingSphere();
+    return geo;
   }
 
   /**

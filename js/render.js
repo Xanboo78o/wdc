@@ -532,11 +532,16 @@ export class View {
     // The ground the whole circuit sits on. Big, textured, and the colour of
     // the region rather than a default green — it is what fills every gap the
     // survey does not cover.
-    S.add(buildGround(t, look, this.sky, this.world));
+    const plate = buildGround(t, look, this.sky, this.world);
+    // Named, like the pit meshes, so tools/groundcheck.mjs can raycast at the
+    // GROUND and nothing else. Without a name it has to guess from a hit list,
+    // and a tree standing on a hole in the world looks exactly like ground.
+    plate.name = 'ground.plate';
+    S.add(plate);
     // Fills the hole buildGround leaves around the circuit, at track
     // resolution, so the terrain can never close over the road.
     const skirt = buildSkirt(t, look, this.sky, this.world, buildGround.hole || 260, buildGround.cell || 0);
-    if (skirt) S.add(skirt);
+    if (skirt) { skirt.name = 'ground.skirt'; S.add(skirt); }
 
     // RUN-OFF, BY MATERIAL.
     //
