@@ -413,7 +413,13 @@ async function startDrive() {
   mode = 'drive';
   acc = 0;
   document.body.classList.add('driving');
-  toast((newest.name ? `DRIVING INTO ${newest.name.toUpperCase()}` : newest.n > 1 ? `DRIVING INTO PIECE ${newest.n}` : 'DRIVING') + ' — C FOR CAMERA');
+  // Say where you ARE, not where the newest piece is. It announced "DRIVING
+  // INTO THE SNAIL" while sitting on the start line, which is the kind of
+  // small lie that makes you doubt the rest of the screen.
+  const from = [...path.pieces].reverse().find(p2 => p2.part && p2.s0 <= spawnS);
+  toast((spawnS <= 40 ? 'FROM THE LINE'
+    : from ? `DRIVING INTO ${from.part.toUpperCase()}`
+    : `DRIVING FROM ${Math.round(spawnS)} m`) + ' — C FOR CAMERA');
 }
 function stopDrive() {
   mode = 'fly';
