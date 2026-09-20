@@ -460,9 +460,11 @@ export class Flora {
             const lat = side * (base + row * ROW_GAP + r() * ROW_GAP);
             const j = Math.min(p.n - 1, i + Math.round(((r() - 0.5) * step) / p.ds));
             const pt = pointAt(p, j, lat);
-            // roadDist knows about EVERY road, so this is also what keeps a
-            // wood from growing under a viaduct deck or inside the loop.
-            if (g.roadDist(pt.x, pt.y) < base) continue;
+            // EXACT clearance to the nearest road, not the chamfer grid. This
+            // is what keeps a wood out from under a viaduct deck or inside the
+            // loop — and, where the road folds back on itself, off the tarmac
+            // of the OTHER road that happens to be 10 m away.
+            if (g.roadSlack(pt.x, pt.y) < TREE_CLEAR) continue;
             push({
               sp: r() < kind.conifer ? 'conifer' : 'broad',
               x: pt.x, y: pt.y, h: g.height(pt.x, pt.y),
@@ -633,8 +635,24 @@ export class Flora {
       let prev = null;
       for (let i = run.from; i <= run.to; i += 2) {
         const base = this.treeLine(i, run.side, run.kind);
+        // The mass reaches DARK_DEPTH sideways, which is 70 m, and where the
+        // road folds back on itself that lands on the OTHER carriageway — it
+        // was lying over a road corridor at 4% of its points, worst 19 m in,
+        // which draws a dark sheet hovering a metre above the tarmac. Pull the
+        // far edge in until it is clear; if even the near edge is on a road,
+        // there is no wood to draw here at all.
+        // outward from the near edge, stopping at the FIRST intrusion: a road
+        // can cross the middle of a 70 m wedge while both its ends are clear.
+        let depth = DARK_ROW * ROW_GAP;
+        for (let f = DARK_ROW * ROW_GAP; f <= DARK_DEPTH; f += 4) {
+          const q = pointAt(p, i, run.side * (base + f));
+          if (g.roadSlack(q.x, q.y) < 1) break;
+          depth = f;
+        }
+        if (depth <= DARK_ROW * ROW_GAP) { prev = null; continue; }
         const inner = pointAt(p, i, run.side * (base + DARK_ROW * ROW_GAP));
-        const outer = pointAt(p, i, run.side * (base + DARK_DEPTH));
+        if (g.roadSlack(inner.x, inner.y) < 1) { prev = null; continue; }
+        const outer = pointAt(p, i, run.side * (base + depth));
         const hi = g.height(inner.x, inner.y), ho = g.height(outer.x, outer.y);
         const here = {
           in: [inner.x, hi - 0.5, -inner.y], inTop: [inner.x, hi + DARK_H, -inner.y],

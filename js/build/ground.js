@@ -203,6 +203,47 @@ export class Ground {
 
   roadDist(x, y) { return this._bilin(this.nat.dist, x, y); }
 
+  /**
+   * EXACT distance to the nearest road centreline, and how much room is left
+   * over after that road's own width and run-off — metres, negative meaning
+   * the point is inside the corridor.
+   *
+   * roadDist() above is a 40 m chamfer grid and overestimates by up to 8%,
+   * which is fine for deciding how tall a hill is and not fine for deciding
+   * whether something may stand somewhere. Where the road folds back on itself
+   * — the hairpins, the snail, the loop — a point 21 m from one sample is on
+   * the tarmac of another, and the grid says there is room. That put six trees
+   * on the racing surface at s=1902-1984.
+   */
+  nearestRoad(x, y, max = 90) {
+    const p = this.path;
+    let bd = max * max, bi = -1;
+    const R = Math.ceil(max / HASH) + 1;
+    const cx = Math.floor(x / HASH), cy = Math.floor(y / HASH);
+    for (let gx = cx - R; gx <= cx + R; gx++) for (let gy = cy - R; gy <= cy + R; gy++) {
+      const bk = this.buckets.get(gx * 100003 + gy);
+      if (!bk) continue;
+      for (const id of bk) {
+        const sg = this.seg[id];
+        const rx = x - sg.ax, ry = y - sg.ay;
+        const t = Math.max(0, Math.min(sg.len, rx * sg.ux + ry * sg.uy));
+        const dx = rx - sg.ux * t, dy = ry - sg.uy * t;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; bi = t < sg.len * 0.5 ? sg.i : sg.j; }
+      }
+    }
+    if (bi < 0) return null;
+    return { d: Math.sqrt(bd), i: bi };
+  }
+
+  /** Metres of clear ground between a point and the nearest road's barrier. */
+  roadSlack(x, y) {
+    const n = this.nearestRoad(x, y);
+    if (!n) return Infinity;
+    const p = this.path;
+    return n.d - (p.w[n.i] + Math.max(p.runL[n.i], p.runR[n.i]));
+  }
+
   // The height a camera must stay above. Normally the land — but inside a
   // tunnel the "land" is the rock ABOVE the road, so a camera clamped to it
   // gets shoved out through the hilltop (which is exactly what happened).
