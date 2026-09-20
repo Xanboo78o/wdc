@@ -262,11 +262,15 @@ function paint(t) {
 
   // NEUTRAL and REVERSE are states of the SELECTOR, not gear numbers — in N
   // there is no gear to show, and in R the gearbox is irrelevant.
-  if (t.sel !== undefined && t.sel !== 1) {
+  // The selector ladder: -1 R, 0 N, 1..n the gear you actually chose.
+  if (t.sel !== undefined && t.sel <= 0) {
     $('gear').textContent = t.sel === 0 ? 'N' : 'R';
     $('gear').className = 'sel';
+  } else if (t.sel !== undefined) {
+    $('gear').textContent = t.sel;
+    $('gear').className = t.rpm && t.rpmMax && t.rpm > t.rpmMax * 0.97 ? 'lim' : '';
   } else if (t.gear !== undefined) {
-    $('gear').textContent = t.gear > 0 ? t.gear : 'N';
+    $('gear').textContent = t.gear + 1;
     $('gear').className = t.rpm && t.rpmMax && t.rpm > t.rpmMax * 0.97 ? 'lim' : '';
   }
   if (t.rpm !== undefined && t.rpmMax) {

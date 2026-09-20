@@ -146,6 +146,9 @@ async function start() {
   state.track = t; state.line = line; state.lines = lines;
   state.peak = peakSlip(spec);
   state.box = makeBox(spec);
+  // The selector ladder is as long as this car's gearbox, and you start in N.
+  hands.maxGear = state.box.box.tops.length;
+  hands.selector = 0;
   // Not awaited: a missing or slow .wav must not hold up the green light.
   if (state.engine) state.engine.start('./');
 
@@ -459,7 +462,7 @@ function loop(now) {
   // Read off the speed the car already has. gearbox.js changes no forces, so
   // every validated lap time is untouched — see the header of that file.
   if (state.box) {
-    state.box.update(frame, car.speed * 3.6, car.throttle);
+    state.box.update(frame, car.speed * 3.6, car.throttle, hands.selector);
     if (state.engine) {
       // peakSlip is 60 rounds of bisection, so it is cached per car spec — the
       // tyre layer wants the slip angle THIS car peaks at, so that "starts
