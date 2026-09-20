@@ -135,15 +135,23 @@ export function buildWalls(path, ground, brand) {
   const H = BRAND.H, SINK = 0.35;
   const posts = [];
 
+  // CHUNKED, 256 m at a time: a wall that runs the whole track can never be
+  // frustum-culled (its bounding sphere contains the camera), so all 4.6 km of
+  // it was drawn every frame, and again in the shadow pass, whichever way you
+  // were looking. Chunks trade a few draw calls for most of those triangles.
+  const SEG = 128;                                      // samples, 2 m each
   for (const side of [1, -1]) {
     const L = wallLine(path, ground, side);
+    for (let seg0 = 0; seg0 < L.length - 1; seg0 += SEG) {
+    const segEnd = Math.min(L.length - 1, seg0 + SEG);
     const fp = [], fn = [], fu = [], fi = [];           // banner face
     const cp = [], cn = [], ci = [];                    // top + back, concrete
     const normalIn = p => {                             // horizontal, toward the road
       const nx = Math.sin(p.h) * side, ny = -Math.cos(p.h) * side;
       return [nx, 0, -ny];
     };
-    L.forEach((p, k) => {
+    L.slice(seg0, segEnd + 1).forEach((p, kLocal) => {
+      const k = kLocal;                                 // index within this chunk
       const [nx, , nz] = normalIn(p);
       const u = side * p.arc / BRAND.TILE;
       // face: bottom (sunk into the ground), top
@@ -154,7 +162,7 @@ export function buildWalls(path, ground, brand) {
       cp.push(p.f.x, p.g + H, -p.f.y, p.b.x, p.g + H, -p.b.y, p.b.x, p.g + H, -p.b.y, p.b.x, p.g - SINK, -p.b.y);
       cn.push(0, 1, 0, 0, 1, 0, -nx, 0, -nz, -nx, 0, -nz);
       if (k === 0) return;
-      const q = L[k - 1];
+      const q = L[seg0 + k - 1];
       if (!p.ok || !q.ok) return;
       const a = (k - 1) * 2, b = k * 2;                 // face: a=bottom i-1, a+1=top i-1
       if (side > 0) fi.push(a, b, b + 1, a, b + 1, a + 1);
@@ -189,12 +197,13 @@ export function buildWalls(path, ground, brand) {
     // alpha-tested: an alpha-tested mesh speckles into black dots in the
     // distance as its mips average away (DESIGN.md, the pit-lane fence).
     const wp = [], wu = [], wi = [];
-    L.forEach((p, k) => {
+    L.slice(seg0, segEnd + 1).forEach((p, k) => {
       wp.push(p.b.x, p.g + H, -p.b.y, p.b.x, p.g + H + FENCE_H, -p.b.y);
       wu.push(p.arc / 0.5, 0, p.arc / 0.5, FENCE_H / 0.5);
       // no catch fence inside a tunnel: the bore is the wall there
-      const inTun = path.tunIn && (path.tunIn[p.i] > 0 || (k > 0 && path.tunIn[L[k - 1].i] > 0));
-      if (k && p.ok && L[k - 1].ok && !inTun) { const a = (k - 1) * 2, b = k * 2; wi.push(a, b, b + 1, a, b + 1, a + 1); }
+      const prev = L[seg0 + k - 1];
+      const inTun = path.tunIn && (path.tunIn[p.i] > 0 || (k > 0 && path.tunIn[prev.i] > 0));
+      if (k && p.ok && prev.ok && !inTun) { const a = (k - 1) * 2, b = k * 2; wi.push(a, b, b + 1, a, b + 1, a + 1); }
     });
     const wg = new THREE.BufferGeometry();
     wg.setAttribute('position', new THREE.Float32BufferAttribute(wp, 3));
@@ -202,6 +211,7 @@ export function buildWalls(path, ground, brand) {
     wg.setIndex(wi);
     wg.computeVertexNormals();
     group.add(new THREE.Mesh(wg, fenceMaterial()));
+    }                                                   // end of this 256 m chunk
   }
 
   const pg = new THREE.CylinderGeometry(0.045, 0.045, FENCE_H + 0.1, 6);

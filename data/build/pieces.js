@@ -86,8 +86,12 @@ export const PIECES = [
   // that keeps tightening for 298 degrees down to a hairpin, then a left that
   // unwinds back out for 237. That is the shell shape — a helix was not it.
   { part: 'The snail', kind: 'straight', length: 120, width: 16, run: 8, climb: -2, note: 'run-in, road narrows back to normal' },
-  { kind: 'turn', dir: 'right', angle: 298, radius: 120, radius2: 30, climb: 3, bank: 3, note: 'winds in — 298 deg, R120 tightening to a R30 hairpin' },
+  // Shanghai turns 298 deg in and 237 out; at OUR radii those two spirals ran
+  // through each other (the gate caught 1.0 m between coils that need 19).
+  // Searched the pair instead of guessing: 260 in and 170 out leaves 27 m
+  // between the coils — the same shell, drawn with room to breathe.
+  { kind: 'turn', dir: 'right', angle: 260, radius: 130, radius2: 34, climb: 3, bank: 3, note: 'winds in — 260 deg, R130 tightening to a R34 hairpin' },
   { kind: 'straight', length: 4 },
-  { kind: 'turn', dir: 'left', angle: 237, radius: 30, radius2: 90, climb: -3, note: 'and unwinds out the other way — R30 opening to R90' },
+  { kind: 'turn', dir: 'left', angle: 170, radius: 34, radius2: 130, climb: -3, note: 'and unwinds out the other way — R34 opening to R130' },
   { kind: 'straight', length: 160, note: 'out of the snail' },
 ];

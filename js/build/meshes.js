@@ -89,13 +89,22 @@ export function buildRoad(path, mats = null) {
   const group = new THREE.Group();
   const last = path.n - 1;
 
-  // tarmac
-  const r = strip(path, 0, last, i => path.w[i], i => -path.w[i]);
-  const road = new THREE.Mesh(geo(r.pos, r.nor, r.idx, null, r.uv), mats?.road || new THREE.MeshStandardMaterial({
+  // CHUNKED, 256 m at a time. A mesh that spans the whole track can never be
+  // frustum-culled — its bounding sphere contains the camera everywhere you
+  // stand — so one 4.6 km ribbon is drawn in full, twice (the shadow pass is
+  // a second draw), whichever way you are looking. Chunks cost a few more
+  // draw calls and save most of the triangles.
+  const CHUNK = 128;                       // samples, 2 m each
+  const roadMat = mats?.road || new THREE.MeshStandardMaterial({
     color: COL.road, roughness: 0.92, metalness: 0,
-  }));
-  road.receiveShadow = true;
-  group.add(road);
+  });
+  for (let c0 = 0; c0 < last; c0 += CHUNK) {
+    const c1 = Math.min(last, c0 + CHUNK);
+    const r = strip(path, c0, c1, i => path.w[i], i => -path.w[i]);
+    const road = new THREE.Mesh(geo(r.pos, r.nor, r.idx, null, r.uv), roadMat);
+    road.receiveShadow = true;
+    group.add(road);
+  }
 
   // White edge lines, painted a hair above the tarmac. polygonOffset rather
   // than a bigger lift, so they never float when seen low along the road.
@@ -104,19 +113,33 @@ export function buildRoad(path, mats = null) {
   });
   for (const side of [1, -1]) {
     const lo = i => side * (path.w[i] - 0.2), hi = i => side * (path.w[i] - 0.45);
-    const s = side > 0 ? strip(path, 0, last, lo, hi, 0.004) : strip(path, 0, last, hi, lo, 0.004);
-    const m = new THREE.Mesh(geo(s.pos, s.nor, s.idx, null, s.uv), paint);
-    m.receiveShadow = true;
-    group.add(m);
+    for (let c0 = 0; c0 < last; c0 += CHUNK) {
+      const c1 = Math.min(last, c0 + CHUNK);
+      const s = side > 0 ? strip(path, c0, c1, lo, hi, 0.004) : strip(path, c0, c1, hi, lo, 0.004);
+      const m = new THREE.Mesh(geo(s.pos, s.nor, s.idx, null, s.uv), paint);
+      m.receiveShadow = true;
+      group.add(m);
+    }
   }
 
   // Kerbs, wherever the road is actually turning: red and white blocks from
   // the edge out to 1.2 m, which is exactly the band the game's physics calls
   // "kerb". Raised 6 cm at the outside so they read as solid from the car.
-  const kp = [], kn = [], kc = [], ki = [], ku = [];
+  let kp = [], kn = [], kc = [], ki = [], ku = [];
   const red = new THREE.Color(COL.kerbRed), white = new THREE.Color(COL.kerbWhite);
+  const kerbMat = mats?.kerb || new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.6, side: THREE.DoubleSide,
+  });
+  const flushKerb = () => {
+    if (!kp.length) return;
+    const km = new THREE.Mesh(geo(kp, kn, ki, kc, ku), kerbMat);
+    km.receiveShadow = true; km.castShadow = false;
+    group.add(km);
+    kp = []; kn = []; kc = []; ki = []; ku = [];
+  };
   let block = 0;
   for (let i = 0; i < last; i++) {
+    if (i % CHUNK === 0) flushKerb();        // same 256 m chunks as the tarmac
     const turning = Math.abs(path.k[i]) > 1 / 450 && Math.abs(path.k[i + 1]) > 1 / 450;
     if (!turning) continue;
     const c = (block++ % 2) ? red : white;
@@ -149,13 +172,7 @@ export function buildRoad(path, mats = null) {
       }
     }
   }
-  if (kp.length) {
-    const km = new THREE.Mesh(geo(kp, kn, ki, kc, ku), mats?.kerb || new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.6, side: THREE.DoubleSide,
-    }));
-    km.receiveShadow = true; km.castShadow = false;
-    group.add(km);
-  }
+  flushKerb();
 
   // Start / finish: a chequered band across the road at s = 0.
   {
