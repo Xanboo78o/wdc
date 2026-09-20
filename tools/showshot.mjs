@@ -30,6 +30,13 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--port') opts.port = +argv[++i];
   else if (a === '--page') opts.page = argv[++i];
   else if (a === '--flag') opts.flag = argv[++i];
+  // --gpu: drop the swiftshader flags and render on the real hardware, and
+  // --nvidia: do that on the discrete card via PRIME offload. The point of
+  // both is to find out what the machine can actually do, which no
+  // swiftshader run can ever tell you.
+  else if (a === '--size') opts.size = argv[++i];
+  else if (a === '--gpu') opts.gpu = true;
+  else if (a === '--nvidia') { opts.gpu = true; opts.nvidia = true; }
   else { console.error(`unknown flag ${a}`); process.exit(2); }
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -54,12 +61,19 @@ for (const chunk of opts.q) for (const [k, v] of new URLSearchParams(chunk)) qs.
 const url = `http://127.0.0.1:${opts.port}/${opts.page}?${qs}`;
 const CDP = 9300 + Math.floor(Math.random() * 600);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'wdc-build-'));
+const env = { ...process.env };
+if (opts.nvidia) {
+  env.__NV_PRIME_RENDER_OFFLOAD = '1';
+  env.__GLX_VENDOR_LIBRARY_NAME = 'nvidia';
+  env.__EGL_VENDOR_LIBRARY_FILENAMES = '/usr/share/glvnd/egl_vendor.d/10_nvidia.json';
+}
 const chrome = spawn('/usr/bin/chromium', [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
-  '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader',
-  '--hide-scrollbars', '--mute-audio', '--window-size=1600,900',
+  ...(opts.gpu ? ['--use-gl=angle', '--use-angle=gl', '--ignore-gpu-blocklist', '--enable-gpu-rasterization']
+    : ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader']),
+  '--hide-scrollbars', '--mute-audio', `--window-size=${opts.size || '1600,900'}`,
   `--remote-debugging-port=${CDP}`, `--user-data-dir=${profile}`, url,
-], { stdio: 'ignore' });
+], { stdio: 'ignore', env });
 
 let id = 0;
 const pending = new Map(), errors = [];
@@ -95,6 +109,10 @@ while (Date.now() - t0 < 60000) {
   await sleep(300);
 }
 if (stats) await sleep(opts.wait);
+// Read the flag AGAIN after the wait: a frame rate does not exist on frame
+// two, and it is the one number a screenshot cannot carry.
+const after = await evalJs(`window.__perf || window.${opts.flag} || null`);
+if (after) console.log('after ' + JSON.stringify(after));
 const shot = await send('Page.captureScreenshot', { format: 'png' });
 const file = path.join(OUT, `${opts.out}.png`);
 fs.writeFileSync(file, Buffer.from(shot.data, 'base64'));

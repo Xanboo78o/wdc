@@ -41,9 +41,12 @@ const DARK_ROW = 2.6;           // which row the dark mass stands at
 const DARK_H = 7.2;             // m: under the canopy, so it never breaks the skyline
 const DARK_DEPTH = 70;          // m of wood the dark mass covers, then it lands
 const CELL = 220;               // m, one forest bucket
-const LOD_FULL = 130;           // m: trunks and all
-const LOD_CARDS = 330;          // m: foliage only, no trunks
-const LOD_FAR = 780;            // m: one baked cross-card, then nothing
+// Measured on the Intel chip this runs on: the whole wood costs about 7 fps of
+// a 20 fps frame, so these are as far out as they can be afforded rather than
+// as far as they look good.
+const LOD_FULL = 105;           // m: trunks and all
+const LOD_CARDS = 280;          // m: foliage only, no trunks
+const LOD_FAR = 520;            // m: one baked cross-card, then nothing
 
 // --- the fringe -------------------------------------------------------------
 const FRINGE_H = 0.34;          // m of blade standing at the edge of the verge
@@ -491,7 +494,10 @@ export class Flora {
     // contains the camera wherever the camera is, so the renderer draws every
     // triangle of it every frame no matter which way you are looking. Broken
     // into 160 m pieces, the frustum throws away all but a handful.
-    const PIECE = 160;
+    // 512 m was measured to be the right granularity on the road meshes (the
+    // other session's tools/perfcheck.mjs): 256 m bought nothing and cost
+    // twice the draw calls. These are lighter meshes, so 320 m.
+    const PIECE = 320;
     this.darkParts = [];
     let pos = [], nor = [], col = [], idx = [];
     const mat = new THREE.MeshStandardMaterial({
@@ -565,7 +571,7 @@ export class Flora {
     const rects = this.look.cutouts('grass');
     if (!rects.length) return this;
     const r = rng(77);
-    const PIECE = 120;                              // m of verge per mesh
+    const PIECE = 300;                              // m of verge per mesh
     this.fringeParts = [];
     for (const side of [1, -1]) {
       let parts = [], mark = 0;

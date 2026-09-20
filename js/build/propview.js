@@ -52,26 +52,31 @@ function merge(parts) {
 // A real traffic cone: a weighted square base, a tapered body, a white band.
 // The band is what makes it read as a cone at fifty metres rather than as an
 // orange smudge, and it costs twelve triangles.
+//
+// Every segment count in this file was measured down. The props were 371,000
+// triangles a frame — HALF the scene, more than the terrain and the road put
+// together — because eight hundred of them at four hundred triangles each adds
+// up and nobody had looked. A cone is 30 cm across at 200 km/h.
 function coneGeometry() {
   return merge([
     { geometry: new THREE.BoxGeometry(0.36, 0.05, 0.36), colour: 0x23252a, at: [0, 0.025, 0] },
-    { geometry: new THREE.CylinderGeometry(0.035, 0.155, 0.36, 10, 1, true), colour: 0xe2571c, at: [0, 0.235, 0] },
-    { geometry: new THREE.CylinderGeometry(0.093, 0.11, 0.1, 10, 1, true), colour: 0xf0f0ee, at: [0, 0.31, 0] },
-    { geometry: new THREE.CylinderGeometry(0.02, 0.035, 0.09, 10, 1, true), colour: 0xe2571c, at: [0, 0.46, 0] },
+    { geometry: new THREE.CylinderGeometry(0.035, 0.155, 0.36, 7, 1, true), colour: 0xe2571c, at: [0, 0.235, 0] },
+    { geometry: new THREE.CylinderGeometry(0.093, 0.11, 0.1, 7, 1, true), colour: 0xf0f0ee, at: [0, 0.31, 0] },
+    { geometry: new THREE.CylinderGeometry(0.02, 0.035, 0.09, 7, 1, true), colour: 0xe2571c, at: [0, 0.46, 0] },
   ]);
 }
 
 function tyreGeometry(y = 0) {
-  const t = new THREE.TorusGeometry(0.28, 0.105, 5, 11);
+  const t = new THREE.TorusGeometry(0.28, 0.105, 4, 8);
   return merge([{ geometry: t, colour: 0x1b1b1d, rot: [Math.PI / 2, 0, 0], at: [0, y + 0.11, 0] }]);
 }
 
 // A stack: three tyres on a post, which is how a real tyre wall is built.
 function stackGeometry() {
-  const parts = [{ geometry: new THREE.CylinderGeometry(0.05, 0.05, 1.3, 6), colour: 0x3a3d42, at: [0, 0.65, 0] }];
+  const parts = [{ geometry: new THREE.CylinderGeometry(0.05, 0.05, 1.3, 4), colour: 0x3a3d42, at: [0, 0.65, 0] }];
   for (let i = 0; i < 3; i++) {
     parts.push({
-      geometry: new THREE.TorusGeometry(0.31, 0.12, 5, 11), colour: i === 1 ? 0x222225 : 0x1b1b1d,
+      geometry: new THREE.TorusGeometry(0.31, 0.12, 4, 9), colour: i === 1 ? 0x222225 : 0x1b1b1d,
       rot: [Math.PI / 2, 0, 0], at: [0, 0.16 + i * 0.4, 0],
     });
   }

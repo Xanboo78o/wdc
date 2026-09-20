@@ -50,9 +50,9 @@ const buildMs = performance.now() - t0;
 // screenshots are taken at.
 // ---------------------------------------------------------------------------
 const QUALITY = {
-  low:  { dpr: 0.85, aa: false, shadows: false, shadowMap: 1024, shadowBox: 60, land: 'simple', trees: 0.55, fringe: false, env: false, soft: 0 },
-  med:  { dpr: 1.0,  aa: false, shadows: true,  shadowMap: 1024, shadowBox: 70, land: 'simple', trees: 1.0, fringe: true, env: true, soft: 1 },
-  high: { dpr: 1.75, aa: true,  shadows: true,  shadowMap: 2048, shadowBox: 110, land: 'full', trees: 1.3, fringe: true, env: true, soft: 2 },
+  low:  { dpr: 0.8,  aa: false, shadows: false, shadowMap: 1024, shadowBox: 60, land: 'simple', trees: 0.5, fringe: false, env: false, soft: 0, every: 1 },
+  med:  { dpr: 0.9,  aa: false, shadows: true,  shadowMap: 1024, shadowBox: 55, land: 'simple', trees: 0.8, fringe: true, env: true, soft: 1, every: 2 },
+  high: { dpr: 1.75, aa: true,  shadows: true,  shadowMap: 2048, shadowBox: 110, land: 'full', trees: 1.3, fringe: true, env: true, soft: 2, every: 1 },
 };
 const QK = QUALITY[q.get('q')] ? q.get('q') : 'med';
 const QN = QUALITY[QK];
@@ -68,6 +68,10 @@ renderer.shadowMap.enabled = !q.has('lo');
 // PCFSoft takes many taps per pixel of every shadowed surface. It is the
 // prettiest and it is not free, so it is the top setting only.
 renderer.shadowMap.type = [THREE.BasicShadowMap, THREE.PCFShadowMap, THREE.PCFSoftShadowMap][QN.soft];
+// The shadow pass is a second draw of every caster. The sun does not move and
+// the world mostly does not either, so redrawing that map every OTHER frame is
+// half the cost and nobody can see the difference at 30 fps.
+if (QN.every > 1) renderer.shadowMap.autoUpdate = false;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.25, 12000);
 
@@ -521,6 +525,9 @@ function meter(now) {
     `${renderer.getPixelRatio().toFixed(2)}x<br>${['low', 'med', 'high'].map(link).join(' · ')}` +
     `<span>${SOFT ? 'SOFTWARE RENDERING — ' : ''}${GPU}</span>`;
   fpsT = now; fpsN = 0;
+  // Published so a headless run can read the frame rate back out. Everything
+  // else in this file can be measured from a screenshot; this cannot.
+  window.__perf = { fps: fpsNow, draws: r.calls, tris: r.triangles, quality: QK, gpu: GPU, software: SOFT, dpr: renderer.getPixelRatio() };
 }
 
 let prev = performance.now(), frames = 0;
@@ -556,6 +563,7 @@ function loop(now) {
   // gate that presses a key and then reads the car was reading a snapshot from
   // before the press. tools/pedalcheck.mjs drives this instead.
   window.__step = secs => { if (mode === 'drive') driveStep(Math.max(0, Math.min(5, secs))); };
+  if (QN.every > 1) renderer.shadowMap.needsUpdate = (frames % QN.every) === 0;
   renderer.render(scene, camera);
   meter(now);
   frames++;
