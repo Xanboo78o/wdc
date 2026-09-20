@@ -22,7 +22,7 @@ import { TIERS, makeAutopilot, makeDriver } from './autopilot.js';
 import { Field } from './field.js';
 import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
-import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from './phonewheel.js';
+import { startDash, mountDashCard, onDash } from './dash.js';
 
 const $ = id => document.getElementById(id);
 const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV'];
@@ -41,7 +41,7 @@ const state = {
 };
 const hands = new Hands();
 // the phone steers while it is live; keys and pedals are untouched
-hands.wheelSource = () => phoneLive() ? phone.steer : null;
+// (the phone used to steer here; a real wheel comes in through input.js)
 
 // ---------------------------------------------------------------------------
 // menu
@@ -713,13 +713,60 @@ function rejoin() {
 hands.attach();
 // Phone wheel: the pairing card (code + QR) sits under the key help on the
 // menu, and a connect or drop mid-session says so on screen.
-startPhoneWheel();
-mountPhoneCard(document.querySelector('#menu .keys'));
+
+// ---------------------------------------------------------------------------
+// What the dash gets. This is the ONLY place that decides what the iPad knows,
+// and it reads the same state the screen does, so the two can never disagree.
+// Called 15x a second by js/dash.js; the tower is stripped out of most of
+// those frames on the way (22 rows of strings do not change at 15 Hz).
+// ---------------------------------------------------------------------------
+function dashTelemetry() {
+  const car = state.car;
+  if (!car) return null;
+  const race = state.race, me = state.me, box = state.box;
+  const t = {
+    spd: car.speed * 3.6,
+    gLat: car.gLat,
+    thr: car.throttle,
+    brk: car.brake,
+    slipF: car.slipF,
+    slipR: car.slipR,
+    peak: state.peak,
+    tf: car.tyre && car.tyre.Tf,
+    tr: car.tyre && car.tyre.Tr,
+    lapT: state.lapT,
+    last: state.last,
+    best: state.best,
+    invalid: !!state.invalid,
+    drs: !!car.drsOpen,
+    pad: !!hands.usingPad,
+    track: state.trackName || (state.track && state.track.name) || '',
+    car: state.carName || '',
+  };
+  if (box) { t.gear = box.gear; t.rpm = box.rpm; t.rpmMax = box.box && box.box.limit; }
+
+  if (race && me) {
+    t.lap = Math.min(race.laps, me.lap + 1);
+    t.laps = race.laps;
+    t.pos = me.retired ? 'DNF' : me.pos;
+    t.box = !!(me.pitRequest || me.inPit);
+    t.sc = race.safety > 0;
+    t.tower = race.standings.map((e, i) => ({
+      p: i + 1, n: e.name, col: e.col, you: !!e.isPlayer, g: rowText(race, e, i)[1],
+    }));
+  } else {
+    t.lap = Math.max(1, state.lap);
+  }
+  return t;
+}
+
+startDash({ getTelemetry: dashTelemetry });
+mountDashCard(document.querySelector('#menu .keys'));
 {
   let was = false;
-  onPhone(p => {
-    if (p.connected !== was && state.started) toast(p.connected ? 'PHONE WHEEL CONNECTED' : 'PHONE WHEEL LOST');
-    was = p.connected;
+  onDash(d => {
+    if (d.connected !== was && state.started) toast(d.connected ? 'DASH CONNECTED' : 'DASH LOST');
+    was = d.connected;
   });
 }
 

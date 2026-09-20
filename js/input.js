@@ -66,7 +66,7 @@ export class Hands {
     this.usingPad = false; this.padName = '';
     this.pad = null;
     this._padPrev = {};
-    // An outside wheel (the phone, js/phonewheel.js): a function returning
+    // An outside wheel: a function returning
     // -1..1 while it is live, or null. Kept as a hook so this file never
     // needs the network to run — the Node harnesses import it.
     this.wheelSource = null;

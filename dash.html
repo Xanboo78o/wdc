@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#07090b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>WDC — Dash</title>
+<link rel="icon" href="data:,">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+  :root { --ink:#eef0f2; --dim:#79828c; --bg:#07090b; --panel:#101318; --line:#232a33;
+          --mint:#35d6a0; --red:#e0483a; --amber:#f0b429; --blue:#3f7fe0; }
+  html,body { height:100%; background:var(--bg); color:var(--ink); overflow:hidden;
+    font-family:ui-sans-serif,"Inter",system-ui,sans-serif; font-variant-numeric:tabular-nums; }
+  .mono { font-family:ui-monospace,"SF Mono",Menlo,monospace; }
+
+  /* iPad Pro landscape: 11" is ~1194x834 css px, 13" ~1366x1024. Everything
+     scales off vh so both fill the glass without a media query per device. */
+  #rotate { display:none; position:fixed; inset:0; z-index:100; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px; background:var(--bg); padding:30px; text-align:center; }
+  @media (orientation:portrait) { #rotate { display:flex; } #app,#connect { display:none !important; } }
+
+  #connect { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:16px; padding:30px; z-index:60; background:var(--bg); }
+  #connect h1 { font-size:34px; font-weight:900; letter-spacing:5px; }
+  #connect h1 span { color:var(--mint); }
+  #connect p { color:var(--dim); font-size:15px; }
+  input#code { font-size:34px; font-weight:800; letter-spacing:11px; text-align:center; text-transform:uppercase;
+    width:min(420px,80vw); padding:14px; border-radius:14px; border:2px solid var(--line); background:var(--panel); color:#fff; outline:none; }
+  input#code:focus { border-color:var(--mint); }
+  button.go { font:inherit; font-size:18px; font-weight:800; color:#06140f; background:var(--mint);
+    border:0; border-radius:14px; padding:16px 30px; cursor:pointer; letter-spacing:.1em; }
+
+  #app { height:100%; display:grid; grid-template-rows:auto 1fr auto; gap:1vh; padding:1.2vh 1.2vw; }
+
+  /* ---- top bar ---- */
+  .top { display:flex; align-items:center; gap:1.4vw; }
+  .top .circuit { font-size:2.1vh; font-weight:800; letter-spacing:.14em; }
+  .top .carname { font-size:1.7vh; color:var(--dim); letter-spacing:.1em; }
+  .top .spacer { flex:1; }
+  .lights { display:flex; gap:.7vw; }
+  .lights span { font-size:1.6vh; font-weight:800; letter-spacing:.14em; padding:.6vh 1vw;
+    border-radius:.8vh; border:1px solid var(--line); color:#3d454e; }
+  .lights span.on { color:#06140f; }
+  #lDRS.on { background:var(--mint); border-color:var(--mint); }
+  #lBOX.on { background:var(--amber); border-color:var(--amber); }
+  #lSC.on  { background:var(--amber); border-color:var(--amber); }
+  #lPAD.on { background:var(--blue); border-color:var(--blue); color:#fff; }
+
+  /* ---- main three columns ---- */
+  .main { display:grid; grid-template-columns:23vw 1fr 23vw; gap:1.2vw; min-height:0; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:1.4vh; padding:1.2vh 1vw; min-height:0; }
+  .lbl { font-size:1.35vh; letter-spacing:.2em; color:var(--dim); margin-bottom:.7vh; }
+
+  /* tower */
+  #tower { overflow:hidden; display:flex; flex-direction:column; }
+  #towerRows { flex:1; overflow:hidden; display:flex; flex-direction:column; gap:.35vh; }
+  .trow { display:grid; grid-template-columns:2.6ch 4px 1fr auto; align-items:center; gap:.6vw;
+    font-size:1.75vh; padding:.35vh .3vw; border-radius:.5vh; }
+  .trow.you { background:#19222c; }
+  .trow b { color:var(--dim); font-weight:700; }
+  .trow i { width:4px; height:1.9vh; border-radius:2px; background:#555; }
+  .trow span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:.05em; }
+  .trow em { font-style:normal; color:var(--dim); font-size:1.5vh; }
+
+  /* centre */
+  .centre { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.4vh; }
+  #gear { font-size:20vh; line-height:.86; font-weight:900; letter-spacing:-.02em; }
+  #gear.lim { color:var(--red); }
+  #rpmbar { width:100%; height:1.4vh; background:#1a1f26; border-radius:.7vh; overflow:hidden; }
+  #rpmbar i { display:block; height:100%; width:0; background:var(--mint); }
+  .spdrow { display:flex; align-items:baseline; gap:.8vw; }
+  #spd { font-size:9vh; font-weight:900; line-height:1; }
+  .spdrow small { font-size:1.8vh; color:var(--dim); letter-spacing:.2em; }
+  .times { display:flex; gap:1.6vw; align-items:baseline; margin-top:.6vh; }
+  .times div { text-align:center; }
+  .times .k { font-size:1.3vh; letter-spacing:.18em; color:var(--dim); }
+  .times .v { font-size:2.6vh; font-weight:800; }
+  #tCur.bad { color:var(--red); }
+  #posbig { font-size:3.4vh; font-weight:900; letter-spacing:.06em; }
+
+  /* right */
+  .right { display:flex; flex-direction:column; gap:1vh; }
+  .sliprow { display:flex; align-items:center; gap:.6vw; margin-bottom:.6vh; }
+  .sliprow > span { font-size:1.4vh; color:var(--dim); width:4.2ch; letter-spacing:.1em; }
+  .track { position:relative; flex:1; height:1.8vh; background:#1a1f26; border-radius:.9vh; overflow:hidden; }
+  .track i { position:absolute; left:0; top:0; bottom:0; width:0; background:var(--mint); }
+  .track u { position:absolute; top:0; bottom:0; left:71.4%; width:2px; background:#fff; opacity:.55; }
+  .sliprow em { font-style:normal; font-size:1.5vh; width:5ch; text-align:right; }
+  .two { display:flex; gap:1vw; }
+  .two > div { flex:1; }
+  .big2 { font-size:3vh; font-weight:800; }
+  .peds { display:flex; gap:.5vw; height:7vh; }
+  .ped { flex:1; background:#1a1f26; border-radius:.6vh; position:relative; overflow:hidden; }
+  .ped i { position:absolute; left:0; right:0; bottom:0; height:0; }
+  .ped.t i { background:var(--mint); } .ped.b i { background:var(--red); }
+  .ped small { position:absolute; bottom:.4vh; left:0; right:0; text-align:center; font-size:1.2vh; color:#0008; font-weight:800; }
+
+  /* ---- radio strip ---- */
+  .radio { display:flex; align-items:center; gap:1vw; }
+  #radioLine { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:1.2vh;
+    padding:1vh 1.2vw; min-height:6vh; display:flex; flex-direction:column; justify-content:center; }
+  #radioWho { font-size:1.2vh; letter-spacing:.2em; color:var(--mint); }
+  #radioLine.me #radioWho { color:var(--amber); }
+  #radioTxt { font-size:2vh; line-height:1.3; }
+  #ptt { font:inherit; font-size:1.7vh; font-weight:800; letter-spacing:.12em; color:var(--ink);
+    background:#1c222a; border:1px solid var(--line); border-radius:1.2vh; padding:2vh 2.4vw; cursor:pointer; }
+  #ptt.live { background:var(--red); border-color:var(--red); color:#fff; }
+  #conn { position:fixed; top:1.2vh; left:50%; transform:translateX(-50%); font-size:1.3vh;
+    letter-spacing:.14em; color:var(--dim); z-index:50; }
+  #conn.bad { color:var(--red); }
+</style>
+</head>
+<body>
+
+<div id="rotate"><h1>Turn the iPad sideways</h1><p style="color:#79828c">The dash is landscape.</p></div>
+
+<div id="connect">
+  <h1>WDC <span>DASH</span></h1>
+  <p>The code is on the game screen, under DASH.</p>
+  <input id="code" maxlength="6" placeholder="CODE" autocomplete="off" autocapitalize="characters">
+  <button class="go" id="go">CONNECT</button>
+  <p id="err" style="color:#e0483a"></p>
+</div>
+
+<div id="app" style="display:none">
+  <div id="conn">WAITING FOR THE GAME…</div>
+
+  <div class="top">
+    <div>
+      <div class="circuit" id="trackName">—</div>
+      <div class="carname" id="carName">—</div>
+    </div>
+    <div class="spacer"></div>
+    <div id="posbig">—</div>
+    <div class="spacer"></div>
+    <div class="lights">
+      <span id="lDRS">DRS</span><span id="lBOX">BOX</span><span id="lSC">SC</span><span id="lPAD">PAD</span>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="card" id="tower">
+      <div class="lbl">CLASSIFICATION</div>
+      <div id="towerRows"></div>
+    </div>
+
+    <div class="card centre">
+      <div id="gear">N</div>
+      <div id="rpmbar"><i></i></div>
+      <div class="spdrow"><b id="spd">0</b><small>KM/H</small></div>
+      <div class="times">
+        <div><div class="k">LAP</div><div class="v" id="lapNo">1</div></div>
+        <div><div class="k">CURRENT</div><div class="v mono" id="tCur">--:--.---</div></div>
+        <div><div class="k">LAST</div><div class="v mono" id="tLast">--:--.---</div></div>
+        <div><div class="k">BEST</div><div class="v mono" id="tBest">--:--.---</div></div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="card">
+        <div class="lbl">TYRE SLIP · PEAK <span id="peakMark">—</span></div>
+        <div class="sliprow"><span>FRONT</span><div class="track"><i id="slipF"></i><u></u></div><em id="slipFv">0.0°</em></div>
+        <div class="sliprow"><span>REAR</span><div class="track"><i id="slipR"></i><u></u></div><em id="slipRv">0.0°</em></div>
+        <div class="two" style="margin-top:.6vh">
+          <div><div class="lbl">TYRE °C F</div><div class="big2" id="tfT">—</div></div>
+          <div><div class="lbl">TYRE °C R</div><div class="big2" id="trT">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="two">
+          <div><div class="lbl">G LAT</div><div class="big2" id="gLat">0.0</div></div>
+          <div style="flex:1.4">
+            <div class="lbl">THROTTLE / BRAKE</div>
+            <div class="peds">
+              <div class="ped t"><i id="pedT"></i><small>T</small></div>
+              <div class="ped b"><i id="pedB"></i><small>B</small></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="radio">
+    <div id="radioLine"><div id="radioWho">ENGINEER</div><div id="radioTxt">Radio standing by.</div></div>
+    <button id="ptt">HOLD TO TALK</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+'use strict';
+// The iPad half of js/dash.js. Receives telemetry at 15 Hz and the timing
+// tower at 2 Hz, and carries the race-engineer radio. It sends NOTHING about
+// driving — the wheel on the desk does that now.
+const CFG = {
+  url: 'https://wsjrcoibrigewmwospva.supabase.co',
+  key: 'sb_publishable_n88dYo7wUYb_utwKiQT3uQ_HGOtXDZb',
+  prefix: 'wdc:',
+};
+const $ = id => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+if (q.get('code')) $('code').value = q.get('code').toUpperCase();
+$('code').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase(); });
+
+let telCh = null, radioCh = null, lastTel = 0;
+
+const fmt = s => (s == null || s < 0) ? '--:--.---'
+  : `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
+
+$('go').addEventListener('click', async () => {
+  const code = ($('code').value || '').trim().toUpperCase();
+  if (code.length < 4) { $('err').textContent = 'Type the code from the game screen.'; return; }
+  if (!window.supabase) { $('err').textContent = 'No internet connection to the game.'; return; }
+  $('connect').style.display = 'none';
+  $('app').style.display = 'grid';
+
+  const sb = window.supabase.createClient(CFG.url, CFG.key, { realtime: { params: { eventsPerSecond: 20 } } });
+
+  telCh = sb.channel(CFG.prefix + code + ':dash', { config: { broadcast: { self: false } } });
+  telCh.on('broadcast', { event: 'tel' }, ({ payload }) => paint(payload))
+       .subscribe(st => { if (st === 'SUBSCRIBED') hello(); });
+
+  radioCh = sb.channel(CFG.prefix + code + ':radio', { config: { broadcast: { self: false } } });
+  radioCh.on('broadcast', { event: 'radio-open' },  () => micOn())
+         .on('broadcast', { event: 'radio-close' }, () => micOff())
+         .on('broadcast', { event: 'radio-reply' }, ({ payload }) => speak(payload && payload.text))
+         .subscribe(st => { if (st === 'SUBSCRIBED') radioCh.send({ type: 'broadcast', event: 'radio-here', payload: {} }); });
+
+  // The game only starts sending once it has heard from us.
+  function hello() { telCh.send({ type: 'broadcast', event: 'dash-here', payload: {} }); }
+  setInterval(hello, 2000);
+  setInterval(() => {
+    const stale = performance.now() - lastTel > 2500;
+    $('conn').textContent = stale ? 'NO TELEMETRY — IS THE GAME RUNNING?' : '';
+    $('conn').className = stale ? 'bad' : '';
+  }, 800);
+
+  primeRadio();
+  try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {}
+});
+
+// ---------------------------------------------------------------------------
+// Paint. Every field is optional: a missing key means the game did not send it
+// this frame, not that it is zero. Never render a confident 0 for "unknown".
+// ---------------------------------------------------------------------------
+let peak = 0;
+function paint(t) {
+  if (!t) return;
+  lastTel = performance.now();
+  const set = (id, v) => { if (v !== undefined && v !== null) $(id).textContent = v; };
+
+  if (t.track !== undefined) set('trackName', t.track);
+  if (t.car !== undefined) set('carName', t.car);
+  if (t.pos !== undefined) set('posbig', 'P' + t.pos);
+  set('spd', t.spd !== undefined ? Math.round(t.spd) : undefined);
+
+  if (t.gear !== undefined) {
+    $('gear').textContent = t.gear > 0 ? t.gear : (t.gear === 0 ? 'N' : 'R');
+    $('gear').className = t.rpm && t.rpmMax && t.rpm > t.rpmMax * 0.97 ? 'lim' : '';
+  }
+  if (t.rpm !== undefined && t.rpmMax) {
+    $('rpmbar').firstElementChild.style.width = Math.min(100, t.rpm / t.rpmMax * 100).toFixed(1) + '%';
+    $('rpmbar').firstElementChild.style.background =
+      t.rpm > t.rpmMax * 0.97 ? 'var(--red)' : t.rpm > t.rpmMax * 0.88 ? 'var(--amber)' : 'var(--mint)';
+  }
+
+  if (t.lap !== undefined) set('lapNo', t.laps ? `${t.lap}/${t.laps}` : t.lap);
+  if (t.lapT !== undefined) { $('tCur').textContent = fmt(t.lapT); $('tCur').className = 'v mono' + (t.invalid ? ' bad' : ''); }
+  if (t.last !== undefined) set('tLast', fmt(t.last));
+  if (t.best !== undefined) set('tBest', fmt(t.best));
+
+  if (t.peak !== undefined) { peak = t.peak; set('peakMark', (peak * 180 / Math.PI).toFixed(1) + '°'); }
+  const bar = (id, vid, a) => {
+    if (a === undefined || !peak) return;
+    const el = $(id), frac = Math.min(1, Math.abs(a) / (peak * 1.4));
+    el.style.width = (frac * 100).toFixed(1) + '%';
+    el.style.background = Math.abs(a) > peak ? 'var(--red)' : Math.abs(a) > peak * 0.8 ? 'var(--amber)' : 'var(--mint)';
+    $(vid).textContent = (Math.abs(a) * 180 / Math.PI).toFixed(1) + '°';
+  };
+  bar('slipF', 'slipFv', t.slipF);
+  bar('slipR', 'slipRv', t.slipR);
+
+  set('tfT', t.tf !== undefined ? Math.round(t.tf) : undefined);
+  set('trT', t.tr !== undefined ? Math.round(t.tr) : undefined);
+  set('gLat', t.gLat !== undefined ? Math.abs(t.gLat).toFixed(1) : undefined);
+  if (t.thr !== undefined) $('pedT').style.height = (t.thr * 100).toFixed(0) + '%';
+  if (t.brk !== undefined) $('pedB').style.height = (t.brk * 100).toFixed(0) + '%';
+
+  if (t.drs !== undefined) $('lDRS').className = t.drs ? 'on' : '';
+  if (t.box !== undefined) $('lBOX').className = t.box ? 'on' : '';
+  if (t.sc  !== undefined) $('lSC').className  = t.sc  ? 'on' : '';
+  if (t.pad !== undefined) $('lPAD').className = t.pad ? 'on' : '';
+
+  if (t.tower) tower(t.tower);
+}
+
+function tower(rows) {
+  const box = $('towerRows');
+  while (box.children.length > rows.length) box.lastElementChild.remove();
+  while (box.children.length < rows.length) {
+    const d = document.createElement('div');
+    d.className = 'trow';
+    d.innerHTML = '<b></b><i></i><span></span><em></em>';
+    box.appendChild(d);
+  }
+  rows.forEach((r, k) => {
+    const d = box.children[k];
+    d.className = 'trow' + (r.you ? ' you' : '');
+    d.children[0].textContent = r.p;
+    d.children[1].style.background = r.col || '#555';
+    d.children[2].textContent = r.n;
+    d.children[3].textContent = r.g || '';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// RACE ENGINEER RADIO — ears and a mouth. Push-to-talk is pressed on the PC
+// (hands stay on the wheel) and arrives as 'radio-open'; the button here is
+// the fallback, because iOS only grants the mic from a real touch and a
+// network event is not one.
+// ---------------------------------------------------------------------------
+let rec = null, recOn = false, heard = '';
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function radioSay(who, text) {
+  $('radioTxt').textContent = text;
+  $('radioLine').className = who === 'me' ? 'me' : '';
+  $('radioWho').textContent = who === 'me' ? 'YOU' : 'ENGINEER';
+}
+function tone(hz, dur) {
+  try {
+    const c = tone.ac || (tone.ac = new (window.AudioContext || window.webkitAudioContext)());
+    if (c.state === 'suspended') c.resume();
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'square'; o.frequency.value = hz;
+    g.gain.setValueAtTime(0.06, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0005, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur);
+  } catch (e) {}
+}
+function micOn() {
+  if (!rec || recOn) return;
+  heard = ''; recOn = true;
+  $('ptt').classList.add('live'); $('ptt').textContent = 'LISTENING…';
+  radioSay('me', '…'); tone(1180, 0.08);
+  try { rec.start(); } catch (e) {}
+}
+function micOff() {
+  if (!rec || !recOn) return;
+  recOn = false;
+  $('ptt').classList.remove('live'); $('ptt').textContent = 'HOLD TO TALK';
+  try { rec.stop(); } catch (e) {}
+}
+function primeRadio() {
+  if (!SR) { radioSay('eng', 'This tablet has no speech recognition — the engineer can still talk to you.'); }
+  else {
+    rec = new SR();
+    rec.lang = 'en-GB'; rec.interimResults = true; rec.continuous = true;
+    rec.onresult = e => {
+      heard = '';
+      for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
+      radioSay('me', heard.trim() || '…');
+    };
+    rec.onerror = e => {
+      recOn = false; $('ptt').classList.remove('live'); $('ptt').textContent = 'HOLD TO TALK';
+      radioSay('eng', e.error === 'not-allowed' ? 'Microphone was blocked — allow it in Settings.' : 'Mic error: ' + e.error);
+    };
+    rec.onend = () => {
+      $('ptt').classList.remove('live'); $('ptt').textContent = 'HOLD TO TALK';
+      const t = heard.trim();
+      if (t && radioCh) { radioCh.send({ type: 'broadcast', event: 'radio-said', payload: { text: t } }); radioSay('me', t); }
+      recOn = false;
+    };
+    try { rec.start(); setTimeout(() => { try { rec.stop(); } catch (e) {} }, 60); } catch (e) {}
+  }
+  try { const w = new SpeechSynthesisUtterance(' '); w.volume = 0; speechSynthesis.speak(w); } catch (e) {}
+  $('ptt').addEventListener('touchstart', e => { e.preventDefault(); micOn(); }, { passive: false });
+  $('ptt').addEventListener('touchend',   e => { e.preventDefault(); micOff(); }, { passive: false });
+  $('ptt').addEventListener('mousedown', micOn);
+  $('ptt').addEventListener('mouseup', micOff);
+}
+function speak(text) {
+  text = String(text || '').trim();
+  if (!text) return;
+  radioSay('eng', text);
+  tone(1180, 0.08);
+  if (!window.speechSynthesis) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-GB'; u.rate = 1.05; u.pitch = 0.95;
+    u.onend = () => tone(700, 0.12);
+    setTimeout(() => speechSynthesis.speak(u), 110);
+  } catch (e) {}
+}
+</script>
+</body>
+</html>

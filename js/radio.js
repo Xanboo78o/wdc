@@ -15,7 +15,7 @@
 //   import { startRadio } from './radio.js';
 //   startRadio({ getTelemetry: () => ({ lap: 12, position: 4, gapAhead: 1.2 }) });
 
-import { phone } from './phonewheel.js';
+import { dashCode } from './dash.js';
 
 const CFG = {
   url: 'https://wsjrcoibrigewmwospva.supabase.co',
@@ -48,7 +48,7 @@ export async function startRadio(opts = {}) {
   // The engineer rides the same six-letter channel as the phone wheel, on its
   // own events, so it cannot disturb steering. (A shifter once hijacked a
   // 'hello' — never reuse another feature's event name.)
-  const code = phone.code || (() => { try { return localStorage.getItem('wdc_wheel_code'); } catch { return null; } })();
+  const code = dashCode();
   if (!code) { radio.status = 'no-code'; notify(); return; }
 
   try {
