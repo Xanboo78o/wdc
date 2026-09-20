@@ -1,0 +1,46 @@
+# NOT INSTALLED YET. Copy this to .github/workflows/stamp.yml to switch the
+# release stamp on:
+#
+#   gh auth refresh -h github.com -s workflow     (once, needs a browser)
+#   mkdir -p .github/workflows && cp tools/ci/stamp.yml .github/workflows/
+#
+# It lives here rather than in .github/ because pushing a workflow file
+# needs a token scope this machine's gh login does not have, and the app
+# works without it: code is network-first, so an installed app always RUNS
+# the newest push. What the stamp adds is the app NOTICING, and saying so.
+# Until then, `node tools/release.mjs` before a push does the same job.
+#
+# Stamp every push, so the installed app knows a new version exists without
+# anyone remembering to do it.
+#
+# version.json carries the build id the service worker compares against. If it
+# is only written by hand then the release somebody forgets to stamp is exactly
+# the release that matters, so it is written here instead, on push.
+#
+# The loop guard is `paths-ignore`: this job's own commit only touches
+# version.json, so it cannot trigger itself.
+name: stamp
+on:
+  push:
+    branches: [master]
+    paths-ignore: ['version.json']
+permissions:
+  contents: write
+jobs:
+  stamp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      # --no-icons: the icon is drawn with ImageMagick from the track, and a CI
+      # box has no reason to carry it. It is regenerated locally when the track
+      # changes shape, which is the only time it looks different.
+      - run: node tools/release.mjs --no-icons
+      - name: commit the stamp
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add version.json
+          git diff --cached --quiet || git commit -m "Stamp ${GITHUB_SHA:0:7} [skip ci]"
+          git push

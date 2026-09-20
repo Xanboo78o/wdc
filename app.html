@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHASING WDC</title>
+<meta name="theme-color" content="#0b0d10">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<style>
+  :root { --ink: #eef0f2; --dim: #9aa3ab; --hot: #35d6a0; --red: #d8352a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: #0b0d10; color: var(--ink);
+    font: 14px/1.45 ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  body { display: flex; flex-direction: column; align-items: center; padding: 6vh 20px 40px; gap: 26px; }
+  header { text-align: center; }
+  img.mark { width: 108px; height: 108px; image-rendering: auto; }
+  h1 { font-size: 26px; letter-spacing: 0.22em; margin: 14px 0 4px; }
+  .sub { color: var(--dim); letter-spacing: 0.08em; font-size: 12px; }
+  nav { display: grid; gap: 14px; width: min(560px, 100%); }
+  a.card { display: block; text-decoration: none; color: inherit; border: 1px solid #222831;
+    border-radius: 12px; padding: 16px 18px; background: #11151a; transition: border-color .15s, transform .08s; }
+  a.card:hover { border-color: var(--hot); }
+  a.card:active { transform: translateY(1px); }
+  a.card b { display: block; font-size: 17px; letter-spacing: 0.1em; }
+  a.card span { color: var(--dim); font-size: 12px; }
+  .row { display: flex; gap: 10px; width: min(560px, 100%); }
+  button { flex: 1; font: inherit; letter-spacing: 0.1em; color: #0b0d10; background: var(--hot);
+    border: 0; border-radius: 10px; padding: 13px; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--dim); border: 1px solid #222831; }
+  button[disabled] { opacity: .4; cursor: default; }
+  footer { color: #5d666e; font-size: 11px; text-align: center; letter-spacing: 0.06em; }
+  footer b { color: var(--dim); font-weight: 400; }
+  #note { color: var(--dim); }
+  .live { color: var(--hot); }
+  .off { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <img class="mark" src="./icon-512.png" alt="the circuit">
+  <h1>CHASING WDC</h1>
+  <div class="sub">the sim, and the track that feeds it</div>
+</header>
+
+<nav>
+  <a class="card" href="./index.html"><b>DRIVE</b><span>the race — five real circuits, F4 / GT3 / F1, 21 rivals</span></a>
+  <a class="card" href="./build.html"><b>TRACK BUILDER</b><span>the megatrack: fly it, drive it, one corner at a time</span></a>
+  <a class="card" href="./gameshow.html"><b>THE GAME SHOW</b><span>rate the trees and the props out of ten</span></a>
+</nav>
+
+<div class="row">
+  <button id="install" disabled>INSTALL AS AN APP</button>
+  <button id="check" class="ghost">CHECK FOR UPDATES</button>
+</div>
+
+<footer>
+  <div id="status">…</div>
+  <div id="note"></div>
+</footer>
+
+<script src="./js/pwa.js"></script>
+<script>
+// The launcher is the one page it is safe to reload underneath somebody: it is
+// a menu. Mid-lap the same event only prints a line (see js/pwa.js).
+const $ = id => document.getElementById(id);
+let version = '—';
+
+async function readVersion() {
+  try {
+    const v = await (await fetch('./version.json', { cache: 'no-store' })).json();
+    version = v.version;
+    $('note').textContent = v.note || '';
+    return v;
+  } catch { return null; }
+}
+
+function paint(extra) {
+  const on = navigator.onLine;
+  const installed = matchMedia('(display-mode: standalone)').matches;
+  $('status').innerHTML =
+    `<b>${version}</b> · ${installed ? 'installed' : 'in the browser'} · ` +
+    `<span class="${on ? 'live' : 'off'}">${on ? 'online' : 'offline — running from the cache'}</span>` +
+    (extra ? ` · ${extra}` : '');
+}
+
+addEventListener('online', () => paint());
+addEventListener('offline', () => paint());
+
+addEventListener('wdc-installable', () => {
+  $('install').disabled = false;
+  $('install').textContent = 'INSTALL AS AN APP';
+});
+$('install').addEventListener('click', async () => {
+  const e = window.__wdcInstall;
+  if (!e) return;
+  $('install').disabled = true;
+  await e.prompt();
+  const { outcome } = await e.userChoice;
+  $('install').textContent = outcome === 'accepted' ? 'INSTALLED' : 'INSTALL AS AN APP';
+  $('install').disabled = outcome === 'accepted';
+});
+
+$('check').addEventListener('click', async () => {
+  $('check').textContent = 'CHECKING…';
+  navigator.serviceWorker?.controller?.postMessage('wdc-check');
+  const v = await readVersion();
+  setTimeout(() => {
+    $('check').textContent = 'CHECK FOR UPDATES';
+    paint(v && v.version !== version ? 'new version found' : 'up to date');
+  }, 1200);
+});
+
+addEventListener('wdc-update', async (e) => {
+  await readVersion();
+  paint(`updating to ${e.detail.version}…`);
+  setTimeout(() => location.reload(), 1200);
+});
+
+(async () => {
+  const v = await readVersion();
+  paint();
+  window.__app = { ready: true, version, note: v?.note || null, files: v?.files?.length || 0,
+    standalone: matchMedia('(display-mode: standalone)').matches,
+    sw: !!navigator.serviceWorker };
+  if (matchMedia('(display-mode: standalone)').matches) {
+    $('install').textContent = 'INSTALLED';
+  }
+})();
+</script>
+</body>
+</html>
