@@ -40,7 +40,15 @@ const ROW_PACK = [0.30, 0.55, 0.85, 1.15, 1.45];   // each row denser than the l
 const DARK_ROW = 2.6;           // which row the dark mass stands at
 const DARK_H = 7.2;             // m: under the canopy, so it never breaks the skyline
 const DARK_DEPTH = 70;          // m of wood the dark mass covers, then it lands
+const DARK_CLEAR = 14;          // m: nearer than this the mass is invisible
+const DARK_SOLID = 75;          // m: by here it is the full darkness
 const CELL = 220;               // m, one forest bucket
+// m behind the barrier before anything is allowed to grow. `near` in
+// scenery.js is measured from the CENTRELINE, and a standard section is 7 m of
+// half-road plus 12 m of run-off — so `pine`'s near: 8 was planting trees
+// ELEVEN METRES deep into the gravel. The fringe grass got this right
+// (it starts at w + run); the wood never asked.
+const TREE_CLEAR = 2;
 // Measured on the Intel chip this runs on: the whole wood costs about 7 fps of
 // a 20 fps frame, so these are as far out as they can be afforded rather than
 // as far as they look good.
@@ -351,7 +359,6 @@ export class Flora {
     this.group.add(this.forest);
     this.cells = [];
     this.counts = { trees: 0, cells: 0, blades: 0, darkRuns: 0 };
-    this.darkShown = true;
   }
 
   // -- which section of scenery a sample belongs to --------------------------
@@ -419,6 +426,15 @@ export class Flora {
   // PLANT. Five rows along the edge of the wood, each denser than the one in
   // front of it, and nothing at all behind them: the dark mass is the wood.
   // -------------------------------------------------------------------------
+  // Where the wood may start on this side at this sample: whichever is further
+  // out, the section's authored `near` or the far edge of the run-off. Nothing
+  // grows on a surface a car is meant to be able to use.
+  treeLine(i, side, kind) {
+    const p = this.path;
+    const edge = p.w[i] + (side > 0 ? p.runL[i] : p.runR[i]);
+    return Math.max(kind.near, edge + TREE_CLEAR);
+  }
+
   plant() {
     const p = this.path, g = this.ground;
     const r = rng(1234);
@@ -436,16 +452,17 @@ export class Flora {
       for (const side of [1, -1]) {
         const kind = this.kindFor(i, side);
         if (!kind.trees) continue;
+        const base = this.treeLine(i, side, kind);
         for (let row = 0; row < ROWS; row++) {
           const n = (kind.trees / 10000) * (step * ROW_GAP) * ROW_PACK[row] * this.q.trees;
           for (let k = 0; k < Math.ceil(n); k++) {
             if (k > n - 1 && r() > n - Math.floor(n)) continue;
-            const lat = side * (kind.near + row * ROW_GAP + r() * ROW_GAP);
+            const lat = side * (base + row * ROW_GAP + r() * ROW_GAP);
             const j = Math.min(p.n - 1, i + Math.round(((r() - 0.5) * step) / p.ds));
             const pt = pointAt(p, j, lat);
             // roadDist knows about EVERY road, so this is also what keeps a
             // wood from growing under a viaduct deck or inside the loop.
-            if (g.roadDist(pt.x, pt.y) < kind.near) continue;
+            if (g.roadDist(pt.x, pt.y) < base) continue;
             push({
               sp: r() < kind.conifer ? 'conifer' : 'broad',
               x: pt.x, y: pt.y, h: g.height(pt.x, pt.y),
@@ -559,10 +576,34 @@ export class Flora {
     const PIECE = 320;
     this.darkParts = [];
     let pos = [], nor = [], col = [], idx = [];
+    // "they need a opacity effect, lke they get more solid and dark the further
+    //  they extend, like the minecraft glas air glass fade trick"
+    //
+    // It replaces a switch. The mass used to be hidden outright whenever the
+    // camera was off the road and below the canopy, because flying into it
+    // filled the screen with black — but that was ONE boolean for the whole
+    // circuit, so stepping onto the grass made every wood on the track lose
+    // its darkness at the same instant. That is the blocks disappearing.
+    //
+    // Faded by distance there is nothing to switch: right in front of you it
+    // is clear, so you can be inside the wood, and by DARK_SOLID metres it is
+    // the full dark mass, which is the only place it was ever doing work.
     const mat = new THREE.MeshStandardMaterial({
       color: 0x4c6338, roughness: 1, metalness: 0, side: THREE.DoubleSide,
       vertexColors: true, envMapIntensity: 0.4,
+      transparent: true, depthWrite: false,
     });
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uClear = { value: DARK_CLEAR };
+      sh.uniforms.uSolid = { value: DARK_SOLID };
+      sh.vertexShader = 'varying float vFlatDist;\n' + sh.vertexShader.replace(
+        '#include <project_vertex>',
+        '#include <project_vertex>\n  vFlatDist = -mvPosition.z;');
+      sh.fragmentShader = 'uniform float uClear;\nuniform float uSolid;\nvarying float vFlatDist;\n'
+        + sh.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          '#include <dithering_fragment>\n  gl_FragColor.a *= smoothstep(uClear, uSolid, vFlatDist);');
+    };
     const flush = () => {
       if (!pos.length) return;
       const geo = new THREE.BufferGeometry();
@@ -584,16 +625,16 @@ export class Flora {
     };
     for (const run of runs) {
       if (run.to - run.from < 3) continue;
-      const near = run.kind.near + DARK_ROW * ROW_GAP;
+      // per sample, because the run-off it has to clear is not constant
       // Not the full forest depth: the mass is a WEDGE that comes back down to
       // the ground, not a box 200 m deep. A box that deep is a box the fly
       // camera spends most of its time inside, and from inside it is a black
       // screen — which is exactly what the first photograph of it was.
-      const far = run.kind.near + DARK_DEPTH;
       let prev = null;
       for (let i = run.from; i <= run.to; i += 2) {
-        const inner = pointAt(p, i, run.side * near);
-        const outer = pointAt(p, i, run.side * far);
+        const base = this.treeLine(i, run.side, run.kind);
+        const inner = pointAt(p, i, run.side * (base + DARK_ROW * ROW_GAP));
+        const outer = pointAt(p, i, run.side * (base + DARK_DEPTH));
         const hi = g.height(inner.x, inner.y), ho = g.height(outer.x, outer.y);
         const here = {
           in: [inner.x, hi - 0.5, -inner.y], inTop: [inner.x, hi + DARK_H, -inner.y],
@@ -670,23 +711,9 @@ export class Flora {
   // -- per frame: one level of detail per cell -------------------------------
   update(camera) {
     const cam = camera.position;
-    // Get out of the way when the camera is inside the wood. The mass is
-    // unlit from behind, so flying into it fills the screen with black — and
-    // flying around the track is how this page is used.
-    if (this.darkParts?.length) {
-      // The rule is about where you are looking FROM. On the road you see the
-      // wall, which is the point of it. Above the canopy you see the lid,
-      // which is also the point of it. Off the road and below the canopy you
-      // are either inside the wood or behind it, and either way the mass is
-      // between you and everything you came to look at.
-      const d = this.ground.roadDist(cam.x, -cam.z);
-      const low = cam.y < this.ground.cameraFloor(cam.x, -cam.z) + DARK_H + 6;
-      const show = !(low && d > 16);
-      if (show !== this.darkShown) {
-        for (const m of this.darkParts) m.visible = show;
-        this.darkShown = show;
-      }
-    }
+    // The dark mass used to be switched off here when the camera was inside a
+    // wood. It fades by distance in its own shader now (see darkness()), so
+    // there is nothing per-frame to decide and nothing to pop.
     for (const cell of this.cells) {
       const dx = cell.x - cam.x, dz = -cell.y - cam.z;
       const d = Math.hypot(dx, dz);
