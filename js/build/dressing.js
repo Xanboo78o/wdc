@@ -135,11 +135,13 @@ export function buildWalls(path, ground, brand) {
   const H = BRAND.H, SINK = 0.35;
   const posts = [];
 
-  // CHUNKED, 256 m at a time: a wall that runs the whole track can never be
+  // CHUNKED, 512 m at a time: a wall that runs the whole track can never be
   // frustum-culled (its bounding sphere contains the camera), so all 4.6 km of
   // it was drawn every frame, and again in the shadow pass, whichever way you
   // were looking. Chunks trade a few draw calls for most of those triangles.
-  const SEG = 128;                                      // samples, 2 m each
+  // ?chunk=<samples> so tools/perfcheck.mjs can measure the trade instead
+  // of us arguing about it: 99999 is one mesh for the whole track.
+  const SEG = (typeof location !== 'undefined' && +new URLSearchParams(location.search).get('chunk')) || 256;                                      // samples, 2 m each
   for (const side of [1, -1]) {
     const L = wallLine(path, ground, side);
     for (let seg0 = 0; seg0 < L.length - 1; seg0 += SEG) {
@@ -211,7 +213,7 @@ export function buildWalls(path, ground, brand) {
     wg.setIndex(wi);
     wg.computeVertexNormals();
     group.add(new THREE.Mesh(wg, fenceMaterial()));
-    }                                                   // end of this 256 m chunk
+    }                                                   // end of this chunk
   }
 
   const pg = new THREE.CylinderGeometry(0.045, 0.045, FENCE_H + 0.1, 6);

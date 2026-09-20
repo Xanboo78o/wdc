@@ -89,12 +89,18 @@ export function buildRoad(path, mats = null) {
   const group = new THREE.Group();
   const last = path.n - 1;
 
-  // CHUNKED, 256 m at a time. A mesh that spans the whole track can never be
+  // CHUNKED, 512 m at a time. A mesh that spans the whole track can never be
   // frustum-culled — its bounding sphere contains the camera everywhere you
   // stand — so one 4.6 km ribbon is drawn in full, twice (the shadow pass is
   // a second draw), whichever way you are looking. Chunks cost a few more
   // draw calls and save most of the triangles.
-  const CHUNK = 128;                       // samples, 2 m each
+  // ?chunk=<samples> so tools/perfcheck.mjs can measure the trade instead
+  // of us arguing about it: 99999 is one mesh for the whole track.
+  // 512 m measured (tools/perfcheck.mjs): looking at one corner it is 1157 ->
+  // 801 ms a frame against one mesh, and down a straight, where nothing can be
+  // culled, it is 623 -> 618 — free. 256 m was no faster and cost twice the
+  // draw calls.
+  const CHUNK = (typeof location !== 'undefined' && +new URLSearchParams(location.search).get('chunk')) || 256;                       // samples, 2 m each
   const roadMat = mats?.road || new THREE.MeshStandardMaterial({
     color: COL.road, roughness: 0.92, metalness: 0,
   });
@@ -139,7 +145,7 @@ export function buildRoad(path, mats = null) {
   };
   let block = 0;
   for (let i = 0; i < last; i++) {
-    if (i % CHUNK === 0) flushKerb();        // same 256 m chunks as the tarmac
+    if (i % CHUNK === 0) flushKerb();        // same chunks as the tarmac
     const turning = Math.abs(path.k[i]) > 1 / 450 && Math.abs(path.k[i + 1]) > 1 / 450;
     if (!turning) continue;
     const c = (block++ % 2) ? red : white;
