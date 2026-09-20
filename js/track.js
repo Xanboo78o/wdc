@@ -17,6 +17,19 @@ export class Track {
       while (d2 < -Math.PI) d2 += 2 * Math.PI;
       this.curv[i] = d2 / (2 * this.ds);
     }
+    // An OPEN track — a point-to-point stage, which is what the hand-built
+    // megatrack is until its two ends are joined — has no sample after the
+    // last one. Both loops above wrap round and join the ends, so the FIRST
+    // and LAST samples get a heading pointing across the map at each other.
+    // The first sample is exactly where cars are placed, which is how a hot
+    // lap started with the car facing into a field. Clamp the ends instead.
+    // (js/build/app.js has always overwritten hdg/curv for the same reason.)
+    if (this.open) {
+      this.hdg[0] = Math.atan2(this.y[1] - this.y[0], this.x[1] - this.x[0]);
+      this.hdg[n - 1] = Math.atan2(this.y[n - 1] - this.y[n - 2], this.x[n - 1] - this.x[n - 2]);
+      this.curv[0] = this.curv[1];
+      this.curv[n - 1] = this.curv[n - 2];
+    }
     this.pitLen = 0;
     if (this.pit) {
       for (let i = 1; i < this.pit.pts.length; i++)

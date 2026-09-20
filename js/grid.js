@@ -41,9 +41,14 @@ export function gridSlots(track, count = 22) {
   const first = (t.corners || [])[0];
   // corner.dir < 0 is a right-hander, so pole goes LEFT of the centreline.
   const poleSide = first && first.dir < 0 ? 1 : -1;
+  // An OPEN track has no road BEHIND the line: s = -6 wraps to the far end of
+  // the map, kilometres away, and the grid forms up in a field facing a hedge.
+  // Line them up FORWARD of the line instead, pole furthest up the road, which
+  // is how a stage start works.
+  const open = !!t.open;
   const slots = [];
   for (let k = 0; k < count; k++) {
-    const s = -6 - k * 8;
+    const s = open ? 6 + (count - 1 - k) * 8 : -6 - k * 8;
     const i = t.idx(s);
     slots.push({
       n: k + 1,                                            // 1 is pole

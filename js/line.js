@@ -154,6 +154,18 @@ export function buildLine(track, spec, mu = spec.mu, margin = 0.35) {
     const a = ((i - 1) + track.n) % track.n, b = (i + 1) % track.n;
     hdg[i] = Math.atan2(pts[b * 2 + 1] - pts[a * 2 + 1], pts[b * 2] - pts[a * 2]);
   }
+  // An OPEN track has no sample before the first or after the last, and the
+  // wrap above points those two at each other across the map. A hot lap takes
+  // the PLAYER's starting heading from this array, so on the hand-built track
+  // that put the car on the start line facing 120 degrees into a field. Same
+  // clamp as js/track.js; the two have to agree or the car and the line it is
+  // being scored against disagree about which way the road goes.
+  if (track.open && track.n > 2) {
+    const n = track.n;
+    hdg[0] = Math.atan2(pts[3] - pts[1], pts[2] - pts[0]);
+    hdg[n - 1] = Math.atan2(pts[(n - 1) * 2 + 1] - pts[(n - 2) * 2 + 1],
+      pts[(n - 1) * 2] - pts[(n - 2) * 2]);
+  }
   let lap = 0;
   for (let i = 0; i < track.n; i++) lap += track.ds / Math.max(v[i], 5);
   return { off, cur, v, pts, hdg, lapTime: lap };

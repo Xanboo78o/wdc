@@ -105,7 +105,16 @@ const t0 = Date.now();
 let stats = null;
 while (Date.now() - t0 < 60000) {
   stats = await evalJs(`window.${opts.flag} || null`);
-  if (stats || errors.some(e => !/favicon/.test(e) && /SyntaxError|ReferenceError|TypeError|export named|Failed to/.test(e))) break;
+  // Break early on a REAL script error, never on a failed resource. "Failed
+  // to load resource ... 404" is how an optional file announces itself —
+  // data/env and data/surf do not exist for a hand-built track and both are
+  // caught — and matching it here made this tool give up after one second,
+  // screenshot a loading screen, and report a page that was building fine as
+  // hung. The instrument was the bug, for the third time in this project.
+  const fatal = errors.some(e => !/favicon/.test(e) &&
+    !/Failed to load resource/.test(e) &&
+    /SyntaxError|ReferenceError|TypeError|is not a function|export named/.test(e));
+  if (stats || fatal) break;
   await sleep(300);
 }
 if (stats) await sleep(opts.wait);
