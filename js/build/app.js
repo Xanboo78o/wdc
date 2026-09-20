@@ -12,7 +12,7 @@ import { makeAero } from '../aero.js';
 import { Hands, steerLock } from '../input.js';
 import { resolveBarrier } from '../collide.js';
 import { buildCar, buildGT3 } from '../car.js';
-import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from '../phonewheel.js';
+import { startDash, mountDashCard, onDash } from '../dash.js';
 import { BuildLook, foldTerrainUVs, Horizon } from './look.js';
 import { buildFlora } from './flora.js';
 import { PropYard } from './propview.js';
@@ -304,10 +304,12 @@ function updateFly(dt) {
 let mode = 'fly';
 const hands = new Hands();
 hands.attach();
-// the phone steers while it is live (js/phonewheel.js); the pedals stay put
-hands.wheelSource = () => phoneLive() ? phone.steer : null;
-startPhoneWheel();
-mountPhoneCard($('info'), { compact: true });
+// The phone stopped being the wheel when the iPad became the dash (js/dash.js,
+// "The iPad is the dash"); js/main.js moved over and the builder did not, so it
+// was still importing the deleted js/phonewheel.js and build.html would not
+// load at all. Same move as main.js: no phone wheel source, just the dash.
+startDash();
+mountDashCard($('info'), { compact: true });
 let track = null, car = null, carView = null, hint = 0, spawnS = 0, lastSpeedProfile = null;
 const CAMS = ['FIRST PERSON', 'CHASE', 'FAR CHASE'];
 // ?view=chase|far picks the drive camera without pressing C (headless shots)
@@ -435,7 +437,7 @@ let acc = 0, camSmooth = null, msgT = 0;
 function toast(m) { $('msg').textContent = m; msgT = 2.4; }
 {
   let was = false;
-  onPhone(p => { if (p.connected !== was) toast(p.connected ? 'PHONE WHEEL CONNECTED' : 'PHONE WHEEL LOST'); was = p.connected; });
+  onDash(d => { if (d.connected !== was) toast(d.connected ? 'DASH CONNECTED' : 'DASH LOST'); was = d.connected; });
 }
 
 function driveStep(frame) {
