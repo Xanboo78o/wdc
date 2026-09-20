@@ -19,6 +19,15 @@ import { PropYard } from './propview.js';
 
 const $ = id => document.getElementById(id);
 const q = new URLSearchParams(location.search);
+// `q.has('flat')` is true for ?flat=0, so the obvious way to turn a flag OFF
+// turned it ON. It cost the other session a screenshot of an empty world that
+// looked perfectly plausible — "flora": null in the stats was the only tell.
+// Every switch in this file goes through here now: present and not 0/false/off.
+const on = (name) => {
+  if (!q.has(name)) return false;
+  const v = (q.get(name) || '').toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'off' && v !== 'no';
+};
 const t0 = performance.now();
 
 // The track file is imported fresh on every load, so a new piece shows up on
@@ -64,7 +73,7 @@ const renderer = new THREE.WebGLRenderer({ canvas: $('cv'), antialias: QN.aa, po
 renderer.setPixelRatio(Math.min(devicePixelRatio, QN.dpr));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
-renderer.shadowMap.enabled = !q.has('lo');
+renderer.shadowMap.enabled = !on('lo');
 // PCFSoft takes many taps per pixel of every shadowed surface. It is the
 // prettiest and it is not free, so it is the top setting only.
 renderer.shadowMap.type = [THREE.BasicShadowMap, THREE.PCFShadowMap, THREE.PCFSoftShadowMap][QN.soft];
@@ -81,11 +90,11 @@ const camera = new THREE.PerspectiveCamera(55, 1, 0.25, 12000);
 // Everything else is photographed: real asphalt, real grass, and a real sky
 // that the sun direction, sun colour and fog were MEASURED out of rather than
 // picked to match it.
-const FLAT = q.has('flat');
+const FLAT = on('flat');
 const LOOK = await BuildLook.load(renderer, { flat: FLAT, sky: q.get('sky') });
 let follow;
 if (LOOK.on) {
-  LOOK.install(scene, { shadows: QN.shadows && !q.has('lo'), shadowMap: QN.shadowMap, shadowBox: QN.shadowBox, env: QN.env });
+  LOOK.install(scene, { shadows: QN.shadows && !on('lo'), shadowMap: QN.shadowMap, shadowBox: QN.shadowBox, env: QN.env });
   follow = f => LOOK.follow(f);
 } else {
   follow = flatViewport();
@@ -155,7 +164,7 @@ if (landmarks.userData.beam) scene.add(gantryBanner(brand, landmarks.userData.be
 // Grass, and a forest planted from data/build/scenery.js. ?flat skips it so a
 // screenshot stays comparable with the ones taken before any of this existed.
 const tFlora = performance.now();
-const flora = FLAT || q.has('noflora') ? null
+const flora = FLAT || on('noflora') ? null
   : await buildFlora(renderer, path, ground, LOOK, { trees: QN.trees, fringe: QN.fringe, shadows: QN.shadows });
 if (flora) scene.add(flora.group);
 const floraMs = performance.now() - tFlora;
@@ -163,7 +172,7 @@ const floraMs = performance.now() - tFlora;
 // Loose objects: cones, tyre stacks, boards. Real bodies (js/props.js), so
 // what happens to them when you arrive is not decided here.
 const tProps = performance.now();
-const yard = q.has('noprops') ? null : new PropYard(path, ground, LOOK, brand);
+const yard = on('noprops') ? null : new PropYard(path, ground, LOOK, brand);
 if (yard) { yard.populate(); scene.add(yard.group); }
 const propMs = performance.now() - tProps;
 

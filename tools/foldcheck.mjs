@@ -42,7 +42,19 @@ try { z = JSON.parse(fs.readFileSync(`${ROOT}data/elev/${KEY}.json`, 'utf8')).s;
 const SAME_LEVEL = 6;          // m of height difference below which it is a fold
 // Far enough along the track that being close is a FOLD and not just the road
 // being continuous with itself.
+//
+// ON A CLOSED CIRCUIT THAT DISTANCE WRAPS, and leaving that out made this tool
+// cry wolf on every real track: it reported Monza, Monaco, Baku and Zandvoort
+// as folding at s=0, always at exactly ds, because s=0 and s=length are the
+// same point on a loop and it was measuring the track against its own seam.
+// Four different circuits reporting an identical headline is what gave it
+// away — the same shape as the bridge bug, and caught the same way.
 const APART = Math.round(120 / ds);
+const OPEN = !!t.open;
+const sep = (i, j) => {
+  const d = Math.abs(i - j);
+  return OPEN ? d : Math.min(d, n - d);
+};
 
 const hdg = new Float64Array(n);
 for (let i = 0; i < n; i++) {
@@ -54,7 +66,7 @@ for (let i = 0; i < n; i++) {
 function nearestElsewhere(x, y, i) {
   let bd = Infinity, bj = -1;
   for (let j = 0; j < n; j++) {
-    if (Math.abs(j - i) < APART) continue;
+    if (sep(i, j) < APART) continue;
     if (z && Math.abs(z[j] - z[i]) > SAME_LEVEL) continue;    // a bridge, not a fold
     const dx = t.x[j] - x, dy = t.y[j] - y;
     const d = dx * dx + dy * dy;
@@ -108,7 +120,7 @@ if (z) {
   for (let i = 0; i < n; i += 2) {
     const reach = t.w[i] + Math.max(t.runL[i], t.runR[i]);
     for (let j = 0; j < n; j++) {
-      if (Math.abs(j - i) < APART) continue;
+      if (sep(i, j) < APART) continue;
       const dz = Math.abs(z[j] - z[i]);
       if (dz <= SAME_LEVEL) continue;
       const dx = t.x[j] - t.x[i], dy = t.y[j] - t.y[i];
@@ -124,6 +136,12 @@ const pct = p => gap[Math.min(gap.length - 1, Math.floor(gap.length * p))].toFix
 
 console.log(`\n${t.name || KEY} — ${(t.length / 1000).toFixed(2)} km, ${n} samples\n`);
 console.log(`ROAD TO ITSELF     closest ${closest.d.toFixed(1)} m AT THE SAME HEIGHT, s=${closest.s} against s=${closest.at}`);
+if (t.crossover) {
+  console.log(`                   NOTE: this track is marked crossover — it legitimately crosses`);
+  console.log(`                   itself, and data/elev is a survey ALONG THE LINE, so it samples`);
+  console.log(`                   the deck and the road beneath it at nearly the same height. One`);
+  console.log(`                   of the pairs below is that bridge, not a fold.`);
+}
 console.log(`                   (crossings more than ${SAME_LEVEL} m apart vertically are bridges and are ignored)`);
 console.log(`BARRIER TO OTHER ROAD   p5 ${pct(0.05)} m   p50 ${pct(0.5)} m   worst ${worst.d.toFixed(1)} m (s=${worst.s}${worst.side} lands on s=${worst.at})`);
 console.log(`\n${onRoad} barrier position(s) stand ON another piece of road`);
@@ -133,6 +151,40 @@ if (hits.length) {
   for (const h of hits.sort((a, b) => a.d - b.d).slice(0, 10)) {
     console.log(`  s=${String(h.s).padStart(5)}${h.side}  ${h.d.toFixed(1)} m from the centreline of s=${h.at}`);
   }
+}
+
+// The same thing as a continuous measure, with no threshold in it. A count of
+// places over 6 m says nothing about Monaco, whose hairpin folds at 13 m with
+// a height difference of a few metres — under the threshold, and still enough
+// to put the ground in the wrong place. This is the number that should go to
+// zero when the ground stops asking one sample and starts asking every nearby
+// road: for each point, how far apart in HEIGHT are the pieces of road that
+// are entitled to an opinion about it.
+if (z) {
+  // THE RADIUS HAS TO BE THE MODEL'S, NOT THE TRACK'S. Measured over the
+  // run-off, Monaco reported 0.00 m and looked clean — but Monaco's run-off is
+  // two metres of street, so nothing else was ever inside it. js/world.js
+  // blends the track's own profile into the grid over NEAR = 55 m and draws
+  // the ground in 26 m cells, so 55 m is the distance at which another piece
+  // of road is entitled to an opinion about this one's ground.
+  const NEAR = 55;
+  const spread = [];
+  for (let i = 0; i < n; i += 2) {
+    const reach = Math.max(t.w[i] + Math.max(t.runL[i], t.runR[i]), NEAR);
+    let hi = 0;
+    for (let j = 0; j < n; j++) {
+      if (sep(i, j) < APART) continue;
+      const dx = t.x[j] - t.x[i], dy = t.y[j] - t.y[i];
+      if (dx * dx + dy * dy > reach * reach) continue;
+      hi = Math.max(hi, Math.abs(z[j] - z[i]));
+    }
+    spread.push(hi);
+  }
+  spread.sort((a, b) => a - b);
+  const at = f => spread[Math.min(spread.length - 1, Math.floor(spread.length * f))].toFixed(2);
+  const bad = spread.filter(v => v > 0.5).length;
+  console.log(`\nHEIGHT DISAGREEMENT within the run-off (0 is a track the ground model can serve)`);
+  console.log(`  p50 ${at(0.5)} m   p95 ${at(0.95)} m   worst ${at(1)} m   over 0.5 m at ${bad} of ${spread.length} points`);
 }
 
 if (steps.length) {
