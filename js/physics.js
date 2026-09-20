@@ -134,6 +134,50 @@ export const CARS = {
     loadSens: 0.18,
     drs: true, drsCl: 0.80, drsCd: 0.74,
   },
+  gt3: {
+    key: 'gt3', name: 'GT3', full: 'GT3',
+    // A closed-cockpit GT car to current GT3 regulations, at the middle of
+    // where Balance of Performance puts them: ~1300 kg with the driver aboard,
+    // 550 hp, and about a fifth of an F1 car's downforce. Everything below is
+    // that real car, not the F1 numbers scaled: the differences that matter
+    // are the ones a driver feels.
+    m: 1300, Izz: 1900,
+    // Mid-engined, 45% of the weight on the front axle (b / L), like the F1
+    // car but far heavier and much taller — see `h`.
+    L: 2.65, a: 1.46, b: 1.19,
+    bodyL: 4.60, bodyW: 2.05,   // the regulations cap the width at 2.05 m
+    // 0.45 m, HALF AS TALL AGAIN as a single-seater's 0.30. This one number is
+    // most of why a GT3 leans, transfers weight slowly, and lets go gently:
+    // load transfer is m * h * a / track, so a taller car moves more of its
+    // weight onto the outside tyres in every corner.
+    h: 0.45,
+    // ~560 kg of downforce at 200 km/h and ~870 at 250, which is where a
+    // modern GT3 sits in a medium-downforce trim. An F1 car makes 2000 kg at
+    // 300. The drag that comes with it caps the car at ~270 km/h.
+    ClA: 2.90, CdA: 1.45, rho: 1.225,
+    aeroBal: 0.40,
+    // 550 hp. Fdrive is what the drivetrain can put down at low speed; a GT3
+    // is traction-limited out of slow corners, and its rear tyres, not its
+    // engine, are what sets that.
+    Pmax: 410e3, Fdrive: 11000,
+    // Steel brakes and ABS, and enough pedal to lock the tyres at any speed —
+    // which is what the ABS aid is then for.
+    Fbrake: 26000, brakeBal: 0.62,
+    rollRes: 320,
+    Iyy: 1900, Ixx: 550,
+    trackF: 1.68, trackR: 1.66,
+    rollDist: 0.52,
+    // A closed car with a flat floor and a small diffuser: it does not have an
+    // F1 car's floor, and spun backwards it does not take off like one.
+    ClFloor: 2.2,
+    // GT slicks: less peak grip than an F1 tyre and a broader, later peak, so
+    // it slides progressively instead of snapping. That breadth is the whole
+    // character of the car.
+    B: 11.0, C: 1.68, E: 0.76,
+    mu: 1.82, wear: 1.0, Topt: 85, Twin: 32,
+    loadSens: 0.20,
+    drs: false,
+  },
 };
 
 export const SURFACE = { track: 1.0, kerb: 0.93, runoff: 0.58, grass: 0.42 };

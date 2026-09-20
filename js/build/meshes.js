@@ -217,9 +217,12 @@ export function buildLandmarks(path, ground) {
 
 // The land, from ground.chunks(). Sim-frame arrays are swapped into three's
 // frame here and nowhere else.
-export function buildGround(chunks) {
+export function buildGround(chunks, material = null) {
   const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.97, metalness: 0 });
+  // `material` is the hook for a textured/PBR terrain: pass one in and these
+  // meshes use it instead. Geometry carries position, normal, vertex colour
+  // and a UV in METRES (see ground.js), so a material can tile by real size.
+  const mat = material || new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.97, metalness: 0 });
   for (const c of chunks) {
     const n = c.position.length / 3;
     const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
@@ -231,6 +234,7 @@ export function buildGround(chunks) {
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     g.setAttribute('color', new THREE.BufferAttribute(c.color, 3));
+    if (c.uv) g.setAttribute('uv', new THREE.BufferAttribute(c.uv, 2));
     g.setIndex(new THREE.BufferAttribute(c.index, 1));
     g.computeBoundingSphere();
     const m = new THREE.Mesh(g, mat);

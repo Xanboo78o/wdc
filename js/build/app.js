@@ -198,7 +198,7 @@ hands.wheelSource = () => phoneLive() ? phone.steer : null;
 startPhoneWheel();
 mountPhoneCard($('info'), { compact: true });
 let track = null, car = null, carView = null, hint = 0, spawnS = 0, driveCam = 0, lastSpeedProfile = null;
-const CAMS = ['CHASE', 'ONBOARD', 'FAR CHASE'];
+const CAMS = ['FIRST PERSON', 'CHASE', 'FAR CHASE'];
 
 async function loadAero() {
   for (const k of ['f1', 'f4']) {
@@ -291,7 +291,7 @@ async function startDrive() {
   mode = 'drive';
   acc = 0;
   document.body.classList.add('driving');
-  toast(newest.name ? `DRIVING INTO THE ${newest.name.toUpperCase()}` : newest.n > 1 ? `DRIVING INTO PIECE ${newest.n}` : 'DRIVING');
+  toast((newest.name ? `DRIVING INTO ${newest.name.toUpperCase()}` : newest.n > 1 ? `DRIVING INTO PIECE ${newest.n}` : 'DRIVING') + ' — C FOR CAMERA');
 }
 function stopDrive() {
   mode = 'fly';
@@ -368,13 +368,22 @@ function placeCar(dt) {
 function driveCamera(dt) {
   const b = carView.yaw.position;
   const fwd = new THREE.Vector3(Math.cos(car.hdg), 0, -Math.sin(car.hdg));
-  if (driveCam === 1) {
-    const head = new THREE.Vector3(-0.28, 0.92, 0).applyMatrix4(carView.att.matrixWorld);
+  if (driveCam === 0) {
+    // FIRST PERSON: out of the driver's own head. The view is built from the
+    // car's attitude rather than its heading, so the horizon tilts with body
+    // roll and with the banking under the wheels — and it looks where the
+    // front wheels point, which is what a driver does.
+    const m = carView.att.matrixWorld;
+    const head = new THREE.Vector3(-0.22, 0.95, 0).applyMatrix4(m);
+    const fwdL = new THREE.Vector3(1, 0, 0).transformDirection(m);
+    const upL = new THREE.Vector3(0, 1, 0).transformDirection(m);
     camera.position.copy(head);
-    camera.lookAt(head.clone().addScaledVector(fwd, 20).add(new THREE.Vector3(0, -0.4, 0)));
-    camera.fov = 72; camera.updateProjectionMatrix();
+    camera.up.copy(upL);
+    camera.lookAt(head.clone().addScaledVector(fwdL.applyAxisAngle(upL, car.delta * 0.55), 30));
+    camera.fov = 78; camera.updateProjectionMatrix();
     return;
   }
+  camera.up.set(0, 1, 0);
   const back = driveCam === 2 ? 14 : 6.8, up = driveCam === 2 ? 4.2 : 2.1;
   const want = b.clone().addScaledVector(fwd, -back).add(new THREE.Vector3(0, up, 0));
   if (!camSmooth) camSmooth = want.clone();
@@ -404,7 +413,7 @@ function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.1, (now - prev) / 1000);
   prev = now;
-  if (mode === 'fly') { updateFly(dt); hands.endFrame(); }
+  if (mode === 'fly') { camera.up.set(0, 1, 0); updateFly(dt); hands.endFrame(); }
   else {
     driveStep(dt);
     placeCar(dt);

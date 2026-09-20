@@ -339,7 +339,7 @@ export class Ground {
     const cellOf = [o.NEAR, o.MID, o.FAR, o.HORIZON], skirt = [4, 10, 24, 40];
     const CH = 16, out = [];
     for (let cy = 0; cy < nty; cy += CH) for (let cx = 0; cx < ntx; cx += CH) {
-      const pos = [], nor = [], col = [], idx = [];
+      const pos = [], nor = [], col = [], uv = [], idx = [];
       for (let ty = cy; ty < Math.min(nty, cy + CH); ty++) for (let tx = cx; tx < Math.min(ntx, cx + CH); tx++) {
         const L = lod[ty * ntx + tx];
         const nb = (dx, dy) => {
@@ -348,18 +348,21 @@ export class Ground {
         };
         this._tile((tx0 + tx) * T, (ty0 + ty) * T, T, cellOf[L], skirt[L],
           [nb(0, -1) !== L, nb(1, 0) !== L, nb(0, 1) !== L, nb(-1, 0) !== L],
-          pos, nor, col, idx);
+          pos, nor, col, uv, idx);
       }
       out.push({
         position: Float32Array.from(pos), normal: Float32Array.from(nor),
         color: Float32Array.from(col),
+        // UVs in METRES, the same law the rest of the game uses: a material
+        // says how big its photo is and sets repeat = 1 / size.
+        uv: Float32Array.from(uv),
         index: pos.length / 3 > 65535 ? Uint32Array.from(idx) : Uint16Array.from(idx),
       });
     }
     return out;
   }
 
-  _tile(x0, y0, T, cell, skirtDepth, skirts, pos, nor, col, idx) {
+  _tile(x0, y0, T, cell, skirtDepth, skirts, pos, nor, col, uv, idx) {
     const n = Math.round(T / cell), m = n + 3;       // one ring of padding for normals
     const h = new Float64Array(m * m);
     for (let j = 0; j < m; j++) for (let i = 0; i < m; i++)
@@ -374,6 +377,7 @@ export class Ground {
       const nl = Math.hypot(ddx, ddy, 1);
       const nx = -ddx / nl, ny = -ddy / nl, nz = 1 / nl;
       pos.push(x0 + i * cell, y0 + j * cell, hc);
+      uv.push(x0 + i * cell, y0 + j * cell);
       nor.push(nx, ny, nz);
       normals.push(nx, ny, nz);
       const c = this._colour(x0 + i * cell, y0 + j * cell, nz);
@@ -398,6 +402,7 @@ export class Ground {
         top.push(v);
         bot.push(pos.length / 3);
         pos.push(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2] - skirtDepth);
+        uv.push(uv[v * 2], uv[v * 2 + 1] - skirtDepth);
         nor.push(nor[v * 3], nor[v * 3 + 1], nor[v * 3 + 2]);
         col.push(col[v * 3], col[v * 3 + 1], col[v * 3 + 2]);
       }
