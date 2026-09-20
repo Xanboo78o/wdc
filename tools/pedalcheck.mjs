@@ -20,7 +20,7 @@ for (let i = 0; i < argv.length; i++) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const PORT = 8176, CDP = 9300 + Math.floor(Math.random() * 600);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'wdc-pedal-'));
-const url = `http://127.0.0.1:${PORT}/${page}?drive=1&lo=1`;
+const url = `http://127.0.0.1:${PORT}/${page}?drive=1&lo=1&flat=1&noprops=1`;   // the cheap look: gates, not photographs
 const chrome = spawn('/usr/bin/chromium', [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
   '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader',
@@ -47,21 +47,34 @@ const ev = async e => (await send('Runtime.evaluate', { expression: e, returnByV
 await send('Runtime.enable');
 
 for (let i = 0; i < 200 && !(await ev('!!window.__build')); i++) await sleep(300);
-await sleep(1500);
+// ...and then for the CAR: ?drive=1 starts asynchronously (aero maps, the
+// look), and pressing pedals before it exists reads an empty HUD and shifts
+// every later reading by one.
+for (let i = 0; i < 200 && !(await ev('!!window.__car')); i++) await sleep(300);
+await sleep(800);
 const DIG = { Digit1: 49, Digit2: 50, Digit3: 51, Digit8: 56, Digit9: 57, Digit0: 48, KeyW: 87, KeyS: 83 };
 const key = (type, code) => send('Input.dispatchKeyEvent', {
   type, code, key: code.replace(/^Digit|^Key/, '').toLowerCase(), windowsVirtualKeyCode: DIG[code], nativeVirtualKeyCode: DIG[code],
 });
-const bars = () => ev(`({ t: document.getElementById('pedT')?.style.width, b: document.getElementById('pedB')?.style.width,
-  speed: document.getElementById('speed')?.textContent, driving: document.body.classList.contains('driving') })`);
+// Read the CAR, not the HUD. The bars are written once per frame, and with
+// the look pass on, a headless frame can be seconds apart — reading the DOM
+// caught stale widths and shifted every result by one test.
+const bars = () => ev(`({ t: window.__car ? Math.round(window.__car.throttle * 100) + '%' : '',
+  b: window.__car ? Math.round(window.__car.brake * 100) + '%' : '',
+  speed: window.__car ? Math.round(window.__car.speed * 3.6) : 0,
+  driving: document.body.classList.contains('driving'),
+  down: window.__hands ? [...window.__hands.down].join('+') : '' })`);
 
 async function hold(codes, label) {
   for (const c of codes) await key('keyDown', c);
-  await sleep(4000);                        // swiftshader: a few frames
+  // Step the SIM, don't wait for frames: headless draws this page seconds
+  // apart and the pedals ramp in sim time. Two seconds is ten times the ramp.
+  await ev('window.__step(1)');
+  await ev('window.__step(1)');
   const r = await bars();
   for (const c of codes) await key('keyUp', c);
   await sleep(2500);
-  console.log(`${label.padEnd(26)} throttle bar ${String(r.t).padEnd(5)} brake bar ${String(r.b).padEnd(5)} speed ${r.speed}${r.driving ? '' : '  (NOT in drive mode)'}`);
+  console.log(`${label.padEnd(26)} throttle ${String(r.t).padEnd(5)} brake ${String(r.b).padEnd(5)} speed ${String(r.speed).padEnd(4)} keys the page has down: ${r.down || '(none)'}`);
   return r;
 }
 console.log(`page ${url}`);

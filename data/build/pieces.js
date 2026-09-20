@@ -80,11 +80,14 @@ export const PIECES = [
   { kind: 'turn', dir: 'left', angle: 720, radius: 38, climb: 30, bank: 8, note: 'the double loop — 2 full circles, +30 m, banked' },
   { kind: 'straight', length: 120, note: 'out of the top' },
 
-  // "add a snail type curve like in the trailmakers grandprix"
-  // One piece: 900 degrees winding from R110 down to R28, climbing all the
-  // way, so it coils inward like a shell and the exit off the top crosses
-  // back over its own outer coils.
-  { part: 'The snail', kind: 'straight', length: 80, width: 18, run: 2, climb: 2, note: 'into the shell' },
-  { kind: 'turn', dir: 'left', angle: 900, radius: 110, radius2: 28, climb: 22, bank: 6, note: 'THE SNAIL — two and a half turns, tightening all the way' },
-  { kind: 'straight', length: 260, climb: 7, note: 'off the top of the snail, back over its own coils' },
+  // "thats not how a snail works, it the like big sweeper, that continues to
+  // spiral, then hairpins and spirals out, look at trackmaps of shanghais snail"
+  // Correct. Shanghai's T1-T2, lifted with tools/steal.mjs: one enormous right
+  // that keeps tightening for 298 degrees down to a hairpin, then a left that
+  // unwinds back out for 237. That is the shell shape — a helix was not it.
+  { part: 'The snail', kind: 'straight', length: 120, width: 16, run: 8, climb: -2, note: 'run-in, road narrows back to normal' },
+  { kind: 'turn', dir: 'right', angle: 298, radius: 120, radius2: 30, climb: 3, bank: 3, note: 'winds in — 298 deg, R120 tightening to a R30 hairpin' },
+  { kind: 'straight', length: 4 },
+  { kind: 'turn', dir: 'left', angle: 237, radius: 30, radius2: 90, climb: -3, note: 'and unwinds out the other way — R30 opening to R90' },
+  { kind: 'straight', length: 160, note: 'out of the snail' },
 ];

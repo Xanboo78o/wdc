@@ -22,7 +22,7 @@ const chrome = spawn('/usr/bin/chromium', [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
   '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader',
   '--window-size=1280,720', `--remote-debugging-port=${CDP}`, `--user-data-dir=${profile}`,
-  'http://127.0.0.1:8176/build.html?lo=1',
+  'http://127.0.0.1:8176/build.html?lo=1&flat=1&noprops=1',
 ], { stdio: 'ignore' });
 
 async function attach(match) {

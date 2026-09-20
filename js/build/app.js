@@ -483,15 +483,29 @@ function loop(now) {
   if (yard) { if (mode !== 'drive') yard.settle(dt); yard.sync(); }
   msgT -= dt;
   $('msg').style.opacity = msgT > 0 ? 1 : 0;
+  // handles for headless probes (tools/*.mjs). Every frame, not once: the car
+  // does not exist yet on the frame __build is published.
+  window.__cam = camera; window.__car = car; window.__hands = hands;
+  // Step the simulation without waiting for frames. A headless browser draws
+  // this page seconds apart, and the sim only advances inside a frame — so a
+  // gate that presses a key and then reads the car was reading a snapshot from
+  // before the press. tools/pedalcheck.mjs drives this instead.
+  window.__step = secs => { if (mode === 'drive') driveStep(Math.max(0, Math.min(5, secs))); };
   renderer.render(scene, camera);
   frames++;
   if (frames === 2) {
     let tris = 0;
     scene.traverse(o => { if (o.isMesh && o.geometry.index) tris += o.geometry.index.count / 3; });
+    // What was ACTUALLY submitted this frame, instances and shadow pass
+    // included. `tris` above counts each base geometry ONCE, so a forest of
+    // 9,266 instanced trees reads the same as one tree — which is how a scene
+    // that draws twelve million triangles a frame can report 473k and look
+    // cheap. renderer.info is the honest number.
+    const R = renderer.info.render;
     window.__build = {
       ready: true, buildMs: Math.round(buildMs), n: path.n, length: path.length,
       pieces: PIECES.length, chunks: chunks.length, tris: Math.round(tris),
-      draws: renderer.info.render.calls,
+      draws: R.calls, frameTris: R.triangles,
       textured: LOOK.on, sky: LOOK.look?.sky?.name || null,
       maps: Object.keys(LOOK.look?.maps || {}).length,
       land: TERRAIN ? [!!TERRAIN.map, !!TERRAIN.normalMap, !!TERRAIN.roughnessMap] : null,

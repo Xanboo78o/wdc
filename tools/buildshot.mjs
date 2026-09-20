@@ -37,7 +37,11 @@ catch {
   await sleep(700);
 }
 
-const qs = new URLSearchParams();
+// Gates run the cheap viewport by default: the look pass added a 9k-tree
+// forest and 811 props, and headless swiftshader draws that at a fraction of
+// a frame per second, which turns every check into a timeout. Pass
+// --q flat=0 --q noprops=0 to photograph the real thing.
+const qs = new URLSearchParams({ flat: '1', noprops: '1' });
 for (const chunk of opts.q) for (const [k, v] of new URLSearchParams(chunk)) qs.set(k, v);
 const url = `http://127.0.0.1:${opts.port}/build.html?${qs}`;
 const CDP = 9300 + Math.floor(Math.random() * 600);

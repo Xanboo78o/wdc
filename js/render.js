@@ -85,7 +85,7 @@ function roadSurface(track, line, bank) {
       const cols = [colourAt(i, li0), colourAt(i, li1), colourAt(j, lj1), colourAt(j, lj0)];
       b.quad([a[0], ya0, a[1]], [d[0], ya1, d[1]], [g[0], yb1, g[1]], [e[0], yb0, e[1]],
         [0, 1, 0],
-        [[li0, i * t.ds], [li1, i * t.ds], [lj1, j * t.ds], [lj0, j * t.ds]],
+        [[li0, foldV(i * t.ds)], [li1, foldV(i * t.ds)], [lj1, foldV(j * t.ds)], [lj0, foldV(j * t.ds)]],
         cols);
     }
   }
@@ -94,6 +94,24 @@ function roadSurface(track, line, bank) {
 
 // A ribbon between two lateral offsets, UV'd in metres. Flat, except where the
 // circuit is banked — `bank` may be null for anything that should stay level.
+// UVs are metres along the track, and a lap is thousands of them: at Monza
+// that is 1,931 repeats of a 3 m photograph, and a GPU sampler keeps only a
+// few fractional bits of a texture coordinate, so past a few hundred repeats
+// every pixel of a tile samples nearly the same texel and the surface smears
+// into streaks. Measured on the builder's terrain with a high-contrast scan by
+// the parallel look-pass session; NOT visible on this road today, because the
+// game's asphalt map is nearly featureless (stddev 4/255 — DESIGN.md says so),
+// and the photographs before and after this change are identical within noise.
+//
+// The fold is insurance for the day a road carries a texture with something in
+// it. A TRIANGLE wave, not a saw-tooth: continuous across every quad, so there
+// is no seam case, and it mirrors the texture at each fold, which on asphalt
+// and on kerb blocks is invisible. FOLD must be an exact multiple of every
+// material size that uses these UVs — 96 covers 2, 2.4, 3, 4, 6, 8, 12, 16,
+// 24, 32 and 48.
+const FOLD = 96;
+const foldV = s => FOLD - Math.abs((s % (2 * FOLD)) - FOLD);
+
 function ribbon(track, innerAt, outerAt, y, bank = null) {
   const t = track, n = t.n;
   const b = new Builder();
@@ -114,7 +132,7 @@ function ribbon(track, innerAt, outerAt, y, bank = null) {
     const yj1 = y + (bank ? bankY(bank, t, j, bj) : 0);
     b.quad([p0[0], yi0, p0[1]], [p1[0], yi1, p1[1]], [q1[0], yj1, q1[1]], [q0[0], yj0, q0[1]],
       [0, 1, 0],
-      [[ai, i * t.ds], [bi, i * t.ds], [bj, j * t.ds], [aj, j * t.ds]]);
+      [[ai, foldV(i * t.ds)], [bi, foldV(i * t.ds)], [bj, foldV(j * t.ds)], [aj, foldV(j * t.ds)]]);
   }
   return b;
 }
@@ -143,7 +161,7 @@ function split(track, innerAt, outerAt, y, bank, matAt) {
     const yj1 = y + (bank ? bankY(bank, t, j, bj) : 0);
     b.quad([p0[0], yi0, p0[1]], [p1[0], yi1, p1[1]], [q1[0], yj1, q1[1]], [q0[0], yj0, q0[1]],
       [0, 1, 0],
-      [[ai, i * t.ds], [bi, i * t.ds], [bj, j * t.ds], [aj, j * t.ds]]);
+      [[ai, foldV(i * t.ds)], [bi, foldV(i * t.ds)], [bj, foldV(j * t.ds)], [aj, foldV(j * t.ds)]]);
   }
   return out;
 }
