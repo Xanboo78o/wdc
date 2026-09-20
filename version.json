@@ -1,7 +1,7 @@
 {
- "version": "15a86ab",
- "note": "The speaker under the seat is a chassis, so filter it like one",
- "built": "2026-09-20T17:06:15.895Z",
+ "version": "3dfc9b4",
+ "note": "Gear 5 is gear 3, and here is the reason",
+ "built": "2026-09-20T17:11:00.899Z",
  "files": [
   "app.html",
   "build.html",
