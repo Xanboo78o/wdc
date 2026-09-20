@@ -457,7 +457,18 @@ function loop(now) {
   if (state.box) {
     state.box.update(frame, car.speed * 3.6, car.throttle);
     if (state.engine) {
-      state.engine.update(state.box.rpm, car.throttle, { off: car.surface < 1 ? 1 : 0 });
+      // peakSlip is 60 rounds of bisection, so it is cached per car spec — the
+      // tyre layer wants the slip angle THIS car peaks at, so that "starts
+      // talking at 70%" means 70% of the grip it actually has.
+      if (state._peak === undefined || state._peakFor !== car.spec) {
+        state._peak = peakSlip(car.spec); state._peakFor = car.spec;
+      }
+      state.engine.update(state.box.rpm, car.throttle, {
+        off: car.surface < 1 ? 1 : 0,
+        speed: car.speed,
+        slip: Math.max(Math.abs(car.slipF), Math.abs(car.slipR)),
+        peak: state._peak,
+      });
     }
   }
   view.frame(car, frame, { slipOver: over, rough });

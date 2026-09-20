@@ -76,7 +76,15 @@
 </div>
 
 <div class="panel">
-  <h2>ENGINE &mdash; the maths here is copied from js/audio.js, unchanged</h2>
+  <h2>ENGINE</h2>
+  <div class="note" style="margin:0 0 10px">
+    This panel used to claim it was copied from js/audio.js unchanged. It was not:
+    I rebuilt it from that file's COMMENT rather than its code, and got REF wrong
+    &mdash; 11000 here against 8300 there. A lower REF is a lower rate is a deeper
+    engine, so what you called gold was my mistake. It is a dial now, and 11000 is
+    the default because you preferred it.
+  </div>
+  <div class="row"><label>REF rpm</label><input type="range" id="ref" min="5000" max="16000" step="100" value="11000"><span class="val" id="refV">11000</span></div>
   <div class="row">
     <label>loop</label>
     <div style="flex:1" id="loops"></div>
@@ -131,6 +139,8 @@
   <button id="start" class="go">START AUDIO</button>
   <button id="sweep">auto-sweep revs</button>
   <button id="corner">simulate a slide</button>
+  <button id="copy">COPY SETTINGS</button>
+  <pre id="out" style="white-space:pre-wrap;color:var(--dim);font-size:12px;margin:10px 0 0"></pre>
   <div class="note">Browsers refuse to make sound until you click something. That is why START exists.</div>
 </div>
 
@@ -147,6 +157,25 @@
 // whole point here is to test routing to TWO devices. The maths below is copied
 // line for line, so what he hears is what the game already makes.
 const $ = id => document.getElementById(id);
+
+const IDS = ['muffle', 'tyreLvl', 'thresh', 'tyreCans', 'tyreRoom',
+             'engCans', 'engRoom', 'roadLvl', 'roadCut', 'roadCans', 'roadRoom',
+             'gustD', 'gustR', 'ref'];
+// PERCENTS GO OUT AS FRACTIONS. The sliders are 0-100 because that reads
+// better under a thumb; js/audio.js wants 0-1, and converting in one place
+// beats remembering which of thirteen numbers is which.
+const PCT = new Set(['tyreLvl', 'thresh', 'tyreCans', 'tyreRoom', 'engCans',
+                     'engRoom', 'roadLvl', 'roadCans', 'roadRoom', 'gustD', 'gustR']);
+function save() {
+  const mix = {};
+  for (const i of IDS) mix[i] = PCT.has(i) ? +$(i).value / 100 : +$(i).value;
+  if (roomSinkId) mix.roomSink = roomSinkId;
+  try { localStorage.setItem('wdc.sound', JSON.stringify(mix)); } catch { /* blocked */ }
+  return mix;
+}
+// Same origin as the game, so every move of a slider retunes the car.
+addEventListener('input', e => { if (IDS.includes(e.target.id)) save(); });
+
 const FILES = ['loop_0', 'loop_1_0', 'loop_2_0', 'loop_3_0', 'loop_4_0', 'loop_5_0'];
 const REF_RPM = 11000;                     // audio.js's tuning constant, by ear
 const RATE_MIN = 0.35, RATE_MAX = 2.6;
@@ -260,7 +289,7 @@ function tick() {
   $('thrV').textContent = Math.round(thr * 100) + '%';
 
   // ENGINE — copied from js/audio.js update(), unchanged.
-  const rate = Math.max(RATE_MIN, Math.min(RATE_MAX, rpm / REF_RPM));
+  const rate = Math.max(RATE_MIN, Math.min(RATE_MAX, rpm / +$('ref').value));
   eng.src.playbackRate.value = rate;
   eng.filt.frequency.value = 500 + 7500 * Math.pow(thr, 1.3);
   eng.gain.gain.value = 0.5 * (0.30 + 0.70 * thr);
@@ -336,6 +365,7 @@ function tick() {
                            ['tyreLvl', v => v + '%'], ['muffle', v => v + ' Hz'],
                            ['roadLvl', v => v + '%'], ['roadCut', v => v + ' Hz'],
                            ['gustD', v => v + '%'], ['gustR', v => (v / 100).toFixed(2) + 'x'],
+                           ['ref', v => v],
                            ['roadCans', v => v + '%'], ['roadRoom', v => v + '%']]) {
     $(id + 'V').textContent = fmt($(id).value);
   }
@@ -343,6 +373,21 @@ function tick() {
 }
 
 // ---- controls ---------------------------------------------------------------
+// Come back to whatever was last dialled in, here or in the game.
+try {
+  const saved = JSON.parse(localStorage.getItem('wdc.sound') || 'null');
+  if (saved) for (const i of IDS) {
+    if (saved[i] == null || !$(i)) continue;
+    $(i).value = PCT.has(i) ? Math.round(saved[i] * 100) : saved[i];
+  }
+} catch (e) {
+  // A blocked/absent store is normal and silent. Anything else is a bug in
+  // here, and swallowing it is how "come back to your settings" quietly stops
+  // working — which it did, for exactly 66 lines, because IDS was read before
+  // it was declared and the catch ate the ReferenceError.
+  if (e instanceof ReferenceError || e instanceof TypeError) console.error('restore:', e);
+}
+
 $('gears').innerHTML = TOPS.map((t, i) =>
   `<button data-gear="${i + 1}" class="${i + 1 === gear ? 'on' : ''}" title="${t} km/h at the limiter">${i + 1}</button>`).join('');
 $('gears').onclick = e => {
@@ -398,6 +443,17 @@ async function apply(which, id, label) {
     if (canRouteCtx && ctx) await ctx.setSinkId(id).catch(e => alert('setSinkId: ' + e.message));
   }
 }
+// The settings live in HIS browser and I cannot read them. So the page hands
+// them over in a block small enough to paste back.
+$('copy').onclick = () => {
+  save();
+  const txt = 'SOUND ' + IDS.map(i => `${i}=${$(i).value}`).join(' ') + ` loop=${pick}`;
+  $('out').textContent = txt;
+  navigator.clipboard?.writeText(txt).then(
+    () => { $('copy').textContent = 'COPIED'; setTimeout(() => $('copy').textContent = 'COPY SETTINGS', 1500); },
+    () => { $('copy').textContent = 'select the text below'; });
+};
+
 $('pickCans').onclick = () => choose('cans');
 $('pickRoom').onclick = () => choose('room');
 </script>

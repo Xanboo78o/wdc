@@ -1,4 +1,4 @@
-// audio.js — the engine, out of the speakers.
+// audio.js — the car, out of the speakers.
 //
 // This is Adam's idea, arrived at the long way round: a loop, played back at a
 // rate. Two attempts at synthesising the loop sounded, in his words, like
@@ -8,28 +8,68 @@
 // at 7,900 Hz and leaves hiss. A real engine recording is already at engine
 // frequency, so it moves about an octave and keeps its character.
 //
-// So the loop is a CC0 recording from data/audio/ (see SOURCE.md), and the
-// only thing this file does is decide how fast to play it.
+// So the loops are CC0 recordings from data/audio/ (see SOURCE.md), and this
+// file only decides how fast to play them and how loud.
 //
-// TWO AXES, and getting them the wrong way round is the classic mistake:
+// TWO AXES for the engine, and getting them the wrong way round is the classic
+// mistake:
 //   RATE  follows RPM.      What note the engine is at.
 //   LOAD  follows throttle. How hard it is working: level and brightness.
 // Driving rate from throttle means blipping in the pit lane screams at max
 // pitch while stationary, and lifting at 250 km/h drops to idle while you are
 // still doing 250. Both are backwards, and both are what this avoids.
 //
+// AND A THIRD AXIS THE ENGINE CANNOT CARRY: SPEED.
+//
+// Adam, after driving it: "make gear 5 feel like gear 3". He was right and the
+// cause was one line. The engine note is rpm and throttle only, and F1 gears
+// reach the limiter at [85,115,146,176,208,240,280,321] km/h — so third and
+// fifth are both 15,000 rpm at their limiter and therefore BYTE FOR BYTE the
+// same sound, sixty km/h apart. To the audio, gear 5 was gear 3.
+//
+// Road and wind fix that: they rise with speed and ignore revs entirely.
+//
+// TYRES are on a fourth axis, slip, expressed as a fraction of the car's own
+// limit via physics.peakSlip — so "starts talking at 70%" means 70% of the
+// grip this car actually has, not 70% of a number someone picked.
+//
 // Imports nothing from the renderer or the simulation. main.js hands it
 // numbers; it never reaches back.
 
-// The loop file, and the engine speed the RATE is normalised against. This is
-// NOT measured from the file: tools/enginecheck.mjs tries and its fundamental
-// detector is not trustworthy on this material — it read 25 Hz to 1225 Hz
-// across six recordings of one engine. See data/audio/SOURCE.md. So REF is a
-// tuning constant chosen by ear on engine.html, not a measurement, and it is
-// overridable precisely because it is a guess.
+// The loop files. REF is the engine speed the RATE is normalised against, and
+// it is NOT measured from the file: tools/enginecheck.mjs tries and its
+// fundamental detector is not trustworthy on this material — it read 25 Hz to
+// 1225 Hz across six recordings of one engine. See data/audio/SOURCE.md.
+//
+// 8300 was chosen by ear on engine.html. 11000 got into sound.html by mistake
+// when I rebuilt the model there from this file's COMMENT instead of its code,
+// and Adam's verdict on the mistake was "THE ENGINE IS GOLLDDDDD". A lower REF
+// is a lower rate is a deeper engine, and he prefers the deeper one. So the
+// default is now his, and it stays overridable because it was always a guess.
 const FILES = ['loop_0', 'loop_1_0', 'loop_2_0', 'loop_3_0', 'loop_4_0', 'loop_5_0'];
-const REF_RPM = 8300;        // rpm at which the loop plays at 1.00x
-const RATE_MIN = 0.40, RATE_MAX = 2.20;
+const REF_RPM = 11000;
+const RATE_MIN = 0.35, RATE_MAX = 2.60;
+
+// Everything the sound bench can tune. sound.html writes these to localStorage
+// under the same origin, so tuning there changes the game without a rebuild —
+// and whatever is left here is what ships for anyone who never opens it.
+export const MIX = {
+  ref: REF_RPM,
+  engCans: 1.00, engRoom: 1.00,
+  tyreLvl: 0.35, thresh: 0.18, tyreCans: 1.00, tyreRoom: 0.15,
+  roadLvl: 0.45, roadCut: 900, roadCans: 1.00, roadRoom: 0.70,
+  gustD: 0.45, gustR: 0.70,
+  muffle: 600,
+  roomSink: null,
+};
+
+function savedMix() {
+  try {
+    const raw = localStorage.getItem('wdc.sound');
+    if (!raw) return { ...MIX };
+    return { ...MIX, ...JSON.parse(raw) };
+  } catch { return { ...MIX }; }      // private window, blocked storage, bad JSON
+}
 
 export class Engine {
   constructor(opts = {}) {
@@ -37,9 +77,11 @@ export class Engine {
     this.ctx = null;
     this.src = null;
     this.file = FILES[Math.max(0, Math.min(FILES.length - 1, (opts.pick ?? 1) - 1))];
-    this.ref = opts.ref || REF_RPM;
+    this.mix = savedMix();
+    this.ref = opts.ref || this.mix.ref || REF_RPM;
     this.master = opts.volume ?? 0.5;
     this.muted = false;
+    this.t0 = 0;
   }
 
   // MUST be called from a real user gesture — browsers will not let an
@@ -51,52 +93,131 @@ export class Engine {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return false;
       this.ctx = new AC();
-      const r = await fetch(`${baseUrl}data/audio/${this.file}.wav`);
-      if (!r.ok) throw new Error(`${this.file}.wav: HTTP ${r.status}`);
-      const buf = await this.ctx.decodeAudioData(await r.arrayBuffer());
+      this.t0 = this.ctx.currentTime;
 
-      // Load: a lowpass that opens with throttle. An engine off the throttle
-      // is not quieter so much as duller, and the filter is most of that.
-      this.filt = this.ctx.createBiquadFilter();
-      this.filt.type = 'lowpass'; this.filt.Q.value = 0.8;
-      this.gain = this.ctx.createGain();
-      this.gain.gain.value = 0;
-      this.filt.connect(this.gain);
-      this.gain.connect(this.ctx.destination);
+      // TWO BUSES. CANS is everything; ROOM is what goes to a speaker sitting
+      // against the car — Adam taped his under the seat and reported it
+      // "shakes a lil and muffles it like its comiing from the engine". That
+      // muffling was an accident of a small driver pointing at the floor; here
+      // it is deliberate, because it is the whole trick of a bass shaker.
+      //
+      // ROOM stays SILENT unless a separate output device has been chosen. If
+      // both buses land on the same speakers, the filtered copy just adds
+      // boom to the unfiltered one, which is worse than not having it.
+      this.cans = this.ctx.createGain();
+      this.cans.connect(this.ctx.destination);
+      this.room = this.ctx.createGain();
+      this.room.gain.value = this.mix.roomSink ? 1 : 0;
+      this.roomLP = this.ctx.createBiquadFilter();
+      this.roomLP.type = 'lowpass';
+      this.roomLP.frequency.value = this.mix.muffle;
+      this.roomLP.Q.value = 0.7;
+      this.room.connect(this.roomLP);
+      this.roomLP.connect(this.ctx.destination);
+      if (this.mix.roomSink && this.ctx.setSinkId) {
+        this.ctx.setSinkId(this.mix.roomSink).catch(() => { /* device went away */ });
+      }
 
-      // ONE source node, started once, rate modulated forever. Restarting it
-      // per frame is the classic mistake and it machine-guns.
-      this.src = this.ctx.createBufferSource();
-      this.src.buffer = buf;
-      this.src.loop = true;
-      this.src.connect(this.filt);
-      this.src.start();
+      this.engine = await this._layer(baseUrl, this.file, 'lowpass');
+      // Tyres and road are OPTIONAL: a missing file must cost the engine
+      // nothing, because the engine is the one sound this game cannot be
+      // played without.
+      this.tyre = await this._layer(baseUrl, 'tyre_squeal', 'lowpass').catch(() => null);
+      this.road = await this._layer(baseUrl, 'tyre_squeal', 'lowpass').catch(() => null);
+      if (this.road) this.road.src.playbackRate.value = 0.55;
 
-      await this.ctx.resume();
-      this.ok = this.ctx.state === 'running';
-      return this.ok;
+      // main.js reads these for the __wdc telemetry block; they mean the
+      // ENGINE, as they always did.
+      this.src = this.engine.src;
+      this.gain = this.engine.gain;
+      this.ok = true;
+      return true;
     } catch (e) {
-      // A game that will not start because the speakers are busy is worse than
-      // a silent one.
-      console.warn('engine audio unavailable:', e.message);
-      this.ok = false;
+      this.err = e.message;
       return false;
     }
   }
 
-  // rpm and throttle from the sim. `airborne` and `off` are cues, not physics.
-  update(rpm, throttle, { off = 0 } = {}) {
+  async _layer(baseUrl, name, filter) {
+    const r = await fetch(`${baseUrl}data/audio/${name}.wav`);
+    if (!r.ok) throw new Error(`${name}.wav: HTTP ${r.status}`);
+    const buf = await this.ctx.decodeAudioData(await r.arrayBuffer());
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const filt = this.ctx.createBiquadFilter(); filt.type = filter;
+    const gain = this.ctx.createGain(); gain.gain.value = 0;
+    const toCans = this.ctx.createGain(), toRoom = this.ctx.createGain();
+    src.connect(filt); filt.connect(gain);
+    gain.connect(toCans); gain.connect(toRoom);
+    toCans.connect(this.cans); toRoom.connect(this.room);
+    src.start();
+    return { src, filt, gain, toCans, toRoom };
+  }
+
+  /**
+   * `rpm` and `throttle` are the engine. Everything else is optional and
+   * silent when absent, so an older caller keeps working unchanged.
+   *   off    1 when the wheels are off the tarmac
+   *   speed  metres per second (car.speed)
+   *   slip   the larger of |slipF|,|slipR| in radians
+   *   peak   physics.peakSlip(spec) — the slip angle this car peaks at
+   */
+  update(rpm, throttle, { off = 0, speed = 0, slip = 0, peak = 0 } = {}) {
     if (!this.ok || this.muted) { if (this.gain) this.gain.gain.value = 0; return; }
+    const m = this.mix;
+
+    // ---- engine: rate from rpm, load from throttle --------------------------
     const rate = Math.max(RATE_MIN, Math.min(RATE_MAX, rpm / this.ref));
-    this.src.playbackRate.value = rate;
+    this.engine.src.playbackRate.value = rate;
     const t = Math.max(0, Math.min(1, throttle));
-    // Brightness is the load axis. Off the throttle the top end shuts down.
-    this.filt.frequency.value = 500 + 7500 * Math.pow(t, 1.3);
+    this.engine.filt.frequency.value = 500 + 7500 * Math.pow(t, 1.3);
     // Level rises with load but never to zero: an engine on the overrun is
     // still an engine, and a car that goes silent mid-corner sounds broken.
-    // `off` dulls it further when the wheels are off the tarmac.
-    this.gain.gain.value = this.master * (0.30 + 0.70 * t) * (1 - 0.25 * off);
+    this.engine.gain.gain.value = this.master * (0.30 + 0.70 * t) * (1 - 0.25 * off);
+    this.engine.toCans.gain.value = m.engCans;
+    this.engine.toRoom.gain.value = m.engRoom;
+
+    const kmh = speed * 3.6;
+
+    // ---- tyres: a fraction of THIS car's limit, silent below a threshold ----
+    if (this.tyre) {
+      // peakSlip is where the tyre makes its most force. Past 1.0 it is
+      // sliding, which is the part you can hear.
+      const frac = peak > 0 ? Math.min(1.6, Math.abs(slip) / peak) : 0;
+      const over = Math.max(0, frac - m.thresh) / Math.max(0.01, 1 - m.thresh);
+      const sp = Math.min(1, kmh / 90);     // scrubbing at walking pace is nothing
+      this.tyre.gain.gain.value = this.master * m.tyreLvl * Math.pow(over, 1.4) * sp;
+      this.tyre.src.playbackRate.value = 0.72 + 0.55 * Math.min(1, over);
+      this.tyre.filt.frequency.value = 700 + 9000 * Math.pow(Math.min(1, over), 0.8);
+      this.tyre.toCans.gain.value = m.tyreCans;
+      this.tyre.toRoom.gain.value = m.tyreRoom;
+    }
+
+    // ---- road and wind: speed only, and it BREATHES -------------------------
+    if (this.road) {
+      const sn = Math.min(1, kmh / 321);
+      // Three waves at rates sharing no common multiple, so it never settles
+      // into a rhythm you can hear as a machine. Same trick js/build/look.js
+      // uses to stop a whole forest swaying in time.
+      const gt = (this.ctx.currentTime - this.t0) * m.gustR;
+      const gust = 0.55 * Math.sin(gt * 0.61) + 0.30 * Math.sin(gt * 1.37 + 1.1)
+                 + 0.15 * Math.sin(gt * 2.93 + 2.7);
+      // The gust moves the TONE as well as the level. A gust that only gets
+      // louder is a volume knob; a real one changes character as it hits.
+      const amp = Math.max(0, 1 + m.gustD * gust * 0.8);
+      const tone = 1 + m.gustD * gust * 0.45;
+      this.road.gain.gain.value = this.master * m.roadLvl * Math.pow(sn, 1.7) * amp;
+      this.road.src.playbackRate.value = 0.45 + 0.5 * sn;
+      this.road.filt.frequency.value = Math.max(80, m.roadCut * tone);
+      this.road.toCans.gain.value = m.roadCans;
+      this.road.toRoom.gain.value = m.roadRoom;
+    }
+
+    if (this.roomLP) this.roomLP.frequency.value = m.muffle;
   }
+
+  /** Re-read the bench's settings without restarting the context. */
+  reloadMix() { this.mix = savedMix(); this.ref = this.mix.ref || REF_RPM; return this.mix; }
 
   setVolume(v) { this.master = Math.max(0, Math.min(1, v)); }
   toggleMute() { this.muted = !this.muted; return this.muted; }
