@@ -1,7 +1,7 @@
 {
- "version": "aa79aa4",
- "note": "Objects from files, and walls you can hit",
- "built": "2026-09-20T14:53:08.578Z",
+ "version": "5da00a9",
+ "note": "A pad inspector, because a wheel is not a gamepad",
+ "built": "2026-09-20T15:49:35.162Z",
  "files": [
   "app.html",
   "build.html",
