@@ -119,6 +119,8 @@
   </div>
   <div class="row"><label>level</label><input type="range" id="roadLvl" min="0" max="100" value="45"><span class="val" id="roadLvlV">45%</span></div>
   <div class="row"><label>tone</label><input type="range" id="roadCut" min="150" max="4000" value="900"><span class="val" id="roadCutV">900 Hz</span></div>
+  <div class="row"><label>gust depth</label><input type="range" id="gustD" min="0" max="100" value="45"><span class="val" id="gustDV">45%</span></div>
+  <div class="row"><label>gust speed</label><input type="range" id="gustR" min="10" max="200" value="70"><span class="val" id="gustRV">0.70x</span></div>
   <div class="row"><label>&rarr; CANS</label><input type="range" id="roadCans" min="0" max="100" value="100"><span class="val" id="roadCansV">100%</span></div>
   <div class="row"><label>&rarr; ROOM</label><input type="range" id="roadRoom" min="0" max="100" value="70"><span class="val" id="roadRoomV">70%</span></div>
   <div class="derived" id="roadD">&mdash;</div>
@@ -298,13 +300,32 @@ function tick() {
   // is exactly the axis the engine cannot express. Cubed-ish so it is nothing
   // in the pit lane and a wall at 300.
   const sn = Math.min(1, spd / 321);
-  const rGain = pct('roadLvl') * Math.pow(sn, 1.7);
+
+  // GUSTS. Adam: "wind is whistly but i want it gusty too like irl". Real wind
+  // at speed is not a level, it breathes — and a single sine breathes in an
+  // obvious rhythm you hear immediately as a machine. So: three waves at rates
+  // that share no common multiple, which is the same trick js/build/look.js
+  // already uses to stop a whole forest swaying in time.
+  //
+  // It modulates the CUTOFF as well as the gain, because a gust that only gets
+  // louder is a volume knob. A real one changes tone as it hits you — that is
+  // most of what makes it read as air rather than as a fader.
+  const gr = +$('gustR').value / 100;
+  const gt = now * gr;
+  const gust = 0.55 * Math.sin(gt * 0.61) + 0.30 * Math.sin(gt * 1.37 + 1.1)
+             + 0.15 * Math.sin(gt * 2.93 + 2.7);          // -1..1, never repeating
+  const depth = pct('gustD');
+  const gAmp = 1 + depth * gust * 0.8;
+  const gTone = 1 + depth * gust * 0.45;
+
+  const rGain = pct('roadLvl') * Math.pow(sn, 1.7) * Math.max(0, gAmp);
   road.src.playbackRate.value = 0.45 + 0.5 * sn;
-  road.filt.frequency.value = +$('roadCut').value;
+  road.filt.frequency.value = Math.max(80, +$('roadCut').value * gTone);
   road.gain.gain.value = rGain;
   $('roadD').textContent =
     `speed ${Math.round(spd)} km/h (gear ${gear} @ ${Math.round(rpm)} rpm)   ` +
-    `gain ${rGain.toFixed(3)}   rate ${road.src.playbackRate.value.toFixed(2)}x`;
+    `gain ${rGain.toFixed(3)}   gust ${gust >= 0 ? '+' : ''}${gust.toFixed(2)}   ` +
+    `cutoff ${Math.round(road.filt.frequency.value)} Hz`;
   route(road, pct('roadCans'), pct('roadRoom'));
 
   route(eng, pct('engCans'), pct('engRoom'));
@@ -314,6 +335,7 @@ function tick() {
                            ['tyreCans', v => v + '%'], ['tyreRoom', v => v + '%'],
                            ['tyreLvl', v => v + '%'], ['muffle', v => v + ' Hz'],
                            ['roadLvl', v => v + '%'], ['roadCut', v => v + ' Hz'],
+                           ['gustD', v => v + '%'], ['gustR', v => (v / 100).toFixed(2) + 'x'],
                            ['roadCans', v => v + '%'], ['roadRoom', v => v + '%']]) {
     $(id + 'V').textContent = fmt($(id).value);
   }
