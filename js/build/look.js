@@ -450,3 +450,92 @@ export function foldTerrainUVs(group, period = LAND.block) {
   });
   return group;
 }
+
+// ---------------------------------------------------------------------------
+// RENDER DISTANCE, and the wall that makes it survivable.
+//
+// Adam: "add a render distance on the track builder when racing it, and make
+// it fairly low". A near far-plane is the cheapest frame there is — the
+// frustum throws away every tree, prop and terrain chunk beyond it before any
+// of them cost anything — but on its own it is also the worst-looking, because
+// what you get at the cut is SKY. Ground that stops is the "baseplate horizon"
+// he banned on day one.
+//
+// So the distance comes with two things that hide it:
+//
+//   A WALL. An inverted cylinder that rides with the camera, just inside the
+//   far plane, painted the colour of distant land at the bottom and fading to
+//   the sky's own horizon colour at the top. Drawn first, with no depth write,
+//   so every real thing in the world draws over it. Below the skyline there is
+//   never a hole — there is haze, which is what distance looks like.
+//
+//   LINEAR FOG matched to that distance, rather than the exponential fog used
+//   for the whole 4 km valley. Exponential fog dense enough to hide a 400 m
+//   wall is already murky at fifty metres; linear fog can be perfectly clear
+//   up close and completely opaque exactly where the wall is.
+//
+// Both come off when you go back to flying, because from the air the point is
+// to see the whole circuit.
+// ---------------------------------------------------------------------------
+export class Horizon {
+  constructor(look, scene) {
+    this.look = look;
+    this.scene = scene;
+    this.far = null;
+    const sky = look.look?.sky;
+    const haze = new THREE.Color(sky?.horizon || 0xc6d2dc);
+    // Distant land is the horizon colour pushed toward green and darkened —
+    // air does most of the work at this range, which is why a far hillside is
+    // nearly the colour of the sky behind it rather than the colour of grass.
+    const land = haze.clone().lerp(new THREE.Color(0x44583a), 0.62).multiplyScalar(0.9);
+    const g = new THREE.CylinderGeometry(1, 1, 1, 48, 1, true);
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide, transparent: true, depthWrite: false, fog: false,
+      uniforms: { land: { value: land }, haze: { value: haze } },
+      vertexShader: `varying float vY;
+        void main(){ vY = position.y + 0.5;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      // Opaque along the ground, gone by the top: the wall has to END in sky,
+      // not in an edge.
+      fragmentShader: `uniform vec3 land, haze; varying float vY;
+        void main(){
+          float t = clamp(vY, 0.0, 1.0);
+          vec3 c = mix(land, haze, smoothstep(0.0, 0.62, t));
+          float a = 1.0 - smoothstep(0.55, 0.98, t);
+          gl_FragColor = vec4(c, a);
+        }`,
+    });
+    this.mesh = new THREE.Mesh(g, mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = -1;          // behind everything real, over the sky
+    this.mesh.visible = false;
+    scene.add(this.mesh);
+    this.haze = haze;
+  }
+
+  /** `metres` sets the clip distance; null puts the whole world back. */
+  set(camera, metres) {
+    if (this.far === metres) return;
+    this.far = metres;
+    if (!metres) {
+      camera.far = 12000;
+      this.mesh.visible = false;
+      this.scene.fog = new THREE.FogExp2(this.haze.getHex(), 0.00021);
+    } else {
+      camera.far = metres;
+      this.mesh.visible = true;
+      // Clear to HALF way out, gone by the wall. The first try started the
+      // fade at a third and washed out the barriers a hundred metres ahead,
+      // which is the range you actually drive by.
+      this.scene.fog = new THREE.Fog(this.haze.getHex(), metres * 0.5, metres * 0.92);
+      this.mesh.scale.set(metres * 0.86, metres * 0.62, metres * 0.86);
+    }
+    camera.updateProjectionMatrix();
+  }
+
+  /** Ride with the camera, or the wall's far side falls behind the far plane. */
+  follow(camera) {
+    if (!this.mesh.visible) return;
+    this.mesh.position.set(camera.position.x, camera.position.y - this.mesh.scale.y * 0.18, camera.position.z);
+  }
+}

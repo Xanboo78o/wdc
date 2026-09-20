@@ -13,7 +13,7 @@ import { Hands, steerLock } from '../input.js';
 import { resolveBarrier } from '../collide.js';
 import { buildCar, buildGT3 } from '../car.js';
 import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from '../phonewheel.js';
-import { BuildLook, foldTerrainUVs } from './look.js';
+import { BuildLook, foldTerrainUVs, Horizon } from './look.js';
 import { buildFlora } from './flora.js';
 import { PropYard } from './propview.js';
 
@@ -50,9 +50,9 @@ const buildMs = performance.now() - t0;
 // screenshots are taken at.
 // ---------------------------------------------------------------------------
 const QUALITY = {
-  low:  { dpr: 0.8,  aa: false, shadows: false, shadowMap: 1024, shadowBox: 60, land: 'simple', trees: 0.5, fringe: false, env: false, soft: 0, every: 1 },
-  med:  { dpr: 0.9,  aa: false, shadows: true,  shadowMap: 1024, shadowBox: 55, land: 'simple', trees: 0.8, fringe: true, env: true, soft: 1, every: 2 },
-  high: { dpr: 1.75, aa: true,  shadows: true,  shadowMap: 2048, shadowBox: 110, land: 'full', trees: 1.3, fringe: true, env: true, soft: 2, every: 1 },
+  low:  { dpr: 0.8,  aa: false, shadows: false, shadowMap: 1024, shadowBox: 60, land: 'simple', trees: 0.5, fringe: false, env: false, soft: 0, every: 1, far: 320 },
+  med:  { dpr: 0.9,  aa: false, shadows: true,  shadowMap: 1024, shadowBox: 55, land: 'simple', trees: 0.8, fringe: true, env: true, soft: 1, every: 2, far: 400 },
+  high: { dpr: 1.75, aa: true,  shadows: true,  shadowMap: 2048, shadowBox: 110, land: 'full', trees: 1.3, fringe: true, env: true, soft: 2, every: 1, far: 700 },
 };
 const QK = QUALITY[q.get('q')] ? q.get('q') : 'med';
 const QN = QUALITY[QK];
@@ -131,6 +131,13 @@ const LAND = buildGround(chunks, TERRAIN);
 // screen.
 foldTerrainUVs(LAND);
 scene.add(LAND);
+// How far you can see FROM THE CAR. Flying keeps the whole circuit, because
+// from the air seeing the shape of it is the entire point; driving clips hard
+// and hides the cut behind a horizon wall (js/build/look.js). ?far=0 turns it
+// off, ?far=600 sets it by hand.
+const horizon = new Horizon(LOOK, scene);
+const FAR = q.has('far') ? Number(q.get('far')) : QN.far;
+
 const ROADMATS = LOOK.road();
 scene.add(buildRoad(path, ROADMATS));
 // The band the physics calls run-off, drawn as run-off. Nothing without
@@ -545,6 +552,11 @@ function loop(now) {
     $('pedB').style.width = (car.brake * 100).toFixed(0) + '%';
   }
   if (mode === 'fly' && camera.fov !== 55) { camera.fov = 55; camera.updateProjectionMatrix(); }
+  // Drive mode clips by default; ?far= also applies while FLYING, which is
+  // the only way to photograph it or to time it without the physics loop
+  // (which runs up to 240 substeps a frame headless) dominating the number.
+  horizon.set(camera, (mode === 'drive' || q.has('far')) && FAR > 0 ? FAR : null);
+  horizon.follow(camera);
   // the shadow box follows whatever you are looking at
   const focus = mode === 'fly' ? fly.target : carView.yaw.position;
   follow(focus);
