@@ -1,7 +1,7 @@
 {
- "version": "5da00a9",
- "note": "A pad inspector, because a wheel is not a gamepad",
- "built": "2026-09-20T15:49:35.162Z",
+ "version": "7dfc801",
+ "note": "Say where the car actually starts",
+ "built": "2026-09-20T16:05:55.800Z",
  "files": [
   "app.html",
   "build.html",
