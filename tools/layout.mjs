@@ -40,16 +40,32 @@ if (args.includes('--walls')) {
     let s = 0;
     while (s < p.length - STEP) {
       const i = Math.min(p.n - 1, Math.round(s / p.ds));
+      // Nothing along a tunnel or a bridge. Both carry their own wall — the
+      // bore in one, the deck's parapet in the other (dressing.js) — and a
+      // kit barrier standing on the GROUND there stands on the rock above the
+      // tunnel, or on the valley floor ten metres under the bridge deck.
+      if ((p.tunIn && p.tunIn[i] > 0) || (p.briIn && p.briIn[i] > 0)) { s += STEP; continue; }
       const run = side > 0 ? p.runL[i] : p.runR[i];
       const lat = side * (p.w[i] + run);
       const a = pointAt(p, i, lat);
       const j = Math.min(p.n - 1, Math.round((s + STEP) / p.ds));
       const b = pointAt(p, j, side * (p.w[j] + (side > 0 ? p.runL[j] : p.runR[j])));
       const ry = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+      // NO z. The file's own rule is "leave it out to stand on the ground",
+      // and that is the only version of this that survives the track being
+      // edited. A baked height is correct on the day it is written and wrong
+      // the moment a piece moves: 2,942 of these were baked from an older
+      // track and by 2026-09-20, 430 of them floated (worst 31.3 m in the
+      // air) and 320 were buried (worst 7.0 m under). That is the "terrain
+      // clipping everywhere".
+      //
+      // It was also baked from the wrong surface. `pointAt` returns the ROAD
+      // height, and on an unbanked sample surfaceY just hands back the
+      // centreline — but a barrier stands on the GROUND, which is a different
+      // surface wherever the road is on an embankment or in a cutting.
       out.push({
         model: 'barrierWall',
         at: [+((a.x + b.x) / 2).toFixed(2), +((a.y + b.y) / 2).toFixed(2)],
-        z: +(((a.z + b.z) / 2)).toFixed(2),
         ry: +ry.toFixed(1),
       });
       s += STEP;
@@ -57,7 +73,7 @@ if (args.includes('--walls')) {
   }
 }
 
-const body = out.map(o => `  { model: '${o.model}', at: [${o.at[0]}, ${o.at[1]}], z: ${o.z}, ry: ${o.ry} },`).join('\n');
+const body = out.map(o => `  { model: '${o.model}', at: [${o.at[0]}, ${o.at[1]}], ry: ${o.ry} },`).join('\n');
 fs.writeFileSync(OUT, `// THE THINGS IN THE WORLD — one line each, and every line is editable.
 //
 // Written by tools/layout.mjs, owned by whoever edits it next. A wall in the

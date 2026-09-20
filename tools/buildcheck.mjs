@@ -276,5 +276,55 @@ function terrainAt(x, y) {
   else ok(`${sites.length} supports, none on another carriageway (${skipped.length} sited then dropped for one)`);
 }
 
+// ---- the world's objects still belong to this track ------------------------
+// data/build/objects.js is WRITTEN ONCE by tools/layout.mjs and is nobody's
+// job to keep in step, so it silently goes stale every time a piece moves.
+// On 2026-09-20 it held 2,942 barriers baked against an older track: 430 of
+// them floated, worst 31.3 m in the air, and 320 were buried up to 7.0 m
+// under. Driving past that is "lots of terrain clipping".
+//
+// Heights are no longer baked (they stand on the ground now), so the thing
+// that can still drift is WHERE they are. If this fails the fix is one line:
+//   node tools/layout.mjs --walls
+{
+  const { OBJECTS } = await import('../data/build/objects.js');
+  // --break pretends the track moved under the file, which is the only way
+  // this ever goes wrong and so the only thing worth proving it can see.
+  const SHIFT = BREAK ? 6 : 0;
+  const line = [];
+  for (let i = 0; i < path.n; i++) {
+    if (path.tunIn && path.tunIn[i] > 0) continue;
+    if (path.briIn && path.briIn[i] > 0) continue;
+    for (const side of [1, -1]) {
+      const off = path.w[i] + (side > 0 ? path.runL[i] : path.runR[i]) + SHIFT;
+      const q = pointAt(path, i, side * off);
+      line.push([q.x, q.y]);
+    }
+  }
+  let adrift = 0, worst = 0, at = null;
+  for (const o of OBJECTS) {
+    const [x, y] = o.at;
+    let bd = Infinity;
+    for (const [lx, ly] of line) { const d = (lx - x) ** 2 + (ly - y) ** 2; if (d < bd) bd = d; }
+    const d = Math.sqrt(bd);
+    if (d > 3) { adrift++; if (d > worst) { worst = d; at = { x, y, d }; } }
+  }
+  const pct = (100 * adrift / OBJECTS.length).toFixed(1);
+  (adrift <= OBJECTS.length * 0.02 ? ok : fail)(
+    `${OBJECTS.length} world objects sit on the current barrier line` +
+    (adrift ? ` — except ${adrift} (${pct}%), worst ${worst.toFixed(1)} m out${at ? ` at ${at.x.toFixed(0)},${at.y.toFixed(0)}` : ''}; re-run tools/layout.mjs --walls` : ''));
+
+  // And they must not stand inside, or above, the terrain that is DRAWN.
+  let bad = 0, wz = 0;
+  for (const o of OBJECTS) {
+    const [x, y] = o.at;
+    const tz = terrainAt(x, y);
+    if (tz === null) continue;
+    const d = Math.abs((o.z ?? ground.height(x, y)) - tz);
+    if (d > 1.5) { bad++; if (d > wz) wz = d; }
+  }
+  (bad === 0 ? ok : fail)(`world objects stand on the drawn ground` + (bad ? ` — ${bad} off by up to ${wz.toFixed(1)} m` : ''));
+}
+
 console.log(fails ? `\n${fails} FAILED${BREAK ? '  (expected: --break is meant to fail)' : ''}` : '\nall good');
 process.exit(fails ? 1 : 0);
