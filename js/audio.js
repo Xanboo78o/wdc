@@ -61,6 +61,19 @@ export const MIX_KEY = 'wdc.sound.v2';
 export const MIX = {
   ref: REF_RPM,
   engCans: 1.00, engRoom: 1.00,
+  // WEIGHT. Adam: "we need a deeper bass heavier louder engine bro".
+  //
+  //   sub    a second copy of the same loop an OCTAVE DOWN, underneath. This
+  //          is the one that matters. A single sample has whatever body the
+  //          recording had; a half-rate copy under it adds an octave of
+  //          fundamental the original never contained, which is the whole
+  //          difference between a whine and a engine you feel. Free, because
+  //          it is the same buffer.
+  //   bass   a low shelf, for weight the sample simply does not have.
+  //   drive  compression. Loud is not gain: gain clips. A compressor pulls
+  //          the peaks down so the BODY can come up, which reads as heavier
+  //          and louder at the same time.
+  sub: 0.55, subCut: 420, bass: 7, bassAt: 160, drive: 0.55, master: 0.78,
   // BOTH OFF BY DEFAULT. Adam, after one drive: "i only hear wind, i only want
   // engine". The road layer is still the tyre sample detuned and lowpassed, a
   // placeholder meant to test whether SPEED belongs in the mix — and it does,
@@ -94,7 +107,7 @@ export class Engine {
     this.file = FILES[Math.max(0, Math.min(FILES.length - 1, (opts.pick ?? 1) - 1))];
     this.mix = savedMix();
     this.ref = opts.ref || this.mix.ref || REF_RPM;
-    this.master = opts.volume ?? 0.5;
+    this.master = opts.volume ?? this.mix.master ?? 0.5;
     this.muted = false;
     this.t0 = 0;
   }
@@ -134,6 +147,26 @@ export class Engine {
       }
 
       this.engine = await this._layer(baseUrl, this.file, 'lowpass');
+      // The weight chain sits between the engine and its sends, so tyres and
+      // road are not dragged through a compressor tuned for an engine.
+      this.shelf = this.ctx.createBiquadFilter();
+      this.shelf.type = 'lowshelf';
+      this.shelf.frequency.value = this.mix.bassAt;
+      this.shelf.gain.value = this.mix.bass;
+      this.comp = this.ctx.createDynamicsCompressor();
+      this.comp.ratio.value = 4; this.comp.knee.value = 12;
+      this.comp.attack.value = 0.008; this.comp.release.value = 0.14;
+      this.engine.gain.disconnect();
+      this.engine.gain.connect(this.shelf);
+      this.shelf.connect(this.comp);
+      this.comp.connect(this.engine.toCans);
+      this.comp.connect(this.engine.toRoom);
+
+      // THE OCTAVE. Same buffer, half the rate, its own lowpass so only the
+      // body of it comes through and it never competes with the note on top.
+      this.sub = await this._layer(baseUrl, this.file, 'lowpass');
+      this.sub.gain.disconnect();
+      this.sub.gain.connect(this.shelf);
       // Tyres and road are OPTIONAL: a missing file must cost the engine
       // nothing, because the engine is the one sound this game cannot be
       // played without.
@@ -188,9 +221,29 @@ export class Engine {
     this.engine.filt.frequency.value = 500 + 7500 * Math.pow(t, 1.3);
     // Level rises with load but never to zero: an engine on the overrun is
     // still an engine, and a car that goes silent mid-corner sounds broken.
-    this.engine.gain.gain.value = this.master * (0.30 + 0.70 * t) * (1 - 0.25 * off);
+    const load = (0.30 + 0.70 * t) * (1 - 0.25 * off);
+    this.engine.gain.gain.value = this.master * load;
     this.engine.toCans.gain.value = m.engCans;
     this.engine.toRoom.gain.value = m.engRoom;
+
+    // The octave below, tracking the same note so it is weight and not a
+    // second engine. Its own filter keeps it to body only.
+    if (this.sub) {
+      this.sub.src.playbackRate.value = rate * 0.5;
+      this.sub.filt.frequency.value = m.subCut;
+      this.sub.gain.gain.value = this.master * load * m.sub;
+    }
+    if (this.shelf) {
+      this.shelf.frequency.value = m.bassAt;
+      this.shelf.gain.value = m.bass;
+    }
+    if (this.comp) {
+      // More drive is a lower threshold and more makeup: the peaks come down
+      // and the body comes up, which is what "heavier" and "louder" both are.
+      this.comp.threshold.value = -6 - 30 * m.drive;
+      this.cans.gain.value = 1 + 1.1 * m.drive;
+      this.room.gain.value = (this.mix.roomSink ? 1 : 0) * (1 + 1.1 * m.drive);
+    }
 
     const kmh = speed * 3.6;
 
