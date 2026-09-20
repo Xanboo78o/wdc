@@ -31,8 +31,22 @@ export const PIECES = [
   { kind: 'turn', dir: 'left', angle: 75, radius: 74, climb: -6.5, note: 'esses 3 (Suzuka T5)' },
   { kind: 'straight', length: 10, climb: -0.5 },
   { kind: 'turn', dir: 'right', angle: 109, radius: 76, climb: -8.5, note: 'esses 4 (Suzuka T6, the reverse curve)' },
-  { kind: 'straight', length: 34, climb: -1.5 },
-  { kind: 'turn', dir: 'left', angle: 82, radius: 66, climb: -6, note: 'esses 5 (Suzuka T7, into Dunlop)' },
+
+  // "theres a wall where the bridge should be, after the esses ... remove those
+  //  walls, fix the terrain there (push both ends of the clif WAY back so the
+  //  road undneath can exist, then add a huge concrete bridge with supports
+  //  that dont interfere with with bottom track"
+  // The esses exit crosses OVER the road out of the Nurburgring hairpins, 10 m
+  // above it. Terrain here is made FROM the road, and where two roads disagree
+  // the ground drops to the LOWER one and the upper road stands on a wall — so
+  // the crossing was a slot cut through an embankment, with a cliff face each
+  // side of the road underneath and the esses' barriers hanging over the void.
+  // `bridge: true` is the tunnel rule mirrored: the land below sets no support
+  // and must keep GROUND.CLEAR metres of daylight under the deck. 171 m of it,
+  // so both abutments sit ~60 m and ~105 m back from what it crosses, and the
+  // run-off narrows to the deck edge the way it does on the loop.
+  { kind: 'straight', length: 34, climb: -1.5, bridge: true, run: 3, note: 'onto the bridge' },
+  { kind: 'turn', dir: 'left', angle: 82, radius: 66, climb: -6, note: 'esses 5 (Suzuka T7, into Dunlop) — on the bridge, over the hairpins' },
 
   // "add nurburhing t4-9"
   // Lifted off the Nürburgring GP centreline with tools/steal.mjs (corners
@@ -43,7 +57,7 @@ export const PIECES = [
   // -10 m here on purpose: it drops the hairpin into a bowl so the esses exit
   // crosses OVER this section with 10 m to spare instead of through it (the
   // gate caught 3.1 m). That crossover is Suzuka's trick, and it is free here.
-  { part: 'Nürburgring hairpins', kind: 'turn', dir: 'left', angle: 126, radius: 55, climb: -10, note: 'ring 1 — long left, diving into the hairpin bowl' },
+  { part: 'Nürburgring hairpins', bridge: false, run: 12, kind: 'turn', dir: 'left', angle: 126, radius: 55, climb: -10, note: 'ring 1 — long left, diving into the hairpin bowl' },
   { kind: 'straight', length: 34 },
   { kind: 'turn', dir: 'left', angle: 7, radius: 224, note: 'ring 2 — kink' },
   { kind: 'straight', length: 6 },

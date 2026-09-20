@@ -13,12 +13,15 @@
 //      straddling the road edge interpolates between its corners, and that
 //      interpolation is exactly how terrain ends up poking through a road.
 //   2. Samples are exactly DS apart (the game's Track assumes s = i * ds).
-//   3. Where the road crosses itself there is room for a bridge.
+//   3. Where the road crosses itself there is room for a bridge, the road
+//      UNDERNEATH is not walled in by the embankment carrying the one above,
+//      and no support lands on another carriageway.
 // And it prints the piece list with an F1 corner speed for each turn.
 import { buildPath, pointAt, surfaceY } from '../js/build/path.js';
 import { GROUND } from '../js/build/ground.js';
 import { Ground } from '../js/build/ground.js';
 import { CARS, corneringSpeed, limitMu, topSpeed } from '../js/physics.js';
+import { PIER, pierSites, pierBox } from '../js/build/piers.js';
 
 const args = process.argv.slice(2);
 const known = new Set(['--break']);
@@ -193,6 +196,84 @@ function terrainAt(x, y) {
   if (!spots.length) ok('the road never crosses itself');
   for (const c of spots) (c.dz >= 5.5 ? ok : fail)(
     `road crosses itself at s=${c.s1} and s=${c.s2}: ${c.dz.toFixed(1)} m apart vertically (bridge needs 5.5)`);
+
+  // ---- the road underneath can actually exist ------------------------------
+  // Vertical clearance was never the problem. The problem was sideways: the
+  // land is made FROM the road, so the embankment carrying the upper road came
+  // down to meet the lower one and stood across it as a cliff, leaving the
+  // crossing a slot cut through a hillside. Clearance said 10.1 m and passed
+  // while you could not drive the road underneath at all.
+  //
+  // So: within RANGE of a road that passes beneath another, the land may not
+  // stand RISE metres above it. That is what `bridge: true` buys, and it is
+  // the thing you can see out of the windscreen.
+  // What a bridge is FOR, measured: how far the road underneath stays in the
+  // open before the land stands WALL metres over it. Terrain here is made from
+  // the road, so without a bridge the embankment carrying the road above comes
+  // down beside the one below and that distance collapses.
+  //
+  // Measured at the esses/hairpins crossing, same map, flag on and off:
+  //   without `bridge: true`   open for 40 m, then a 10 m cliff, on the LEFT
+  //   with it                  open for 60 m, and the limit is now the RIGHT
+  //                            side, which is the hairpin bowl's own cutting
+  //                            and nothing to do with the bridge.
+  // 55 sits between the two with room either way.
+  //
+  // Vertical clearance is NOT this. Clearance was 10.1 m and passed all along
+  // while the road underneath was walled in — that is why this check exists.
+  const WALL = 8, OPEN = 55;
+  for (const c of spots) {
+    const iu = Math.round(c.s1 / path.ds), jl = Math.round(c.s2 / path.ds);
+    const [hi, lo] = path.z[iu] >= path.z[jl] ? [iu, jl] : [jl, iu];
+    // Only a crossing we PROMISED to bridge is a failure. A stacked structure
+    // like the double loop has coils close by on purpose; it is reported so it
+    // can be judged, not failed for being what it is.
+    const promised = !!(path.briIn && path.briIn[hi] > 0);
+    let worst = 1e9, at = 0;
+    for (let d = -24; d <= 24; d += 4) {
+      const k = Math.max(0, Math.min(path.n - 1, lo + Math.round(d / path.ds)));
+      let reach = 999;
+      for (let lat = 0; lat <= 240; lat += 4) {
+        const l = pointAt(path, k, lat), r = pointAt(path, k, -lat);
+        const up = Math.max(ground.height(l.x, l.y), ground.height(r.x, r.y)) - path.z[k];
+        if (up > WALL) { reach = lat; break; }
+      }
+      if (reach < worst) { worst = reach; at = d; }
+    }
+    const far = worst > 240 ? '>240' : String(worst);
+    const msg = `under s=${c.s2} (crossed by s=${c.s1}): open for ${far} m each side before the land stands ${WALL} m over it`;
+    if (!promised) console.log(`      ${msg} — not a declared bridge, not judged`);
+    else (worst >= OPEN ? ok : fail)(`${msg} (a bridge promises >= ${OPEN})`);
+  }
+}
+
+// ---- supports stand clear of every other carriageway -----------------------
+// The defect this exists for: a bridge's piers dropping straight through the
+// road the bridge was built to cross. Checked as the drawn BOX against the
+// road's drawn width, not by the centre-distance rule that sited them — a rule
+// checking itself proves nothing.
+{
+  // --break sites them without the clearance rule, which is how this gate was
+  // watched to fail rather than assumed to work.
+  const sites = pierSites(path, ground).filter(p => BREAK || p.skipped < 0);
+  let worst = null;
+  for (const p of sites) {
+    const b = pierBox(p);
+    const reach = Math.hypot(b.along, b.across);
+    for (let j = 0; j < path.n; j++) {
+      const z = path.z[j];
+      if (z < p.gc - 2 || z > p.top - 1.5) continue;
+      const rx = path.x[j] - p.x, ry = path.y[j] - p.y;
+      const along = Math.abs(rx * Math.cos(p.hdg) + ry * Math.sin(p.hdg));
+      const across = Math.abs(-rx * Math.sin(p.hdg) + ry * Math.cos(p.hdg));
+      // nearest point of the pier's footprint to this bit of road centreline
+      const gap = Math.hypot(Math.max(0, along - b.along), Math.max(0, across - b.across)) - path.w[j];
+      if (gap < 0 && (!worst || gap < worst.gap)) worst = { gap, s: j * path.ds, at: p.i * path.ds, reach };
+    }
+  }
+  const skipped = pierSites(path, ground).filter(p => p.skipped >= 0);
+  if (worst) fail(`a support at s=${worst.at} stands ${(-worst.gap).toFixed(1)} m INTO the road at s=${worst.s}`);
+  else ok(`${sites.length} supports, none on another carriageway (${skipped.length} sited then dropped for one)`);
 }
 
 console.log(fails ? `\n${fails} FAILED${BREAK ? '  (expected: --break is meant to fail)' : ''}` : '\nall good');

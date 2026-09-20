@@ -12,8 +12,10 @@
 // steadily tighter (or wider) all the way through. A snail is one piece:
 //   { kind: 'turn', dir: 'left', angle: 900, radius: 110, radius2: 28 }
 // and any piece may also set `width` (full road width, m), `run` / `runL` /
-// `runR` (metres from the road edge to the barrier), or `tunnel: true` (the
-// road goes THROUGH the hill here, so the land is above it, not below).
+// `runR` (metres from the road edge to the barrier), `tunnel: true` (the
+// road goes THROUGH the hill here, so the land is above it, not below), or
+// `bridge: true` (the road is carried OVER the land on a structure, so the
+// land is below it and holds nothing up — the mirror image of a tunnel).
 // Those carry on into the pieces after it until something changes them.
 //
 // Pure: no renderer, no DOM. Runs the same in the browser and in Node, which
@@ -72,15 +74,16 @@ function smooth(src, sigmaM, closed) {
 }
 
 export function buildPath(pieces, { closed = false } = {}) {
-  const X = [], Y = [], ZL = [], H = [], K = [], B = [], W = [], RL = [], RR = [], P = [], TU = [];
+  const X = [], Y = [], ZL = [], H = [], K = [], B = [], W = [], RL = [], RR = [], P = [], TU = [], BR = [];
   const info = [];
   let x = 0, y = 0, hdg = 0, z = 0, s = 0, next = 0;
-  let width = START.width, runL = START.run, runR = START.run, tunnel = false;
+  let width = START.width, runL = START.run, runR = START.run, tunnel = false, bridge = false;
   const SUB = 0.25;                 // integration step; samples are emitted every DS
 
   const emit = (k, bank, pi) => {
     X.push(x); Y.push(y); ZL.push(z); H.push(hdg); K.push(k); B.push(bank);
-    W.push(width / 2); RL.push(runL); RR.push(runR); P.push(pi); TU.push(tunnel ? 1 : 0);
+    W.push(width / 2); RL.push(runL); RR.push(runR); P.push(pi);
+    TU.push(tunnel ? 1 : 0); BR.push(bridge ? 1 : 0);
   };
 
   pieces.forEach((p, pi) => {
@@ -89,6 +92,7 @@ export function buildPath(pieces, { closed = false } = {}) {
     if (p.runL != null) runL = p.runL;
     if (p.runR != null) runR = p.runR;
     if (p.tunnel != null) tunnel = !!p.tunnel;
+    if (p.bridge != null) bridge = !!p.bridge;
     const sh = shape(p);
     const s0 = s, z0 = z, climb = p.climb || 0, bank = p.bank || 0;
     for (let u = 0; u < sh.len - 1e-9;) {
@@ -109,7 +113,7 @@ export function buildPath(pieces, { closed = false } = {}) {
     }
     info.push({
       n: pi + 1, kind: p.kind, s0, s1: s, len: sh.len,
-      dir: p.dir, angle: p.angle, radius: p.radius, radius2: p.radius2 || null, climb, bank, tunnel,
+      dir: p.dir, angle: p.angle, radius: p.radius, radius2: p.radius2 || null, climb, bank, tunnel, bridge,
       note: p.note || '', part: p.part || null,
     });
   });
@@ -127,23 +131,29 @@ export function buildPath(pieces, { closed = false } = {}) {
     ds: DS, n: X.length, length: (X.length - 1) * DS, closed,
     x: Float64Array.from(X), y: Float64Array.from(Y), z: Z,
     hdg: Float64Array.from(H), k: Float64Array.from(K), bank: Float64Array.from(B),
-    w: Wd, runL: RLs, runR: RRs, piece: Int32Array.from(P), tunnel: Uint8Array.from(TU),
+    w: Wd, runL: RLs, runR: RRs, piece: Int32Array.from(P),
+    tunnel: Uint8Array.from(TU), bridge: Uint8Array.from(BR),
     // metres INSIDE the tunnel (0 anywhere else). The rock above a tunnel has
     // to thicken from nothing at the portal, or the hill stands as a cliff on
     // the road's doorstep and its triangles cut across the road outside.
-    tunIn: tunnelDepth(TU),
+    tunIn: spanDepth(TU),
+    // metres ONTO the bridge, same idea and for the same reason: the ground
+    // has to fall away from the abutment over a distance, or the deck ends in
+    // a cliff face standing across whatever the bridge was built to clear.
+    briIn: spanDepth(BR),
     pieces: info,
     end: { x, y, hdg, z },
   };
 }
 
-// How far inside a tunnel each sample is, in metres.
-function tunnelDepth(TU) {
-  const n = TU.length, d = new Float64Array(n);
+// How far inside a flagged run (a tunnel, a bridge) each sample is, in metres:
+// the distance to the nearer end. 0 everywhere outside one.
+function spanDepth(F) {
+  const n = F.length, d = new Float64Array(n);
   let run = 0;
-  for (let i = 0; i < n; i++) { run = TU[i] ? run + DS : 0; d[i] = run; }
+  for (let i = 0; i < n; i++) { run = F[i] ? run + DS : 0; d[i] = run; }
   run = 0;
-  for (let i = n - 1; i >= 0; i--) { run = TU[i] ? run + DS : 0; d[i] = Math.min(d[i], run); }
+  for (let i = n - 1; i >= 0; i--) { run = F[i] ? run + DS : 0; d[i] = Math.min(d[i], run); }
   return d;
 }
 

@@ -20,10 +20,17 @@
 // a bridge), the ground drops to the LOWER one and the higher road stands on a
 // wall — it never ends up underground.
 //
-// A TUNNEL is the one deliberate exception, and it is the same rule upside
+// A TUNNEL is one deliberate exception, and it is the same rule upside
 // down: through a tunnel the road is INSIDE the hill, so those samples set no
 // upper limit at all and instead demand ROCK metres of land above the road.
 // The bore is cut by the tunnel mesh in dressing.js, not by the terrain.
+//
+// A BRIDGE is the other, and it is the tunnel's mirror image: the road is
+// carried OVER the land, so those samples set no lower limit — they hold
+// nothing up — and instead demand CLEAR metres of daylight beneath the deck.
+// Without it the rule above does exactly what it promises: where the road
+// crosses itself the ground drops to the lower road and the upper one "stands
+// on a wall", and that wall is a cliff face across the road underneath.
 //
 // The level verge is not decoration. The ground is drawn as triangles, and a
 // triangle straddling the road edge interpolates between its corners; if the
@@ -45,6 +52,8 @@ export const GROUND = {
   QUERY: 130,       // m around a point within which roads constrain it
   ROCK: 7,          // m of hill the land must keep ABOVE a tunnel's road
   PORTAL: 16,       // m over which that rock thickens from nothing at the mouth
+  CLEAR: 6,         // m of daylight the land must keep BELOW a bridge's deck
+  ABUT: 20,         // m over which the ground lets go of the deck, at each end
   TILE: 48,         // m, one terrain tile
   NEAR: 3, MID: 12, FAR: 24, HORIZON: 48,   // cell sizes by distance from the road
   MARGIN: 4000,     // m of land beyond the track's bounding box (the fog eats the edge)
@@ -267,6 +276,9 @@ export class Ground {
         // 0 outside a tunnel, 1 once properly inside it
         const depth = p.tunIn ? Math.min(p.tunIn[i], p.tunIn[j]) : 0;
         const tunnel = depth > 0 ? smoothstep(0, o.PORTAL, depth) : 0;
+        // 0 off a bridge, 1 once properly out onto it
+        const bDepth = p.briIn ? Math.min(p.briIn[i], p.briIn[j]) : 0;
+        const bridge = bDepth > 0 ? smoothstep(0, o.ABUT, bDepth) : 0;
         const tol = 0.5 * sg.len * (1 + F * sg.kMax) + 0.25;
         const over = Math.abs(t - tc) * sg.len;
         // centreline height along this segment; within the slab it is carried
@@ -274,9 +286,11 @@ export class Ground {
         const tz = over <= tol ? Math.max(-tol / sg.len, Math.min(1 + tol / sg.len, t)) : Math.max(0, Math.min(1, t));
         const tzc = Math.max(0, Math.min(1, tz));
         // the road's height, pulled into the land around it
+        // A bridge does not drag the land up with it: the deck's height is
+        // not this ground's height, it is 20 m of fresh air above it.
         const dReal = Math.hypot((t - f) * sg.len, lat);
-        if (dReal < 4 * NS) {
-          const wt = Math.exp(-0.5 * (dReal / NS) ** 2);
+        if (dReal < 4 * NS && bridge < 1) {
+          const wt = Math.exp(-0.5 * (dReal / NS) ** 2) * (1 - bridge);
           ws += wt; wz += wt * (p.z[i] + (p.z[j] - p.z[i]) * f);
         }
         const sA = surfaceY(p, i, side * w), sB = surfaceY(p, j, side * w);
@@ -308,6 +322,13 @@ export class Ground {
           const d = Math.hypot(over - tol, Math.max(0, Math.abs(lat) - F));
           u = edge - o.EPS + o.CUT * d; l = edge - o.EPS - o.FILL * d;
         }
+        // Open the daylight, and let go. Lowering the UPPER limit by CLEAR is
+        // what keeps the land off the soffit; dropping the LOWER limit out of
+        // sight is what stops this road demanding to be held up, so the ground
+        // beneath is free to fall to whatever is genuinely there — the road
+        // being crossed, or the valley floor. Tapered over ABUT, so the
+        // abutment is a slope at the ends instead of a wall in the middle.
+        if (bridge > 0) { u -= bridge * o.CLEAR; l -= bridge * 1e4; }
         if (u < U) U = u;
         if (l > L) L = l;
       }

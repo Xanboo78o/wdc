@@ -11,6 +11,7 @@
 // them or on top of them.
 import * as THREE from 'three';
 import { pointAt, surfaceY } from './path.js';
+import { PIER, deckRuns, pierSites, pierBox } from './piers.js';
 import { V } from './meshes.js';
 
 export const BRAND = {
@@ -119,7 +120,13 @@ function wallLine(path, ground, side) {
   for (let i = 0; i < path.n; i++) {
     const off = path.w[i] + (side > 0 ? path.runL[i] : path.runR[i]);
     const inside = Math.sign(path.k[i]) === side;
-    const ok = !inside || (off + WALL_T) * Math.abs(path.k[i]) < 0.8;
+    // No armco on a bridge. The wall is drawn from the GROUND up, and over a
+    // bridge the ground is whatever the bridge is crossing — so the barrier
+    // came out as a curtain of banner hanging the full height of the deck,
+    // straight across the road underneath. That is one of the walls he flew
+    // into. The deck carries its own parapet instead, in buildViaducts.
+    const onBridge = path.briIn && path.briIn[i] > 0;
+    const ok = !onBridge && (!inside || (off + WALL_T) * Math.abs(path.k[i]) < 0.8);
     const f = pointAt(path, i, side * off), b = pointAt(path, i, side * (off + WALL_T));
     if (prev) arc += Math.hypot(f.x - prev.x, f.y - prev.y);
     prev = f;
@@ -507,45 +514,57 @@ export function buildTunnels(path) {
 export function buildViaducts(path, ground) {
   const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color: 0x8e9298, roughness: 0.9, side: THREE.DoubleSide });
-  const DROP = 1.0, DECK = 0.9;
-  const piers = [];
-  const gapAt = i => {
-    const l = pointAt(path, i, path.w[i]), r = pointAt(path, i, -path.w[i]);
-    return Math.min(l.z - ground.height(l.x, l.y), r.z - ground.height(r.x, r.y));
-  };
-  const runs = [];
-  for (let i = 0; i < path.n; i++) {
-    if (path.tunIn && path.tunIn[i] > 0) continue;
-    if (gapAt(i) < DROP) continue;
-    const last = runs[runs.length - 1];
-    if (last && i - last.i1 <= 3) last.i1 = i; else runs.push({ i0: i, i1: i });
-  }
-  for (const r of runs) {
-    if (r.i1 - r.i0 < 2) continue;
+  const pierMat = new THREE.MeshStandardMaterial({ color: 0x9a9ea3, roughness: 0.92 });
+  const PARAPET = PIER.PARAPET;
+  // Where the deck runs and where the supports stand are decided in piers.js,
+  // which the gate can import and this file cannot be. Here we only draw them.
+  const piers = pierSites(path, ground).filter(p => p.skipped < 0);
+
+  for (const r of deckRuns(path, ground)) {
     const i0 = Math.max(0, r.i0 - 2), i1 = Math.min(path.n - 1, r.i1 + 2);
+    const deep = r.auth ? PIER.BIG : PIER.DECK;
     const pos = [], idx = [];
     const push = v => { pos.push(v.x, v.y, v.z); return pos.length / 3 - 1; };
-    let prev = null;
+    // Parapets are their own ribbon so they can be a closed strip rather than
+    // a skirt; an authored bridge has them, an incidental deck does not.
+    const pp = [], pi = [];
+    const pushP = v => { pp.push(v.x, v.y, v.z); return pp.length / 3 - 1; };
+    let prev = null, prevP = null;
     for (let i = i0; i <= i1; i++) {
       const w = path.w[i] + 0.35;
       const l = pointAt(path, i, w), rt = pointAt(path, i, -w);
       const gl = ground.height(l.x, l.y), gr = ground.height(rt.x, rt.y);
       const cur = {
         lt: push(V(l.x, l.y, l.z)),
-        lb: push(V(l.x, l.y, Math.max(gl - 0.4, l.z - Math.max(DECK, (l.z - gl) * 0.5)))),
+        lb: push(V(l.x, l.y, Math.max(gl - 0.4, l.z - Math.max(deep, (l.z - gl) * 0.5)))),
         rt: push(V(rt.x, rt.y, rt.z)),
-        rb: push(V(rt.x, rt.y, Math.max(gr - 0.4, rt.z - Math.max(DECK, (rt.z - gr) * 0.5)))),
+        rb: push(V(rt.x, rt.y, Math.max(gr - 0.4, rt.z - Math.max(deep, (rt.z - gr) * 0.5)))),
       };
       if (prev) {
         idx.push(prev.lt, prev.lb, cur.lb, prev.lt, cur.lb, cur.lt);      // left skirt
         idx.push(prev.rt, cur.rt, cur.rb, prev.rt, cur.rb, prev.rb);      // right skirt
         idx.push(prev.lb, prev.rb, cur.rb, prev.lb, cur.rb, cur.lb);      // deck underneath
       }
-      // a pier every 14 m wherever the deck is properly off the ground
-      if (i % Math.round(14 / path.ds) === 0) {
-        const c = pointAt(path, i, 0), gc = ground.height(c.x, c.y);
-        const top = c.z - DECK, h = top - gc;
-        if (h > 2.5) piers.push({ x: c.x, y: c.y, gc, h, hdg: path.hdg[i], wide: path.w[i] });
+      if (r.auth) {
+        // inner face, top, outer face — a solid edge beam each side
+        const li = pointAt(path, i, w), lo = pointAt(path, i, w + 0.55);
+        const ri = pointAt(path, i, -w), ro = pointAt(path, i, -(w + 0.55));
+        const curP = {
+          lii: pushP(V(li.x, li.y, li.z)), lit: pushP(V(li.x, li.y, li.z + PARAPET)),
+          lot: pushP(V(lo.x, lo.y, lo.z + PARAPET)), loi: pushP(V(lo.x, lo.y, lo.z)),
+          rii: pushP(V(ri.x, ri.y, ri.z)), rit: pushP(V(ri.x, ri.y, ri.z + PARAPET)),
+          rot: pushP(V(ro.x, ro.y, ro.z + PARAPET)), roi: pushP(V(ro.x, ro.y, ro.z)),
+        };
+        if (prevP) {
+          const quad = (a, b, c, d) => pi.push(a, b, c, a, c, d);
+          quad(prevP.lii, curP.lii, curP.lit, prevP.lit);   // left, road side
+          quad(prevP.lit, curP.lit, curP.lot, prevP.lot);   // left, top
+          quad(prevP.lot, curP.lot, curP.loi, prevP.loi);   // left, outer
+          quad(prevP.rii, prevP.rit, curP.rit, curP.rii);   // right, road side
+          quad(prevP.rit, prevP.rot, curP.rot, curP.rit);   // right, top
+          quad(prevP.rot, prevP.roi, curP.roi, curP.rot);   // right, outer
+        }
+        prevP = curP;
       }
       prev = cur;
     }
@@ -556,22 +575,52 @@ export function buildViaducts(path, ground) {
     const m = new THREE.Mesh(g, mat);
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
+    if (pp.length) {
+      const pgeo = new THREE.BufferGeometry();
+      pgeo.setAttribute('position', new THREE.Float32BufferAttribute(pp, 3));
+      pgeo.setIndex(pi);
+      pgeo.computeVertexNormals();
+      const pm = new THREE.Mesh(pgeo, mat);
+      pm.castShadow = true; pm.receiveShadow = true;
+      group.add(pm);
+    }
   }
+
   // Piers. A deck 30 m up on nothing reads as a bug however carefully the
   // skirts are drawn, and he asked for supports.
   if (piers.length) {
     const pg = new THREE.BoxGeometry(1, 1, 1);
     pg.translate(0, 0.5, 0);                       // grow upward from the ground
-    const inst = new THREE.InstancedMesh(pg, new THREE.MeshStandardMaterial({ color: 0x9a9ea3, roughness: 0.92 }), piers.length);
+    const inst = new THREE.InstancedMesh(pg, pierMat, piers.length);
     const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3();
     piers.forEach((p, n) => {
       Q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.hdg);
-      S.set(2.2, p.h, Math.min(7, p.wide * 0.55));
+      const b = pierBox(p);
+      S.set(b.along * 2, p.h, b.across * 2);
       M.compose(V(p.x, p.y, p.gc - 0.3), Q, S);
       inst.setMatrixAt(n, M);
     });
     inst.castShadow = true; inst.receiveShadow = true;
     group.add(inst);
+
+    // A crosshead on an authored bridge's piers: the column is narrower than
+    // the deck, and without a cap spreading the load the deck looks balanced
+    // on a stick.
+    const caps = piers.filter(p => p.auth);
+    if (caps.length) {
+      const cg = new THREE.BoxGeometry(1, 1, 1);
+      cg.translate(0, 0.5, 0);
+      const ci = new THREE.InstancedMesh(cg, pierMat, caps.length);
+      const M2 = new THREE.Matrix4(), Q2 = new THREE.Quaternion(), S2 = new THREE.Vector3();
+      caps.forEach((p, n) => {
+        Q2.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.hdg);
+        S2.set(4.6, 1.2, Math.min(15, p.wide * 1.9));
+        M2.compose(V(p.x, p.y, p.gc + p.h - 1.2), Q2, S2);
+        ci.setMatrixAt(n, M2);
+      });
+      ci.castShadow = true; ci.receiveShadow = true;
+      group.add(ci);
+    }
   }
   return group;
 }
