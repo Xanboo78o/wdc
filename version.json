@@ -1,7 +1,7 @@
 {
- "version": "f78bc66",
- "note": "Cars that are afraid of hitting each other, and overtake more because of it",
- "built": "2026-09-20T18:33:48.566Z",
+ "version": "20d7cc0",
+ "note": "Twenty-two people instead of twenty-two copies of one",
+ "built": "2026-09-20T19:05:10.348Z",
  "files": [
   "app.html",
   "build.html",
@@ -26,7 +26,9 @@
   "js/car.js",
   "js/collide.js",
   "js/crowd.js",
+  "js/dash.js",
   "js/dent.js",
+  "js/drivers.js",
   "js/env.js",
   "js/field.js",
   "js/furniture.js",
@@ -38,7 +40,6 @@
   "js/line.js",
   "js/main.js",
   "js/mesh.js",
-  "js/phonewheel.js",
   "js/physics.js",
   "js/pit.js",
   "js/pitstop.js",
