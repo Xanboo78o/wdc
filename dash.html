@@ -260,8 +260,6 @@ function paint(t) {
   if (t.pos !== undefined) set('posbig', 'P' + t.pos);
   set('spd', t.spd !== undefined ? Math.round(t.spd) : undefined);
 
-  // NEUTRAL and REVERSE are states of the SELECTOR, not gear numbers — in N
-  // there is no gear to show, and in R the gearbox is irrelevant.
   // Reverse replaces the gear readout; otherwise the box picks the gear.
   if (t.sel !== undefined && t.sel < 0) {
     $('gear').textContent = 'R';
