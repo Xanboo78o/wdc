@@ -4,6 +4,7 @@
 // races in plain Node in `tools/race.mjs`, which is the only way to find out
 // whether a grid of twenty-two actually races rather than piling into turn one.
 // Grid slots are injected rather than imported for exactly that reason.
+import { driverAt, teamOf, applyProfile } from './drivers.js';
 //
 // What lives here and NOT in autopilot.js: anything that needs to know the
 // running order. A driver knows how to drive; only the session knows who is
@@ -19,14 +20,8 @@ import { makeLane, shouldPit, updateStop } from './pitstop.js';
 // allocating 462 of them per pass.
 const W = newWake();
 
-const NAMES = [
-  'VERSTAPPEN', 'NORRIS', 'LECLERC', 'PIASTRI', 'SAINZ', 'RUSSELL', 'HAMILTON',
-  'ALONSO', 'GASLY', 'HULKENBERG', 'TSUNODA', 'ALBON', 'STROLL', 'OCON',
-  'BEARMAN', 'COLAPINTO', 'LAWSON', 'BORTOLETO', 'ANTONELLI', 'HADJAR',
-  'DOOHAN', 'ARON',
-];
-const COLS = ['#1fd2be', '#ff8000', '#e8002d', '#ffd400', '#3671c6', '#27f4d2',
-              '#00a0de', '#229971', '#b6babd', '#6692ff'];
+// Names, numbers, teams, colours and personalities all live in
+// js/drivers.js now — see its header for why one table drives all of it.
 
 const PIT_LIMIT = 80 / 3.6;
 const NEIGH_EVERY = 4;        // substeps between neighbour/racecraft updates
@@ -64,12 +59,17 @@ export class Race {
       const car = makeCar({ cls: spec.key });
       const p = track.point(slot.s, slot.lat);
       car.x = p.x; car.y = p.y; car.hdg = slot.hdg; car.vx = 0.001;
-      const driver = isPlayer ? null : makeDriver(seed * 131 + k, tier, track.corners.length || 24);
+      // WHO this is, WHAT they drive, and HOW they drive it — one table.
+      const prof = driverAt(k);
+      const team = teamOf(prof);
+      const driver = isPlayer ? null
+        : applyProfile(makeDriver(seed * 131 + k, tier, track.corners.length || 24), prof, team);
       this.entries.push({
         car, driver, isPlayer, idx: k, box: k,
-        name: isPlayer ? 'YOU' : NAMES[k % NAMES.length],
-        num: isPlayer ? 78 : k + 1,
-        col: isPlayer ? '#ffffff' : COLS[k % COLS.length],
+        name: isPlayer ? 'YOU' : prof.n,
+        num: isPlayer ? 78 : prof.num,
+        col: isPlayer ? '#ffffff' : team.col,
+        team: isPlayer ? null : team,
         drive: isPlayer ? null : makeAutopilot(track, lines, spec, this.peak, { driver }),
         proj: track.project(p.x, p.y), hint: slot.i,
         lap: 0, gridPos: k + 1, pos: k + 1, crossed0: false, pastHalf: false,

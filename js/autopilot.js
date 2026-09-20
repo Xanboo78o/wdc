@@ -194,7 +194,9 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     if (d.nextMistake <= 0 && !d.mistake && v > 20) {
       const r = d.rng();
       d.mistake = { kind: r < 0.45 ? 'lock' : r < 0.8 ? 'wide' : 'snap', t: 0.35 + d.rng() * 0.5 };
-      d.nextMistake = (60 / Math.max(0.05, d.T.mistakes)) * (0.5 + d.rng());
+      // `errScale` is the driver's own sloppiness from js/drivers.js, 1 when
+      // nobody set one. The tier still decides how error-prone the FIELD is.
+      d.nextMistake = (60 / Math.max(0.05, d.T.mistakes * (d.errScale ?? 1))) * (0.5 + d.rng());
     }
     if (d.mistake && (d.mistake.t -= 1 / cfg.hz) <= 0) d.mistake = null;
 
