@@ -188,7 +188,12 @@ async function ollamaAsk() {
     signal: AbortSignal.timeout(20000),
   });
   const j = await r.json();
-  return String((j.message && j.message.content) || '').trim().split('\n')[0].slice(0, 220);
+  // Small models like to wrap a line in quotes however firmly you ask them not
+  // to, and a stray quote mark is something a speech engine can read aloud.
+  return String((j.message && j.message.content) || '')
+    .trim().split('\n')[0]
+    .replace(/^["'`\u201c\u201d]+|["'`\u201c\u201d]+$/g, '')
+    .trim().slice(0, 220);
 }
 
 const key = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
