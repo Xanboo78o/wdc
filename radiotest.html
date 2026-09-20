@@ -104,11 +104,12 @@ async function health() {
     const j = await r.json();
     $('health').innerHTML =
       `<span class="pill ok">server up</span>` +
-      `<span class="pill ${j.key ? 'ok' : 'bad'}">${j.key ? 'API key present' : 'NO API KEY'}</span>` +
-      `<span class="pill">${j.model}</span>` +
+      `<span class="pill ${j.key ? 'ok' : ''}">${j.key ? 'CLAUDE' : 'LOCAL ENGINEER (no key)'}</span>` +
+      (j.key ? `<span class="pill">${j.model}</span>` : '') +
       `<span class="pill">${j.calls}/${j.cap} calls used</span>`;
     $('healthHint').textContent = j.key ? '' :
-      'Start it with the key:  ANTHROPIC_API_KEY=sk-ant-... node tools/radio.mjs';
+      'Running the offline engineer: fixed vocabulary, real numbers, no bill. ' +
+      'For Claude: echo ANTHROPIC_API_KEY=sk-ant-... > .env  then restart it.';
   } catch (e) {
     $('health').innerHTML = `<span class="pill bad">server down</span>`;
     $('healthHint').textContent = 'Run:  node tools/radio.mjs   (from ~/Games/wdc)';

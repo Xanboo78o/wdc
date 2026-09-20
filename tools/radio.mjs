@@ -67,6 +67,83 @@ Never invent a number. The TELEMETRY block is everything you know. If he asks fo
 
 "Copy that." is only for a transmission you genuinely could not make out. It is not a default answer.`;
 
+
+// ---------------------------------------------------------------------------
+// LOCAL MODE — the engineer with no API key and no bill.
+//
+// It does not understand you; it classifies you, which is most of what a real
+// engineer does anyway. The numbers are real (they come from the telemetry),
+// the fallback is "Copy that.", and the fallback is not a failure — it is what
+// an engineer says when he is not engaging. Runs instantly and offline.
+//
+// This is the mode whenever there is no key. Drop a key in .env and the same
+// endpoint starts answering with Claude instead, with no other change.
+// ---------------------------------------------------------------------------
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+const INTENTS = [
+  ['greeting', /\b(hi|hey|hello|yo|you there|radio check|can you hear|morning)\b/i, t => [
+    'Hello mate, loud and clear.', 'Reading you. All good here.',
+    'Hearing you fine. Head down.', 'Loud and clear. Let us know if you need anything.',
+  ]],
+  ['incident', /\b(ran me|pushed me|penalty|divebomb|dive bomb|hit me|took me out|off the (road|track)|dirty|unfair|steward|cameras?|that was|he just|she just)\b/i, () => [
+    'Got it, checking cameras now.', 'Understood, we will report it.',
+    'We saw it. Leave it with us.', 'Noted. Stewards are looking at it.',
+  ]],
+  ['gap', /\b(gaps?|how far|intervals?|ahead|in front|behind me|catching)\b/i, t => {
+    const a = [];
+    if (t.gapAhead != null) a.push(`Gap to the car ahead, ${(+t.gapAhead).toFixed(1)}.`);
+    if (t.gapBehind != null) a.push(`${(+t.gapBehind).toFixed(1)} to the car behind.`);
+    if (t.carAhead) a.push(`${t.carAhead} ahead${t.gapAhead != null ? `, ${(+t.gapAhead).toFixed(1)}` : ''}.`);
+    return a.length ? a : ['We are checking the gaps.'];
+  }],
+  ['tyres', /\b(tyres?|tires?|grip|rubber|temps?)\b/i, t => {
+    const a = [];
+    if (t.tyre) a.push(`You are on ${t.tyre}.`);
+    if (t.tf != null && t.tr != null) a.push(`Fronts ${Math.round(t.tf)}, rears ${Math.round(t.tr)}.`);
+    a.push('Manage the rears, be smooth on exit.', 'Tyres are in the window. Keep them there.');
+    return a;
+  }],
+  ['laps', /\b(laps?\s*(left|remaining|to go)|how many laps|how long|to go)\b/i, t => {
+    if (t.lap != null && t.totalLaps != null) {
+      const left = Math.max(0, t.totalLaps - t.lap);
+      return [left <= 1 ? 'Last lap. Bring it home.' : `${left} to go.`];
+    }
+    return ['We will count you down.'];
+  }],
+  ['box', /\b(box|pit|pitting|come in|should i stop|strategy)\b/i, () => [
+    'Negative, stay out. Stay out.', 'Not this lap. We will call it.',
+    'Box, box, box. Box this lap.', 'Plan is to go long. Keep pushing.',
+  ]],
+  ['fuel', /\b(fuel|petrol|gas|saving)\b/i, t => t.fuelLaps != null
+    ? [`Fuel is good for ${Math.round(t.fuelLaps)} laps.`]
+    : ['Fuel is fine. Race him.', 'Lift and coast into the braking zones.']],
+  ['position', /\b(position|what place|where am i|p\d)\b/i, t => t.position != null
+    ? [`You are P${t.position}.`] : ['We are checking the order.']],
+  ['frustration', /\b(so slow|cant|can.t|undriv|terrible|awful|hate|useless|no grip|hopeless|rubbish|shit|fuck|damn)\b/i, () => [
+    'Understood. Reset, next corner.', 'It is fine. Get your rhythm back.',
+    'We hear you. Head down, one lap at a time.', 'Copy. We will look at the balance.',
+  ]],
+  ['praise', /\b(yes+|lets go|let.s go|come on|unreal|nailed|beautiful|amazing|great|love|brilliant)\b/i, () => [
+    'Lovely. Keep it there.', 'Great job mate, great job.',
+    'That is the lap. Same again.', 'Well done. Stay focused.',
+  ]],
+  ['push', /\b(push|attack|go for it|can i (get|have|take)|overtake|drs)\b/i, () => [
+    'Push now, push.', 'Mode push, mode push. This is the lap.',
+    'Go for it. You have the pace.', 'Not yet. Wait for the DRS.',
+  ]],
+];
+
+function localReply(text, t) {
+  t = t || {};
+  for (const [, re, lines] of INTENTS) {
+    if (re.test(text)) {
+      try { return pick(lines(t)); } catch { return 'Copy that.'; }
+    }
+  }
+  return pick(['Copy that.', 'Understood.', 'Copy.']);
+}
+
 const key = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
 const client = new Anthropic();          // resolves key/profile from the environment
 let calls = 0, lastAt = 0;
@@ -88,7 +165,8 @@ async function ask(text, telemetry) {
   if (calls >= MAX_CALLS) return { reply: 'Copy that.', capped: true };
   // Say the radio is DEAD, never a plausible "Copy that." — a wrong answer that
   // sounds right is worse than no answer, because you stop trusting the working ones.
-  if (!key) return { reply: 'Radio is dead.', error: 'no ANTHROPIC_API_KEY set' };
+  // No key is not a broken radio any more — it is the local engineer.
+  if (!key) return { reply: localReply(text, telemetry), local: true };
   calls++;
 
   history.push({ role: 'user', content: `${telemetryBlock(telemetry)}\n\nDRIVER: ${text}` });
@@ -144,7 +222,7 @@ http.createServer(async (req, res) => {
   };
 
   if (req.url === '/health') {
-    return send(200, { ok: true, key: !!key, model: MODEL, calls, cap: MAX_CALLS });
+    return send(200, { ok: true, key: !!key, mode: key ? 'claude' : 'local', model: MODEL, calls, cap: MAX_CALLS });
   }
   if (req.method === 'POST' && req.url === '/ask') {
     let body = '';
