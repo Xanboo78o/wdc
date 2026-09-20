@@ -29,28 +29,14 @@ export const LADDER = {
   brake: ['Digit1', 'Digit2', 'Digit3'],
 };
 
-// GEAR SELECTOR — Shift + number pad, and it is INCREMENTAL.
+// REVERSE. Shift + R, which is literally what you do: shift, to reverse.
 //
-// One ladder, not three modes:
-//
-//     REVERSE  <--  NEUTRAL  -->  1st (DRIVE)  -->  2nd  -->  3rd ...
-//
-// You start in NEUTRAL: no drive at all, and the engine just revs. Shift UP
-// once and you are in DRIVE. Crash, shift DOWN twice — through neutral — and
-// you are in reverse. Back out, shift up twice, and you are driving again.
-//
-// Two up/down pairs because that is how the pad is laid out: 8 over 2 in the
-// middle column, 7 over 1 on the left. Either works, they do the same thing.
-//
-// Shift is deliberate: Digit0/1/2/3/8/9 are ladder-pedal keys (above), and a
-// foot on a cardboard flap never holds Shift, so they can share keys and never
-// collide. Top-row digits are accepted as well as the pad because the MX Keys
-// Mini has no number pad at all.
-export const SHIFT_UP = ['Numpad8', 'Numpad7', 'Digit8', 'Digit7'];
-export const SHIFT_DOWN = ['Numpad2', 'Numpad1', 'Digit2', 'Digit1'];
-export const REVERSE = -1, NEUTRAL = 0;
-// What to show for a selector position: -1 R, 0 N, 1.. the gear number.
-export const selName = sel => sel < 0 ? 'R' : sel === 0 ? 'N' : String(sel);
+// There is no gear selector and no neutral. The gearbox shifts itself, as it
+// always has — gearbox.js is a sound model, not a drivetrain, so there was
+// never a mechanical gear to choose. This is one toggle for getting out of a
+// gravel trap, and physics.js caps it at a 25 km/h crawl.
+export const REVERSE_KEY = 'KeyR';
+export const selName = sel => sel < 0 ? 'R' : 'D';
 const LADDER_KEYS = new Set([...LADDER.throttle, ...LADDER.brake]);
 
 // What each step is worth, by how many keys are down (0, 1, 2, 3). The
@@ -111,21 +97,14 @@ export class Hands {
     // -1..1 while it is live, or null. Kept as a hook so this file never
     // needs the network to run — the Node harnesses import it.
     this.wheelSource = null;
-    // Start in NEUTRAL, like a real car you have just got into.
-    this.selector = NEUTRAL;
-    this.maxGear = 8;                // main.js sets this from the car's gearbox
+    this.selector = 1;               // 1 drive, -1 reverse. Shift+R toggles.
 
     this._kd = e => {
       if (e.repeat) return;
-      if (e.shiftKey) {
-        const up = SHIFT_UP.includes(e.code), down = SHIFT_DOWN.includes(e.code);
-        if (up || down) {
-          // One step per press, clamped. You cannot skip neutral on the way to
-          // reverse, which is the whole point of a sequential selector.
-          this.selector = Math.max(REVERSE, Math.min(this.maxGear, this.selector + (up ? 1 : -1)));
-          e.preventDefault();
-          return;
-        }
+      if (e.shiftKey && e.code === REVERSE_KEY) {
+        this.selector = this.selector < 0 ? 1 : -1;
+        e.preventDefault();
+        return;
       }
       this.down.add(e.code);
       this.pressed.add(e.code);

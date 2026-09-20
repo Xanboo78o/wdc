@@ -87,43 +87,15 @@ export function makeBox(spec) {
   return {
     box,
     gear: 0,
-    neutral: false,      // selector in N: engine revs, wheels get nothing
-    reverse: false,
     rpm: box.idle,
     shiftT: 0,           // seconds left of the current shift
     shifted: 0,          // +1 up, -1 down, 0 none — one frame only, for a cue
     // `dt` and speed in km/h. Call it once a frame; it is not a physics step
     // and nothing downstream integrates it.
-    // `sel` is the driver's SEQUENTIAL SELECTOR when he is holding it himself:
-    // -1 reverse, 0 neutral, 1..n a gear. Leave it undefined and the box shifts
-    // itself exactly as it always did — which is what every AI car and every
-    // harness does, so none of them are affected by manual shifting existing.
-    update(dt, speedKmh, throttle = 1, sel) {
+    update(dt, speedKmh, throttle = 1) {
       this.shifted = 0;
       if (this.shiftT > 0) this.shiftT = Math.max(0, this.shiftT - dt);
       const last = this.box.tops.length - 1;
-
-      if (sel !== undefined) {
-        const was = this.gear, wasN = this.neutral;
-        this.neutral = sel === 0;
-        this.reverse = sel < 0;
-        // Reverse runs on first gear's ratio; there is only one of them.
-        this.gear = Math.max(0, Math.min(last, (sel <= 0 ? 1 : sel) - 1));
-        if (this.gear !== was || this.neutral !== wasN) { this.shiftT = 0.05; this.shifted = this.gear > was ? 1 : -1; }
-
-        // NEUTRAL: nothing is connected to the wheels, so the engine answers
-        // the pedal and nothing else. This is the wild revving — road speed is
-        // not in it anywhere, which is exactly why it sounds wrong-and-right.
-        const target = this.neutral
-          ? this.box.idle + (this.box.limit - this.box.idle) * Math.min(1, throttle)
-          : rpmAt(this.box, Math.abs(speedKmh), this.gear) * (0.93 + 0.07 * Math.min(1, throttle));
-        // An unloaded engine picks up and drops far faster than a loaded one.
-        const rate = this.neutral ? 6 : 26;
-        this.rpm += (Math.max(this.box.idle, target * (this.shiftT > 0 ? 0.82 : 1)) - this.rpm) * Math.min(1, dt * rate);
-        return this;
-      }
-      this.neutral = false; this.reverse = false;
-
       const raw = this.box.limit * (speedKmh / this.box.tops[this.gear]);
       if (this.shiftT === 0) {
         if (raw > this.box.shiftUp && this.gear < last) {

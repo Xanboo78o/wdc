@@ -146,9 +146,6 @@ async function start() {
   state.track = t; state.line = line; state.lines = lines;
   state.peak = peakSlip(spec);
   state.box = makeBox(spec);
-  // The selector ladder is as long as this car's gearbox, and you start in N.
-  hands.maxGear = state.box.box.tops.length;
-  hands.selector = 0;
   // Not awaited: a missing or slow .wav must not hold up the green light.
   if (state.engine) state.engine.start('./');
 
@@ -382,7 +379,7 @@ function loop(now) {
     const inp = hands.update(FIXED_DT);
     car.throttle = inp.throttle;
     car.brake = inp.brake;
-    car.selector = hands.selector;        // Shift + number pad: D / N / R
+    car.selector = hands.selector;        // Shift+R toggles reverse
     car.delta = inp.wheel * steerLock(car.speed);
 
     // Walls and loose objects, in the same substep as everything else. At
@@ -462,7 +459,7 @@ function loop(now) {
   // Read off the speed the car already has. gearbox.js changes no forces, so
   // every validated lap time is untouched — see the header of that file.
   if (state.box) {
-    state.box.update(frame, car.speed * 3.6, car.throttle, hands.selector);
+    state.box.update(frame, car.speed * 3.6, car.throttle);
     if (state.engine) {
       // peakSlip is 60 rounds of bisection, so it is cached per car spec — the
       // tyre layer wants the slip angle THIS car peaks at, so that "starts
