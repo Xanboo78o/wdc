@@ -16,11 +16,16 @@ const COL = {
   gantry: 0x2a2d33,
 };
 
-function geo(pos, nor, idx, col) {
+function geo(pos, nor, idx, col, uv) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   if (nor) g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   if (col) g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  // UVs ARE METRES here, like everywhere else in this project: u across the
+  // road, v along it. A material then only says how big its photograph is and
+  // sets repeat = 1/size, and the aggregate on a 14 m road is the same size as
+  // the aggregate on a 24 m one without a tiling constant anywhere.
+  if (uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.setIndex(idx);
   if (!nor) g.computeVertexNormals();
   return g;
@@ -38,32 +43,55 @@ function roadNormal(path, i) {
   return n.y < 0 ? n.negate() : n;
 }
 
+// How far along the road a UV is allowed to get before it folds back.
+//
+// A texture coordinate is metres here, and this track is 4,872 m long: at a 3 m
+// photograph that is 1,624 repeats, and a GPU sampler keeps only a handful of
+// fractional bits. Past a few hundred repeats every pixel of a tile samples
+// almost the same texel and the surface smears into streaks — measured
+// side-by-side on the terrain, where turning the fold off turned real dirt
+// into vertical smears.
+//
+// The fold is a TRIANGLE wave, not a saw-tooth: v runs 0 -> 96 -> 0 -> 96, so
+// it is continuous across every quad and needs no special case at the seam.
+// The texture is mirrored at each fold, which on asphalt is invisible, and 96
+// is an exact multiple of every surface size in js/build/look.js so the tiling
+// itself never breaks stride.
+const FOLD = 96;
+const foldV = s => FOLD - Math.abs((s % (2 * FOLD)) - FOLD);
+
 // A strip running along the road between two lateral offsets, lifted `dz`
 // above the surface. `latA` must be the LEFT (larger) offset so the winding
 // faces up in three's frame.
 function strip(path, from, to, latA, latB, dz = 0) {
-  const pos = [], nor = [], idx = [];
+  const pos = [], nor = [], idx = [], uv = [];
   for (let i = from; i <= to; i++) {
     const la = typeof latA === 'function' ? latA(i) : latA, lb = typeof latB === 'function' ? latB(i) : latB;
     const a = pointAt(path, i, la), b = pointAt(path, i, lb);
     const n = roadNormal(path, i);
     pos.push(a.x, a.z + dz, -a.y, b.x, b.z + dz, -b.y);
     nor.push(n.x, n.y, n.z, n.x, n.y, n.z);
+    const v = foldV(i * path.ds);
+    uv.push(la, v, lb, v);
     if (i > from) {
       const k = (i - from) * 2;
       idx.push(k - 2, k - 1, k, k - 1, k + 1, k);
     }
   }
-  return { pos, nor, idx };
+  return { pos, nor, idx, uv };
 }
 
-export function buildRoad(path) {
+// `mats` is the hook for photographed surfaces (js/build/look.js): pass
+// { road, paint, kerb, grid } and the ribbon is painted with those instead of
+// with flat colours. Without it this is still the Blender solid viewport it
+// started as, which is what ?flat turns back on.
+export function buildRoad(path, mats = null) {
   const group = new THREE.Group();
   const last = path.n - 1;
 
   // tarmac
   const r = strip(path, 0, last, i => path.w[i], i => -path.w[i]);
-  const road = new THREE.Mesh(geo(r.pos, r.nor, r.idx), new THREE.MeshStandardMaterial({
+  const road = new THREE.Mesh(geo(r.pos, r.nor, r.idx, null, r.uv), mats?.road || new THREE.MeshStandardMaterial({
     color: COL.road, roughness: 0.92, metalness: 0,
   }));
   road.receiveShadow = true;
@@ -71,13 +99,13 @@ export function buildRoad(path) {
 
   // White edge lines, painted a hair above the tarmac. polygonOffset rather
   // than a bigger lift, so they never float when seen low along the road.
-  const paint = new THREE.MeshStandardMaterial({
+  const paint = mats?.paint || new THREE.MeshStandardMaterial({
     color: COL.line, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   for (const side of [1, -1]) {
     const lo = i => side * (path.w[i] - 0.2), hi = i => side * (path.w[i] - 0.45);
     const s = side > 0 ? strip(path, 0, last, lo, hi, 0.004) : strip(path, 0, last, hi, lo, 0.004);
-    const m = new THREE.Mesh(geo(s.pos, s.nor, s.idx), paint);
+    const m = new THREE.Mesh(geo(s.pos, s.nor, s.idx, null, s.uv), paint);
     m.receiveShadow = true;
     group.add(m);
   }
@@ -85,7 +113,7 @@ export function buildRoad(path) {
   // Kerbs, wherever the road is actually turning: red and white blocks from
   // the edge out to 1.2 m, which is exactly the band the game's physics calls
   // "kerb". Raised 6 cm at the outside so they read as solid from the car.
-  const kp = [], kn = [], kc = [], ki = [];
+  const kp = [], kn = [], kc = [], ki = [], ku = [];
   const red = new THREE.Color(COL.kerbRed), white = new THREE.Color(COL.kerbWhite);
   let block = 0;
   for (let i = 0; i < last; i++) {
@@ -102,7 +130,10 @@ export function buildRoad(path) {
       });
       const quad = (a, b, c2, d) => {
         const base = kp.length / 3;
-        for (const v of [a, b, c2, d]) { kp.push(v.x, v.y, v.z); kc.push(c.r, c.g, c.b); }
+        // Planar metres for the concrete under the paint. A kerb is 1.2 m
+        // wide and a metre long a block, so which way the photograph runs on
+        // it is not something the eye can see.
+        for (const v of [a, b, c2, d]) { kp.push(v.x, v.y, v.z); kc.push(c.r, c.g, c.b); ku.push(v.x, v.z); }
         const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(d, a)).normalize();
         if (n.y < 0 && Math.abs(n.y) > 0.3) n.negate();
         for (let q = 0; q < 4; q++) kn.push(n.x, n.y, n.z);
@@ -119,7 +150,7 @@ export function buildRoad(path) {
     }
   }
   if (kp.length) {
-    const km = new THREE.Mesh(geo(kp, kn, ki, kc), new THREE.MeshStandardMaterial({
+    const km = new THREE.Mesh(geo(kp, kn, ki, kc, ku), mats?.kerb || new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.6, side: THREE.DoubleSide,
     }));
     km.receiveShadow = true; km.castShadow = false;
@@ -128,7 +159,7 @@ export function buildRoad(path) {
 
   // Start / finish: a chequered band across the road at s = 0.
   {
-    const pos = [], col = [], idx = [];
+    const pos = [], col = [], idx = [], uvs = [];
     const rows = 2, cols = 16, depth = 1.6;
     for (let rI = 0; rI < rows; rI++) for (let cI = 0; cI < cols; cI++) {
       const c = (rI + cI) % 2 ? new THREE.Color(0x151515) : new THREE.Color(0xf2f2f2);
@@ -142,11 +173,12 @@ export function buildRoad(path) {
         const y = path.y[0] + Math.sin(h) * s + Math.cos(h) * l;
         pos.push(x, surfaceY(path, 0, l) + 0.006, -y);
         col.push(c.r, c.g, c.b);
+        uvs.push(l, s);
       }
       idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
-    const g = geo(pos, null, idx, col);
-    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+    const g = geo(pos, null, idx, col, uvs);
+    const m = new THREE.Mesh(g, mats?.grid || new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
     }));
     m.receiveShadow = true;
@@ -211,6 +243,57 @@ export function buildLandmarks(path, ground) {
     board.rotation.y = h - Math.PI / 2;
     board.castShadow = true;
     group.add(board);
+  }
+  return group;
+}
+
+// RUN-OFF. Additive: without a material there is nothing here and the track
+// looks exactly as it did.
+//
+// This is not decoration, it is the land agreeing with the physics. app.js
+// already calls everything from the road edge out to the barrier `runoff` —
+// asphalt grip, not grass grip — and it was DRAWN as grass, so a driver
+// running wide saw lawn under the wheels and kept the grip of a car park. A
+// modern circuit's run-off is pale asphalt, and now it looks like it.
+//
+// The height is the road EDGE's height less ground.js's EPS, which is exactly
+// where ground.js puts the level verge, plus 2 cm. That is why it cannot
+// z-fight: it is not guessing where the ground is, it is using the same rule
+// the ground was built from.
+export function buildRunoff(path, material, eps = 0.12) {
+  if (!material) return new THREE.Group();
+  const group = new THREE.Group();
+  const last = path.n - 1;
+  for (const side of [1, -1]) {
+    const pos = [], nor = [], idx = [], uv = [];
+    let run0 = false;                                 // was the sample before this one drawn?
+    for (let i = 0; i <= last; i++) {
+      const w = path.w[i], run = side > 0 ? path.runL[i] : path.runR[i];
+      // Walls right at the kerb (the tunnel, the loop): no run-off to draw.
+      // Skipping a sample also breaks the ribbon, so the next quad must not
+      // be stitched across the gap — that is what `run0` is for. Without it
+      // the tunnel section grows a 60 m triangle across the infield.
+      if (run <= 1.4) { run0 = false; continue; }
+      const h = surfaceY(path, i, side * w) - eps + 0.02;
+      const inner = pointAt(path, i, side * (w + 1.2));
+      const outer = pointAt(path, i, side * (w + run));
+      // Left side first when the left edge is the larger offset, so the
+      // winding faces the sky in three's frame — a reversed one renders lit
+      // from below, which looks like a texture bug and is not one.
+      const a = side > 0 ? outer : inner, b = side > 0 ? inner : outer;
+      const la = side > 0 ? w + run : -(w + 1.2), lb = side > 0 ? w + 1.2 : -(w + run);
+      pos.push(a.x, h, -a.y, b.x, h, -b.y);
+      nor.push(0, 1, 0, 0, 1, 0);
+      const v = foldV(i * path.ds);
+      uv.push(la, v, lb, v);
+      const k = pos.length / 3;
+      if (run0 && k >= 4) idx.push(k - 4, k - 3, k - 2, k - 3, k - 1, k - 2);
+      run0 = true;
+    }
+    if (!pos.length) continue;
+    const m = new THREE.Mesh(geo(pos, nor, idx, null, uv), material);
+    m.receiveShadow = true;
+    group.add(m);
   }
   return group;
 }

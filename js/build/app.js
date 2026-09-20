@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { buildPath, trackData, surfaceYAt, pointAt } from './path.js';
 import { Ground } from './ground.js';
-import { V, buildRoad, buildLandmarks, buildGround, buildSky } from './meshes.js';
+import { V, buildRoad, buildRunoff, buildLandmarks, buildGround, buildSky } from './meshes.js';
 import { brandTexture, buildWalls, buildDetails, buildTunnels, buildViaducts, gantryBanner } from './dressing.js';
 import { Track } from '../track.js';
 import { CARS, makeCar, step, FIXED_DT, SURFACE, dragFor, registerAero, corneringSpeed, limitMu, topSpeed } from '../physics.js';
@@ -13,6 +13,9 @@ import { Hands, steerLock } from '../input.js';
 import { resolveBarrier } from '../collide.js';
 import { buildCar, buildGT3 } from '../car.js';
 import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from '../phonewheel.js';
+import { BuildLook } from './look.js';
+import { buildFlora } from './flora.js';
+import { PropYard } from './propview.js';
 
 const $ = id => document.getElementById(id);
 const q = new URLSearchParams(location.search);
@@ -38,33 +41,59 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.25, 12000);
 
-const sunDir = new THREE.Vector3(-0.55, 0.62, 0.42).normalize();
-const sky = buildSky(sunDir);
-scene.add(sky);
-scene.fog = new THREE.FogExp2(0xc6d2dc, 0.00021);
-{
-  // light the world with the sky itself: one PMREM render of the dome
-  const skyScene = new THREE.Scene();
-  skyScene.add(buildSky(sunDir));
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  // far = 20000: the dome is 9000 m out, and fromScene's default far plane of
-  // 100 m clips it away and hands back a black environment — which looks like
-  // "everything in shadow is black", not like an error.
-  scene.environment = pmrem.fromScene(skyScene, 0.04, 0.1, 20000).texture;
-  scene.environmentIntensity = 0.32;
+// The builder started life as Blender's solid viewport — flat colours, a
+// gradient dome, one light — and ?flat still is exactly that, byte for byte,
+// because every screenshot taken before the look pass was taken that way.
+// Everything else is photographed: real asphalt, real grass, and a real sky
+// that the sun direction, sun colour and fog were MEASURED out of rather than
+// picked to match it.
+const FLAT = q.has('flat');
+const LOOK = await BuildLook.load(renderer, { flat: FLAT, sky: q.get('sky') });
+let follow;
+if (LOOK.on) {
+  LOOK.install(scene, { shadows: !q.has('lo') });
+  follow = f => LOOK.follow(f);
+} else {
+  follow = flatViewport();
 }
-const sun = new THREE.DirectionalLight(0xfff1dc, 3.3);
-sun.castShadow = true;
-sun.shadow.mapSize.set(4096, 4096);
-const SH = 160;
-Object.assign(sun.shadow.camera, { left: -SH, right: SH, top: SH, bottom: -SH, near: 1, far: 1600 });
-sun.shadow.normalBias = 0.06;
-sun.shadow.bias = -0.0002;
-scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight(0xdbe6f2, 0x5d5a48, 0.12));
 
-scene.add(buildGround(chunks));
-scene.add(buildRoad(path));
+function flatViewport() {
+  const sunDir = new THREE.Vector3(-0.55, 0.62, 0.42).normalize();
+  scene.add(buildSky(sunDir));
+  scene.fog = new THREE.FogExp2(0xc6d2dc, 0.00021);
+  {
+    // light the world with the sky itself: one PMREM render of the dome
+    const skyScene = new THREE.Scene();
+    skyScene.add(buildSky(sunDir));
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    // far = 20000: the dome is 9000 m out, and fromScene's default far plane of
+    // 100 m clips it away and hands back a black environment — which looks like
+    // "everything in shadow is black", not like an error.
+    scene.environment = pmrem.fromScene(skyScene, 0.04, 0.1, 20000).texture;
+    scene.environmentIntensity = 0.32;
+  }
+  const sun = new THREE.DirectionalLight(0xfff1dc, 3.3);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(4096, 4096);
+  const SH = 160;
+  Object.assign(sun.shadow.camera, { left: -SH, right: SH, top: SH, bottom: -SH, near: 1, far: 1600 });
+  sun.shadow.normalBias = 0.06;
+  sun.shadow.bias = -0.0002;
+  scene.add(sun, sun.target);
+  scene.add(new THREE.HemisphereLight(0xdbe6f2, 0x5d5a48, 0.12));
+  return (focus) => {
+    sun.position.copy(focus).addScaledVector(sunDir, 700);
+    sun.target.position.copy(focus);
+  };
+}
+
+const TERRAIN = LOOK.terrain();
+scene.add(buildGround(chunks, TERRAIN));
+const ROADMATS = LOOK.road();
+scene.add(buildRoad(path, ROADMATS));
+// The band the physics calls run-off, drawn as run-off. Nothing without
+// textures, so ?flat is unchanged.
+scene.add(buildRunoff(path, ROADMATS?.apron));
 const brand = brandTexture(renderer.capabilities.getMaxAnisotropy());
 scene.add(buildWalls(path, ground, brand));
 scene.add(buildDetails(path, ground, brand));
@@ -73,6 +102,20 @@ scene.add(buildViaducts(path, ground));
 const landmarks = buildLandmarks(path, ground);
 scene.add(landmarks);
 if (landmarks.userData.beam) scene.add(gantryBanner(brand, landmarks.userData.beam));
+
+// Grass, and a forest planted from data/build/scenery.js. ?flat skips it so a
+// screenshot stays comparable with the ones taken before any of this existed.
+const tFlora = performance.now();
+const flora = FLAT || q.has('noflora') ? null : await buildFlora(renderer, path, ground, LOOK);
+if (flora) scene.add(flora.group);
+const floraMs = performance.now() - tFlora;
+
+// Loose objects: cones, tyre stacks, boards. Real bodies (js/props.js), so
+// what happens to them when you arrive is not decided here.
+const tProps = performance.now();
+const yard = q.has('noprops') ? null : new PropYard(path, ground, LOOK, brand);
+if (yard) { yard.populate(); scene.add(yard.group); }
+const propMs = performance.now() - tProps;
 
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -330,6 +373,10 @@ function driveStep(frame) {
     else if (al > proj.w) surface = SURFACE.kerb;
     step(car, FIXED_DT, { surface, bank: proj.bank, bankDir: Math.sign(proj.curv), rollMul: dragFor(surface) });
     const hit = resolveBarrier(car, track, hint);
+    // Loose objects are resolved in the same substep as the barriers, at 400
+    // Hz. At frame rate a cone is 2 m further on between tests, which is more
+    // than its own diameter: it would be hit while already behind the car.
+    if (yard) yard.step(FIXED_DT, car);
     if (hit && hit.closing > 3.5) {
       hands.rumble(Math.min(1, hit.closing / 14), 0.5, 160);
       toast(hit.harm > 0.12 ? `HEAVY CONTACT — ${hit.part.toUpperCase()}` : 'CONTACT');
@@ -428,10 +475,12 @@ function loop(now) {
   if (mode === 'fly' && camera.fov !== 55) { camera.fov = 55; camera.updateProjectionMatrix(); }
   // the shadow box follows whatever you are looking at
   const focus = mode === 'fly' ? fly.target : carView.yaw.position;
-  const reach = mode === 'fly' ? Math.min(SH, fly.dist) : SH;
-  sun.position.copy(focus).addScaledVector(sunDir, 700);
-  sun.target.position.copy(focus);
-  void reach;
+  follow(focus);
+  // One clock for every plant, so a gust crosses the grass and the trees
+  // together instead of each of them waving on its own.
+  LOOK.tick(now / 1000);
+  if (flora) flora.update(camera);
+  if (yard) { if (mode !== 'drive') yard.settle(dt); yard.sync(); }
   msgT -= dt;
   $('msg').style.opacity = msgT > 0 ? 1 : 0;
   renderer.render(scene, camera);
@@ -443,6 +492,12 @@ function loop(now) {
       ready: true, buildMs: Math.round(buildMs), n: path.n, length: path.length,
       pieces: PIECES.length, chunks: chunks.length, tris: Math.round(tris),
       draws: renderer.info.render.calls,
+      textured: LOOK.on, sky: LOOK.look?.sky?.name || null,
+      maps: Object.keys(LOOK.look?.maps || {}).length,
+      land: TERRAIN ? [!!TERRAIN.map, !!TERRAIN.normalMap, !!TERRAIN.roughnessMap] : null,
+      floraMs: Math.round(floraMs), propMs: Math.round(propMs),
+      flora: flora ? flora.stats() : null,
+      props: yard ? yard.stats() : null,
     };
   }
 }
