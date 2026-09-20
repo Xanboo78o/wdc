@@ -1,7 +1,7 @@
 {
- "version": "f53cc55",
- "note": "The test map, in the menu — and that is why the phone would not pair",
- "built": "2026-09-20T14:03:57.232Z",
+ "version": "649fe87",
+ "note": "A render distance for driving, and a wall to hide it behind",
+ "built": "2026-09-20T14:14:11.639Z",
  "files": [
   "app.html",
   "build.html",
