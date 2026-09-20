@@ -19,6 +19,27 @@ const TYPES = {
 };
 http.createServer((req, res) => {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  // gameshow.html posts its marks out of ten here. A rating that only lives in
+  // the browser's localStorage is a rating the next session cannot read, and
+  // the whole point of asking Adam to mark the trees is to act on the marks.
+  if (req.method === 'POST' && p === '/rate') {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const file = path.join(root, 'data/show/ratings.json');
+        const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
+        all.push(JSON.parse(body));
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, JSON.stringify(all, null, 1));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{"ok":true}');
+      } catch (e) {
+        res.writeHead(400); res.end(String(e.message));
+      }
+    });
+    return;
+  }
   if (p.endsWith('/')) p += 'build.html';
   const f = path.join(root, path.normalize(p));
   if (!f.startsWith(root)) { res.writeHead(403); return res.end(); }

@@ -108,7 +108,8 @@ function wingGeometry() {
   ]);
 }
 
-const SHAPES = {
+// Exported so gameshow.html can stand them up and have them marked out of ten.
+export const SHAPES = {
   cone: { geo: coneGeometry, rough: 0.62, metal: 0 },
   tyre: { geo: () => tyreGeometry(0), rough: 0.96, metal: 0 },
   stack: { geo: stackGeometry, rough: 0.94, metal: 0 },

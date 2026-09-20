@@ -1,202 +1,199 @@
-// flora.js — the grass and the forest.
+// flora.js — the woods, and the suggestion of grass.
 //
-// Two jobs, and they are not the same job:
+// REBUILT 2026-09-19 to Adam's brief, which was an art note and the
+// performance fix at the same time, because they turned out to be one thing:
 //
-//   GRASS is a near-field thing. It exists so that the verge has a SURFACE at
-//   two metres from the camera at 250 km/h, and it is worthless past about
-//   ninety. So it is built in strips along the road, streamed in around the
-//   camera, and thrown away behind it. It never needs a terrain query: inside
-//   the level verge the ground IS the road edge's height (that is ground.js's
-//   own rule), which makes a blade of grass about four floating-point
-//   operations to place.
+//   "the woods dont look like woods, woods tend to get a lot darker, so for
+//    the forests, make it do like 5 rows of increasingly packed trees, then a
+//    dark box that doesnt stick up from the top but still not visible and
+//    looks like woods... at speed, just INSINUATE grass, not actually show it"
 //
-//   A FOREST is a far-field thing. It exists so the track sits in a place
-//   rather than on a plane, and what matters is the shape of the treeline a
-//   kilometre out. So it is built once at load, bucketed into cells, and drawn
-//   at three levels of detail: the whole tree close up, foliage without trunks
-//   in the middle distance, and a crossed pair of BAKED cards past that. The
-//   bake is the method that makes a forest possible at all — a photographed
-//   tree is a few hundred triangles, and ten thousand of those is not a thing
-//   a browser will draw.
+// THE WOOD IS A WALL AND A LID. A real wood seen from outside is a few rows of
+// trunks with DARKNESS behind them — you never see the hundredth tree, you see
+// that you cannot see it. So the trees stand in five rows that get denser
+// going back, and behind the third row is a dark mass: a wall along the
+// treeline and a canopy over it, both BELOW the height of the trees, so the
+// skyline is always real branches and never a box edge. The inside of the wood
+// is then two triangles deep instead of four hundred trees deep. That is why
+// the first version drew 9,266 trees at one frame a second and this one does
+// not.
 //
-// WHERE the trees go is not computed. It is written down, section by section,
-// in data/build/scenery.js, in the same words the track's own pieces are
-// written in. Density inside a named section is random; the fact that the
-// esses run through pine forest is a decision.
+// GRASS IS A FRINGE. A lawn of instanced blades is thousands of alpha-tested
+// quads for something you pass at 250 km/h. What the eye checks is the EDGE —
+// the line where the asphalt stops. So there is one strip of real photographed
+// blades standing along that line and nothing anywhere else; the rest of the
+// green is the ground texture doing its job.
 //
-// The plants themselves are photoscans (data/flora/, CC0 from ambientCG), cut
-// out by measurement — see tools/getflora.mjs.
+// Where the wood goes is still written down, section by section, in
+// data/build/scenery.js. Density inside a section is random; the fact that the
+// esses run through pine is a decision.
 import * as THREE from 'three';
 import { pointAt, surfaceY } from './path.js';
 import { V } from './meshes.js';
 import { GROUND } from './ground.js';
 import { SCENERY, KINDS, FOREST_DEPTH } from '../../data/build/scenery.js';
 
-// --- near-field grass -------------------------------------------------------
-const CHUNK = 30;          // path samples per grass strip (2 m each, so 60 m)
-const GRASS_ON = 95;       // m from the camera a strip is built and shown
-const GRASS_OFF = 130;     // m at which it is dropped again (hysteresis)
-// Measured against a cone: the first build's grass stood taller than a traffic
-// cone, which reads as a field nobody has mown since the war. Trackside grass
-// is 5-10 cm and what sells it is DENSITY, not height.
-const TUFTS_PER_M2 = 3.4;
-const SEEDS_PER_M2 = 0.055;
-const BUILD_BUDGET = 2;    // strips built per frame, so streaming never hitches
+// --- the wood ---------------------------------------------------------------
+const ROWS = 5;                 // rows of trees along the edge, front to back
+const ROW_GAP = 5.5;            // m between them
+const ROW_PACK = [0.30, 0.55, 0.85, 1.15, 1.45];   // each row denser than the last
+const DARK_ROW = 2.6;           // which row the dark mass stands at
+const DARK_H = 7.2;             // m: under the canopy, so it never breaks the skyline
+const DARK_DEPTH = 70;          // m of wood the dark mass covers, then it lands
+const CELL = 220;               // m, one forest bucket
+const LOD_FULL = 130;           // m: trunks and all
+const LOD_CARDS = 330;          // m: foliage only, no trunks
+const LOD_FAR = 780;            // m: one baked cross-card, then nothing
 
-// --- the forest -------------------------------------------------------------
-const CELL = 260;          // m, one forest bucket
-const LOD_FULL = 190;      // m: trunks and all
-const LOD_CARDS = 460;     // m: foliage only, no trunks
-const LOD_FAR = 1250;      // m: baked cross-cards, then nothing
+// --- the fringe -------------------------------------------------------------
+const FRINGE_H = 0.34;          // m of blade standing at the edge of the verge
+const FRINGE_STEP = 1.6;        // m between tufts along it
 
-// Deterministic noise, so the same track always grows the same wood. Nothing
-// here decides WHERE a forest is — only which blade of grass lands where
-// inside one.
+// Deterministic, so the same track always grows the same wood.
 function rng(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
+  let s = (seed >>> 0) || 1;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
 }
 
 // ---------------------------------------------------------------------------
-// Geometry: a bent card, which is every plant in this file.
+// A bent card, which is every leaf and every blade in this file.
 //
-// `rect` is a measured cut-out from data/flora/atlas.json. `rows` is how many
-// times the card is cut across, which is what lets the wind bend it rather
-// than slide it. `aSway` runs 0 at the root to 1 at the tip and is what the
-// sway shader in look.js weights its bend by.
+// `shade` is the addition that stopped the trees looking, in Adam's words,
+// kindergarten-drawn. It is written into a vertex colour and darkens a card by
+// how deep in the crown it sits: real foliage is a MASS, lit on the outside
+// and shadowed inside, and a tree whose every leaf is the same bright green is
+// a cartoon of a tree no matter how many leaves you give it.
 // ---------------------------------------------------------------------------
-function card(rect, w, h, { rows = 2, bend = 0, tilt = 0, yaw = 0, at = [0, 0, 0], flip = false } = {}) {
-  const pos = [], uv = [], sway = [], idx = [], nor = [];
+function card(rect, w, h, { rows = 2, bend = 0, tilt = 0, yaw = 0, at = [0, 0, 0], shade = 1, droop = 0 } = {}) {
+  const pos = [], uv = [], sway = [], nor = [], col = [], idx = [];
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   for (let r = 0; r <= rows; r++) {
     const t = r / rows;
-    // A card that leans as it rises reads as a plant; a flat rectangle reads
-    // as a sticker. `bend` is metres of lean at the tip, `tilt` radians of
-    // pitch for a branch that hangs rather than stands.
     const lean = bend * t * t;
-    const y = h * t * Math.cos(tilt) + (flip ? 0 : 0);
+    const y = h * t * Math.cos(tilt) - droop * t * t;
     const z0 = h * t * Math.sin(tilt) + lean;
+    // Lighter toward the tip, darker at the root: the inside of a branch is
+    // the shaded part.
+    const k = shade * (0.74 + 0.26 * t);
     for (const s of [-0.5, 0.5]) {
       const x = s * w * (1 - 0.12 * t);
-      // yaw the card around its own root
       pos.push(x * cy - z0 * sy + at[0], y + at[1], x * sy + z0 * cy + at[2]);
       uv.push(rect.x + (s + 0.5) * rect.w, rect.y + t * rect.h);
       sway.push(t);
-      // Normals point along the card's face. For a plant the truth is "this
-      // leaf faces everywhere", so they are pushed toward vertical, which is
-      // what stops a field of grass flickering black as the sun crosses it.
+      // Normals pushed toward vertical: the truth for a leaf is "this faces
+      // everywhere", and it is what stops a wood flickering black as the sun
+      // crosses it.
       nor.push(-sy * 0.45, 0.89, cy * 0.45);
+      col.push(k, k, k);
     }
     if (r > 0) {
-      const k = r * 2;
-      idx.push(k - 2, k - 1, k, k - 1, k + 1, k);
+      const q = r * 2;
+      idx.push(q - 2, q - 1, q, q - 1, q + 1, q);
     }
   }
-  return { pos, uv, sway, nor, idx };
+  return { pos, uv, sway, nor, col, idx };
 }
 
 function assemble(parts) {
-  const pos = [], uv = [], sway = [], nor = [], idx = [];
+  const pos = [], uv = [], sway = [], nor = [], col = [], idx = [];
   for (const p of parts) {
     const base = pos.length / 3;
-    pos.push(...p.pos); uv.push(...p.uv); sway.push(...p.sway); nor.push(...p.nor);
+    pos.push(...p.pos); uv.push(...p.uv); sway.push(...p.sway); nor.push(...p.nor); col.push(...p.col);
     for (const i of p.idx) idx.push(base + i);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.setAttribute('aSway', new THREE.Float32BufferAttribute(sway, 1));
   g.setIndex(idx);
   g.computeBoundingSphere();
   return g;
 }
 
-// A tuft: three blades from three different cut-outs, facing three ways. The
-// variety between tufts comes from the instance (yaw, scale, tint); the
-// variety WITHIN a tuft has to be in the geometry, or every tuft is the same
-// blade repeated and the eye picks that up immediately.
-function tuftGeometry(rects, { blades = 3, h = 0.52, w = 0.13, seed = 7 } = {}) {
-  const r = rng(seed), parts = [];
-  for (let i = 0; i < blades; i++) {
-    const rect = rects[Math.floor(r() * rects.length)];
-    // A cut-out's box is mostly empty for a thin blade; `fill` is how much of
-    // it is actually plant, and a card sized by the box makes a sparse blade
-    // look like a wide leaf. Narrow the card by what was measured.
-    const aspect = (rect.w / rect.h) * Math.max(0.35, rect.fill ?? 1);
-    const hh = h * (0.7 + r() * 0.6);
-    parts.push(card(rect, Math.max(w, hh * aspect * 1.9), hh, {
-      rows: 2, bend: (r() - 0.5) * hh * 0.5, yaw: (i / blades) * Math.PI + r() * 0.5,
-      at: [(r() - 0.5) * 0.14, 0, (r() - 0.5) * 0.14],
-    }));
-  }
-  return assemble(parts);
-}
-
 // ---------------------------------------------------------------------------
-// Trees. A trunk is real geometry because you drive past it; the leaves are
-// cards because there is no other way to afford a wood.
+// Trees.
 // ---------------------------------------------------------------------------
-function trunkGeometry(rBase, rTop, h, lean = 0) {
-  const g = new THREE.CylinderGeometry(rTop, rBase, h, 7, 2, false);
+function trunkGeometry(rBase, rTop, h, { sides = 6, lean = 0 } = {}) {
+  const g = new THREE.CylinderGeometry(rTop, rBase, h, sides, 1, false);
   g.translate(0, h / 2, 0);
   if (lean) g.rotateZ(lean);
-  // UVs are metres, like everything else in this project: the bark material
-  // says its photograph is 1.2 m across and repeats 1/1.2, so the scale has to
-  // arrive here in metres rather than in 0..1 of a cylinder.
+  // UVs are metres here too, so the bark photograph is the size it was shot at.
   const uv = g.attributes.uv;
   const circ = 2 * Math.PI * (rBase + rTop) * 0.5;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * circ, uv.getY(i) * h);
-  g.setAttribute('aSway', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count), 1));
+  const n = g.attributes.position.count;
+  g.setAttribute('aSway', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+  // A trunk in a wood stands in shadow. Flat-lit bark is most of why a
+  // low-poly tree reads as a lamp post with a bush on top.
+  const col = new Float32Array(n * 3).fill(0.62);
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return g;
 }
 
-// A fir: sprigs in whorls down a cone, each one hanging slightly.
-function coniferFoliage(rects, { h = 13, spread = 2.9, whorls = 15, seed = 3 } = {}) {
+// A fir: whorls of drooping sprigs down a cone, darker toward the bottom,
+// tapering to a spire. The silhouette is the whole job.
+function coniferFoliage(rects, { h = 15, spread = 3.0, whorls = 16, perWhorl = 2, seed = 3 } = {}) {
   const r = rng(seed), parts = [];
   for (let k = 0; k < whorls; k++) {
-    const t = 0.22 + 0.78 * (k / (whorls - 1));
-    const rect = rects[k % rects.length];
-    const reach = spread * Math.pow(1 - t, 0.75) + 0.35;
-    const yaw = k * 2.3999 + r() * 0.6;
-    parts.push(card(rect, reach * 2.2, reach * 1.5, {
-      rows: 2, tilt: 1.32 + r() * 0.16, bend: -reach * 0.12, yaw,
-      at: [0, h * t, 0],
-    }));
+    const t = 0.2 + 0.8 * (k / (whorls - 1));
+    const reach = spread * Math.pow(1 - t, 0.72) + 0.4;
+    const shade = 0.52 + 0.48 * t;
+    for (let j = 0; j < perWhorl; j++) {
+      const rect = rects[(k + j) % rects.length];
+      const yaw = k * 2.3999 + j * (Math.PI * 2 / perWhorl) + r() * 0.4;
+      parts.push(card(rect, reach * 2.3, reach * 1.45, {
+        rows: 2, tilt: 1.28 + r() * 0.2, bend: -reach * 0.18, yaw, shade,
+        droop: reach * 0.22,
+        at: [Math.cos(yaw) * reach * 0.18, h * t, Math.sin(yaw) * reach * 0.18],
+      }));
+    }
   }
-  // A spire, so the top is not a bald pole.
-  parts.push(card(rects[0], spread * 0.8, spread * 0.9, { rows: 2, yaw: 0.7, at: [0, h * 0.97, 0] }));
+  parts.push(card(rects[0], spread * 0.7, spread * 1.1, { rows: 2, yaw: 0.7, shade: 1, at: [0, h * 0.94, 0] }));
   return assemble(parts);
 }
 
-// A broadleaf: clusters of leaves around a crown. The cluster is why this
-// works — one leaf per card is a Christmas decoration, four leaves in one card
-// with the gaps transparent is a branch.
-function broadFoliage(rects, { h = 9, crown = 3.4, cards = 14, seed = 11 } = {}) {
+// A broadleaf gets real branches, and the clusters hang on the ENDS of them.
+// Leaves floating in a ball around a pole is the other half of the
+// kindergarten look: a crown has structure holding it up.
+function broadBranches(h, crown, seed) {
+  const r = rng(seed), out = [];
+  for (let k = 0; k < 4; k++) {
+    const g = trunkGeometry(0.17, 0.07, crown * (0.85 + r() * 0.5), { sides: 4, lean: 0.62 + r() * 0.25 });
+    g.rotateY(k * 1.7 + r() * 0.5);
+    g.translate(0, h * 0.62, 0);
+    out.push(g);
+  }
+  return out;
+}
+
+function broadFoliage(rects, { h = 9.5, crown = 3.6, cards = 20, seed = 11 } = {}) {
   const r = rng(seed), parts = [];
   for (let k = 0; k < cards; k++) {
     const rect = rects[k % rects.length];
     const t = k / cards;
-    const yaw = k * 2.3999;
-    // Up the crown and out from the middle, so the silhouette is a ball with a
-    // flat-ish bottom rather than a sphere of leaves floating in the air.
-    const up = 0.62 + 0.42 * Math.sin(t * Math.PI * 1.9 + r());
-    const out = crown * (0.45 + r() * 0.62) * Math.sin(up * Math.PI * 0.9);
-    const size = crown * (0.72 + r() * 0.5);
-    parts.push(card(rect, size, size, {
-      rows: 2, tilt: 0.7 + r() * 0.9, bend: (r() - 0.5) * size * 0.4, yaw,
-      at: [Math.cos(yaw) * out, h * 0.62 + up * crown, Math.sin(yaw) * out],
+    const yaw = k * 2.3999 + r() * 0.3;
+    // Up the crown and out from the middle: a ball with a flat-ish underside,
+    // which is what a tree grown toward light actually is.
+    const up = 0.28 + 0.78 * Math.sin(t * Math.PI * 1.6 + r() * 0.5);
+    const out = crown * (0.42 + r() * 0.72) * Math.max(0.35, Math.sin(up * Math.PI * 0.85));
+    const size = crown * (0.78 + r() * 0.55);
+    // The outside of a crown catches the sun; the middle and the underside
+    // never do.
+    const shade = 0.44 + 0.56 * Math.min(1, (out / crown) * 0.55 + up * 0.7);
+    parts.push(card(rect, size, size * 0.92, {
+      rows: 2, tilt: 0.55 + r() * 1.0, bend: (r() - 0.5) * size * 0.5, yaw, shade,
+      droop: size * 0.18,
+      at: [Math.cos(yaw) * out, h * 0.6 + up * crown, Math.sin(yaw) * out],
     }));
   }
   return assemble(parts);
 }
 
-// Two leaf cut-outs side by side make a cluster card. The atlas is a grid of
-// single leaves; a rectangle spanning four of them shows four leaves with
-// transparent gaps, which is a branch's worth of foliage in one quad.
+// Two by two leaves out of the atlas make a cluster card: the atlas is a grid
+// of single leaves, and a rectangle spanning four of them is a branch's worth
+// of foliage, with transparent gaps, in one quad.
 function clusters(items, cols = 2, rows = 2) {
   if (items.length < 4) return items;
   const byCol = [...items].sort((a, b) => a.x - b.x || a.y - b.y);
@@ -210,14 +207,42 @@ function clusters(items, cols = 2, rows = 2) {
   return out.length ? out : items;
 }
 
+// Merge geometries that share this file's attribute set.
+function mergeGeoms(list) {
+  const pos = [], nor = [], uv = [], col = [], sway = [], idx = [];
+  for (const g of list) {
+    const base = pos.length / 3;
+    const p = g.attributes.position, n = g.attributes.normal, u = g.attributes.uv;
+    const c = g.attributes.color, s = g.attributes.aSway;
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i), p.getY(i), p.getZ(i));
+      nor.push(n.getX(i), n.getY(i), n.getZ(i));
+      uv.push(u ? u.getX(i) : 0, u ? u.getY(i) : 0);
+      col.push(c ? c.getX(i) : 1, c ? c.getY(i) : 1, c ? c.getZ(i) : 1);
+      sway.push(s ? s.getX(i) : 0);
+    }
+    const ix = g.index;
+    for (let i = 0; i < ix.count; i++) idx.push(base + ix.getX(i));
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  out.setAttribute('aSway', new THREE.Float32BufferAttribute(sway, 1));
+  out.setIndex(idx);
+  out.computeBoundingSphere();
+  return out;
+}
+
 // ---------------------------------------------------------------------------
-// The impostor bake. One orthographic render of a real tree into a texture,
-// which then stands in for it past a quarter of a kilometre.
+// The impostor bake: one orthographic render of a real tree, standing in for
+// it past a quarter of a kilometre.
 //
-// Baked UNLIT and with tone mapping off: what goes into the texture has to be
-// albedo, because the card is lit again when it is drawn. Bake a lit tree and
-// every distant tree carries the sun angle it was baked at, which is wrong
-// twice over — once for the light, once for the exposure.
+// Baked UNLIT with tone mapping off, because what goes into the texture has to
+// be albedo — the card is lit again when it is drawn. Bake a lit tree and
+// every distant tree in the world carries the sun angle and the exposure it
+// was baked at.
 // ---------------------------------------------------------------------------
 function bakeImpostor(renderer, parts, size = 512) {
   const scene = new THREE.Scene();
@@ -225,7 +250,7 @@ function bakeImpostor(renderer, parts, size = 512) {
   for (const { geometry, material } of parts) {
     const m = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
       map: material.map, alphaMap: material.alphaMap, alphaTest: material.alphaTest || 0.4,
-      side: THREE.DoubleSide, toneMapped: false,
+      vertexColors: !!geometry.attributes.color, side: THREE.DoubleSide, toneMapped: false,
     }));
     scene.add(m);
     box.expandByObject(m);
@@ -250,20 +275,12 @@ function bakeImpostor(renderer, parts, size = 512) {
   renderer.setClearColor(clear, clearA);
   renderer.toneMapping = wasTone;
   for (const m of scene.children) m.material.dispose();
-  // The card is square because the bake is; the tree inside it is not, and the
-  // caller needs the real size to plant it at the right height.
   return { texture: rt.texture, size: half * 2, base: c.y - box.min.y };
 }
 
-// A crossed pair of quads. Normals are pushed outward and up rather than left
-// flat, so a distant wood shades like a mass of leaves instead of like two
-// pieces of card.
 function crossGeometry(w, h, base) {
   const parts = [];
-  for (const yaw of [0, Math.PI / 2]) {
-    const c = card({ x: 0, y: 0, w: 1, h: 1 }, w, h, { rows: 1, yaw, at: [0, -base, 0] });
-    parts.push(c);
-  }
+  for (const yaw of [0, Math.PI / 2]) parts.push(card({ x: 0, y: 0, w: 1, h: 1 }, w, h, { rows: 1, yaw, at: [0, -base, 0] }));
   const g = assemble(parts);
   const n = g.attributes.normal, p = g.attributes.position;
   for (let i = 0; i < n.count; i++) {
@@ -275,56 +292,24 @@ function crossGeometry(w, h, base) {
 
 // ---------------------------------------------------------------------------
 export class Flora {
-  constructor(path, ground, look) {
+  constructor(path, ground, look, quality = {}) {
     this.path = path; this.ground = ground; this.look = look;
+    this.q = { trees: 1, fringe: true, shadows: true, ...quality };
     this.group = new THREE.Group();
     this.group.name = 'flora';
-    this.grass = new THREE.Group();
     this.forest = new THREE.Group();
-    this.group.add(this.grass, this.forest);
-    this.strips = new Map();          // key -> { mesh[], built, lastSeen }
+    this.group.add(this.forest);
     this.cells = [];
-    this.counts = { tufts: 0, seeds: 0, trees: 0, cells: 0 };
-    this._tmp = new THREE.Vector3();
-  }
-
-  // -- where the mown verge is, once, so no blade of grass ever asks ---------
-  //
-  // Two things stop grass: a tunnel (there is no sky in there) and a road that
-  // has left the ground — a viaduct deck's verge is thin air, and grass placed
-  // at the road's edge height would hang off the side of it. Both are measured
-  // per sample here rather than per blade.
-  survey() {
-    const p = this.path, g = this.ground;
-    this.band = new Float32Array(p.n * 2);            // [outer left, outer right]
-    this.ok = new Uint8Array(p.n);
-    for (let i = 0; i < p.n; i++) {
-      if (p.tunIn && p.tunIn[i] > 0) continue;
-      let good = 1;
-      for (const side of [1, -1]) {
-        const run = side > 0 ? p.runL[i] : p.runR[i];
-        const outer = p.w[i] + run + GROUND.VERGE * 0.8;
-        this.band[i * 2 + (side > 0 ? 0 : 1)] = outer;
-        const e = pointAt(p, i, side * (p.w[i] + run * 0.5));
-        // The ground under the verge should be the road edge's height. Where
-        // it is not, the road is on a bridge or in a bore and there is nothing
-        // out there to grow on.
-        if (Math.abs(g.height(e.x, e.y) - e.z) > 1.6) good = 0;
-      }
-      this.ok[i] = good;
-    }
-    return this;
+    this.counts = { trees: 0, cells: 0, blades: 0, darkRuns: 0 };
   }
 
   // -- which section of scenery a sample belongs to --------------------------
   sections() {
     const p = this.path;
     this.kindAt = new Array(p.n);
-    let current = { left: SCENERY.default.left, right: SCENERY.default.right };
+    let current = SCENERY.START || SCENERY.default;
     for (const piece of p.pieces) {
-      const named = piece.part && (SCENERY[piece.part] || (piece.n === 1 ? SCENERY.START : null));
-      if (named) current = named;
-      else if (piece.n === 1 && SCENERY.START) current = SCENERY.START;
+      if (piece.part && SCENERY[piece.part]) current = SCENERY[piece.part];
       const i0 = Math.floor(piece.s0 / p.ds), i1 = Math.min(p.n - 1, Math.ceil(piece.s1 / p.ds));
       for (let i = i0; i <= i1; i++) this.kindAt[i] = current;
     }
@@ -332,40 +317,46 @@ export class Flora {
     return this;
   }
 
-  // -- the plant materials and the two trees, built once ---------------------
+  kindFor(i, side) {
+    const sec = this.kindAt[i];
+    return KINDS[side > 0 ? sec.left : sec.right] || KINDS.meadow;
+  }
+
+  // -- the two species, built once -------------------------------------------
   makeSpecies(renderer) {
     const L = this.look;
-    const grassRects = L.cutouts('grass'), seedRects = L.cutouts('seed');
     const needleRects = L.cutouts('needle'), leafRects = clusters(L.cutouts('leaf'));
     this.mat = {
-      grass: L.cardMaterial('grass', { sway: 1, glow: 0.35, alphaTest: 0.4 }),
-      seed: L.cardMaterial('seed', { sway: 1.5, glow: 0.3, alphaTest: 0.35 }),
-      needle: L.cardMaterial('needle', { sway: 0.35, glow: 0.55, alphaTest: 0.42 }),
-      leaf: L.cardMaterial('leaf', { sway: 0.5, glow: 0.6, alphaTest: 0.42 }),
+      // Foliage is tinted DOWN from the scan: a leaf photographed on a light
+      // table is the brightest that leaf will ever be, and a wood built out of
+      // them glows like a salad.
+      needle: L.cardMaterial('needle', { sway: 0.3, glow: 0.45, alphaTest: 0.45, tint: 0x93a375 }),
+      leaf: L.cardMaterial('leaf', { sway: 0.45, glow: 0.5, alphaTest: 0.45, tint: 0x92a075 }),
       bark: L.bark(),
+      fringe: L.cardMaterial('grass', { sway: 0.8, glow: 0.35, alphaTest: 0.4 }),
     };
-    if (!this.mat.grass) return false;              // no data/flora: no plants
-
-    this.tuft = tuftGeometry(grassRects, { blades: 3, h: 0.3, seed: 5 });
-    this.seedTuft = tuftGeometry(seedRects, { blades: 2, h: 0.72, w: 0.16, seed: 9 });
+    if (!this.mat.needle) return false;
+    for (const m of [this.mat.needle, this.mat.leaf, this.mat.bark]) m.vertexColors = true;
 
     const conifer = {
-      trunk: trunkGeometry(0.42, 0.13, 13.5),
-      foliage: coniferFoliage(needleRects, { h: 13.5, spread: 3.1, whorls: 16, seed: 3 }),
+      trunk: trunkGeometry(0.34, 0.1, 15),
+      foliage: coniferFoliage(needleRects, { h: 15, spread: 3.0, whorls: 16, perWhorl: 2, seed: 3 }),
       mat: this.mat.needle,
     };
     const broad = {
-      trunk: trunkGeometry(0.46, 0.2, 8.4),
-      foliage: broadFoliage(leafRects, { h: 8.4, crown: 3.6, cards: 15, seed: 11 }),
+      trunk: mergeGeoms([trunkGeometry(0.42, 0.22, 9.5), ...broadBranches(9.5, 3.5, 12)]),
+      foliage: broadFoliage(leafRects, { h: 9.5, crown: 3.6, cards: 20, seed: 11 }),
       mat: this.mat.leaf,
     };
     for (const sp of [conifer, broad]) {
-      sp.card = bakeImpostor(renderer, [{ geometry: sp.foliage, material: sp.mat },
-        { geometry: sp.trunk, material: { map: this.mat.bark.map, alphaTest: 0 } }]);
+      sp.card = bakeImpostor(renderer, [
+        { geometry: sp.foliage, material: sp.mat },
+        { geometry: sp.trunk, material: { map: this.mat.bark.map, alphaTest: 0 } },
+      ]);
       sp.cross = crossGeometry(sp.card.size, sp.card.size, sp.card.base);
       sp.crossMat = new THREE.MeshStandardMaterial({
-        map: sp.card.texture, alphaTest: 0.3, side: THREE.DoubleSide,
-        roughness: 0.85, metalness: 0, envMapIntensity: 0.8,
+        map: sp.card.texture, alphaTest: 0.35, side: THREE.DoubleSide,
+        roughness: 0.9, metalness: 0, envMapIntensity: 0.7,
       });
       sp.crossMat.shadowSide = THREE.DoubleSide;
     }
@@ -373,63 +364,62 @@ export class Flora {
     return true;
   }
 
-  // -- plant the forest, once ------------------------------------------------
+  // -------------------------------------------------------------------------
+  // PLANT. Five rows along the edge of the wood, each denser than the one in
+  // front of it, and nothing at all behind them: the dark mass is the wood.
+  // -------------------------------------------------------------------------
   plant() {
     const p = this.path, g = this.ground;
     const r = rng(1234);
     const buckets = new Map();
-    const push = (cx, cy, t) => {
-      const key = `${cx},${cy}`;
+    const push = (t) => {
+      const key = `${Math.floor(t.x / CELL)},${Math.floor(t.y / CELL)}`;
       let b = buckets.get(key);
-      if (!b) buckets.set(key, b = { cx, cy, conifer: [], broad: [] });
+      if (!b) buckets.set(key, b = { conifer: [], broad: [] });
       b[t.sp].push(t);
     };
-    // Walk the road and throw trees sideways into the country beside it. The
-    // road is the only thing we know the position of, which is also why this
-    // cannot plant a wood that is not beside the track — and that is fine: a
-    // wood you never come within 260 m of is fog.
-    const step = 6;                                   // m along the road between attempts
-    for (let i = 0; i < p.n; i += Math.round(step / p.ds)) {
-      const sec = this.kindAt[i];
+    const step = 5;                                  // m along the road between attempts
+    const di = Math.max(1, Math.round(step / p.ds));
+    for (let i = 0; i < p.n; i += di) {
+      if (p.tunIn && p.tunIn[i] > 0) continue;       // nothing grows inside a hill
       for (const side of [1, -1]) {
-        const kind = KINDS[side > 0 ? sec.left : sec.right] || KINDS.meadow;
+        const kind = this.kindFor(i, side);
         if (!kind.trees) continue;
-        // trees per hectare over the strip of land this sample owns
-        const area = step * FOREST_DEPTH;
-        const n = (kind.trees / 10000) * area;
-        for (let k = 0; k < Math.ceil(n); k++) {
-          if (k > n - 1 && r() > n - Math.floor(n)) continue;
-          const lat = side * (kind.near + r() * FOREST_DEPTH);
-          const along = (r() - 0.5) * step;
-          const pt = pointAt(p, Math.min(p.n - 1, i + Math.round(along / p.ds)), lat);
-          // Never on the road — and roadDist knows about EVERY road, so this
-          // is also what keeps a wood from growing under a viaduct deck or on
-          // top of the piece of track the loop crosses over.
-          if (g.roadDist(pt.x, pt.y) < kind.near) continue;
-          const h = g.height(pt.x, pt.y);
-          const sp = r() < kind.conifer ? 'conifer' : 'broad';
-          push(Math.floor(pt.x / CELL), Math.floor(pt.y / CELL), {
-            sp, x: pt.x, y: pt.y, h, yaw: r() * Math.PI * 2,
-            scale: 0.72 + r() * 0.66, tint: 0.82 + r() * 0.36,
-          });
+        for (let row = 0; row < ROWS; row++) {
+          const n = (kind.trees / 10000) * (step * ROW_GAP) * ROW_PACK[row] * this.q.trees;
+          for (let k = 0; k < Math.ceil(n); k++) {
+            if (k > n - 1 && r() > n - Math.floor(n)) continue;
+            const lat = side * (kind.near + row * ROW_GAP + r() * ROW_GAP);
+            const j = Math.min(p.n - 1, i + Math.round(((r() - 0.5) * step) / p.ds));
+            const pt = pointAt(p, j, lat);
+            // roadDist knows about EVERY road, so this is also what keeps a
+            // wood from growing under a viaduct deck or inside the loop.
+            if (g.roadDist(pt.x, pt.y) < kind.near) continue;
+            push({
+              sp: r() < kind.conifer ? 'conifer' : 'broad',
+              x: pt.x, y: pt.y, h: g.height(pt.x, pt.y),
+              yaw: r() * Math.PI * 2, scale: 0.74 + r() * 0.6,
+              tint: 0.78 + r() * 0.4, row,
+            });
+          }
         }
       }
     }
-    for (const b of buckets.values()) this.buildCell(b);
+    for (const [key, b] of buckets) this.buildCell(key, b);
     this.counts.cells = this.cells.length;
     return this;
   }
 
-  buildCell(b) {
-    const S = this.species;
-    const cell = { x: (b.cx + 0.5) * CELL, y: (b.cy + 0.5) * CELL, lods: [], n: 0 };
+  buildCell(key, b) {
+    const [cx, cy] = key.split(',').map(Number);
+    const cell = { x: (cx + 0.5) * CELL, y: (cy + 0.5) * CELL, lods: [], n: 0 };
     for (const name of ['conifer', 'broad']) {
       const list = b[name];
       if (!list.length) continue;
-      const sp = S[name];
-      // ONE matrix array, three meshes. The LODs are the same trees seen from
-      // further away, so they must be the same matrices — and three is happy
-      // to share an InstancedBufferAttribute between meshes.
+      const sp = this.species[name];
+      // ONE matrix array, three meshes: the LODs are the same trees further
+      // away, so they must be the same matrices, and three is happy to share
+      // an InstancedBufferAttribute between meshes.
       const mat4 = new THREE.InstancedBufferAttribute(new Float32Array(list.length * 16), 16);
       const tint = new THREE.InstancedBufferAttribute(new Float32Array(list.length * 3), 3);
       const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
@@ -437,27 +427,31 @@ export class Flora {
       list.forEach((t, i) => {
         q.setFromAxisAngle(up, t.yaw);
         pos.copy(V(t.x, t.y, t.h));
-        scl.set(t.scale, t.scale * (0.86 + (t.tint - 0.82) * 0.8), t.scale);
+        scl.set(t.scale, t.scale * (0.9 + (t.tint - 0.78) * 0.5), t.scale);
         m.compose(pos, q, scl);
         m.toArray(mat4.array, i * 16);
-        // Real foliage is a spread of greens, never one. This is the
-        // difference between "a forest" and "a texture applied to cones".
-        tint.setXYZ(i, t.tint * 0.96, t.tint, t.tint * 0.86);
+        // Real foliage is a spread of greens, never one, and a row further
+        // back sits deeper in the shade of its own wood.
+        const shade = t.tint * (1 - t.row * 0.06);
+        tint.setXYZ(i, shade * 0.94, shade, shade * 0.84);
       });
-      const mesh = (geo, material) => {
+      const mesh = (geo, material, shadow) => {
         const im = new THREE.InstancedMesh(geo, material, list.length);
         im.instanceMatrix = mat4;
         im.instanceColor = tint;
-        im.castShadow = true; im.receiveShadow = true;
-        im.frustumCulled = true;
+        // Only the nearest level of detail casts. A shadow map is a second
+        // draw of everything in it, and a forest of alpha-tested cards is the
+        // most expensive thing in the scene to draw twice.
+        im.castShadow = shadow && this.q.shadows;
+        im.receiveShadow = false;
         im.visible = false;
         this.forest.add(im);
         return im;
       };
       cell.lods.push({
-        full: [mesh(sp.trunk, this.mat.bark), mesh(sp.foliage, sp.mat)],
-        cards: [mesh(sp.foliage, sp.mat)],
-        far: [mesh(sp.cross, sp.crossMat)],
+        full: [mesh(sp.trunk, this.mat.bark, true), mesh(sp.foliage, sp.mat, true)],
+        cards: [mesh(sp.foliage, sp.mat, false)],
+        far: [mesh(sp.cross, sp.crossMat, false)],
       });
       cell.n += list.length;
       this.counts.trees += list.length;
@@ -465,66 +459,146 @@ export class Flora {
     this.cells.push(cell);
   }
 
-  // -- near-field grass, streamed -------------------------------------------
-  stripKey(c, side) { return c * 2 + (side > 0 ? 0 : 1); }
-
-  buildStrip(c, side) {
-    const p = this.path, i0 = c * CHUNK, i1 = Math.min(p.n - 1, i0 + CHUNK);
-    const r = rng(c * 7919 + (side > 0 ? 13 : 71));
-    const tufts = [], seeds = [];
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
-    const pos = new THREE.Vector3(), scl = new THREE.Vector3();
-    for (let i = i0; i < i1; i++) {
-      if (!this.ok[i]) continue;
-      const sec = this.kindAt[i];
-      const kind = KINDS[side > 0 ? sec.left : sec.right] || KINDS.meadow;
-      // Grass starts where the RUN-OFF ends, not part way across it: that band
-      // is asphalt, both to the physics and now to the eye.
-      const inner = p.w[i] + (side > 0 ? p.runL[i] : p.runR[i]);
-      const outer = this.band[i * 2 + (side > 0 ? 0 : 1)];
-      if (outer <= inner) continue;
-      const area = p.ds * (outer - inner);
-      const n = area * TUFTS_PER_M2 * kind.grass;
-      const ns = area * SEEDS_PER_M2 * kind.grass;
-      for (const [list, count, big] of [[tufts, n, false], [seeds, ns, true]]) {
-        for (let k = 0; k < count; k++) {
-          if (k > count - 1 && r() > count - Math.floor(count)) continue;
-          const lat = side * (inner + r() * (outer - inner));
-          const pt = pointAt(p, i, lat);
-          // Inside the level verge the ground IS the road edge, so this is the
-          // exact height with no terrain query at all — that identity is what
-          // makes streaming grass cheap enough to do at 60 fps.
-          const y = surfaceY(p, i, lat) - GROUND.EPS;
-          q.setFromAxisAngle(up, r() * Math.PI * 2);
-          const s = big ? 0.75 + r() * 0.4 : 0.78 + r() * 0.42;
-          pos.set(pt.x, y, -pt.y);
-          scl.set(s, s * (0.8 + r() * 0.5), s);
-          m.compose(pos, q, scl);
-          list.push(...m.elements);
-        }
+  // -------------------------------------------------------------------------
+  // THE DARK MASS — the inside of the wood.
+  //
+  // A wall along the treeline and a lid over it, both at DARK_H, which is
+  // under the canopy: the skyline stays real branches and the box is never
+  // seen as a box. From the air the lid reads as canopy with trees standing
+  // through it; from the road it is the darkness between the trunks, which is
+  // the thing that makes a wood a wood.
+  //
+  // One mesh for the whole track, so a circuit lined with forest costs a
+  // single draw call instead of four hundred trees' worth.
+  // -------------------------------------------------------------------------
+  darkness() {
+    const p = this.path, g = this.ground;
+    const runs = [];
+    for (const side of [1, -1]) {
+      let run = null;
+      for (let i = 0; i < p.n; i++) {
+        const kind = this.kindFor(i, side);
+        const wooded = kind.trees > 40 && !(p.tunIn && p.tunIn[i] > 0);
+        if (wooded) {
+          if (!run) run = { side, from: i, to: i, kind };
+          run.to = i;
+        } else if (run) { runs.push(run); run = null; }
       }
+      if (run) runs.push(run);
     }
-    const meshes = [];
-    const make = (geo, mat, arr) => {
-      if (!arr.length) return;
-      const im = new THREE.InstancedMesh(geo, mat, arr.length / 16);
-      im.instanceMatrix = new THREE.InstancedBufferAttribute(new Float32Array(arr), 16);
-      im.castShadow = false;          // a blade's shadow costs more than it shows
-      im.receiveShadow = true;
-      this.grass.add(im);
-      meshes.push(im);
+    const pos = [], nor = [], col = [], idx = [];
+    const quad = (a, b, c, d, shade, n) => {
+      const base = pos.length / 3;
+      for (const v of [a, b, c, d]) { pos.push(v[0], v[1], v[2]); nor.push(n[0], n[1], n[2]); col.push(shade, shade, shade); }
+      idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     };
-    make(this.tuft, this.mat.grass, tufts);
-    make(this.seedTuft, this.mat.seed, seeds);
-    this.counts.tufts += tufts.length / 16;
-    this.counts.seeds += seeds.length / 16;
-    return meshes;
+    for (const run of runs) {
+      if (run.to - run.from < 3) continue;
+      const near = run.kind.near + DARK_ROW * ROW_GAP;
+      // Not the full forest depth: the mass is a WEDGE that comes back down to
+      // the ground, not a box 200 m deep. A box that deep is a box the fly
+      // camera spends most of its time inside, and from inside it is a black
+      // screen — which is exactly what the first photograph of it was.
+      const far = run.kind.near + DARK_DEPTH;
+      let prev = null;
+      for (let i = run.from; i <= run.to; i += 2) {
+        const inner = pointAt(p, i, run.side * near);
+        const outer = pointAt(p, i, run.side * far);
+        const hi = g.height(inner.x, inner.y), ho = g.height(outer.x, outer.y);
+        const here = {
+          in: [inner.x, hi - 0.5, -inner.y], inTop: [inner.x, hi + DARK_H, -inner.y],
+          // the far edge sits ON the ground, so the lid is a slope that lands
+          out: [outer.x, ho + 0.8, -outer.y],
+        };
+        if (prev) {
+          // the wall facing the track, and the lid over the wood behind it
+          // The wall is the darkness between the trunks; the lid is CANOPY,
+          // in full sun. Painting both the same near-black made the wood read
+          // as a hole in the world from every angle except the road.
+          quad(prev.in, here.in, here.inTop, prev.inTop, 0.34, [0, 0.25, 0.97]);
+          quad(prev.inTop, here.inTop, here.out, prev.out, 1.0, [0, 1, 0]);
+        }
+        prev = here;
+      }
+      this.counts.darkRuns++;
+    }
+    if (!pos.length) return this;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: 0x4c6338, roughness: 1, metalness: 0, side: THREE.DoubleSide,
+      vertexColors: true, envMapIntensity: 0.4,
+    }));
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    this.group.add(mesh);
+    this.dark = mesh;
+    return this;
   }
 
-  // -- per frame -------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // THE FRINGE — grass, insinuated.
+  //
+  // One strip of real blades along the edge of the verge, both sides, whole
+  // track, built once: two draw calls and no streaming. What sells grass at
+  // 250 km/h is the EDGE of it, not a lawn nobody will ever look down at.
+  // -------------------------------------------------------------------------
+  fringe() {
+    if (!this.q.fringe || !this.mat?.fringe) return this;
+    const p = this.path;
+    const rects = this.look.cutouts('grass');
+    if (!rects.length) return this;
+    const r = rng(77);
+    for (const side of [1, -1]) {
+      const parts = [];
+      for (let s = 0; s < p.length; s += FRINGE_STEP) {
+        const i = Math.min(p.n - 1, Math.round(s / p.ds));
+        if (p.tunIn && p.tunIn[i] > 0) continue;
+        const run = side > 0 ? p.runL[i] : p.runR[i];
+        if (run <= 1.4) continue;                    // a wall right at the kerb
+        const lat = side * (p.w[i] + run + 0.15 + r() * 0.5);
+        const pt = pointAt(p, i, lat);
+        const y = surfaceY(p, i, side * p.w[i]) - GROUND.EPS;
+        const rect = rects[Math.floor(r() * rects.length)];
+        const h = FRINGE_H * (0.75 + r() * 0.6);
+        // Two crossed blades per point, which from a car is a tuft.
+        for (const turn of [0, 1.1]) {
+          parts.push(card(rect, h * 2.6, h, {
+            rows: 1, yaw: p.hdg[i] + turn + r() * 0.5, bend: (r() - 0.5) * h * 0.4,
+            shade: 0.8 + r() * 0.2, at: [pt.x, y, -pt.y],
+          }));
+        }
+        this.counts.blades += 2;
+      }
+      if (!parts.length) continue;
+      const mesh = new THREE.Mesh(assemble(parts), this.mat.fringe);
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      this.group.add(mesh);
+    }
+    return this;
+  }
+
+  // -- per frame: one level of detail per cell -------------------------------
   update(camera) {
     const cam = camera.position;
-    // forest: one level of detail per cell, by distance to the cell's middle
+    // Get out of the way when the camera is inside the wood. The mass is
+    // unlit from behind, so flying into it fills the screen with black — and
+    // flying around the track is how this page is used.
+    if (this.dark) {
+      // The rule is about where you are looking FROM. On the road you see the
+      // wall, which is the point of it. Above the canopy you see the lid,
+      // which is also the point of it. Off the road and below the canopy you
+      // are either inside the wood or behind it, and either way the mass is
+      // between you and everything you came to look at.
+      const d = this.ground.roadDist(cam.x, -cam.z);
+      const low = cam.y < this.ground.cameraFloor(cam.x, -cam.z) + DARK_H + 6;
+      this.dark.visible = !(low && d > 16);
+    }
     for (const cell of this.cells) {
       const dx = cell.x - cam.x, dz = -cell.y - cam.z;
       const d = Math.hypot(dx, dz);
@@ -535,44 +609,18 @@ export class Flora {
         for (const k of ['full', 'cards', 'far']) for (const m of set[k]) m.visible = (k === want);
       }
     }
-    // grass: build what is close, drop what is not. The two radii differ so a
-    // strip on the boundary is not built and thrown away every other frame.
-    if (!this.mat?.grass) return;
-    const p = this.path, chunks = Math.ceil(p.n / CHUNK);
-    let budget = BUILD_BUDGET;
-    for (let c = 0; c < chunks; c++) {
-      const i = Math.min(p.n - 1, c * CHUNK + CHUNK / 2);
-      const dx = p.x[i] - cam.x, dz = -p.y[i] - cam.z;
-      const d = Math.hypot(dx, dz);
-      for (const side of [1, -1]) {
-        const key = this.stripKey(c, side);
-        const have = this.strips.get(key);
-        if (d < GRASS_ON) {
-          if (have) continue;
-          if (budget-- <= 0) continue;
-          this.strips.set(key, { meshes: this.buildStrip(c, side) });
-        } else if (d > GRASS_OFF && have) {
-          for (const m of have.meshes) { this.grass.remove(m); m.dispose(); }
-          this.strips.delete(key);
-          this.counts.tufts = Math.max(0, this.counts.tufts);
-        }
-      }
-    }
   }
 
-  stats() {
-    let live = 0;
-    for (const s of this.strips.values()) live += s.meshes.length;
-    return { ...this.counts, strips: this.strips.size, liveGrassDraws: live };
-  }
+  stats() { return { ...this.counts }; }
 }
 
 // ---------------------------------------------------------------------------
-export async function buildFlora(renderer, path, ground, look) {
-  const f = new Flora(path, ground, look);
+export async function buildFlora(renderer, path, ground, look, quality) {
+  const f = new Flora(path, ground, look, quality);
   f.sections();
-  if (!f.makeSpecies(renderer)) return f;     // textures missing: no plants, no crash
-  f.survey();
+  if (!f.makeSpecies(renderer)) return f;     // no data/flora: no plants, no crash
   f.plant();
+  f.darkness();
+  f.fringe();
   return f;
 }

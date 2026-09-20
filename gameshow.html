@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>THE GAME SHOW — rate the props</title>
+<link rel="icon" href="data:,">
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.min.js" } }
+</script>
+<style>
+  :root { --ink: #eef0f2; --dim: #9aa3ab; --panel: rgba(14, 16, 19, 0.74); --hot: #35d6a0; --warm: #ffc447; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #b9c6cf;
+    font: 13px/1.35 ui-monospace, "JetBrains Mono", Menlo, monospace; color: var(--ink); }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .panel { position: fixed; background: var(--panel); border-radius: 10px; padding: 12px 14px; backdrop-filter: blur(6px); }
+  #list { top: 14px; left: 14px; width: 330px; max-height: calc(100vh - 120px); overflow: auto; }
+  #cat { font-size: 11px; letter-spacing: 0.14em; color: var(--hot); }
+  h1 { font-size: 17px; letter-spacing: 0.1em; margin: 2px 0 10px; }
+  ol { list-style: none; margin: 0; padding: 0; }
+  li { padding: 6px 0; border-top: 1px solid rgba(255,255,255,0.08); display: flex; gap: 8px; align-items: baseline; }
+  li.on { color: var(--hot); }
+  li .n { color: var(--dim); min-width: 18px; }
+  li .s { margin-left: auto; font-weight: 700; color: var(--warm); }
+  li .s.none { color: #545b63; font-weight: 400; }
+  #hint { bottom: 14px; left: 50%; transform: translateX(-50%); color: var(--dim); white-space: nowrap; }
+  kbd { color: var(--ink); background: rgba(255,255,255,0.1); border-radius: 4px; padding: 1px 6px; }
+  #dist { top: 14px; right: 14px; text-align: right; }
+  #dist b { font-size: 30px; display: block; }
+  #fps { bottom: 14px; right: 14px; color: var(--dim); font-size: 11px; }
+  #saved { position: fixed; top: 50%; left: 50%; transform: translateX(-50%); font-size: 18px;
+    letter-spacing: 0.1em; opacity: 0; transition: opacity .35s; text-shadow: 0 2px 10px #000; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="list" class="panel">
+  <div id="cat">TREES</div>
+  <h1>THE GAME SHOW</h1>
+  <ol id="items"></ol>
+</div>
+<div id="dist" class="panel"><b id="d">—</b>metres away</div>
+<div id="hint" class="panel">
+  <kbd>← →</kbd> pick · <kbd>↑ ↓</kbd> distance · <kbd>1-9 0</kbd> rate out of ten ·
+  <kbd>Tab</kbd> row / solo · <kbd>C</kbd> category · <kbd>drag</kbd> look
+</div>
+<div id="fps" class="panel">…</div>
+<div id="saved">SAVED</div>
+<script type="module" src="./js/show/app.js"></script>
+</body>
+</html>

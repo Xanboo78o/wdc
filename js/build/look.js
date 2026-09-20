@@ -75,7 +75,7 @@ export class BuildLook {
   }
 
   // Sky, image-based lighting, sun and fog, all from the one measured capture.
-  install(scene, { shadows = true } = {}) {
+  install(scene, { shadows = true, shadowMap = 2048, shadowBox = 90 } = {}) {
     const sky = this.look.sky;
     if (this.on && sky) {
       this.look.install(scene);                       // background + PMREM environment
@@ -88,11 +88,14 @@ export class BuildLook {
     const punch = sky?.punch ?? 0.85;
     const sun = new THREE.DirectionalLight(new THREE.Color(sky?.sunColour || 0xfff1dc), 0.6 + punch * 2.6);
     sun.castShadow = shadows && punch > 0.25;
-    sun.shadow.mapSize.set(4096, 4096);
-    // The builder's camera flies: the shadow box has to cover what you are
-    // LOOKING at, not what the car is on, so `follow` moves it and nothing
-    // else. 160 m is the whole of a corner and its run-off.
-    const SH = 160;
+    // A shadow map is a SECOND DRAW of everything that casts into it, at this
+    // resolution, every frame. 4096 over a 160 m box was a quarter of the
+    // frame on its own — measured the hard way, on Adam's laptop, at one frame
+    // a second. 2048 over 90 m is the same picture from a car.
+    sun.shadow.mapSize.set(shadowMap, shadowMap);
+    // The builder's camera flies: the box has to cover what you are LOOKING
+    // at, not what the car is on, so `follow` moves it and nothing else.
+    const SH = shadowBox;
     Object.assign(sun.shadow.camera, { left: -SH, right: SH, top: SH, bottom: -SH, near: 1, far: 1600 });
     // Flat ground is the worst case for shadow acne and this track is nothing
     // but that. normalBias offsets along the surface normal, which is the one
@@ -290,11 +293,11 @@ export class BuildLook {
   // -------------------------------------------------------------------------
 
   /** A cut-out material: alpha-tested, double-sided, lit through, and it sways. */
-  cardMaterial(name, { alphaTest = 0.42, sway = 1, roughness = 0.82, glow = 0.5 } = {}) {
+  cardMaterial(name, { alphaTest = 0.42, sway = 1, roughness = 0.82, glow = 0.5, tint = 0xffffff } = {}) {
     const t = this.flora?.tex?.[name];
     if (!t) return null;
     const mat = new THREE.MeshStandardMaterial({
-      map: t.c, alphaMap: t.a, alphaTest, transparent: false,
+      map: t.c, alphaMap: t.a, alphaTest, transparent: false, color: tint,
       side: THREE.DoubleSide, roughness, metalness: 0, envMapIntensity: 0.9,
     });
     // An alpha-tested cut-out must cast an alpha-tested SHADOW, or every leaf
