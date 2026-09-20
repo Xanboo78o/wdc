@@ -614,7 +614,7 @@ export class View {
     buildBoards(S, t, this.line, look, sign, this.world);
     buildStartFinish(S, t, look, sign, this.world);
     buildMarshalPosts(S, t, look, this.world);
-    stats.stands = buildGrandstands(S, t, env, look, this.world);
+    stats.stands = buildGrandstands(S, t, env, look, this.world, sign);
     stats.pit = buildPitLane(S, t, look, sign, this.world);
     this.tvCams = this._tvCameras();
     stats.tvCams = this.tvCams.length;

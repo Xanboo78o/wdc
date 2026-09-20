@@ -53,12 +53,42 @@ const barrierLat = (t, i, side) => side > 0 ? t.w[i] + t.runL[i] : -(t.w[i] + t.
 // draw call. Cells are 4:1, which suits a hoarding; square signs use a
 // letterboxed cell and their quad is sized to match.
 // ---------------------------------------------------------------------------
+// THE BIG FORMAT. Adam: "espexcally BIG ones that youlll see on massive
+// billboards, buildings etc, like lenovo grandstands".
+//
+// These are the names that go across a grandstand roof rather than on a
+// hoarding — the ones you read from the other side of the circuit. Real
+// trackside brands mixed with this studio's own, which is what a real paddock
+// looks like: a few global names everybody knows, and a lot you only see here.
+//
+// They are drawn as TEXT in this project's own typeface. That is deliberate
+// and it is the whole difference between naming a sponsor and reproducing its
+// logo — no company's artwork appears anywhere in this repo.
+export const BIG = [
+  'LENOVO', 'ROLEX', 'PIRELLI', 'HEINEKEN', 'DHL', 'EMIRATES', 'ARAMCO',
+  'QATAR AIRWAYS', 'MSC CRUISES', 'SALESFORCE', 'AWS', 'SHELL', 'SANTANDER',
+  'TAG HEUER', 'PUMA', 'HUGO BOSS', 'CRYPTO.COM', 'MOET & CHANDON',
+  'XANBOO78O STUDIOS', 'FOGLAST', 'TERMINAL TYCOON', 'VROOM',
+];
+
+// The hoardings. The circuit data carries this studio's games; these top it up
+// so a lap does not show the same eight boards over and over.
+export const TRACKSIDE = [
+  'LENOVO', 'DHL', 'PIRELLI', 'ROLEX', 'HEINEKEN', 'EMIRATES', 'AWS',
+  'SALESFORCE', 'SHELL', 'PUMA', 'TAG HEUER', 'ARAMCO', 'MSC', 'QATAR AIRWAYS',
+  'HONDA', 'BOSCH', 'BREMBO', 'OZ RACING', 'SPARCO', 'ALPINESTARS',
+  'PETRONAS', 'CASTROL', 'MOBIL 1', 'GULF', 'BOSE', 'LOGITECH', 'RAZER',
+  'MONSTER', 'RED BULL', 'BURGER FACTORY', 'NORTHWAY BANK', 'VELOCITA TYRES',
+  'MERIDIAN AERO', 'KESTREL OIL', 'ATLAS FREIGHT', 'HALDANE ELECTRIC',
+];
+
 export function signAtlas(track) {
-  // 48 cells, not 32: the worst case is 20 sponsors + 6 braking boards + 12
-  // corner names + the banner + the pit sign, and Monaco really does have 12
-  // named corners. See Atlas.cell for what happened when it did not fit.
-  const A = new Atlas(4, 12, 512, 128);
-  const cells = { sponsors: [], boards: {}, names: new Map(), banner: 0, pit: 0 };
+  // 64 cells now, not 48: the worst case was 20 sponsors + 6 braking boards +
+  // 12 corner names + the banner + the pit sign, and Monaco really does have
+  // 12 named corners. Eight big-format names go on top of that and 48 left no
+  // room for them. See Atlas.cell for what happened when it did not fit.
+  const A = new Atlas(4, 16, 512, 128);
+  const cells = { sponsors: [], boards: {}, names: new Map(), banner: 0, pit: 0, big: [] };
 
   // Advertising hoardings, in the sponsor colours of a paddock that does not
   // exist. The names come from the circuit data — they are Adam's own games.
@@ -67,7 +97,10 @@ export function signAtlas(track) {
     ['#f5c518', '#101014'], ['#0f8f6b', '#ffffff'], ['#e8eaee', '#101014'],
     ['#7b2fd8', '#ffffff'], ['#ff6b1a', '#101014'],
   ];
-  const sponsors = track.sponsors && track.sponsors.length ? track.sponsors : ['CHASING WDC'];
+  // The circuit's own list first — those are the studio's games and they should
+  // be the ones you see most — then the wider pool behind them.
+  const own = track.sponsors && track.sponsors.length ? track.sponsors : ['CHASING WDC'];
+  const sponsors = own.concat(TRACKSIDE.filter(n => !own.includes(n)));
   for (let i = 0; i < Math.min(sponsors.length, 20); i++) {
     const [bg, fg] = PALETTE[i % PALETTE.length];
     cells.sponsors.push(A.cell((g, w, h) => {
@@ -77,6 +110,18 @@ export function signAtlas(track) {
       // flat rectangle when it is 200 m away and four pixels tall.
       g.fillStyle = fg; g.globalAlpha = 0.85; g.fillRect(0, h - 10, w, 10); g.globalAlpha = 1;
       fitText(g, sponsors[i], w / 2, h / 2 - 4, w * 0.88, h * 0.62, { colour: fg });
+    }));
+  }
+
+  // BIG FORMAT. Light lettering on a dark band, edge to edge, because these
+  // are read at three hundred metres and a boxed-in logo disappears at that
+  // range while a word across the whole fascia does not.
+  for (let i = 0; i < 8; i++) {
+    const text = BIG[(i * 3 + 1) % BIG.length];
+    cells.big.push(A.cell((g, w, h) => {
+      g.fillStyle = i % 2 ? '#101014' : '#12161c';
+      g.fillRect(0, 0, w, h);
+      fitText(g, text, w / 2, h / 2, w * 0.94, h * 0.74, { colour: '#ffffff' });
     }));
   }
 

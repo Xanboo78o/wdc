@@ -139,7 +139,7 @@ function obb(ring) {
 // Turn one `building=grandstand` footprint into a raked stand facing the
 // track, and return where everybody sits.
 // ---------------------------------------------------------------------------
-function stand(box, deck, roofB, track, ring, height, y0 = 0) {
+function stand(box, deck, roofB, track, ring, height, y0 = 0, band = null, sign = null, pick = 0) {
   const o = obb(ring);
   if (!o || o.len < 6 || o.dep < 3) return [];
 
@@ -156,6 +156,25 @@ function stand(box, deck, roofB, track, ring, height, y0 = 0) {
 
   const rows = Math.max(3, Math.min(26, Math.floor(o.dep / ROW_DEPTH)));
   const seats = [];
+
+  // A NAME ACROSS THE FACE. Adam: "like lenovo grandstands".
+  //
+  // A stand is the biggest flat thing beside a circuit and it carried nothing
+  // at all, which is the single most obviously unbranded object in the world.
+  // The band sits along the top of the seating, spanning the whole front, and
+  // it is sized from the stand's own length rather than fixed — Monza's main
+  // grandstand is 200 m long and Zandvoort has stands a fifth of that.
+  if (band && sign && sign.cells.big && sign.cells.big.length) {
+    const topY = y0 + 0.5 + rows * ROW_RISE;
+    const fx = o.cx + perp[0] * front, fy = o.cy + perp[1] * front;
+    const hx = o.ux * o.len / 2, hy = o.uy * o.len / 2;
+    const A0 = [fx - hx, fy - hy], B0 = [fx + hx, fy + hy];
+    const bh = Math.max(1.8, Math.min(5.5, o.len * 0.055));
+    const uv = sign.atlas.uv(sign.cells.big[pick % sign.cells.big.length], false);
+    band.quadN(
+      [A0[0], topY, Z(A0[1])], [B0[0], topY, Z(B0[1])],
+      [B0[0], topY + bh, Z(B0[1])], [A0[0], topY + bh, Z(A0[1])], uv);
+  }
   // Rows step up and back from the front edge, which is what a raked stand is.
   for (let r = 0; r < rows; r++) {
     const off = front - sgn * (r + 0.5) * ROW_DEPTH;
@@ -247,14 +266,16 @@ function distToTrack(track, p) {
 }
 
 // ---------------------------------------------------------------------------
-export function buildGrandstands(scene, track, env, look, world = null) {
+export function buildGrandstands(scene, track, env, look, world = null, sign = null) {
   const stands = (env?.buildings || []).filter(b => b.k === 'grandstand' && b.p.length >= 4);
   if (!stands.length) return { stands: 0, people: 0 };
 
   const deck = new Builder();        // the raked seating steps
   const box = new Builder();         // side and back walls
   const roofB = new Builder();       // roof and columns
+  const band = new Builder();        // the name across the front
   let seats = [];
+  let si = 0;                        // which big name this stand carries
 
   // Nearest first: if a circuit has more stands than the people budget allows,
   // fill the ones you actually drive past.
@@ -264,7 +285,7 @@ export function buildGrandstands(scene, track, env, look, world = null) {
     // vertex where it happens to be. A grandstand is a rigid building: letting
     // its far end follow the terrain would shear it.
     const y0 = world ? world.groundY(b.p[0][0], Z(b.p[0][1])) : 0;
-    seats = seats.concat(stand(box, deck, roofB, track, b.p, b.h, y0));
+    seats = seats.concat(stand(box, deck, roofB, track, b.p, b.h, y0, band, sign, si++));
     if (seats.length > MAX_PEOPLE) break;
   }
   if (seats.length > MAX_PEOPLE) seats.length = MAX_PEOPLE;
@@ -273,6 +294,14 @@ export function buildGrandstands(scene, track, env, look, world = null) {
   add(deck, look.mat('concrete', { size: 3.0, tint: 0x9aa0a6, roughness: 0.95, side: THREE.DoubleSide }));
   add(box, look.mat('concrete', { size: 3.4, tint: 0xb4b8bd, roughness: 0.95, side: THREE.DoubleSide }));
   add(roofB, look.mat('metal', { size: 3.0, tint: 0xc8ccd2, roughness: 0.55, metalness: 0.6, side: THREE.DoubleSide }));
+  // DoubleSide, because which way a stand faces is decided at run time by
+  // asking the track, and a band that is backfacing is an invisible band.
+  if (sign) {
+    const bm = band.mesh(new THREE.MeshStandardMaterial({
+      map: sign.texture, roughness: 0.72, side: THREE.DoubleSide,
+    }), { shadow: false });
+    if (bm) { bm.name = 'stand.band'; scene.add(bm); }
+  }
 
   const pm = peopleMesh(seats);
   if (pm) scene.add(pm);
