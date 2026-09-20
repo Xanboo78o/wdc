@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SKY BENCH</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%230b0d10%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%277%27 fill=%27%23ffd400%27/%3E%3C/svg%3E">
+<style>
+  :root { --bg:#0b0d10; --fg:#e8eaee; --dim:#7d8590; --mint:#35d6a0; --line:#1e232b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); overflow:hidden;
+         font:13px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  canvas { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+  .panel { position:fixed; background:#11151bcc; border:1px solid var(--line);
+           border-radius:8px; padding:12px 14px; backdrop-filter:blur(6px); }
+  #ctl { left:14px; top:14px; width:330px; }
+  #out { right:14px; top:14px; min-width:250px; color:var(--dim); font-size:12px; white-space:pre; }
+  h1 { font-size:12px; letter-spacing:.16em; margin:0 0 10px; color:var(--fg); }
+  .row { display:flex; align-items:center; gap:10px; margin:6px 0; }
+  .row label { width:88px; color:var(--dim); flex:none; }
+  input[type=range] { flex:1; min-width:90px; accent-color:var(--mint); }
+  .v { width:66px; text-align:right; font-variant-numeric:tabular-nums; color:var(--fg); }
+  .note { color:var(--dim); font-size:11px; margin-top:10px; }
+  b { color:var(--mint); font-weight:400; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel" id="ctl">
+  <h1>SKY BENCH</h1>
+  <div class="row"><label>hour</label><input type="range" id="hour" min="0" max="1439" value="750"><span class="v" id="hourV">12:30</span></div>
+  <div class="row"><label>day</label><input type="range" id="day" min="0" max="364" value="171"><span class="v" id="dayV">Jun 21</span></div>
+  <div class="row"><label>latitude</label><input type="range" id="lat" min="-70" max="70" value="41"><span class="v" id="latV">41°</span></div>
+  <div class="row"><label>cloud</label><input type="range" id="cloud" min="0" max="100" value="15"><span class="v" id="cloudV">15%</span></div>
+  <div class="row"><label>turbidity</label><input type="range" id="turb" min="10" max="90" value="26"><span class="v" id="turbV">2.6</span></div>
+  <div class="row"><label>look</label><input type="range" id="yaw" min="0" max="359" value="270"><span class="v" id="yawV">270°</span></div>
+  <div class="row"><label>tilt</label><input type="range" id="pitch" min="-10" max="80" value="8"><span class="v" id="pitchV">8°</span></div>
+  <div class="note">
+    <b>Drag the hour through sunset.</b> The look angle is a compass bearing, so
+    set it near the sun's azimuth (printed right) to see the sunset itself
+    rather than the sky behind you — which is the mistake that cost me an
+    afternoon of grey screenshots.
+  </div>
+</div>
+<div class="panel" id="out">…</div>
+
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.min.js" } }
+</script>
+<script type="module">
+// sky.html — the sky, on its own, with the sun somewhere I can point at.
+//
+// js/sky.js is driven by the real clock, which means the only way to see a
+// sunset in the game is to wait for one, and the only way to see it from the
+// right ANGLE is for the track to happen to point that way. Both of those are
+// terrible for judging a shader. This is the same trick as gameshow.html for
+// trees and sound.html for audio: take the thing out, put every input on a
+// slider, and let a person look at it.
+import * as THREE from 'three';
+import { solarPosition, sunVector } from './js/weather.js';
+
+const $ = id => document.getElementById(id);
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 100);
+
+// The same shader the game uses, on a dome we can stand inside.
+const { ProcSky } = await import('./js/sky.js');
+const proc = new ProcSky(renderer, { size: 64 });
+const dome = new THREE.Mesh(new THREE.SphereGeometry(40, 64, 32), proc.mat);
+scene.add(dome);
+
+// A ground plane, so there is a horizon to judge the sky against. Flat dark
+// green, deliberately dumb — this page is about the sky.
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(400, 64).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0x0d1a0e }));
+ground.position.y = -0.6;
+scene.add(ground);
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Every slider takes a URL parameter, because a page that can only be driven
+// by a thumb cannot be photographed — and a shader I cannot photograph is one
+// I cannot check.
+for (const id of ['hour', 'day', 'lat', 'cloud', 'turb', 'yaw', 'pitch']) {
+  const q = new URLSearchParams(location.search).get(id);
+  if (q != null && $(id)) $(id).value = q;
+}
+
+function frame() {
+  const mins = +$('hour').value, doy = +$('day').value, lat = +$('lat').value;
+  const cloud = +$('cloud').value / 100, turb = +$('turb').value / 10;
+  const yaw = +$('yaw').value, pitch = +$('pitch').value;
+
+  const d = new Date(Date.UTC(2026, 0, 1 + doy, 0, 0));
+  // Longitude 0 and UTC, so the hour slider IS solar time and the sun's
+  // azimuth is honest rather than smeared by a timezone.
+  const when = new Date(Date.UTC(2026, 0, 1 + doy, Math.floor(mins / 60), mins % 60));
+  const sol = solarPosition(when, lat, 0);
+  const v = sunVector(sol.elevation, sol.azimuth);
+
+  proc.mat.uniforms.uSun.value.set(v[0], v[1], v[2]).normalize();
+  proc.mat.uniforms.uTurb.value = turb;
+  proc.mat.uniforms.uCloud.value = cloud;
+  proc.mat.uniforms.uNight.value = Math.max(0, Math.min(1, (-sol.elevation - 1) / 11));
+
+  // Compass bearing: 0 north, 90 east, matching the azimuth printed opposite.
+  const a = yaw * Math.PI / 180, p = pitch * Math.PI / 180;
+  camera.position.set(0, 0, 0);
+  camera.lookAt(Math.sin(a) * Math.cos(p), Math.sin(p), -Math.cos(a) * Math.cos(p));
+
+  $('hourV').textContent = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  $('dayV').textContent = `${MONTH[d.getUTCMonth()]} ${d.getUTCDate()}`;
+  $('latV').textContent = lat + '°';
+  $('cloudV').textContent = Math.round(cloud * 100) + '%';
+  $('turbV').textContent = turb.toFixed(1);
+  $('yawV').textContent = yaw + '°';
+  $('pitchV').textContent = pitch + '°';
+  $('out').textContent =
+    `sun elevation  ${sol.elevation.toFixed(2)}°\n` +
+    `sun azimuth    ${sol.azimuth.toFixed(1)}°   ${sol.elevation < -0.8 ? '(set)' : ''}\n` +
+    `you are facing ${yaw}°\n` +
+    `difference     ${Math.round(Math.abs(((sol.azimuth - yaw + 540) % 360) - 180))}°  ` +
+    `${Math.abs(((sol.azimuth - yaw + 540) % 360) - 180) < 40 ? '<- sun is in frame' : '(turn toward it)'}\n` +
+    `declination    ${sol.declination.toFixed(2)}°\n` +
+    `night mix      ${proc.mat.uniforms.uNight.value.toFixed(2)}`;
+
+  renderer.setRenderTarget(null);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+// Published BEFORE the first frame, not after: tools/showshot.mjs polls for
+// this flag to know the page is alive, and setting it last made a page that
+// was rendering perfectly report "never finished building".
+window.__sky = { proc, solarPosition };
+frame();
+</script>
+</body>
+</html>

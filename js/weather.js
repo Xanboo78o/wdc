@@ -111,6 +111,51 @@ export function sunVector(elevation, azimuth) {
   return [Math.sin(az) * c, Math.max(Math.sin(el), 0.02), -Math.cos(az) * c];
 }
 
+/**
+ * Where "here" is, without asking permission and without a network call.
+ *
+ * The browser's geolocation API puts a prompt in front of a racing game, and
+ * an IP lookup is another service to be down. But the machine already knows
+ * its timezone, and a timezone is mostly a statement about LONGITUDE — which
+ * is the half that decides what time the sun rises.
+ *
+ * Worth writing down why this exists: the first version hardcoded Concord,
+ * California while the machine was set to America/New_York, so the clock said
+ * 19:50 and the sun sat at 41 degrees — late afternoon three time zones west.
+ * The sums were right and the place was wrong, which is the hardest kind of
+ * wrong to see in a screenshot.
+ */
+const ZONES = {
+  'America/New_York': [40.71, -74.01], 'America/Detroit': [42.33, -83.05],
+  'America/Toronto': [43.65, -79.38], 'America/Chicago': [41.88, -87.63],
+  'America/Denver': [39.74, -104.99], 'America/Phoenix': [33.45, -112.07],
+  'America/Los_Angeles': [34.05, -118.24], 'America/Vancouver': [49.28, -123.12],
+  'America/Sao_Paulo': [-23.55, -46.63], 'America/Mexico_City': [19.43, -99.13],
+  'Europe/London': [51.51, -0.13], 'Europe/Dublin': [53.35, -6.26],
+  'Europe/Paris': [48.86, 2.35], 'Europe/Madrid': [40.42, -3.70],
+  'Europe/Berlin': [52.52, 13.40], 'Europe/Rome': [41.90, 12.50],
+  'Europe/Warsaw': [52.23, 21.01], 'Europe/Moscow': [55.76, 37.62],
+  'Asia/Dubai': [25.20, 55.27], 'Asia/Kolkata': [22.57, 88.36],
+  'Asia/Shanghai': [31.23, 121.47], 'Asia/Tokyo': [35.68, 139.69],
+  'Asia/Singapore': [1.35, 103.82], 'Australia/Sydney': [-33.87, 151.21],
+  'Pacific/Auckland': [-36.85, 174.76], 'Africa/Johannesburg': [-26.20, 28.05],
+};
+
+export function guessLocation() {
+  let zone = '';
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { /* old runtime */ }
+  if (ZONES[zone]) return { lat: ZONES[zone][0], lon: ZONES[zone][1], from: zone };
+
+  // Unknown zone: longitude from the STANDARD offset, because that is what a
+  // timezone is. Good to about seven degrees, which is half an hour of sun.
+  // Latitude cannot be had this way at all, so 40 and admit it.
+  const now = new Date();
+  const jan = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
+  const jul = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
+  const standard = Math.max(jan, jul);          // the larger offset is winter, i.e. no DST
+  return { lat: 40, lon: -standard / 4, from: zone || 'offset' };
+}
+
 // ---------------------------------------------------------------------------
 // WHAT THE WEATHER IS
 // ---------------------------------------------------------------------------

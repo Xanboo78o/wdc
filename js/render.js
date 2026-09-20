@@ -13,6 +13,8 @@ import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { Look, sunRig } from './tex.js';
 import { Post } from './post.js';
+import { ProcSky } from './sky.js';
+import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation } from './weather.js';
 import { bankTable, bankY, bankRoll } from './bank.js';
 import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
@@ -379,6 +381,31 @@ export class View {
       } catch { /* no extension, assume it can cope */ }
     }
     this.post = new Post(this.renderer, { quality });
+
+    // THE REAL SKY. ?sky=photo keeps the baked photographs; anything else
+    // draws it, so the sun can be where the sun actually is.
+    const skyQ = new URLSearchParams(location.search).get('sky');
+    // NOT gated on the post chain. A drawn sky costs one cube render when the
+    // sun moves and nothing at all when it does not, so it is affordable on
+    // the Intel chip — and tying them together meant ?post=off silently took
+    // the sky with it, which made the one diagnostic I needed impossible.
+    if (skyQ !== 'photo') {
+      this.proc = new ProcSky(this.renderer);
+      // Where "here" is. ?at=lat,lon overrides; the default is Adam's, because
+      // LOOK.md 13 says the sky is HIS everywhere rather than the circuit's.
+      const atQ = new URLSearchParams(location.search).get('at');
+      this.at = atQ
+        ? { lat: +atQ.split(',')[0] || 40, lon: +atQ.split(',')[1] || 0, from: 'url' }
+        : guessLocation();
+      // ?time=2026-06-21T19:30 freezes it. Tedious on purpose: the default is
+      // reality, and the override is for looking at a sunset deliberately.
+      const tq = new URLSearchParams(location.search).get('time');
+      this.fixedTime = tq ? new Date(tq.length <= 5 ? `${new Date().toISOString().slice(0, 10)}T${tq}` : tq) : null;
+      if (this.fixedTime && isNaN(+this.fixedTime)) this.fixedTime = null;
+      this.wx = readWeather({ rain: 0, cloud: 0.2, wind: 6, temp: 18, kind: 'clear' });
+      this._wxAt = 0;
+      this._skyAt = -99;
+    }
     // Tuning knobs, because every number in post.js is a judgement about
     // light and I cannot see the screen. ?key=0.12&bloom=0.85&rays=0.75
     const qp = new URLSearchParams(location.search);
@@ -398,6 +425,19 @@ export class View {
       // renderer.info is only populated after a render, so the draw-call and
       // triangle counts are filled in by the first frame rather than here.
       window.__wdc = { track: track.key, sky: sky ? sky.name : 'none', tex: look.on, ...this.stats };
+      // The sky is now a FUNCTION of time and weather, so a screenshot alone
+      // cannot tell a working overcast from a broken shader. Publish what it
+      // was asked for, or every sky bug costs an afternoon of squinting.
+      Object.defineProperty(window.__wdc, 'sun', {
+        get: () => this.proc ? {
+          elevation: +(this.sunElevation ?? 0).toFixed(2),
+          dir: this.rig.dir.map(n => +n.toFixed(3)),
+          at: this.at, time: (this.fixedTime || new Date()).toISOString(),
+          wx: { cloud: +this.wx.cloud.toFixed(2), wet: +this.wx.wetness.toFixed(2), haze: +this.wx.haze.toFixed(2), kind: this.wx.kind },
+          live: this.weatherRaw ? this.weatherRaw.ok : null,
+        } : 'photo sky',
+        enumerable: true, configurable: true,
+      });
       // A debug handle, so tools/shot.mjs can raycast through the scene and
       // say what a mystery object actually is. Cheaper than another screenshot
       // and a guess.
@@ -535,6 +575,53 @@ export class View {
   }
 
   /** Every frame goes through here, so the post chain can never be skipped. */
+  /**
+   * Put the sun where the sun is, and the weather where the weather is.
+   *
+   * Called every frame and does almost nothing most of them: ProcSky only
+   * rebuilds its cube when the sun has actually moved, and the weather is
+   * fetched every ten minutes rather than every sixteen milliseconds.
+   */
+  _sky(now) {
+    if (!this.proc) return;
+    const when = this.fixedTime || new Date();
+    const sol = solarPosition(when, this.at.lat, this.at.lon);
+    const v = sunVector(sol.elevation, sol.azimuth);
+
+    // The rig closes over its own `dir` array, so writing into it steers the
+    // light and its shadow box without rebuilding anything.
+    this.rig.dir[0] = v[0]; this.rig.dir[1] = v[1]; this.rig.dir[2] = v[2];
+
+    // A low sun is dim and orange because its light has crossed forty times
+    // as much air — the same reason the sky goes red, seen from the other end.
+    const up = Math.max(0, Math.min(1, sol.elevation / 45));
+    const warm = Math.pow(1 - up, 2.2);
+    this.rig.sun.intensity = 3.1 * up * this.wx.punch;
+    this.rig.sun.color.setRGB(1, 1 - warm * 0.30, 1 - warm * 0.62);
+    this.rig.sun.castShadow = this.shadows && sol.elevation > 3 && this.wx.punch > 0.25;
+    // Ambient has to RISE as the sun falls, or dusk is simply black. At night
+    // it is all there is.
+    this.rig.hemi.intensity = 0.55 + (1 - up) * 0.45 + this.wx.cloud * 0.5;
+
+    if (now - this._skyAt > 0.25) {
+      this._skyAt = now;
+      this.proc.update(this.scene, v, {
+        turbidity: 1.8 + this.wx.haze * 5.5,
+        cloud: this.wx.cloud,
+        elevation: sol.elevation,
+      });
+    }
+    this.sunElevation = sol.elevation;
+
+    // Weather, every ten minutes, and never blocking a frame.
+    if (now - this._wxAt > 600 || !this._wxAt) {
+      this._wxAt = now || 1;
+      fetchWeather(this.at.lat, this.at.lon)
+        .then(w => { this.wx = readWeather(w); this.weatherRaw = w; })
+        .catch(() => { /* a nice day, then */ });
+    }
+  }
+
   _draw() {
     // renderer.info RESETS on every render() call, and the post chain ends
     // with a full-screen quad — so main.js's telemetry started reporting
@@ -547,9 +634,11 @@ export class View {
     const now = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
     const dt = this._lastT ? Math.min(0.1, now - this._lastT) : 0.016;
     this._lastT = now;
+    this._sky(now);
     if (this.post && this.post.on) {
+      const d = this.proc ? this.rig.dir : this.sunDir.toArray();
       this.post.setSun(
-        this.sunDir.clone().multiplyScalar(5000).add(this.camera.position),
+        new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(5000).add(this.camera.position),
         this.camera);
       this.post.render(this.scene, this.camera, dt);
     } else {
