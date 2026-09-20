@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RADIO TEST</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { --bg:#0b0d10; --fg:#e8eaee; --dim:#7d8590; --mint:#35d6a0; --red:#d8352a; --amber:#f2b01b; --line:#1e232b; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  main { max-width:780px; margin:0 auto; padding:22px 16px 60px; }
+  h1 { font-size:15px; letter-spacing:.2em; margin:0 0 2px; }
+  .sub { color:var(--dim); margin-bottom:16px; }
+  .panel { border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
+  .health { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; }
+  .pill { padding:3px 9px; border-radius:20px; border:1px solid var(--line); color:var(--dim); }
+  .pill.ok { color:var(--mint); border-color:var(--mint); }
+  .pill.bad { color:var(--red); border-color:var(--red); }
+  label { display:block; font-size:11px; letter-spacing:.12em; color:var(--dim); margin-bottom:4px; }
+  .tel { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+  input,textarea,select,button { font:inherit; background:#151a21; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:9px; }
+  input,textarea { width:100%; }
+  textarea { resize:vertical; min-height:62px; }
+  button { cursor:pointer; letter-spacing:.08em; }
+  button.go { background:var(--mint); color:#04150e; border-color:var(--mint); font-weight:700; padding:11px 20px; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .row { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .log { margin-top:6px; }
+  .ex { border-left:3px solid var(--line); padding:8px 12px; margin:9px 0; }
+  .ex .d { color:var(--amber); }
+  .ex .e { color:var(--mint); }
+  .err { color:var(--red); font-size:12px; margin-top:8px; }
+  .hint { color:var(--dim); font-size:12px; }
+  .quick button { font-size:12px; padding:6px 10px; color:var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <h1>RADIO TEST</h1>
+  <div class="sub">The engineer, without the phone, the wheel or the game. Type a line, hear him answer.</div>
+
+  <div class="panel">
+    <div class="health" id="health"><span class="pill">checking tools/radio.mjs…</span></div>
+    <div class="hint" id="healthHint" style="margin-top:8px"></div>
+  </div>
+
+  <div class="panel">
+    <label>FAKE TELEMETRY — what the engineer is allowed to know</label>
+    <div class="tel">
+      <div><label>lap</label><input id="lap" value="12"></div>
+      <div><label>totalLaps</label><input id="totalLaps" value="44"></div>
+      <div><label>position</label><input id="position" value="4"></div>
+      <div><label>gapAhead</label><input id="gapAhead" value="1.24"></div>
+      <div><label>gapBehind</label><input id="gapBehind" value="0.81"></div>
+      <div><label>carAhead</label><input id="carAhead" value="VOSS"></div>
+      <div><label>carBehind</label><input id="carBehind" value="MERRICK"></div>
+      <div><label>tyre</label><input id="tyre" value="medium, 14 laps old"></div>
+      <div><label>fuelLaps</label><input id="fuelLaps" value="31"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <label>WHAT YOU SAY</label>
+    <textarea id="say">NORRIS JUST SACRIFICED HIS WHOLE FRONT WING AND RAN ME OFF THE ROAD THATS A PENALTY!!!!</textarea>
+    <div class="row">
+      <button class="go" id="send">TRANSMIT</button>
+      <button id="mic">🎤 HOLD TO TALK</button>
+      <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="speak" checked style="width:auto"> speak the reply</label>
+    </div>
+    <div class="row quick" id="quick"></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div id="log" class="log"></div>
+</main>
+
+<script>
+const SERVER = 'http://127.0.0.1:8178';
+const $ = id => document.getElementById(id);
+const TEL = ['lap','totalLaps','position','gapAhead','gapBehind','carAhead','carBehind','tyre','fuelLaps'];
+
+const QUICK = [
+  "what's the gap",
+  "how many laps left",
+  "who's behind me",
+  "how are my tyres",
+  "should I box",
+  "I'm so slow I can't do anything with this car",
+  "YESSS that was unreal",
+  "mmmf grbl nonsense words",
+];
+QUICK.forEach(q => {
+  const b = document.createElement('button');
+  b.textContent = q.length > 26 ? q.slice(0, 26) + '…' : q;
+  b.title = q;
+  b.onclick = () => { $('say').value = q; send(); };
+  $('quick').appendChild(b);
+});
+
+async function health() {
+  try {
+    const r = await fetch(SERVER + '/health');
+    const j = await r.json();
+    $('health').innerHTML =
+      `<span class="pill ok">server up</span>` +
+      `<span class="pill ${j.key ? 'ok' : 'bad'}">${j.key ? 'API key present' : 'NO API KEY'}</span>` +
+      `<span class="pill">${j.model}</span>` +
+      `<span class="pill">${j.calls}/${j.cap} calls used</span>`;
+    $('healthHint').textContent = j.key ? '' :
+      'Start it with the key:  ANTHROPIC_API_KEY=sk-ant-... node tools/radio.mjs';
+  } catch (e) {
+    $('health').innerHTML = `<span class="pill bad">server down</span>`;
+    $('healthHint').textContent = 'Run:  node tools/radio.mjs   (from ~/Games/wdc)';
+  }
+}
+health(); setInterval(health, 5000);
+
+function telemetry() {
+  const t = {};
+  for (const k of TEL) {
+    const v = $(k).value.trim();
+    if (!v) continue;
+    t[k] = isNaN(Number(v)) ? v : Number(v);
+  }
+  return t;
+}
+
+function blip(hz, dur) {
+  try {
+    const c = blip.ac || (blip.ac = new (window.AudioContext || window.webkitAudioContext)());
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'square'; o.frequency.value = hz;
+    g.gain.setValueAtTime(0.05, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0005, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur);
+  } catch (e) {}
+}
+
+function logEx(said, reply, meta) {
+  const d = document.createElement('div');
+  d.className = 'ex';
+  d.innerHTML = `<div class="d">DRIVER · ${esc(said)}</div><div class="e">ENGINEER · ${esc(reply)}</div>` +
+    (meta ? `<div class="hint">${esc(meta)}</div>` : '');
+  $('log').prepend(d);
+}
+const esc = s => String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+async function send() {
+  const text = $('say').value.trim();
+  if (!text) return;
+  $('send').disabled = true; $('err').textContent = '';
+  blip(1180, 0.09);
+  const t0 = performance.now();
+  try {
+    const r = await fetch(SERVER + '/ask', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, telemetry: telemetry() }),
+    });
+    const j = await r.json();
+    const ms = Math.round(performance.now() - t0);
+    const u = j.usage ? `${j.usage.input_tokens} in / ${j.usage.output_tokens} out` : '';
+    logEx(text, j.reply, [ms + ' ms', u, j.error || ''].filter(Boolean).join(' · '));
+    if (j.error) $('err').textContent = j.error;
+    if ($('speak').checked && window.speechSynthesis) {
+      const u2 = new SpeechSynthesisUtterance(j.reply);
+      u2.rate = 1.05; u2.pitch = 0.95;
+      u2.onend = () => blip(700, 0.12);
+      speechSynthesis.speak(u2);
+    } else blip(700, 0.12);
+    health();
+  } catch (e) {
+    $('err').textContent = 'Could not reach tools/radio.mjs on ' + SERVER;
+  }
+  $('send').disabled = false;
+}
+$('send').onclick = send;
+
+// Optional: talk instead of typing. Needs Google Chrome — Arch's chromium has
+// the Google API keys stripped out, so this throws a 'network' error there.
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) { $('mic').disabled = true; $('mic').textContent = '🎤 no speech API'; }
+else {
+  const rec = new SR();
+  rec.lang = 'en-GB'; rec.interimResults = true; rec.continuous = true;
+  let buf = '';
+  rec.onresult = e => {
+    buf = '';
+    for (let i = 0; i < e.results.length; i++) buf += e.results[i][0].transcript;
+    $('say').value = buf.trim();
+  };
+  rec.onerror = e => {
+    $('err').textContent = e.error === 'network'
+      ? "speech failed: 'network' — that's Chromium with no Google API key. Use google-chrome."
+      : 'speech error: ' + e.error;
+  };
+  const start = () => { buf = ''; $('err').textContent = ''; try { rec.start(); } catch (e) {} blip(1180, 0.07); };
+  const stop  = () => { try { rec.stop(); } catch (e) {} setTimeout(() => { if ($('say').value.trim()) send(); }, 350); };
+  $('mic').onmousedown = start; $('mic').onmouseup = stop; $('mic').onmouseleave = () => { if (event.buttons) stop(); };
+  $('mic').ontouchstart = e => { e.preventDefault(); start(); };
+  $('mic').ontouchend = e => { e.preventDefault(); stop(); };
+}
+</script>
+</body>
+</html>

@@ -39,6 +39,15 @@
   .side .row { display: flex; align-items: center; gap: 8px; }
   .bar { width: 100%; height: 10px; background: #252a31; border-radius: 5px; position: relative; overflow: hidden; }
   .bar i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: var(--mint); }
+  #radio { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom));
+    width: min(92vw, 620px); display: none; flex-direction: column; align-items: center; gap: 6px; z-index: 40; }
+  #radio.on { display: flex; }
+  #radioLine { font-size: 15px; line-height: 1.35; text-align: center; padding: 8px 14px; border-radius: 10px;
+    background: #0b0d10ee; border: 1px solid #2a3038; min-height: 36px; width: 100%; }
+  #radioLine b { color: var(--mint); font-size: 11px; letter-spacing: .18em; display: block; margin-bottom: 2px; }
+  #radioLine.me b { color: #f0b429; }
+  #ptt { font-size: 13px; padding: 10px 18px; width: auto; background: #252a31; color: var(--ink); }
+  #ptt.live { background: var(--red); color: #fff; }
   #deg { font-size: 22px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
 </style>
 </head>
@@ -76,6 +85,11 @@
       <button class="sec" id="off">Disconnect</button>
     </div>
   </div>
+</div>
+
+<div id="radio">
+  <div id="radioLine"><b>ENGINEER</b><span id="radioTxt">Radio standing by.</span></div>
+  <button id="ptt">HOLD TO TALK</button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -127,6 +141,7 @@ $('go').addEventListener('click', async () => {
         status('', 'Waiting for the game… (is it open?)');
       } else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') status('err', 'Connection problem — check signal and retry');
     });
+  startRadio(code);
   addEventListener('devicemotion', onMotion);
   zero = null; primed = false;
   $('connect').classList.add('hidden');
@@ -182,6 +197,110 @@ $('off').addEventListener('click', () => {
   removeEventListener('devicemotion', onMotion);
   $('drive').classList.add('hidden'); $('connect').classList.remove('hidden');
 });
+
+// ---------------------------------------------------------------------------
+// RACE ENGINEER RADIO — the phone is ears and a mouth, nothing more.
+// Push-to-talk is pressed on the PC (hands stay on the wheel) and arrives here
+// as 'radio-open'. We listen, recognise, and send the words back as
+// 'radio-said'. The game asks tools/radio.mjs (which holds the API key) and
+// returns 'radio-reply', which we speak out loud.
+//
+// Its own channel suffix ':radio' — never reuse the steering channel's events.
+// ---------------------------------------------------------------------------
+let radioCh = null, rec = null, recOn = false, heard = '';
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function radioSay(who, text) {
+  $('radioTxt').textContent = text;
+  $('radioLine').className = who === 'me' ? 'me' : '';
+  $('radioLine').querySelector('b').textContent = who === 'me' ? 'YOU' : 'ENGINEER';
+}
+
+function tone(hz, dur) {
+  try {
+    const c = tone.ac || (tone.ac = new (window.AudioContext || window.webkitAudioContext)());
+    if (c.state === 'suspended') c.resume();
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'square'; o.frequency.value = hz;
+    g.gain.setValueAtTime(0.06, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0005, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur);
+  } catch (e) {}
+}
+
+function micOn() {
+  if (!rec || recOn) return;
+  heard = ''; recOn = true;
+  $('ptt').classList.add('live'); $('ptt').textContent = 'LISTENING…';
+  radioSay('me', '…');
+  tone(1180, 0.08);
+  try { rec.start(); } catch (e) { /* already running */ }
+}
+function micOff() {
+  if (!rec || !recOn) return;
+  recOn = false;
+  $('ptt').classList.remove('live'); $('ptt').textContent = 'HOLD TO TALK';
+  try { rec.stop(); } catch (e) {}
+}
+
+function startRadio(code) {
+  if (!window.supabase || radioCh) return;
+  $('radio').classList.add('on');
+
+  const sb = window.supabase.createClient(CFG.url, CFG.key, { realtime: { params: { eventsPerSecond: 10 } } });
+  radioCh = sb.channel(CFG.prefix + code + ':radio', { config: { broadcast: { self: false } } });
+  radioCh
+    .on('broadcast', { event: 'radio-open' },  () => micOn())
+    .on('broadcast', { event: 'radio-close' }, () => micOff())
+    .on('broadcast', { event: 'radio-reply' }, ({ payload }) => speak(payload && payload.text))
+    .subscribe(st => { if (st === 'SUBSCRIBED') radioCh.send({ type: 'broadcast', event: 'radio-here', payload: {} }); });
+
+  if (!SR) { radioSay('eng', 'This phone has no speech recognition — the engineer can still talk to you.'); }
+  else {
+    rec = new SR();
+    rec.lang = 'en-GB'; rec.interimResults = true; rec.continuous = true;
+    rec.onresult = e => {
+      heard = '';
+      for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
+      radioSay('me', heard.trim() || '…');
+    };
+    rec.onerror = e => { recOn = false; $('ptt').classList.remove('live'); $('ptt').textContent = 'HOLD TO TALK';
+      radioSay('eng', e.error === 'not-allowed' ? 'Microphone was blocked — allow it in the browser.' : 'Mic error: ' + e.error); };
+    rec.onend = () => {
+      $('ptt').classList.remove('live'); $('ptt').textContent = 'HOLD TO TALK';
+      const t = heard.trim();
+      if (t && radioCh) { radioCh.send({ type: 'broadcast', event: 'radio-said', payload: { text: t } }); radioSay('me', t); }
+      recOn = false;
+    };
+    // Prime it on this tap: iOS only grants the mic from a real gesture, and
+    // 'radio-open' arrives from the network, which is not one.
+    try { rec.start(); setTimeout(() => { try { rec.stop(); } catch (e) {} }, 60); } catch (e) {}
+  }
+
+  // Warm the speech engine on the same gesture, silently.
+  try { const w = new SpeechSynthesisUtterance(' '); w.volume = 0; speechSynthesis.speak(w); } catch (e) {}
+
+  $('ptt').addEventListener('touchstart', e => { e.preventDefault(); micOn(); }, { passive: false });
+  $('ptt').addEventListener('touchend',   e => { e.preventDefault(); micOff(); }, { passive: false });
+  $('ptt').addEventListener('mousedown', micOn);
+  $('ptt').addEventListener('mouseup', micOff);
+}
+
+function speak(text) {
+  text = String(text || '').trim();
+  if (!text) return;
+  radioSay('eng', text);
+  tone(1180, 0.08);
+  if (!window.speechSynthesis) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-GB'; u.rate = 1.05; u.pitch = 0.95;
+    u.onend = () => tone(700, 0.12);
+    setTimeout(() => speechSynthesis.speak(u), 110);
+  } catch (e) {}
+}
+
 $('fs').addEventListener('click', async () => {
   const el = document.documentElement, req = el.requestFullscreen || el.webkitRequestFullscreen;
   if (!req) { status('', 'iPhone: Share → Add to Home Screen, then open it from the icon'); return; }
