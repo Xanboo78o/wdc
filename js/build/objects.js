@@ -25,9 +25,15 @@ import { UNIT, OBJECTS, SOLID } from '../../data/build/objects.js';
 const KIT = './data/kit/';
 
 export class Objects {
-  constructor(scene, ground, props) {
+  /**
+   * `groundY(x, y)` is how high the land is at a point, in the SIM frame. A
+   * function rather than a Ground, because the builder gets it from
+   * js/build/ground.js and the game gets it from js/world.js and neither
+   * should have to know about the other.
+   */
+  constructor(scene, groundY, props) {
     this.scene = scene;
-    this.ground = ground;
+    this.groundY = groundY;
     this.props = props;
     this.group = new THREE.Group();
     this.group.name = 'objects';
@@ -78,7 +84,7 @@ export class Objects {
       list.forEach((o, i) => {
         const [x, y] = o.at;
         // Height: whatever is written down, else stand it on the ground.
-        const h = o.z ?? (this.ground ? this.ground.height(x, y) : 0);
+        const h = o.z ?? (this.groundY ? this.groundY(x, y) : 0);
         const s = (o.scale ?? 1) * UNIT;
         q.setFromAxisAngle(up, (o.ry ?? 0) * Math.PI / 180);
         pos.copy(V(x, y, h));

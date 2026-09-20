@@ -182,7 +182,7 @@ const propMs = performance.now() - tProps;
 // to collide with. Nothing here is worked out from the track at run time.
 const tObj = performance.now();
 const objects = FLAT || on('noobjects') ? null
-  : await new Objects(scene, ground, yard ? yard.world : null).build();
+  : await new Objects(scene, (x, y) => ground.height(x, y), yard ? yard.world : null).build();
 const objMs = performance.now() - tObj;
 
 function resize() {
@@ -392,7 +392,15 @@ async function startDrive() {
       eye: built.eye || [-0.22, 0.95, 0] };
   }
   // 12 m in, so the car is on the road rather than half on the grass before it
-  spawnS = Math.max(12, newest.s0 - 350);
+  // THE START LINE, not the newest piece. The builder began as "drive into
+  // the corner you just laid", which is right while you are laying one and
+  // wrong once there is a track: you want to arrive at it the way you will in
+  // the game, from the straight. ?spawn=newest is the old behaviour, and
+  // ?spawn=<metres> starts anywhere.
+  const want = q.get('spawn');
+  spawnS = want === 'newest' ? Math.max(12, newest.s0 - 350)
+    : Number.isFinite(+want) && want !== null && want !== '' ? Math.max(0, +want)
+    : 12;
   // ...and never inside a tunnel: starting in the dark, mid-corner, with no
   // idea which way the road goes is not a run-up to anything. Back out to
   // 60 m before the portal.

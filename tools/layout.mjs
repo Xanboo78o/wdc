@@ -73,6 +73,11 @@ fs.writeFileSync(OUT, `// THE THINGS IN THE WORLD — one line each, and every l
 //
 // UNIT is how many metres one kit unit is, measured off raceCarRed against a
 // 4.6 m car by tools/kitinfo.mjs — not guessed.
+// Which track these positions belong to. They are in the sim's metres, which
+// the builder and the baked game track share, so the same file serves both —
+// but only for that one track.
+export const TRACK = 'test';
+
 export const UNIT = ${UNIT};
 
 // Which models are SOLID, how long they are along their own x in kit units,

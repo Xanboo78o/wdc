@@ -15,6 +15,9 @@ import { loadEnv } from './env.js';
 import { resolveBarrier } from './collide.js';
 import { Race } from './race.js';
 import { gridSlots } from './grid.js';
+import { Z } from './geom.js';
+import { PropWorld } from './props.js';
+import { Objects } from './build/objects.js';
 import { TIERS, makeAutopilot, makeDriver } from './autopilot.js';
 import { Field } from './field.js';
 import { makeBox } from './gearbox.js';
@@ -247,6 +250,36 @@ async function start() {
   $('trackName').textContent = t.full;
   $('carName').textContent = `${spec.full}  ·  peak grip at ${(state.peak * 180 / Math.PI).toFixed(1)}°`;
   $('drsLight').style.display = spec.drs ? '' : 'none';
+  // THE THINGS IN THE WORLD, for a track that has a layout file. Same file the
+  // builder reads (data/build/objects.js): model names and positions, no
+  // geometry worked out here. Each solid one hands the prop world a wall, so
+  // they are things you hit rather than things you drive through.
+  state.things = null;
+  if (!q.has('noobjects')) {
+    try {
+      const layout = await import('../data/build/objects.js');
+      if (layout.TRACK === pickTrack && layout.OBJECTS.length) {
+        const world = state.view.world;
+        const high = (x, y) => (world ? world.heightAt(x, Z(y)) : 0);
+        const props = new PropWorld({ seed: 7, groundY: high });
+        const things = new Objects(state.view.scene, high, props);
+        await things.build();
+        state.things = { props, things };
+        // Its OWN global. Hanging it off window.__wdc looked right and was
+        // not: render.js publishes that later, so both the success line and
+        // the failure line above were being skipped in silence and a layout
+        // that had loaded 2,942 objects reported nothing at all.
+        if (typeof window !== 'undefined') window.__things = things.stats();
+      }
+    } catch (e) {
+      // Visible, not whispered: a console.warn is invisible to every headless
+      // check in this repo, so a layout that fails to load looks exactly like
+      // a track that has none.
+      console.error('object layout failed:', e.message);
+      if (typeof window !== 'undefined') window.__things = { error: e.message };
+    }
+  }
+
   $('load').classList.add('hidden');
   state.started = true;
   requestAnimationFrame(loop);
@@ -344,6 +377,11 @@ function loop(now) {
     car.throttle = inp.throttle;
     car.brake = inp.brake;
     car.delta = inp.wheel * steerLock(car.speed);
+
+    // Walls and loose objects, in the same substep as everything else. At
+    // frame rate a car covers two metres between contact tests, which is more
+    // than a barrier is thick.
+    if (state.things) state.things.props.step(FIXED_DT, [car]);
 
     const proj = track.project(car.x, car.y, state.hint);
     state.hint = proj.i;
