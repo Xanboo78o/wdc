@@ -55,13 +55,31 @@ const PAD_BUTTONS = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, back: 8, start: 9 };
 // keyboard: "the car isn't as responsive as it should be". 4.6 is 0.22 s,
 // about as fast as hands move on a real wheel, and the centring is quicker
 // still so letting go still catches a slide faster than winding on caused it.
-export const RATES = { WIND: 4.6, CENTRE: 8.2, tUp: 3.4, tDn: 7.5, bUp: 5.5, bDn: 9 };
+// WIND_SOFT / WIND_FULL: the wind-on is PROGRESSIVE now, not linear.
+//
+// Adam: "for keyboard, make steering inputs like the throttle, the longer you
+// hold the greater the value."
+//
+// It always ramped — but at ONE rate, so a tap and a hold differed only in how
+// long they lasted and there was no fine-angle region at all. You were either
+// not turning enough yet or already past the tyres. Starting at 32% and
+// reaching full after RAMP seconds gives a usable small-angle region for
+// corrections and still reaches full lock when you commit to a corner.
+//
+// This may also be some of what he means by the car feeling "like theyre on
+// rain": an input with no small region reads as a car that will not hold a
+// line, which is what no grip feels like.
+export const RATES = {
+  WIND: 4.6, WIND_SOFT: 0.32, RAMP: 0.45,
+  CENTRE: 8.2, tUp: 3.4, tDn: 7.5, bUp: 5.5, bDn: 9,
+};
 
 export class Hands {
   constructor() {
     this.down = new Set();
     this.pressed = new Set();
     this.wheel = 0;            // -1..1, where the driver's hands actually are
+    this._windWant = 0; this._windT = 0;   // which way, and for how long
     this.throttle = 0; this.brake = 0;
     this.usingPad = false; this.padName = '';
     this.pad = null;
@@ -141,6 +159,7 @@ export class Hands {
   // go of the key, which is the single most important thing a keyboard driver
   // has to be able to do.
   update(dt) {
+    const { WIND_SOFT, RAMP } = RATES;
     const pad = this._readPad();
     if (pad) {
       this.usingPad = true;
@@ -159,9 +178,16 @@ export class Hands {
       const PHONE_SLEW = 9;
       this.wheel += Math.max(-PHONE_SLEW * dt, Math.min(PHONE_SLEW * dt, ext - this.wheel));
     } else if (want !== 0) {
-      const rate = WIND * (want * this.wheel < 0 ? 1.8 : 1);   // reversing lock is quicker
+      // How long this direction has been held. Changing direction restarts it,
+      // so a flick back the other way is as fine as the first one was — which
+      // is the whole point when you are catching a slide.
+      if (want !== this._windWant) { this._windWant = want; this._windT = 0; }
+      this._windT += dt;
+      const k = WIND_SOFT + (1 - WIND_SOFT) * Math.min(1, this._windT / RAMP);
+      const rate = WIND * k * (want * this.wheel < 0 ? 1.8 : 1);  // reversing lock is quicker
       this.wheel += Math.sign(want - this.wheel) * Math.min(rate * dt, Math.abs(want - this.wheel));
     } else {
+      this._windWant = 0; this._windT = 0;
       const d = Math.min(CENTRE * dt, Math.abs(this.wheel));
       this.wheel -= Math.sign(this.wheel) * d;
     }
