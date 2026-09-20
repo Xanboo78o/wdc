@@ -27,6 +27,9 @@
   #pedalLinks { margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); color: var(--dim); font-size: 11px; letter-spacing: 0.08em; }
   #pedalLinks a { color: var(--hot); }
   #pieces li.part { color: var(--hot); font-weight: 700; letter-spacing: 0.12em; font-size: 11px; padding-top: 10px; }
+  #fps { top: 14px; right: 14px; color: var(--dim); font-size: 11px; letter-spacing: 0.05em; text-align: right; }
+  #fps b { color: var(--hot); font-size: 15px; }
+  #fps span { display: block; color: #6c757e; font-size: 10px; max-width: 320px; }
   #keys { bottom: 14px; left: 50%; transform: translateX(-50%); color: var(--dim); white-space: nowrap; }
   #keys kbd { color: var(--ink); background: rgba(255,255,255,0.1); border-radius: 4px; padding: 1px 6px; }
   #speedBox { bottom: 14px; right: 14px; text-align: right; display: none; }
@@ -50,6 +53,7 @@
   <ol id="pieces"></ol>
   <div id="pedalLinks">PEDALS: <a href="keytest.html" target="_blank">key tester</a> · <a href="pedals.html" target="_blank">build sheet</a></div>
 </div>
+<div id="fps" class="panel">…</div>
 <div id="keys" class="panel">
   <span class="fly"><kbd>drag</kbd> orbit · <kbd>right-drag</kbd> pan · <kbd>wheel</kbd> zoom · <kbd>WASD</kbd> move ·
     <kbd>F</kbd> newest piece · <kbd>H</kbd> whole track · <kbd>Enter</kbd> DRIVE IT</span>

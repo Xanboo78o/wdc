@@ -301,6 +301,7 @@ export class Flora {
     this.group.add(this.forest);
     this.cells = [];
     this.counts = { trees: 0, cells: 0, blades: 0, darkRuns: 0 };
+    this.darkShown = true;
   }
 
   // -- which section of scenery a sample belongs to --------------------------
@@ -486,7 +487,31 @@ export class Flora {
       }
       if (run) runs.push(run);
     }
-    const pos = [], nor = [], col = [], idx = [];
+    // ONE MESH FOR THE WHOLE TRACK IS NEVER CULLED. Its bounding sphere
+    // contains the camera wherever the camera is, so the renderer draws every
+    // triangle of it every frame no matter which way you are looking. Broken
+    // into 160 m pieces, the frustum throws away all but a handful.
+    const PIECE = 160;
+    this.darkParts = [];
+    let pos = [], nor = [], col = [], idx = [];
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x4c6338, roughness: 1, metalness: 0, side: THREE.DoubleSide,
+      vertexColors: true, envMapIntensity: 0.4,
+    });
+    const flush = () => {
+      if (!pos.length) return;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      geo.setIndex(idx);
+      geo.computeBoundingSphere();
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = false; m.receiveShadow = false;
+      this.group.add(m);
+      this.darkParts.push(m);
+      pos = []; nor = []; col = []; idx = [];
+    };
     const quad = (a, b, c, d, shade, n) => {
       const base = pos.length / 3;
       for (const v of [a, b, c, d]) { pos.push(v[0], v[1], v[2]); nor.push(n[0], n[1], n[2]); col.push(shade, shade, shade); }
@@ -519,24 +544,11 @@ export class Flora {
           quad(prev.inTop, here.inTop, here.out, prev.out, 1.0, [0, 1, 0]);
         }
         prev = here;
+        if ((i - run.from) * p.ds > PIECE) { flush(); prev = here; run.from = i; }
       }
+      flush();
       this.counts.darkRuns++;
     }
-    if (!pos.length) return this;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    geo.setIndex(idx);
-    geo.computeBoundingSphere();
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      color: 0x4c6338, roughness: 1, metalness: 0, side: THREE.DoubleSide,
-      vertexColors: true, envMapIntensity: 0.4,
-    }));
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    this.group.add(mesh);
-    this.dark = mesh;
     return this;
   }
 
@@ -553,9 +565,20 @@ export class Flora {
     const rects = this.look.cutouts('grass');
     if (!rects.length) return this;
     const r = rng(77);
+    const PIECE = 120;                              // m of verge per mesh
+    this.fringeParts = [];
     for (const side of [1, -1]) {
-      const parts = [];
+      let parts = [], mark = 0;
+      const flush = () => {
+        if (!parts.length) return;
+        const m = new THREE.Mesh(assemble(parts), this.mat.fringe);
+        m.castShadow = false; m.receiveShadow = false;
+        this.group.add(m);
+        this.fringeParts.push(m);
+        parts = [];
+      };
       for (let s = 0; s < p.length; s += FRINGE_STEP) {
+        if (s - mark > PIECE) { flush(); mark = s; }
         const i = Math.min(p.n - 1, Math.round(s / p.ds));
         if (p.tunIn && p.tunIn[i] > 0) continue;
         const run = side > 0 ? p.runL[i] : p.runR[i];
@@ -574,11 +597,7 @@ export class Flora {
         }
         this.counts.blades += 2;
       }
-      if (!parts.length) continue;
-      const mesh = new THREE.Mesh(assemble(parts), this.mat.fringe);
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-      this.group.add(mesh);
+      flush();
     }
     return this;
   }
@@ -589,7 +608,7 @@ export class Flora {
     // Get out of the way when the camera is inside the wood. The mass is
     // unlit from behind, so flying into it fills the screen with black — and
     // flying around the track is how this page is used.
-    if (this.dark) {
+    if (this.darkParts?.length) {
       // The rule is about where you are looking FROM. On the road you see the
       // wall, which is the point of it. Above the canopy you see the lid,
       // which is also the point of it. Off the road and below the canopy you
@@ -597,7 +616,11 @@ export class Flora {
       // between you and everything you came to look at.
       const d = this.ground.roadDist(cam.x, -cam.z);
       const low = cam.y < this.ground.cameraFloor(cam.x, -cam.z) + DARK_H + 6;
-      this.dark.visible = !(low && d > 16);
+      const show = !(low && d > 16);
+      if (show !== this.darkShown) {
+        for (const m of this.darkParts) m.visible = show;
+        this.darkShown = show;
+      }
     }
     for (const cell of this.cells) {
       const dx = cell.x - cam.x, dz = -cell.y - cam.z;

@@ -110,13 +110,13 @@ function wingGeometry() {
 
 // Exported so gameshow.html can stand them up and have them marked out of ten.
 export const SHAPES = {
-  cone: { geo: coneGeometry, rough: 0.62, metal: 0 },
-  tyre: { geo: () => tyreGeometry(0), rough: 0.96, metal: 0 },
+  cone: { geo: coneGeometry, rough: 0.62, metal: 0, shadow: false },
+  tyre: { geo: () => tyreGeometry(0), rough: 0.96, metal: 0, shadow: false },
   stack: { geo: stackGeometry, rough: 0.94, metal: 0 },
   board: { geo: boardGeometry, rough: 0.58, metal: 0.1 },
-  panel: { geo: panelGeometry, rough: 0.58, metal: 0.1 },
+  panel: { geo: panelGeometry, rough: 0.58, metal: 0.1, shadow: false },
   barrier: { geo: barrierGeometry, rough: 0.48, metal: 0 },
-  wing: { geo: wingGeometry, rough: 0.42, metal: 0.15 },
+  wing: { geo: wingGeometry, rough: 0.42, metal: 0.15, shadow: false },
 };
 
 // ---------------------------------------------------------------------------
@@ -231,7 +231,11 @@ export class PropYard {
         envMapIntensity: 0.9,
       });
       const im = new THREE.InstancedMesh(S.geo(), mat, max);
-      im.castShadow = true; im.receiveShadow = true;
+      // Only the things big enough for their shadow to mean anything cast one.
+      // A shadow map is a second draw of everything in it, and a cone's
+      // shadow is 30 cm of grey nobody will ever look at.
+      im.castShadow = S.shadow !== false;
+      im.receiveShadow = true;
       im.count = 0;
       im.frustumCulled = false;     // they move; a stale bounding sphere pops
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

@@ -52,7 +52,7 @@ const SIZE = { tarmac: 3, apron: 2.4, concrete: 2, metal: 1.2, grass: 1.6, grave
 // 40 m the texture appeared. So the coordinate is wrapped into a 96 m block
 // before it is sampled, and 96 is an exact multiple of every scale below —
 // which is what makes the wrap invisible instead of a seam every 96 m.
-const LAND = { block: 96, near: 1.5, far: 24, dirt: 3, rock: 4 };
+const LAND = { block: 96, near: 1.5, far: 24, dirt: 3, rock: 4, macro: 48 };
 
 export class BuildLook {
   constructor(renderer, look, flora, opts) {
@@ -75,11 +75,16 @@ export class BuildLook {
   }
 
   // Sky, image-based lighting, sun and fog, all from the one measured capture.
-  install(scene, { shadows = true, shadowMap = 2048, shadowBox = 90 } = {}) {
+  install(scene, { shadows = true, shadowMap = 2048, shadowBox = 90, env = true } = {}) {
     const sky = this.look.sky;
     if (this.on && sky) {
       this.look.install(scene);                       // background + PMREM environment
       scene.environmentIntensity = 0.85;
+      // Image-based lighting is a cube lookup on EVERY pixel of every PBR
+      // surface. Dropping it is worth real frames on a weak GPU, and the
+      // hemisphere light below stands in for it — so the lowest setting keeps
+      // the photographed sky as a backdrop and stops lighting with it.
+      if (!env) { scene.environment = null; scene.environmentIntensity = 1; }
     }
     const horizon = new THREE.Color(sky?.horizon || 0xc6d2dc);
     scene.fog = new THREE.FogExp2(horizon.getHex(), 0.00021);
@@ -107,7 +112,7 @@ export class BuildLook {
     // Sky above, warm bounce below. Under an overcast sky there is barely a
     // sun and nearly all the light has to come from the dome instead.
     scene.add(new THREE.HemisphereLight(new THREE.Color(sky?.sky || 0xdbe6f2), 0x5d5a48,
-      this.on && sky ? 0.18 + (1 - punch) * 0.9 : 0.55));
+      (this.on && sky ? 0.18 + (1 - punch) * 0.9 : 0.55) + (env ? 0 : 0.5)));
     this.sun = sun;
     this.sunDir = new THREE.Vector3(dir[0], dir[1], dir[2]).normalize();
     return this;
@@ -178,40 +183,29 @@ export class BuildLook {
   // AO that looks like a flat-lit hill is exactly the kind of bug that hides
   // for a week.
   // -------------------------------------------------------------------------
-  terrain() {
+  terrain({ land = 'full' } = {}) {
     if (!this.on) return null;
-    // Two knobs for the experiment that decides what this material is:
-    //   ?land=<m>   how big the ground photograph is
-    //   ?block=<m>  the wrap, and 0 turns it off
-    //   ?base=dirt  paint the whole valley in a HIGH-CONTRAST scan, which is
-    //               the only way to tell a sampler precision problem apart
-    //               from a photograph that simply has no detail in it
+    // ?land=<m> still overrides the scale, for looking at it.
     const qp = new URLSearchParams(location.search);
-    const probe = Number(qp.get('land')) || 0;
-    const block = qp.has('block') ? Number(qp.get('block')) : LAND.block;
+    const near = Number(qp.get('land')) || LAND.near;
     const g = qp.get('base') === 'dirt' && this.flora?.tex?.dirt
-      ? this.flora.tex.dirt : this.look.set('grass', LAND.near);
+      ? this.flora.tex.dirt : this.look.set('grass', near);
     const r = this.flora?.tex?.rock, d = this.flora?.tex?.dirt;
     if (!g) return null;
+    const simple = land !== 'full';
     const mat = new THREE.MeshStandardMaterial({
-      // `map` is here so three defines USE_MAP and hands the shader the uv
-      // attribute; every actual sample below is taken by hand.
-      //
-      // No normalMap and no roughnessMap on the terrain, and not by oversight:
-      // both are sampled by three's own chunks with the RAW uv, which is the
-      // coordinate that loses its precision at this size. Wrapping only the
-      // samples this file takes is what keeps the land textured, and a relief
-      // map on ground seen at a grazing angle from a car buys much less than
-      // the real grass geometry standing on it does.
       map: g.c, vertexColors: true, roughness: 0.94, metalness: 0,
       envMapIntensity: 0.55,
+      // Relief on the ground only when we can afford it. It costs a sample
+      // and a tangent frame per pixel, and the ground is most of the screen.
+      normalMap: simple ? null : (g.n || null),
+      normalScale: new THREE.Vector2(0.7, 0.7),
     });
     const U = {
       uRock: { value: r?.c || g.c }, uDirt: { value: d?.c || g.c },
-      uRough: { value: g.orm || null },
-      uNear: { value: probe || LAND.near }, uFar: { value: LAND.far },
+      uNear: { value: near }, uFar: { value: LAND.far },
       uRockSize: { value: LAND.rock }, uDirtSize: { value: LAND.dirt },
-      uBlock: { value: block > 0 ? block : 1e9 },
+      uMacro: { value: LAND.macro },
     };
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, U);
@@ -224,47 +218,47 @@ export class BuildLook {
           // normal IS the world normal, and its y IS the slope.
           vUpness = normal.y;
           vLand = uv;`);
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>
-          uniform sampler2D uRock; uniform sampler2D uDirt; uniform sampler2D uRough;
-          uniform float uNear, uFar, uRockSize, uDirtSize, uBlock;
-          varying float vUpness;
-          varying vec2 vLand;
-          // Wrapped coordinate, true derivatives. mod() alone would fix the
-          // precision and break the mip chain — the derivative jumps at every
-          // block edge and draws a sharp line across the country. Taking the
-          // gradient from the UNWRAPPED coordinate and sampling with
-          // textureGrad keeps both.
-          vec4 land(sampler2D t, float size) {
-            vec2 g1 = dFdx(vLand) / size, g2 = dFdy(vLand) / size;
-            return textureGrad(t, mod(vLand, uBlock) / size, g1, g2);
-          }`)
-        .replace('#include <map_fragment>', `
-          vec3 grass = mix(land(map, uNear).rgb, land(map, uFar).rgb, 0.45);
+      // The UVs arrive already FOLDED into a 96 m block by foldTerrainUVs, so
+      // these are plain texture reads. They used to be mod() + textureGrad,
+      // which is correct and costs three extra instructions on every pixel of
+      // the ground; folding the geometry once at load buys the same thing for
+      // nothing. (Unfolded, a coordinate 5,400 m from the origin loses its
+      // sub-texel precision and the whole valley smears — measured.)
+      const body = simple ? `
+          vec3 grass = texture2D(map, vLand / uNear).rgb;
+          vec3 dirt = texture2D(uDirt, vLand / uDirtSize).rgb;
+          float up = clamp(vUpness, 0.0, 1.0);
+          // One blend, not three: bare earth on anything steeper than a
+          // hillside, and the same photograph doubles as the macro variation.
+          float wEarth = smoothstep(0.945, 0.74, up);
+          vec3 ground = mix(grass * mix(0.74, 1.16, texture2D(uDirt, vLand / uMacro).g), dirt, wEarth);
+          diffuseColor.rgb *= ground;` : `
+          vec3 grass = mix(texture2D(map, vLand / uNear).rgb,
+                           texture2D(map, vLand / uFar).rgb, 0.45);
           // MACRO VARIATION. Measured: the grass scan has a colour standard
-          // deviation of 5/255 — it is a beautiful lawn close up and a flat
-          // green sheet at forty metres, the same trap gettex.mjs documents
-          // for Asphalt033. Real country is patchy at the scale of a field,
-          // and that patchiness has to come from somewhere. Here it is the
-          // dirt scan sampled enormous and used as a brightness map, so the
-          // variation is still photographed rather than invented.
-          float macro = land(uDirt, uBlock * 0.75).g;
-          grass *= mix(0.74, 1.16, macro);
-          vec3 rock = land(uRock, uRockSize).rgb;
-          vec3 dirt = land(uDirt, uDirtSize).rgb;
-          // up is the COSINE of the slope: 1.0 flat, 0.87 is 30 degrees.
-          // The first version had earth starting at 14 degrees, which is every
+          // deviation of 5/255 — a lawn close up, a flat green sheet at forty
+          // metres, the same trap gettex.mjs documents for Asphalt033. Real
+          // country is patchy at the scale of a field, so the dirt scan is
+          // sampled enormous and used as a brightness map: still a
+          // photograph, not a noise function.
+          grass *= mix(0.74, 1.16, texture2D(uDirt, vLand / uMacro).g);
+          vec3 rock = texture2D(uRock, vLand / uRockSize).rgb;
+          vec3 dirt = texture2D(uDirt, vLand / uDirtSize).rgb;
+          // up is the COSINE of the slope: 1.0 flat, 0.87 is 30 degrees. The
+          // first version had earth starting at 14 degrees, which is every
           // graded embankment on the track — the whole circuit sat in sand.
-          // Soil holds on anything a person can walk up; bare earth is a cut
-          // face and rock is a cliff.
           float up = clamp(vUpness, 0.0, 1.0);
           float wRock = smoothstep(0.80, 0.62, up);
           float wDirt = smoothstep(0.945, 0.82, up) * (1.0 - wRock);
           vec3 ground = mix(mix(grass, dirt, wDirt), rock, wRock);
-          diffuseColor.rgb *= ground;`)
-        .replace('#include <roughnessmap_fragment>', `
-          float roughnessFactor = roughness;
-          roughnessFactor *= mix(0.86, 1.0, land(uRough, uNear).g);`)
+          diffuseColor.rgb *= ground;`;
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+          uniform sampler2D uRock; uniform sampler2D uDirt;
+          uniform float uNear, uFar, uRockSize, uDirtSize, uMacro;
+          varying float vUpness;
+          varying vec2 vLand;`)
+        .replace('#include <map_fragment>', body)
         .replace('#include <color_fragment>', `
           #ifdef USE_COLOR
             // Hue only. ground.js's vertex colour says WHAT the land is doing;
@@ -274,16 +268,16 @@ export class BuildLook {
             //
             // .rgb, not vColor bare: three declares that varying as a vec4
             // when the colour attribute carries alpha and as a vec3 when it
-            // does not, and a vec3/vec4 mismatch here is not a warning, it is
-            // "no matching overloaded function" and a material that never
-            // compiles — which looks like the land failing to draw at all.
+            // does not, and the mismatch is "no matching overloaded function"
+            // — a material that never compiles, which looks like the land
+            // failing to draw at all.
             float lum = max(dot(vColor.rgb, vec3(0.299, 0.587, 0.114)), 1e-3);
             diffuseColor.rgb *= mix(vec3(1.0), vColor.rgb / lum, 0.32);
           #endif`);
     };
     // Two materials whose onBeforeCompile bodies differ must not share a
     // program; three keys the cache on this string.
-    mat.customProgramCacheKey = () => 'wdc-terrain-v2';
+    mat.customProgramCacheKey = () => `wdc-terrain-v3-${simple ? 's' : 'f'}`;
     this.materials.push(mat);
     return mat;
   }
@@ -425,4 +419,34 @@ async function loadFlora(renderer) {
   } catch {
     return null;   // no data/flora/: the track simply has no plants on it
   }
+}
+
+// ---------------------------------------------------------------------------
+// Fold a terrain group's UVs into one LAND.block-wide tile, with a TRIANGLE
+// wave so the seam is a mirror rather than a jump.
+//
+// Terrain UVs are world metres and this track's land runs to +-5,400: at a
+// 1.5 m photograph that is 3,600 repeats, and a GPU sampler keeps only a few
+// fractional bits of a texture coordinate, so past a few hundred repeats every
+// pixel of a tile samples the same texel and the ground goes flat. (Measured
+// side by side with the fold off: real dirt against vertical smears.)
+//
+// This can be done per VERTEX only because the terrain grid lines up with the
+// period — cells are 3, 12, 24 and 48 m and tiles start on multiples of 48, so
+// every fold point at a multiple of 96 lands exactly on a vertex and the wave
+// stays piecewise-linear between them. On a mesh whose vertices did not line
+// up, this same trick would tear.
+// ---------------------------------------------------------------------------
+export function foldTerrainUVs(group, period = LAND.block) {
+  const fold = (v) => {
+    const m = ((v % (2 * period)) + 2 * period) % (2 * period);
+    return period - Math.abs(m - period);
+  };
+  group.traverse((o) => {
+    const uv = o.isMesh && o.geometry?.attributes?.uv;
+    if (!uv) return;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, fold(uv.getX(i)), fold(uv.getY(i)));
+    uv.needsUpdate = true;
+  });
+  return group;
 }

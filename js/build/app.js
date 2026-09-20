@@ -13,7 +13,7 @@ import { Hands, steerLock } from '../input.js';
 import { resolveBarrier } from '../collide.js';
 import { buildCar, buildGT3 } from '../car.js';
 import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from '../phonewheel.js';
-import { BuildLook } from './look.js';
+import { BuildLook, foldTerrainUVs } from './look.js';
 import { buildFlora } from './flora.js';
 import { PropYard } from './propview.js';
 
@@ -30,14 +30,44 @@ const chunks = ground.chunks();
 const buildMs = performance.now() - t0;
 
 // ---------------------------------------------------------------------------
+// HOW HARD TO WORK THE GPU  —  ?q=low | med | high
+//
+// The look pass shipped at three frames a second on Adam's laptop and not one
+// of my headless numbers had said so: swiftshader is frame-limited anyway, so
+// every screenshot proved a thing RENDERS and nothing about whether it runs.
+// These are the dials that actually cost, in the order they cost:
+//
+//   dpr        FRAGMENTS. devicePixelRatio 2 on a laptop screen is four times
+//              the pixels of 1.0, and every one of them runs the terrain
+//              shader and whatever alpha-tested leaves are in front of it.
+//              This is the single biggest lever in the file.
+//   aa         4x MSAA on top of that.
+//   shadows    a shadow map is a second draw of everything that casts.
+//   land       how many photographs the ground blends per pixel.
+//   trees      how many are planted, and the fringe of grass at the verge.
+//
+// `med` is the default and is meant to hold 30 on a laptop; `high` is what
+// screenshots are taken at.
+// ---------------------------------------------------------------------------
+const QUALITY = {
+  low:  { dpr: 0.85, aa: false, shadows: false, shadowMap: 1024, shadowBox: 60, land: 'simple', trees: 0.55, fringe: false, env: false, soft: 0 },
+  med:  { dpr: 1.0,  aa: false, shadows: true,  shadowMap: 1024, shadowBox: 70, land: 'simple', trees: 1.0, fringe: true, env: true, soft: 1 },
+  high: { dpr: 1.75, aa: true,  shadows: true,  shadowMap: 2048, shadowBox: 110, land: 'full', trees: 1.3, fringe: true, env: true, soft: 2 },
+};
+const QK = QUALITY[q.get('q')] ? q.get('q') : 'med';
+const QN = QUALITY[QK];
+
+// ---------------------------------------------------------------------------
 // renderer, light, sky
 // ---------------------------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ canvas: $('cv'), antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ canvas: $('cv'), antialias: QN.aa, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, QN.dpr));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = !q.has('lo');
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// PCFSoft takes many taps per pixel of every shadowed surface. It is the
+// prettiest and it is not free, so it is the top setting only.
+renderer.shadowMap.type = [THREE.BasicShadowMap, THREE.PCFShadowMap, THREE.PCFSoftShadowMap][QN.soft];
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.25, 12000);
 
@@ -51,7 +81,7 @@ const FLAT = q.has('flat');
 const LOOK = await BuildLook.load(renderer, { flat: FLAT, sky: q.get('sky') });
 let follow;
 if (LOOK.on) {
-  LOOK.install(scene, { shadows: !q.has('lo') });
+  LOOK.install(scene, { shadows: QN.shadows && !q.has('lo'), shadowMap: QN.shadowMap, shadowBox: QN.shadowBox, env: QN.env });
   follow = f => LOOK.follow(f);
 } else {
   follow = flatViewport();
@@ -87,8 +117,16 @@ function flatViewport() {
   };
 }
 
-const TERRAIN = LOOK.terrain();
-scene.add(buildGround(chunks, TERRAIN));
+const TERRAIN = LOOK.terrain({ land: QN.land });
+const LAND = buildGround(chunks, TERRAIN);
+// Fold the land's UVs into one tile-period block. Terrain UVs are world metres
+// and run to +-5,400 here; folding them per vertex (the grid lines up exactly
+// with the period, so it stays continuous) means the shader can sample with a
+// plain texture read instead of mod + textureGrad, which is three fewer
+// instructions on every pixel of the ground — and the ground is most of the
+// screen.
+foldTerrainUVs(LAND);
+scene.add(LAND);
 const ROADMATS = LOOK.road();
 scene.add(buildRoad(path, ROADMATS));
 // The band the physics calls run-off, drawn as run-off. Nothing without
@@ -106,7 +144,8 @@ if (landmarks.userData.beam) scene.add(gantryBanner(brand, landmarks.userData.be
 // Grass, and a forest planted from data/build/scenery.js. ?flat skips it so a
 // screenshot stays comparable with the ones taken before any of this existed.
 const tFlora = performance.now();
-const flora = FLAT || q.has('noflora') ? null : await buildFlora(renderer, path, ground, LOOK);
+const flora = FLAT || q.has('noflora') ? null
+  : await buildFlora(renderer, path, ground, LOOK, { trees: QN.trees, fringe: QN.fringe, shadows: QN.shadows });
 if (flora) scene.add(flora.group);
 const floraMs = performance.now() - tFlora;
 
@@ -458,6 +497,32 @@ addEventListener('keydown', e => {
 });
 
 // ---------------------------------------------------------------------------
+// The measurement this project could not take headless, put where the person
+// with the actual GPU can read it. The renderer STRING is there for a reason:
+// if a browser has quietly fallen back to SwiftShader or llvmpipe then the
+// scene is being drawn by the CPU and no amount of cutting will reach 24 fps.
+const GPU = (() => {
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : 'unknown';
+  } catch { return 'unknown'; }
+})();
+const SOFT = /swiftshader|llvmpipe|software|microsoft basic/i.test(GPU);
+let fpsT = performance.now(), fpsN = 0, fpsNow = 0;
+function meter(now) {
+  fpsN++;
+  if (now - fpsT < 500) return;
+  fpsNow = Math.round(fpsN * 1000 / (now - fpsT));
+  const r = renderer.info.render;
+  const link = k => `<a href="?${new URLSearchParams({ ...Object.fromEntries(q), q: k })}" ` +
+    `style="color:${k === QK ? '#35d6a0' : '#8b949c'};text-decoration:none">${k}</a>`;
+  $('fps').innerHTML = `<b>${fpsNow} fps</b> ${r.calls} draws · ${(r.triangles / 1000).toFixed(0)}k tris · ` +
+    `${renderer.getPixelRatio().toFixed(2)}x<br>${['low', 'med', 'high'].map(link).join(' · ')}` +
+    `<span>${SOFT ? 'SOFTWARE RENDERING — ' : ''}${GPU}</span>`;
+  fpsT = now; fpsN = 0;
+}
+
 let prev = performance.now(), frames = 0;
 function loop(now) {
   requestAnimationFrame(loop);
@@ -492,6 +557,7 @@ function loop(now) {
   // before the press. tools/pedalcheck.mjs drives this instead.
   window.__step = secs => { if (mode === 'drive') driveStep(Math.max(0, Math.min(5, secs))); };
   renderer.render(scene, camera);
+  meter(now);
   frames++;
   if (frames === 2) {
     let tris = 0;
@@ -506,7 +572,7 @@ function loop(now) {
       ready: true, buildMs: Math.round(buildMs), n: path.n, length: path.length,
       pieces: PIECES.length, chunks: chunks.length, tris: Math.round(tris),
       draws: R.calls, frameTris: R.triangles,
-      textured: LOOK.on, sky: LOOK.look?.sky?.name || null,
+      textured: LOOK.on, sky: LOOK.look?.sky?.name || null, quality: QK, gpu: GPU, software: SOFT,
       maps: Object.keys(LOOK.look?.maps || {}).length,
       land: TERRAIN ? [!!TERRAIN.map, !!TERRAIN.normalMap, !!TERRAIN.roughnessMap] : null,
       floraMs: Math.round(floraMs), propMs: Math.round(propMs),
