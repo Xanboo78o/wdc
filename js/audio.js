@@ -73,7 +73,18 @@ export const MIX = {
   //   drive  compression. Loud is not gain: gain clips. A compressor pulls
   //          the peaks down so the BODY can come up, which reads as heavier
   //          and louder at the same time.
-  sub: 0.55, subCut: 420, bass: 7, bassAt: 160, drive: 0.55, master: 0.78,
+  //   shake  THE ONE HE MEANS. A parallel copy of the engine through a steep
+  //          lowpass, mixed back into the main output. On the bench what shook
+  //          his chair was the engine on the ROOM bus, where the chassis
+  //          filter strips everything above 600 Hz so every bit of energy goes
+  //          into the low end. In the game that bus is off unless a second
+  //          device is chosen, so the same energy was spread across the whole
+  //          spectrum and his speaker spent it on mids. This is that filter
+  //          back, as a BLEND rather than a separate output - resonant at the
+  //          cutoff, because a little Q at 110 Hz is the difference between
+  //          bass and a thump.
+  sub: 0.85, subCut: 460, bass: 12, bassAt: 120, drive: 0.55, master: 0.78,
+  shake: 0.80, shakeAt: 110, shakeQ: 3.5,
   // BOTH OFF BY DEFAULT. Adam, after one drive: "i only hear wind, i only want
   // engine". The road layer is still the tyre sample detuned and lowpassed, a
   // placeholder meant to test whether SPEED belongs in the mix — and it does,
@@ -167,6 +178,21 @@ export class Engine {
       this.sub = await this._layer(baseUrl, this.file, 'lowpass');
       this.sub.gain.disconnect();
       this.sub.gain.connect(this.shelf);
+
+      // THE SHAKE. Taken from the shelf - so it carries the octave as well as
+      // the note - through a steep resonant lowpass, and added back in
+      // PARALLEL rather than in series. In series it would just be a duller
+      // engine; in parallel it is the same engine with a chest under it.
+      this.shakeLP = this.ctx.createBiquadFilter();
+      this.shakeLP.type = 'lowpass';
+      this.shakeLP.frequency.value = this.mix.shakeAt;
+      this.shakeLP.Q.value = this.mix.shakeQ;
+      this.shakeGain = this.ctx.createGain();
+      this.shakeGain.gain.value = 0;
+      this.shelf.connect(this.shakeLP);
+      this.shakeLP.connect(this.shakeGain);
+      this.shakeGain.connect(this.cans);
+      this.shakeGain.connect(this.room);
       // Tyres and road are OPTIONAL: a missing file must cost the engine
       // nothing, because the engine is the one sound this game cannot be
       // played without.
@@ -236,6 +262,14 @@ export class Engine {
     if (this.shelf) {
       this.shelf.frequency.value = m.bassAt;
       this.shelf.gain.value = m.bass;
+    }
+    if (this.shakeGain) {
+      this.shakeLP.frequency.value = m.shakeAt;
+      this.shakeLP.Q.value = m.shakeQ;
+      // Follows the load, so it breathes with the throttle instead of
+      // rumbling flat all lap - which is the difference between a car and a
+      // fridge.
+      this.shakeGain.gain.value = this.master * load * m.shake;
     }
     if (this.comp) {
       // More drive is a lower threshold and more makeup: the peaks come down
