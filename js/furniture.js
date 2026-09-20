@@ -15,6 +15,7 @@
 // That is what makes it affordable to furnish all 5.8 km of Monza instead of
 // dressing the bit by the pits and hoping nobody drives round the back.
 import * as THREE from 'three';
+import { BRANDS, brandAt, drawBrand } from './brands.js';
 import { Z, Builder, Atlas, fitText } from './geom.js';
 // The grid lives in a module that imports NOTHING, so the headless race gate
 // can call the same function this file paints from. See js/grid.js.
@@ -53,35 +54,15 @@ const barrierLat = (t, i, side) => side > 0 ? t.w[i] + t.runL[i] : -(t.w[i] + t.
 // draw call. Cells are 4:1, which suits a hoarding; square signs use a
 // letterboxed cell and their quad is sized to match.
 // ---------------------------------------------------------------------------
-// THE BIG FORMAT. Adam: "espexcally BIG ones that youlll see on massive
-// billboards, buildings etc, like lenovo grandstands".
+// Sponsors come from js/brands.js now. Every one is invented — Adam's call,
+// and the right one: a repo with no real marks in it can be copied, shipped
+// and screenshotted by anyone, forever, with nobody's lawyer involved.
 //
-// These are the names that go across a grandstand roof rather than on a
-// hoarding — the ones you read from the other side of the circuit. Real
-// trackside brands mixed with this studio's own, which is what a real paddock
-// looks like: a few global names everybody knows, and a lot you only see here.
-//
-// They are drawn as TEXT in this project's own typeface. That is deliberate
-// and it is the whole difference between naming a sponsor and reproducing its
-// logo — no company's artwork appears anywhere in this repo.
-export const BIG = [
-  'LENOVO', 'ROLEX', 'PIRELLI', 'HEINEKEN', 'DHL', 'EMIRATES', 'ARAMCO',
-  'QATAR AIRWAYS', 'MSC CRUISES', 'SALESFORCE', 'AWS', 'SHELL', 'SANTANDER',
-  'TAG HEUER', 'PUMA', 'HUGO BOSS', 'CRYPTO.COM', 'MOET & CHANDON',
-  'XANBOO78O STUDIOS', 'FOGLAST', 'TERMINAL TYCOON', 'VROOM',
-];
-
-// The hoardings. The circuit data carries this studio's games; these top it up
-// so a lap does not show the same eight boards over and over.
-export const TRACKSIDE = [
-  'LENOVO', 'DHL', 'PIRELLI', 'ROLEX', 'HEINEKEN', 'EMIRATES', 'AWS',
-  'SALESFORCE', 'SHELL', 'PUMA', 'TAG HEUER', 'ARAMCO', 'MSC', 'QATAR AIRWAYS',
-  'HONDA', 'BOSCH', 'BREMBO', 'OZ RACING', 'SPARCO', 'ALPINESTARS',
-  'PETRONAS', 'CASTROL', 'MOBIL 1', 'GULF', 'BOSE', 'LOGITECH', 'RAZER',
-  'MONSTER', 'RED BULL', 'BURGER FACTORY', 'NORTHWAY BANK', 'VELOCITA TYRES',
-  'MERIDIAN AERO', 'KESTREL OIL', 'ATLAS FREIGHT', 'HALDANE ELECTRIC',
-];
-
+// The reason it is a module and not a list of strings is his actual note:
+// "all the current sponsors are just the name in the same font, no logos, no
+// typography". A brand there is a name, a palette, a TYPEFACE and a MARK,
+// because the thing that makes a paddock look like a paddock is that no two
+// sponsors agree about anything.
 export function signAtlas(track) {
   // 64 cells now, not 48: the worst case was 20 sponsors + 6 braking boards +
   // 12 corner names + the banner + the pit sign, and Monaco really does have
@@ -89,40 +70,27 @@ export function signAtlas(track) {
   // room for them. See Atlas.cell for what happened when it did not fit.
   const A = new Atlas(4, 16, 512, 128);
   const cells = { sponsors: [], boards: {}, names: new Map(), banner: 0, pit: 0, big: [] };
+  // The circuit's own list decides WHICH brands and in what order, so a track
+  // keeps its character; everything about how they LOOK lives in brands.js.
+  const own = track.sponsors && track.sponsors.length ? track.sponsors : [];
+  const pick = i => {
+    const named = own[i] && BRANDS.find(b => b.n === own[i]);
+    return named || brandAt(i * 7 + (own.length || 3));
+  };
 
-  // Advertising hoardings, in the sponsor colours of a paddock that does not
-  // exist. The names come from the circuit data — they are Adam's own games.
-  const PALETTE = [
-    ['#d8352a', '#ffffff'], ['#0b0d10', '#35d6a0'], ['#1b4fd8', '#ffffff'],
-    ['#f5c518', '#101014'], ['#0f8f6b', '#ffffff'], ['#e8eaee', '#101014'],
-    ['#7b2fd8', '#ffffff'], ['#ff6b1a', '#101014'],
-  ];
-  // The circuit's own list first — those are the studio's games and they should
-  // be the ones you see most — then the wider pool behind them.
-  const own = track.sponsors && track.sponsors.length ? track.sponsors : ['CHASING WDC'];
-  const sponsors = own.concat(TRACKSIDE.filter(n => !own.includes(n)));
-  for (let i = 0; i < Math.min(sponsors.length, 20); i++) {
-    const [bg, fg] = PALETTE[i % PALETTE.length];
-    cells.sponsors.push(A.cell((g, w, h) => {
-      g.fillStyle = bg; g.fillRect(0, 0, w, h);
-      // A thin band of the text colour along the bottom: real trackside boards
-      // are printed edge to edge and the band is what stops this reading as a
-      // flat rectangle when it is 200 m away and four pixels tall.
-      g.fillStyle = fg; g.globalAlpha = 0.85; g.fillRect(0, h - 10, w, 10); g.globalAlpha = 1;
-      fitText(g, sponsors[i], w / 2, h / 2 - 4, w * 0.88, h * 0.62, { colour: fg });
-    }));
+  // Advertising hoardings.
+  for (let i = 0; i < 20; i++) {
+    const b = pick(i);
+    cells.sponsors.push(A.cell((g, w, h) => drawBrand(g, w, h, b)));
   }
 
-  // BIG FORMAT. Light lettering on a dark band, edge to edge, because these
-  // are read at three hundred metres and a boxed-in logo disappears at that
-  // range while a word across the whole fascia does not.
+  // BIG FORMAT — the read-it-from-three-hundred-metres version, for the
+  // grandstand fascias. Same brands, drawn flat and edge to edge: at that
+  // range the bottom rule and the drop shadow are noise, and the mark plus
+  // the word is all that survives.
   for (let i = 0; i < 8; i++) {
-    const text = BIG[(i * 3 + 1) % BIG.length];
-    cells.big.push(A.cell((g, w, h) => {
-      g.fillStyle = i % 2 ? '#101014' : '#12161c';
-      g.fillRect(0, 0, w, h);
-      fitText(g, text, w / 2, h / 2, w * 0.94, h * 0.74, { colour: '#ffffff' });
-    }));
+    const b = pick(i * 3 + 1);
+    cells.big.push(A.cell((g, w, h) => drawBrand(g, w, h, b, { flat: true })));
   }
 
   // Braking boards. Drawn letterboxed into the middle of a 4:1 cell so they
