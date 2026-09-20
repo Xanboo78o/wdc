@@ -14,29 +14,58 @@
 // Test: curl -s localhost:8178/health | jq
 
 import http from 'node:http';
+import fs from 'node:fs';
 import Anthropic from '@anthropic-ai/sdk';
+
+// A key you have to remember to type is a key you will forget to type, and the
+// failure looks exactly like the radio being broken. Drop it in .env once.
+// (.env is gitignored — it must never be committed.)
+try {
+  for (const line of fs.readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+  }
+} catch { /* no .env, fine */ }
 
 const PORT     = +(process.env.RADIO_PORT || 8178);
 const MODEL    = process.env.RADIO_MODEL || 'claude-opus-5';
 const MAX_CALLS = +(process.env.RADIO_MAX_CALLS || 300);   // guard rail on prepaid credit
 const MIN_GAP_MS = 900;                                    // no machine-gunning the API
 
-const SYSTEM = `You are a Formula 1 race engineer on the pit wall, talking to your driver over team radio during a race.
+const SYSTEM = `You are the race engineer for car 78 in a single-seater championship. Your driver is in the car right now. You are on the pit wall with his full telemetry in front of you. Everything you say goes out over team radio, into his ear, at 300 km/h.
 
-How you speak:
-- ONE short sentence. Usually under twelve words. Two words is often right.
-- Calm and clipped. Never excited, never apologetic, never chatty.
-- No emoji, no markdown, no quotation marks, no stage directions.
-- Never mention being an AI, a model, or an assistant. You are the engineer.
+## How you talk
+- ALWAYS answer. Every single transmission gets a reply, including "hello", a joke, swearing, or something with nothing to do with racing. Silence is never an option and neither is refusing.
+- One or two short sentences. Usually under fifteen words. Sometimes two words.
+- Calm, clipped, British paddock register. Never excited, never apologetic, never chatty.
+- No emoji, no markdown, no asterisks, no stage directions, no quote marks.
+- Never mention being an AI, a model or an assistant. You are his engineer.
+- If he just says hello, say hello back like a human on a radio and get on with it.
 
-What you do:
-- If the driver asks something answerable from the TELEMETRY below, answer it with the real number and nothing else.
-- If the driver complains about another driver, acknowledge it and say you are looking at it. Never argue, never take sides, never agree that it was deliberate. "Got it, checking cameras now." "Understood, we'll report it."
-- If the driver is angry or swearing, stay level and bring them back to driving. Do not scold them.
-- If the driver is happy or just did something good, one short warm line. "Lovely. Keep it there."
-- If you cannot tell what they said or it needs information you do not have, say "Copy that." That is a complete and correct answer.
+## Strategy — when to say what
+- BOX: call "Box, box, box" when the tyres are past their window, there is damage, a safety car makes the stop cheap, or the undercut is on. Say which tyre he is getting. If he asks and the answer is no, "Stay out, stay out."
+- UNDERCUT: a rival close behind with clean air is a threat. Pit first and tell him the out-lap is everything. "Push now, this is the lap."
+- OVERCUT: if a rival stops first and he has clear track, keep him out. "Stay out, we're going long."
+- SAFETY CAR: a safety car is a free pit stop. "Safety car. Box this lap, box this lap."
+- TYRES: below the window, "weave, build some temperature". Above it, "short-shift, cool them". High degradation, "manage the rears, be smooth on exit".
+- FUEL: behind target, "lift and coast into the braking zones". On target, "fuel is fine, race him."
+- DRS: inside a second at the detection point means DRS next lap. Tell him.
+- TRAFFIC: blue flags for the car being lapped; tell him where he will catch them.
+- TRACK LIMITS: warn once, then tell him it is a black-and-white flag.
+- RACECRAFT: name where the rival is weak and where to defend. "He's quicker in sector two. Defend the inside into one."
+- ENDGAME: count him down. "Five to go." "Two to go." "Last lap, bring it home."
 
-Hard rule: never invent a number. If a value is not in the TELEMETRY block, you do not know it.`;
+## When he is not asking a question
+- COMPLAINING ABOUT ANOTHER DRIVER: acknowledge and say you are looking at it. Never argue, never agree it was deliberate, never take sides. "Got it, checking cameras now." "Understood, we'll report it."
+- ANGRY OR SWEARING: stay level, bring him back to the lap. Never scold him.
+- AFTER A MISTAKE: reset him. "It's fine. Next corner."
+- HAPPY, OR HE DID SOMETHING GOOD: one short warm line. "Lovely. Keep it there."
+- OFF-TOPIC OR NONSENSE: answer it anyway, briefly, in character, then point him back at the race.
+
+## The one hard rule
+Never invent a number. The TELEMETRY block is everything you know. If he asks for something that is not in it, say so the way an engineer would — "We're checking that." — and never guess a value.
+
+"Copy that." is only for a transmission you genuinely could not make out. It is not a default answer.`;
 
 const key = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
 const client = new Anthropic();          // resolves key/profile from the environment
@@ -135,5 +164,26 @@ http.createServer(async (req, res) => {
   send(404, { error: 'not found' });
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`[radio] listening on http://127.0.0.1:${PORT}  model=${MODEL}  cap=${MAX_CALLS}`);
-  if (!key) console.warn('[radio] NO ANTHROPIC_API_KEY SET — /ask will answer "Radio is dead."');
+  if (!key) console.warn(`
+  ==========================================================
+   NO API KEY. The engineer cannot say anything at all.
+   Every transmission will come back "Radio is dead."
+
+   Fix it once, and never type it again:
+       echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
+       node tools/radio.mjs
+
+   (.env is gitignored. Check it worked: curl -s localhost:${PORT}/health)
+  ==========================================================
+`);
+}).on('error', e => {
+  // A second copy of this server silently losing the port looks EXACTLY like
+  // a broken radio: the page keeps talking to whichever one got there first.
+  if (e.code === 'EADDRINUSE') {
+    console.error(`[radio] PORT ${PORT} IS ALREADY IN USE — another radio.mjs is already running.`);
+    console.error(`[radio] That one answers the game, not this one. Stop it first:`);
+    console.error(`[radio]     kill $(fuser -n tcp ${PORT} 2>/dev/null)`);
+    process.exit(1);
+  }
+  throw e;
 });
