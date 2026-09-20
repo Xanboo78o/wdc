@@ -379,6 +379,7 @@ function loop(now) {
     const inp = hands.update(FIXED_DT);
     car.throttle = inp.throttle;
     car.brake = inp.brake;
+    car.selector = hands.selector;        // Shift + number pad: D / N / R
     car.delta = inp.wheel * steerLock(car.speed);
 
     // Walls and loose objects, in the same substep as everything else. At
@@ -744,6 +745,7 @@ function dashTelemetry() {
     car: state.carName || '',
   };
   if (box) { t.gear = box.gear; t.rpm = box.rpm; t.rpmMax = box.box && box.box.limit; }
+  t.sel = car.selector;
 
   if (race && me) {
     t.lap = Math.min(race.laps, me.lap + 1);

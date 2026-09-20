@@ -70,6 +70,7 @@
   .centre { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.4vh; }
   #gear { font-size:20vh; line-height:.86; font-weight:900; letter-spacing:-.02em; }
   #gear.lim { color:var(--red); }
+  #gear.sel { color:var(--amber); }
   #rpmbar { width:100%; height:1.4vh; background:#1a1f26; border-radius:.7vh; overflow:hidden; }
   #rpmbar i { display:block; height:100%; width:0; background:var(--mint); }
   .spdrow { display:flex; align-items:baseline; gap:.8vw; }
@@ -259,8 +260,13 @@ function paint(t) {
   if (t.pos !== undefined) set('posbig', 'P' + t.pos);
   set('spd', t.spd !== undefined ? Math.round(t.spd) : undefined);
 
-  if (t.gear !== undefined) {
-    $('gear').textContent = t.gear > 0 ? t.gear : (t.gear === 0 ? 'N' : 'R');
+  // NEUTRAL and REVERSE are states of the SELECTOR, not gear numbers — in N
+  // there is no gear to show, and in R the gearbox is irrelevant.
+  if (t.sel !== undefined && t.sel !== 1) {
+    $('gear').textContent = t.sel === 0 ? 'N' : 'R';
+    $('gear').className = 'sel';
+  } else if (t.gear !== undefined) {
+    $('gear').textContent = t.gear > 0 ? t.gear : 'N';
     $('gear').className = t.rpm && t.rpmMax && t.rpm > t.rpmMax * 0.97 ? 'lim' : '';
   }
   if (t.rpm !== undefined && t.rpmMax) {

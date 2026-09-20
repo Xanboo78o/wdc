@@ -28,6 +28,22 @@ export const LADDER = {
   throttle: ['Digit8', 'Digit9', 'Digit0'],
   brake: ['Digit1', 'Digit2', 'Digit3'],
 };
+
+// GEAR SELECTOR — Shift + number pad.
+//
+// Shift is deliberate. Digit0 and Digit1 are ladder-pedal keys (above), and a
+// foot on a cardboard flap never holds Shift, so the two can share a key
+// without ever colliding. The top-row digits are accepted as well as the pad
+// because the MX Keys Mini has no number pad at all.
+//
+// -1 / 0 / 1 today. The pad is here so 2..8 can become real gears later
+// without moving anything: this is a SELECTOR, gears are a separate change.
+export const SELECTOR = {
+  1:  ['Numpad1', 'Digit1'],                       // DRIVE
+  0:  ['Numpad0', 'Digit0'],                       // NEUTRAL
+  '-1': ['NumpadSubtract', 'Minus'],               // REVERSE
+};
+export const SELECTOR_NAME = { '1': 'D', '0': 'N', '-1': 'R' };
 const LADDER_KEYS = new Set([...LADDER.throttle, ...LADDER.brake]);
 
 // What each step is worth, by how many keys are down (0, 1, 2, 3). The
@@ -88,8 +104,15 @@ export class Hands {
     // -1..1 while it is live, or null. Kept as a hook so this file never
     // needs the network to run — the Node harnesses import it.
     this.wheelSource = null;
+    this.selector = 1;               // D. See SELECTOR above.
+
     this._kd = e => {
       if (e.repeat) return;
+      if (e.shiftKey) {
+        for (const v of Object.keys(SELECTOR)) {
+          if (SELECTOR[v].includes(e.code)) { this.selector = +v; e.preventDefault(); return; }
+        }
+      }
       this.down.add(e.code);
       this.pressed.add(e.code);
       if (LADDER_KEYS.has(e.code) || Object.values(KEYMAP).some(a => a.includes(e.code))) e.preventDefault();

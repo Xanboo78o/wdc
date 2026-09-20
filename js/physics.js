@@ -546,6 +546,9 @@ export function launch(car, jz, lx = 0, ly = 0) {
   if (car.z < 0.001) car.z = 0.001;
 }
 
+// Reverse: 7 m/s is 25 km/h, and 18% of drive force gets you there slowly.
+const REV_MAX = 7, REV_FORCE = 0.18;
+
 export function makeCar(opts = {}) {
   const spec = CARS[opts.cls || 'f4'];
   return {
@@ -554,6 +557,10 @@ export function makeCar(opts = {}) {
     vx: 0.001, vy: 0, r: 0,       // body frame: vx forward, vy left, r yaw rate
     ax: 0, ay: 0,
     delta: 0, throttle: 0, brake: 0,
+    // Gear selector: 1 = DRIVE, 0 = NEUTRAL, -1 = REVERSE. A car that never
+    // sets it is in DRIVE, so every harness and every validated number —
+    // 321 km/h, the Monaco hairpin, every lap time — is untouched by this.
+    selector: 1,
     tyre: { Tf: 60, Tr: 60, wf: 0, wr: 0, age: 0 },
     drsOpen: false, dirty: 0, tow: 0,
     // Driver aids, modelled as the real systems they are rather than as grip
@@ -858,10 +865,22 @@ export function step(car, dt, env = {}) {
   } else car.absCut = 1;
 
   let FxR = 0, FxF = 0;
-  if (thrCmd > 0) FxR += Math.min(S.Pmax / Math.max(v, 9), S.Fdrive) * thrCmd;
+  // Reverse in a single-seater is not a gear ratio, it is a crawl: a weak
+  // electric reverse capped at walking pace, for getting out of a gravel trap
+  // or a stall. It is deliberately useless for racing.
+  const sel = car.selector === undefined ? 1 : car.selector;
+  if (thrCmd > 0 && sel !== 0) {
+    const full = Math.min(S.Pmax / Math.max(v, 9), S.Fdrive) * thrCmd;
+    if (sel > 0) FxR += full;
+    else if (car.vx > -REV_MAX) FxR -= Math.min(full, S.Fdrive * REV_FORCE);
+  }
   if (brkCmd > 0) {
-    FxF -= S.Fbrake * S.brakeBal * brkCmd;
-    FxR -= S.Fbrake * (1 - S.brakeBal) * brkCmd;
+    // A brake opposes the direction of travel. Rolling backwards it has to
+    // push FORWARD, or the brake pedal accelerates you into the wall behind.
+    // Going forwards dir is 1 and this is arithmetically what it always was.
+    const dir = car.vx < -0.2 ? -1 : 1;
+    FxF -= dir * S.Fbrake * S.brakeBal * brkCmd;
+    FxR -= dir * S.Fbrake * (1 - S.brakeBal) * brkCmd;
   }
   // Friction circle: grip spent stopping is grip you do not have for turning.
   // This is the whole of trail-braking, and it falls out for free.
@@ -919,7 +938,14 @@ export function step(car, dt, env = {}) {
   // travelling backwards, which is the entire mechanism behind a backflip. The
   // clamp must not be the thing that makes flying impossible, so it stops
   // applying exactly where it stops being needed.
-  if (car.vx < 0 && !car.airborne && Math.hypot(car.vx, car.vy) < 33) car.vx = 0;
+  // REVERSE is deliberately inside the regime this clamp exists to prevent, so
+  // it gets a bounded exception rather than a removal: only while the selector
+  // is actually in R, and the reverse force is capped at a crawl, so the bad
+  // slip-angle regime can never be entered at a speed where it does damage.
+  // Shift back to D while rolling backwards and the clamp resumes — which
+  // simply stops the car, which is the right thing to happen.
+  const reversing = car.selector === -1;
+  if (car.vx < 0 && !car.airborne && !reversing && Math.hypot(car.vx, car.vy) < 33) car.vx = 0;
   // Nothing scripted here any more. A spun car is straightened by the viscous
   // scrub term above, which is a tyre force like any other, so the recovery is
   // something the simulation does rather than something played back at you.
