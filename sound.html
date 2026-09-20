@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SOUND BENCH</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%230b0d10%27/%3E%3Crect x=%274%27 y=%2711%27 width=%275%27 height=%2710%27 fill=%27%2335d6a0%27/%3E%3Crect x=%2711%27 y=%2711%27 width=%275%27 height=%2710%27 fill=%27%23e8eaee%27/%3E%3Crect x=%2718%27 y=%2711%27 width=%275%27 height=%2710%27 fill=%27%23d8352a%27/%3E%3C/svg%3E">
+<style>
+  :root { --bg:#0b0d10; --fg:#e8eaee; --dim:#7d8590; --mint:#35d6a0; --red:#d8352a;
+          --amber:#e0a33a; --line:#1e232b; --panel:#11151b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); padding:18px 20px 60px;
+         font:14px/1.55 ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  h1 { font-size:15px; letter-spacing:.16em; margin:0 0 2px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:18px; max-width:700px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+           padding:14px 16px; margin-bottom:14px; max-width:820px; }
+  h2 { font-size:12px; letter-spacing:.14em; color:var(--dim); font-weight:400; margin:0 0 10px; }
+  button { font:inherit; background:#1b212a; color:var(--fg); border:1px solid var(--line);
+           border-radius:5px; padding:7px 13px; cursor:pointer; margin:0 6px 6px 0; }
+  button:hover { border-color:var(--mint); }
+  button.go { background:var(--mint); color:#04150e; border-color:var(--mint); font-weight:700; }
+  button.on { border-color:var(--mint); color:var(--mint); }
+  .row { display:flex; align-items:center; gap:12px; margin:7px 0; }
+  .row label { width:132px; color:var(--dim); flex:none; }
+  .row input[type=range] { flex:1; min-width:150px; accent-color:var(--mint); }
+  .row .val { width:86px; text-align:right; font-variant-numeric:tabular-nums; flex:none; }
+  .cap { display:grid; grid-template-columns:auto 1fr; gap:2px 14px; font-size:13px; }
+  .yes { color:var(--mint); } .no { color:var(--red); } .maybe { color:var(--amber); }
+  .derived { color:var(--dim); font-size:12px; margin-top:8px; border-top:1px solid var(--line); padding-top:8px; }
+  .bus { display:inline-block; border:1px solid var(--line); border-radius:5px; padding:3px 9px;
+         margin-right:8px; font-size:12px; color:var(--dim); cursor:pointer; }
+  .bus.sel { border-color:var(--mint); color:var(--mint); }
+  .note { color:var(--dim); font-size:12px; margin-top:10px; }
+  a { color:var(--mint); }
+</style>
+</head>
+<body>
+<h1>SOUND BENCH</h1>
+<div class="sub">
+  I cannot hear any of this, so every judgement here is yours. Move a slider, decide if it
+  is wrong, tell me which. Nothing on this page ships until you say so.
+</div>
+
+<div class="panel">
+  <h2>WHAT THIS BROWSER CAN DO</h2>
+  <div class="cap" id="caps">checking…</div>
+  <div class="note" id="capnote"></div>
+</div>
+
+<div class="panel">
+  <h2>OUTPUTS</h2>
+  <div class="row">
+    <label>CANS</label>
+    <div style="flex:1"><span id="cansName" class="val" style="width:auto;text-align:left">default output</span></div>
+    <button id="pickCans">choose…</button>
+  </div>
+  <div class="row">
+    <label>ROOM</label>
+    <div style="flex:1"><span id="roomName" class="val" style="width:auto;text-align:left">default output</span></div>
+    <button id="pickRoom">choose…</button>
+  </div>
+  <div class="note">
+    Bluetooth is 150&ndash;250&nbsp;ms late. That is fatal for anything with a MOMENT &mdash; a kerb
+    strike, a lockup &mdash; and completely unnoticeable on continuous sound, which has no moment
+    to be late for. So ROOM gets drone, CANS gets edges.
+  </div>
+</div>
+
+<div class="panel">
+  <h2>ENGINE &mdash; the maths here is copied from js/audio.js, unchanged</h2>
+  <div class="row">
+    <label>loop</label>
+    <div style="flex:1" id="loops"></div>
+  </div>
+  <div class="row"><label>rpm</label><input type="range" id="rpm" min="800" max="15000" value="4000"><span class="val" id="rpmV">4000</span></div>
+  <div class="row"><label>throttle</label><input type="range" id="thr" min="0" max="100" value="0"><span class="val" id="thrV">0%</span></div>
+  <div class="row"><label>send to</label><div style="flex:1">
+    <span class="bus sel" data-for="eng" data-bus="cans">CANS</span><span class="bus" data-for="eng" data-bus="room">ROOM</span><span class="bus" data-for="eng" data-bus="both">BOTH</span>
+  </div></div>
+  <div class="derived" id="engD">&mdash;</div>
+</div>
+
+<div class="panel">
+  <h2>TYRES &mdash; the new layer, and the one to judge</h2>
+  <div class="row"><label>slip</label><input type="range" id="slip" min="0" max="100" value="0"><span class="val" id="slipV">0%</span></div>
+  <div class="row"><label>speed km/h</label><input type="range" id="spd" min="0" max="320" value="120"><span class="val" id="spdV">120</span></div>
+  <div class="row"><label>send to</label><div style="flex:1">
+    <span class="bus sel" data-for="tyre" data-bus="cans">CANS</span><span class="bus" data-for="tyre" data-bus="room">ROOM</span><span class="bus" data-for="tyre" data-bus="both">BOTH</span>
+  </div></div>
+  <div class="derived" id="tyreD">&mdash;</div>
+  <div class="note">
+    A tyre is silent until it is near its limit, then rises fast &mdash; that threshold is the
+    whole feel of it. Too low and the car squeals in a straight line; too high and the slide
+    has already happened by the time you hear it. <b>That number is what I most need you to
+    judge.</b>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>DRIVE IT</h2>
+  <button id="start" class="go">START AUDIO</button>
+  <button id="sweep">auto-sweep revs</button>
+  <button id="corner">simulate a slide</button>
+  <div class="note">Browsers refuse to make sound until you click something. That is why START exists.</div>
+</div>
+
+<script type="module">
+// sound.html — the bench where Adam decides what this game sounds like.
+//
+// Why a bench and not just changing the game: I am deaf to every sound in this
+// project. A screenshot I can read; a waveform tells me nothing about whether a
+// tyre sounds like a tyre. So the only honest loop is one where the numbers are
+// exposed, he moves them, and he says which are wrong.
+//
+// The engine half duplicates js/audio.js deliberately rather than importing it:
+// Engine owns its own AudioContext and routes straight to the speakers, and the
+// whole point here is to test routing to TWO devices. The maths below is copied
+// line for line, so what he hears is what the game already makes.
+const $ = id => document.getElementById(id);
+const FILES = ['loop_0', 'loop_1_0', 'loop_2_0', 'loop_3_0', 'loop_4_0', 'loop_5_0'];
+const REF_RPM = 11000;                     // audio.js's tuning constant, by ear
+const RATE_MIN = 0.35, RATE_MAX = 2.6;
+
+// ---- capability readout, from THIS browser rather than my headless one ------
+const AC = window.AudioContext || window.webkitAudioContext;
+const caps = [
+  ['AudioContext', !!AC],
+  ['AudioContext.setSinkId', !!(AC && AC.prototype.setSinkId)],
+  ['HTMLMediaElement.setSinkId', !!(window.HTMLMediaElement && HTMLMediaElement.prototype.setSinkId)],
+  ['selectAudioOutput', !!(navigator.mediaDevices && navigator.mediaDevices.selectAudioOutput)],
+  ['enumerateDevices', !!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)],
+  ['PannerNode', typeof PannerNode !== 'undefined'],
+  ['ConvolverNode (reverb)', typeof ConvolverNode !== 'undefined'],
+  // `in`, not a property read: audioWorklet is a GETTER, and reading it off the
+  // prototype rather than an instance throws "Illegal invocation" and takes the
+  // whole readout down with it. This is the same bug that made my headless probe
+  // report AudioWorklet as missing.
+  ['AudioWorklet', !!AC && 'audioWorklet' in AC.prototype],
+];
+$('caps').innerHTML = caps.map(([k, v]) =>
+  `<div>${k}</div><div class="${v ? 'yes' : 'no'}">${v ? 'YES' : 'no'}</div>`).join('');
+const canRouteCtx = !!(AC && AC.prototype.setSinkId);
+const canRouteEl = !!(window.HTMLMediaElement && HTMLMediaElement.prototype.setSinkId);
+$('capnote').textContent = canRouteCtx
+  ? 'Two outputs directly on the AudioContext. Simplest possible route.'
+  : canRouteEl
+    ? 'No setSinkId on AudioContext, so the ROOM bus goes through a MediaStreamDestination into an <audio> element, which CAN be pinned to a device. Same result, one more hop.'
+    : 'This browser cannot send audio to a chosen device at all — both buses will land on the system default.';
+
+// ---- graph ------------------------------------------------------------------
+let ctx = null, started = false;
+const bus = { eng: 'cans', tyre: 'cans' };
+let cansGain, roomGain, roomEl, roomSinkId = null, cansSinkId = null;
+let eng = null, tyre = null;
+
+async function build() {
+  ctx = new AC();
+  cansGain = ctx.createGain();
+  roomGain = ctx.createGain();
+  cansGain.connect(ctx.destination);
+  if (canRouteCtx || !canRouteEl) {
+    roomGain.connect(ctx.destination);       // one context; sink chosen later
+  } else {
+    const dest = ctx.createMediaStreamDestination();
+    roomGain.connect(dest);
+    roomEl = new Audio();
+    roomEl.srcObject = dest.stream;
+    roomEl.autoplay = true;
+    await roomEl.play().catch(() => {});
+  }
+
+  eng = await loadLoop(FILES[pick], {
+    filter: 'lowpass',
+  });
+  tyre = await loadLoop('tyre_squeal', { filter: 'lowpass' });
+  started = true;
+  tick();
+}
+
+async function loadLoop(name, { filter }) {
+  const r = await fetch(`./data/audio/${name}.wav`);
+  const buf = await ctx.decodeAudioData(await r.arrayBuffer());
+  const src = ctx.createBufferSource();
+  src.buffer = buf; src.loop = true;
+  const filt = ctx.createBiquadFilter(); filt.type = filter;
+  const g = ctx.createGain(); g.gain.value = 0;
+  const cans = ctx.createGain(), room = ctx.createGain();
+  src.connect(filt); filt.connect(g);
+  g.connect(cans); g.connect(room);
+  cans.connect(cansGain); room.connect(roomGain);
+  src.start();
+  return { src, filt, gain: g, cans, room, name };
+}
+
+function route(node, where) {
+  node.cans.gain.value = (where === 'cans' || where === 'both') ? 1 : 0;
+  node.room.gain.value = (where === 'room' || where === 'both') ? 1 : 0;
+}
+
+// ---- the two models ---------------------------------------------------------
+let pick = 1;                                   // audio.js default is FILES[1]
+let sweeping = false, sweepT = 0, sliding = 0;
+
+function tick() {
+  if (!started) return;
+  const now = performance.now() / 1000;
+
+  let rpm = +$('rpm').value, thr = +$('thr').value / 100;
+  if (sweeping) {
+    sweepT += 1 / 60;
+    const k = (Math.sin(sweepT * 0.5) + 1) / 2;
+    rpm = 1500 + k * 12000; thr = 0.15 + k * 0.85;
+    $('rpm').value = Math.round(rpm); $('thr').value = Math.round(thr * 100);
+  }
+  $('rpmV').textContent = Math.round(rpm);
+  $('thrV').textContent = Math.round(thr * 100) + '%';
+
+  // ENGINE — copied from js/audio.js update(), unchanged.
+  const rate = Math.max(RATE_MIN, Math.min(RATE_MAX, rpm / REF_RPM));
+  eng.src.playbackRate.value = rate;
+  eng.filt.frequency.value = 500 + 7500 * Math.pow(thr, 1.3);
+  eng.gain.gain.value = 0.5 * (0.30 + 0.70 * thr);
+  $('engD').textContent =
+    `rate ${rate.toFixed(3)}x   cutoff ${Math.round(eng.filt.frequency.value)} Hz   gain ${eng.gain.gain.value.toFixed(2)}`;
+
+  // TYRE — the proposal. Silent below THRESH, then rises hard.
+  let slip = +$('slip').value / 100;
+  const spd = +$('spd').value;
+  if (sliding > 0) { sliding -= 1 / 60; slip = Math.min(1, slip + Math.sin((1.2 - sliding) * 3) * 0.9); $('slip').value = Math.round(slip * 100); }
+  $('slipV').textContent = Math.round(slip * 100) + '%';
+  $('spdV').textContent = spd;
+
+  const THRESH = 0.18;                          // ← the number to judge
+  const over = Math.max(0, slip - THRESH) / (1 - THRESH);
+  // Speed gate: a tyre scrubbing at walking pace makes almost nothing.
+  const sp = Math.min(1, spd / 90);
+  const tGain = 0.85 * Math.pow(over, 1.4) * sp;
+  // Pitch climbs as it slides harder; brightness with it, dull scrub to squeal.
+  tyre.src.playbackRate.value = 0.72 + 0.55 * over;
+  tyre.filt.frequency.value = 700 + 9000 * Math.pow(over, 0.8);
+  tyre.gain.gain.value = tGain;
+  $('tyreD').textContent =
+    `over-limit ${(over * 100).toFixed(0)}%   rate ${tyre.src.playbackRate.value.toFixed(3)}x   ` +
+    `cutoff ${Math.round(tyre.filt.frequency.value)} Hz   gain ${tGain.toFixed(3)}`;
+
+  route(eng, bus.eng);
+  route(tyre, bus.tyre);
+  requestAnimationFrame(tick);
+}
+
+// ---- controls ---------------------------------------------------------------
+$('loops').innerHTML = FILES.map((f, i) =>
+  `<button data-loop="${i}" class="${i === pick ? 'on' : ''}">${i}</button>`).join('');
+$('loops').onclick = async e => {
+  const i = e.target.dataset.loop; if (i == null) return;
+  pick = +i;
+  [...$('loops').children].forEach((b, j) => b.className = j === pick ? 'on' : '');
+  if (started) {
+    eng.src.stop(); eng.src.disconnect();
+    const old = eng; eng = await loadLoop(FILES[pick], { filter: 'lowpass' });
+    old.gain.disconnect();
+  }
+};
+document.querySelectorAll('.bus').forEach(el => el.onclick = () => {
+  const who = el.dataset.for;
+  bus[who] = el.dataset.bus;
+  document.querySelectorAll(`.bus[data-for="${who}"]`).forEach(x => x.classList.toggle('sel', x === el));
+});
+$('start').onclick = async () => {
+  if (started) { await ctx.resume(); return; }
+  $('start').textContent = 'loading…';
+  try { await build(); $('start').textContent = 'RUNNING'; $('start').classList.remove('go'); }
+  catch (e) { $('start').textContent = 'FAILED: ' + e.message; }
+};
+$('sweep').onclick = e => { sweeping = !sweeping; e.target.classList.toggle('on', sweeping); };
+$('corner').onclick = () => { sliding = 1.2; };
+
+// Device pickers. selectAudioOutput is the clean one — it shows a chooser
+// without demanding microphone permission first, which enumerateDevices does.
+async function choose(which) {
+  try {
+    if (navigator.mediaDevices?.selectAudioOutput) {
+      const d = await navigator.mediaDevices.selectAudioOutput();
+      apply(which, d.deviceId, d.label || d.deviceId);
+    } else if (navigator.mediaDevices?.enumerateDevices) {
+      const outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+      const names = outs.map((d, i) => `${i}: ${d.label || '(unnamed — needs mic permission to show names)'}`).join('\n');
+      const i = prompt('Which output?\n\n' + names, '0');
+      if (i == null) return;
+      const d = outs[+i]; if (d) apply(which, d.deviceId, d.label || d.deviceId);
+    } else { alert('This browser cannot choose an output device.'); }
+  } catch (e) { alert('Picker failed: ' + e.message); }
+}
+async function apply(which, id, label) {
+  if (which === 'room') {
+    roomSinkId = id; $('roomName').textContent = label;
+    if (roomEl) await roomEl.setSinkId(id).catch(e => alert('setSinkId: ' + e.message));
+    else if (canRouteCtx && ctx) await ctx.setSinkId(id).catch(e => alert('setSinkId: ' + e.message));
+  } else {
+    cansSinkId = id; $('cansName').textContent = label;
+    if (canRouteCtx && ctx) await ctx.setSinkId(id).catch(e => alert('setSinkId: ' + e.message));
+  }
+}
+$('pickCans').onclick = () => choose('cans');
+$('pickRoom').onclick = () => choose('room');
+</script>
+</body>
+</html>

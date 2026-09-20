@@ -36,3 +36,25 @@ nothing should be built on them until the detector is fixed or replaced.
 Which loop to use is Adam's call from engine.html, by ear. There is no number
 for "sounds like the right engine" and neither of the Claudes on this project
 can hear one.
+
+# Tyres
+
+**Car tire squeal skid loop** — https://opengameart.org/content/car-tire-squeal-skid-loop
+
+**Licence: CC-BY 3.0**, NOT CC0 — the only file here that is not. Attribution is
+required and is the point of this section:
+
+> "Car tire squeal skid loop" by **Tom Haigh** (audible-edge), originally from
+> Freesound.org, submitted to OpenGameArt by qubodup. CC-BY 3.0.
+
+    tyre_squeal.wav   3.00 s, 44.1 kHz, 16-bit mono, 265 KB
+
+The download is 24-bit 96 kHz mono (864 KB), which is studio format and three
+times the size for nothing a browser can use. Converted down to match the
+engine loops:
+
+    curl -sL -o /tmp/t.wav https://opengameart.org/sites/default/files/tires_squal_loop.wav
+    ffmpeg -i /tmp/t.wav -ar 44100 -sample_fmt s16 -ac 1 data/audio/tyre_squeal.wav
+
+If the CC-BY attribution is ever unwanted, this file is the one to replace —
+everything else here is public domain and carries no obligation.
