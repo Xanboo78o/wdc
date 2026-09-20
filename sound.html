@@ -91,7 +91,7 @@
 <div class="panel">
   <h2>TYRES &mdash; the new layer, and the one to judge</h2>
   <div class="row"><label>slip</label><input type="range" id="slip" min="0" max="100" value="0"><span class="val" id="slipV">0%</span></div>
-  <div class="row"><label>speed km/h</label><input type="range" id="spd" min="0" max="320" value="120"><span class="val" id="spdV">120</span></div>
+  <div class="row"><label>gear</label><div style="flex:1" id="gears"></div><span class="val" id="spdV">&mdash;</span></div>
   <div class="row"><label>level</label><input type="range" id="tyreLvl" min="0" max="100" value="35"><span class="val" id="tyreLvlV">35%</span></div>
   <div class="row"><label>threshold</label><input type="range" id="thresh" min="0" max="60" value="18"><span class="val" id="threshV">0.18</span></div>
   <div class="row"><label>&rarr; CANS</label><input type="range" id="tyreCans" min="0" max="100" value="100"><span class="val" id="tyreCansV">100%</span></div>
@@ -103,6 +103,25 @@
     has already happened by the time you hear it. <b>That number is what I most need you to
     judge.</b>
   </div>
+</div>
+
+<div class="panel">
+  <h2>ROAD &amp; WIND &mdash; driven by SPEED, not by revs</h2>
+  <div class="note" style="margin:0 0 10px">
+    Adam: <i>&ldquo;make gear 5 feel like gear 3&rdquo;</i> &mdash; and he is right, because the
+    engine note is <code>rpm / 11000</code> and nothing else. At the limiter in third and in
+    fifth the revs are identical, so the sound is identical. To the audio, gear 5 <b>is</b>
+    gear 3. What is missing is everything that scales with SPEED: at 208 km/h you should be
+    drowning in roar that is not there at 146.
+    <br><br>
+    <b>This layer is a placeholder</b> &mdash; it is the tyre sample with the top end taken off,
+    standing in for road roar until a proper CC0 one is sourced. Judge the IDEA, not the sound.
+  </div>
+  <div class="row"><label>level</label><input type="range" id="roadLvl" min="0" max="100" value="45"><span class="val" id="roadLvlV">45%</span></div>
+  <div class="row"><label>tone</label><input type="range" id="roadCut" min="150" max="4000" value="900"><span class="val" id="roadCutV">900 Hz</span></div>
+  <div class="row"><label>&rarr; CANS</label><input type="range" id="roadCans" min="0" max="100" value="100"><span class="val" id="roadCansV">100%</span></div>
+  <div class="row"><label>&rarr; ROOM</label><input type="range" id="roadRoom" min="0" max="100" value="70"><span class="val" id="roadRoomV">70%</span></div>
+  <div class="derived" id="roadD">&mdash;</div>
 </div>
 
 <div class="panel">
@@ -159,7 +178,10 @@ $('capnote').textContent = canRouteCtx
 // ---- graph ------------------------------------------------------------------
 let ctx = null, started = false;
 let cansGain, roomGain, roomLP, roomEl, roomSinkId = null, cansSinkId = null;
-let eng = null, tyre = null;
+let eng = null, tyre = null, road = null;
+// F1 gear tops from js/gearbox.js: km/h at which each gear reaches the limiter.
+const TOPS = [85, 115, 146, 176, 208, 240, 280, 321], LIMIT = 15000;
+let gear = 3;
 
 async function build() {
   ctx = new AC();
@@ -190,6 +212,8 @@ async function build() {
     filter: 'lowpass',
   });
   tyre = await loadLoop('tyre_squeal', { filter: 'lowpass' });
+  road = await loadLoop('tyre_squeal', { filter: 'lowpass' });
+  road.src.playbackRate.value = 0.55;      // detuned so it is not the same tone twice
   started = true;
   tick();
 }
@@ -243,7 +267,12 @@ function tick() {
 
   // TYRE — the proposal. Silent below THRESH, then rises hard.
   let slip = +$('slip').value / 100;
-  const spd = +$('spd').value;
+  // Speed is not a slider any more: it is what the gear and the revs IMPLY.
+  // That is the whole point — the same revs in a different gear is a different
+  // road speed, and until something in the mix knows that, third and fifth are
+  // the same sound.
+  const spd = TOPS[gear - 1] * Math.min(1, rpm / LIMIT);
+  $('spdV').textContent = Math.round(spd) + ' km/h';
   if (sliding > 0) { sliding -= 1 / 60; slip = Math.min(1, slip + Math.sin((1.2 - sliding) * 3) * 0.9); $('slip').value = Math.round(slip * 100); }
   $('slipV').textContent = Math.round(slip * 100) + '%';
   $('spdV').textContent = spd;
@@ -265,18 +294,41 @@ function tick() {
     `over-limit ${(over * 100).toFixed(0)}%   rate ${tyre.src.playbackRate.value.toFixed(3)}x   ` +
     `cutoff ${Math.round(tyre.filt.frequency.value)} Hz   gain ${tGain.toFixed(3)}`;
 
+  // ROAD & WIND. Rises with speed and does not care about revs at all, which
+  // is exactly the axis the engine cannot express. Cubed-ish so it is nothing
+  // in the pit lane and a wall at 300.
+  const sn = Math.min(1, spd / 321);
+  const rGain = pct('roadLvl') * Math.pow(sn, 1.7);
+  road.src.playbackRate.value = 0.45 + 0.5 * sn;
+  road.filt.frequency.value = +$('roadCut').value;
+  road.gain.gain.value = rGain;
+  $('roadD').textContent =
+    `speed ${Math.round(spd)} km/h (gear ${gear} @ ${Math.round(rpm)} rpm)   ` +
+    `gain ${rGain.toFixed(3)}   rate ${road.src.playbackRate.value.toFixed(2)}x`;
+  route(road, pct('roadCans'), pct('roadRoom'));
+
   route(eng, pct('engCans'), pct('engRoom'));
   route(tyre, pct('tyreCans'), pct('tyreRoom'));
   if (roomLP) roomLP.frequency.value = +$('muffle').value;
   for (const [id, fmt] of [['engCans', v => v + '%'], ['engRoom', v => v + '%'],
                            ['tyreCans', v => v + '%'], ['tyreRoom', v => v + '%'],
-                           ['tyreLvl', v => v + '%'], ['muffle', v => v + ' Hz']]) {
+                           ['tyreLvl', v => v + '%'], ['muffle', v => v + ' Hz'],
+                           ['roadLvl', v => v + '%'], ['roadCut', v => v + ' Hz'],
+                           ['roadCans', v => v + '%'], ['roadRoom', v => v + '%']]) {
     $(id + 'V').textContent = fmt($(id).value);
   }
   requestAnimationFrame(tick);
 }
 
 // ---- controls ---------------------------------------------------------------
+$('gears').innerHTML = TOPS.map((t, i) =>
+  `<button data-gear="${i + 1}" class="${i + 1 === gear ? 'on' : ''}" title="${t} km/h at the limiter">${i + 1}</button>`).join('');
+$('gears').onclick = e => {
+  const g = e.target.dataset.gear; if (!g) return;
+  gear = +g;
+  [...$('gears').children].forEach((b, j) => b.className = (j + 1) === gear ? 'on' : '');
+};
+
 $('loops').innerHTML = FILES.map((f, i) =>
   `<button data-loop="${i}" class="${i === pick ? 'on' : ''}">${i}</button>`).join('');
 $('loops').onclick = async e => {
