@@ -144,6 +144,53 @@ function localReply(text, t) {
   return pick(['Copy that.', 'Understood.', 'Copy.']);
 }
 
+
+// ---------------------------------------------------------------------------
+// OLLAMA — a real conversation, free, offline, on his own GTX 1060.
+//
+// The vocabulary engineer below cannot hold a conversation: it has no memory
+// and cannot follow up, which is the one thing Adam asked for. A small model
+// running locally can. 3B at Q4 is ~2 GB of the card's 6 GB and answers a
+// thirty-token radio call in well under a second, which is the only latency
+// budget that matters here — an engineer who pauses two seconds is wrong even
+// when the words are right.
+//
+// Same system prompt and the same history as the Claude path, so the engineer
+// is the same character whichever tier is live.
+// ---------------------------------------------------------------------------
+const OLLAMA = process.env.RADIO_OLLAMA || 'http://127.0.0.1:11434';
+const OLLAMA_MODEL = process.env.RADIO_OLLAMA_MODEL || 'llama3.2:3b';
+let ollamaUp = null, ollamaCheckedAt = 0;
+
+async function ollamaReady() {
+  if (ollamaUp !== null && Date.now() - ollamaCheckedAt < 15000) return ollamaUp;
+  ollamaCheckedAt = Date.now();
+  try {
+    const r = await fetch(OLLAMA + '/api/tags', { signal: AbortSignal.timeout(700) });
+    const j = await r.json();
+    ollamaUp = !!(j.models || []).some(m => m.name === OLLAMA_MODEL || m.name.startsWith(OLLAMA_MODEL.split(':')[0]));
+  } catch { ollamaUp = false; }
+  return ollamaUp;
+}
+
+async function ollamaAsk() {
+  const r = await fetch(OLLAMA + '/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      stream: false,
+      messages: [{ role: 'system', content: SYSTEM }, ...history],
+      // Radio calls are one sentence. Capping it is most of the latency win,
+      // and it also stops a small model rambling into a paragraph.
+      options: { temperature: 0.8, num_predict: 60, stop: ['\n\n'] },
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const j = await r.json();
+  return String((j.message && j.message.content) || '').trim().split('\n')[0].slice(0, 220);
+}
+
 const key = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
 const client = new Anthropic();          // resolves key/profile from the environment
 let calls = 0, lastAt = 0;
@@ -165,8 +212,23 @@ async function ask(text, telemetry) {
   if (calls >= MAX_CALLS) return { reply: 'Copy that.', capped: true };
   // Say the radio is DEAD, never a plausible "Copy that." — a wrong answer that
   // sounds right is worse than no answer, because you stop trusting the working ones.
-  // No key is not a broken radio any more — it is the local engineer.
-  if (!key) return { reply: localReply(text, telemetry), local: true };
+  if (!key) {
+    // A real conversation if a local model is up, the vocabulary if not.
+    if (await ollamaReady()) {
+      history.push({ role: 'user', content: `${telemetryBlock(telemetry)}\n\nDRIVER: ${text}` });
+      while (history.length > 12) history.shift();
+      try {
+        const reply = (await ollamaAsk()) || 'Copy that.';
+        history.push({ role: 'assistant', content: reply });
+        return { reply, mode: 'ollama' };
+      } catch (e) {
+        history.pop();
+        ollamaUp = null;
+        return { reply: localReply(text, telemetry), mode: 'local', error: 'ollama: ' + (e.message || e) };
+      }
+    }
+    return { reply: localReply(text, telemetry), mode: 'local' };
+  }
   calls++;
 
   history.push({ role: 'user', content: `${telemetryBlock(telemetry)}\n\nDRIVER: ${text}` });
@@ -222,7 +284,14 @@ http.createServer(async (req, res) => {
   };
 
   if (req.url === '/health') {
-    return send(200, { ok: true, key: !!key, mode: key ? 'claude' : 'local', model: MODEL, calls, cap: MAX_CALLS });
+    const ol = key ? false : await ollamaReady();
+    return send(200, {
+      ok: true, key: !!key,
+      mode: key ? 'claude' : ol ? 'ollama' : 'local',
+      model: key ? MODEL : ol ? OLLAMA_MODEL : 'vocabulary',
+      converses: !!key || ol,
+      calls, cap: MAX_CALLS,
+    });
   }
   if (req.method === 'POST' && req.url === '/ask') {
     let body = '';

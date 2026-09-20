@@ -104,12 +104,15 @@ async function health() {
     const j = await r.json();
     $('health').innerHTML =
       `<span class="pill ok">server up</span>` +
-      `<span class="pill ${j.key ? 'ok' : ''}">${j.key ? 'CLAUDE' : 'LOCAL ENGINEER (no key)'}</span>` +
-      (j.key ? `<span class="pill">${j.model}</span>` : '') +
+      `<span class="pill ${j.converses ? 'ok' : ''}">${
+         j.mode === 'claude' ? 'CLAUDE' : j.mode === 'ollama' ? 'LOCAL MODEL' : 'VOCABULARY'
+       }</span>` +
+      `<span class="pill ${j.converses ? 'ok' : ''}">${j.converses ? 'remembers the conversation' : 'no memory'}</span>` +
+      `<span class="pill">${j.model}</span>` +
       `<span class="pill">${j.calls}/${j.cap} calls used</span>`;
-    $('healthHint').textContent = j.key ? '' :
-      'Running the offline engineer: fixed vocabulary, real numbers, no bill. ' +
-      'For Claude: echo ANTHROPIC_API_KEY=sk-ant-... > .env  then restart it.';
+    $('healthHint').textContent = j.converses ? '' :
+      'Vocabulary mode: real numbers, but it cannot hold a conversation. ' +
+      'For that: run a local model (ollama serve + llama3.2:3b), or put a key in .env.';
   } catch (e) {
     $('health').innerHTML = `<span class="pill bad">server down</span>`;
     $('healthHint').textContent = 'Run:  node tools/radio.mjs   (from ~/Games/wdc)';
