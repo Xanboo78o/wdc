@@ -60,6 +60,14 @@
     <div style="flex:1"><span id="roomName" class="val" style="width:auto;text-align:left">default output</span></div>
     <button id="pickRoom">choose…</button>
   </div>
+  <div class="row"><label>chassis muffle</label><input type="range" id="muffle" min="120" max="6000" value="600"><span class="val" id="muffleV">600 Hz</span></div>
+  <div class="note" style="margin-top:2px">
+    Adam, with the speaker taped under the seat: <i>&ldquo;it shakes a lil and muffles it like
+    its coming from the engine.&rdquo;</i> That muffling was an accident &mdash; a small driver
+    pointed at the floor through a Bluetooth codec. This makes it deliberate: a lowpass on
+    the ROOM bus only, so the speaker is a thing you feel through the chassis rather than a
+    speaker playing an engine. Wind it down until it stops sounding like a speaker.
+  </div>
   <div class="note">
     Bluetooth is 150&ndash;250&nbsp;ms late. That is fatal for anything with a MOMENT &mdash; a kerb
     strike, a lockup &mdash; and completely unnoticeable on continuous sound, which has no moment
@@ -75,9 +83,8 @@
   </div>
   <div class="row"><label>rpm</label><input type="range" id="rpm" min="800" max="15000" value="4000"><span class="val" id="rpmV">4000</span></div>
   <div class="row"><label>throttle</label><input type="range" id="thr" min="0" max="100" value="0"><span class="val" id="thrV">0%</span></div>
-  <div class="row"><label>send to</label><div style="flex:1">
-    <span class="bus sel" data-for="eng" data-bus="cans">CANS</span><span class="bus" data-for="eng" data-bus="room">ROOM</span><span class="bus" data-for="eng" data-bus="both">BOTH</span>
-  </div></div>
+  <div class="row"><label>&rarr; CANS</label><input type="range" id="engCans" min="0" max="100" value="100"><span class="val" id="engCansV">100%</span></div>
+  <div class="row"><label>&rarr; ROOM</label><input type="range" id="engRoom" min="0" max="100" value="100"><span class="val" id="engRoomV">100%</span></div>
   <div class="derived" id="engD">&mdash;</div>
 </div>
 
@@ -85,9 +92,10 @@
   <h2>TYRES &mdash; the new layer, and the one to judge</h2>
   <div class="row"><label>slip</label><input type="range" id="slip" min="0" max="100" value="0"><span class="val" id="slipV">0%</span></div>
   <div class="row"><label>speed km/h</label><input type="range" id="spd" min="0" max="320" value="120"><span class="val" id="spdV">120</span></div>
-  <div class="row"><label>send to</label><div style="flex:1">
-    <span class="bus sel" data-for="tyre" data-bus="cans">CANS</span><span class="bus" data-for="tyre" data-bus="room">ROOM</span><span class="bus" data-for="tyre" data-bus="both">BOTH</span>
-  </div></div>
+  <div class="row"><label>level</label><input type="range" id="tyreLvl" min="0" max="100" value="35"><span class="val" id="tyreLvlV">35%</span></div>
+  <div class="row"><label>threshold</label><input type="range" id="thresh" min="0" max="60" value="18"><span class="val" id="threshV">0.18</span></div>
+  <div class="row"><label>&rarr; CANS</label><input type="range" id="tyreCans" min="0" max="100" value="100"><span class="val" id="tyreCansV">100%</span></div>
+  <div class="row"><label>&rarr; ROOM</label><input type="range" id="tyreRoom" min="0" max="100" value="15"><span class="val" id="tyreRoomV">15%</span></div>
   <div class="derived" id="tyreD">&mdash;</div>
   <div class="note">
     A tyre is silent until it is near its limit, then rises fast &mdash; that threshold is the
@@ -150,20 +158,28 @@ $('capnote').textContent = canRouteCtx
 
 // ---- graph ------------------------------------------------------------------
 let ctx = null, started = false;
-const bus = { eng: 'cans', tyre: 'cans' };
-let cansGain, roomGain, roomEl, roomSinkId = null, cansSinkId = null;
+let cansGain, roomGain, roomLP, roomEl, roomSinkId = null, cansSinkId = null;
 let eng = null, tyre = null;
 
 async function build() {
   ctx = new AC();
   cansGain = ctx.createGain();
   roomGain = ctx.createGain();
+  // THE CHASSIS. Everything bound for the seat goes through one lowpass, so the
+  // speaker stops sounding like a speaker and starts sounding like something
+  // happening underneath you. This is the whole trick of a bass shaker, and
+  // Adam found it by accident with a roll of tape.
+  roomLP = ctx.createBiquadFilter();
+  roomLP.type = 'lowpass';
+  roomLP.frequency.value = 600;
+  roomLP.Q.value = 0.7;
+  roomGain.connect(roomLP);
   cansGain.connect(ctx.destination);
   if (canRouteCtx || !canRouteEl) {
-    roomGain.connect(ctx.destination);       // one context; sink chosen later
+    roomLP.connect(ctx.destination);         // one context; sink chosen later
   } else {
     const dest = ctx.createMediaStreamDestination();
-    roomGain.connect(dest);
+    roomLP.connect(dest);
     roomEl = new Audio();
     roomEl.srcObject = dest.stream;
     roomEl.autoplay = true;
@@ -193,10 +209,11 @@ async function loadLoop(name, { filter }) {
   return { src, filt, gain: g, cans, room, name };
 }
 
-function route(node, where) {
-  node.cans.gain.value = (where === 'cans' || where === 'both') ? 1 : 0;
-  node.room.gain.value = (where === 'room' || where === 'both') ? 1 : 0;
+function route(node, cans, room) {
+  node.cans.gain.value = cans;
+  node.room.gain.value = room;
 }
+const pct = id => +$(id).value / 100;
 
 // ---- the two models ---------------------------------------------------------
 let pick = 1;                                   // audio.js default is FILES[1]
@@ -231,11 +248,15 @@ function tick() {
   $('slipV').textContent = Math.round(slip * 100) + '%';
   $('spdV').textContent = spd;
 
-  const THRESH = 0.18;                          // ← the number to judge
+  const THRESH = +$('thresh').value / 100;       // ← the number to judge
+  $('threshV').textContent = THRESH.toFixed(2);
   const over = Math.max(0, slip - THRESH) / (1 - THRESH);
   // Speed gate: a tyre scrubbing at walking pace makes almost nothing.
   const sp = Math.min(1, spd / 90);
-  const tGain = 0.85 * Math.pow(over, 1.4) * sp;
+  // 0.85 was "wayyy to loud" — the tyre was shouting over an engine Adam
+  // likes. A slide should be something you notice, not the loudest thing in
+  // the car, so the ceiling is now a control and it starts at a third.
+  const tGain = pct('tyreLvl') * Math.pow(over, 1.4) * sp;
   // Pitch climbs as it slides harder; brightness with it, dull scrub to squeal.
   tyre.src.playbackRate.value = 0.72 + 0.55 * over;
   tyre.filt.frequency.value = 700 + 9000 * Math.pow(over, 0.8);
@@ -244,8 +265,14 @@ function tick() {
     `over-limit ${(over * 100).toFixed(0)}%   rate ${tyre.src.playbackRate.value.toFixed(3)}x   ` +
     `cutoff ${Math.round(tyre.filt.frequency.value)} Hz   gain ${tGain.toFixed(3)}`;
 
-  route(eng, bus.eng);
-  route(tyre, bus.tyre);
+  route(eng, pct('engCans'), pct('engRoom'));
+  route(tyre, pct('tyreCans'), pct('tyreRoom'));
+  if (roomLP) roomLP.frequency.value = +$('muffle').value;
+  for (const [id, fmt] of [['engCans', v => v + '%'], ['engRoom', v => v + '%'],
+                           ['tyreCans', v => v + '%'], ['tyreRoom', v => v + '%'],
+                           ['tyreLvl', v => v + '%'], ['muffle', v => v + ' Hz']]) {
+    $(id + 'V').textContent = fmt($(id).value);
+  }
   requestAnimationFrame(tick);
 }
 
@@ -262,11 +289,6 @@ $('loops').onclick = async e => {
     old.gain.disconnect();
   }
 };
-document.querySelectorAll('.bus').forEach(el => el.onclick = () => {
-  const who = el.dataset.for;
-  bus[who] = el.dataset.bus;
-  document.querySelectorAll(`.bus[data-for="${who}"]`).forEach(x => x.classList.toggle('sel', x === el));
-});
 $('start').onclick = async () => {
   if (started) { await ctx.resume(); return; }
   $('start').textContent = 'loading…';
