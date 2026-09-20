@@ -74,6 +74,7 @@ export const KIND = {
 };
 
 const CELL = 6;                 // m, the bucket size for prop-to-prop contact
+const WALL_CELL = 24;           // m, the bucket size for static walls
 const SLEEP_V = 0.12;           // m/s under which a prop is allowed to stop
 const SLEEP_T = 0.5;            // s it must stay that slow
 
@@ -92,9 +93,62 @@ export class PropWorld {
     this.groundY = groundY;
     this.rand = rng(seed);
     this.props = [];
+    this.walls = [];
+    this.wallGrid = new Map();
     this.grid = new Map();
     this.awake = 0;
     this.events = [];           // { kind, impulse, x, y, broke } since the last step
+  }
+
+  // -------------------------------------------------------------------------
+  // WALLS — the static half of the sandbox.
+  //
+  // "EVERYTHING, EVERYTHING, GETS PHYSICS." A wall in this world is not a
+  // lateral offset from a centreline that the collision code re-derives every
+  // frame; it is a THING, standing between two points, that a car hits. Where
+  // it stands comes from a file (data/build/objects.js), so a wall in the
+  // wrong place is a number somebody can edit rather than a formula somebody
+  // has to re-derive.
+  //
+  // A wall is a SEGMENT, not a box, because that is what a run of barrier
+  // actually is and because a segment has no inside to get stuck in. The car
+  // is the same rectangle js/collide.js uses, and the four corners are what
+  // touch things — the whole reason that file exists.
+  // -------------------------------------------------------------------------
+  addWall(x1, y1, x2, y2, { height = 1, bounce = 0.25, absorb = 0.4, id = null } = {}) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-3) return null;
+    const w = {
+      x1, y1, x2, y2, ux: dx / len, uy: dy / len, len, height, bounce, absorb, id,
+      i: this.walls.length,
+    };
+    this.walls.push(w);
+    // bucket it along its own length, so a 60 m run is found from anywhere
+    for (let t = 0; t <= len; t += WALL_CELL * 0.5) {
+      const key = Math.floor((x1 + w.ux * t) / WALL_CELL) * 100003 + Math.floor((y1 + w.uy * t) / WALL_CELL);
+      let b = this.wallGrid.get(key);
+      if (!b) this.wallGrid.set(key, b = []);
+      if (!b.includes(w)) b.push(w);
+    }
+    return w;
+  }
+
+  wallsNear(x, y) {
+    const out = [];
+    const cx = Math.floor(x / WALL_CELL), cy = Math.floor(y / WALL_CELL);
+    for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+      const b = this.wallGrid.get((cx + ox) * 100003 + cy + oy);
+      if (b) for (const w of b) if (!out.includes(w)) out.push(w);
+    }
+    return out;
+  }
+
+  /** Closest point on a wall to (x, y), and how far away it is. */
+  static onWall(w, x, y) {
+    const t = Math.max(0, Math.min(w.len, (x - w.x1) * w.ux + (y - w.y1) * w.uy));
+    const px = w.x1 + w.ux * t, py = w.y1 + w.uy * t;
+    return { px, py, d: Math.hypot(x - px, y - py), t };
   }
 
   spawn(kind, x, y, opts = {}) {
@@ -133,6 +187,7 @@ export class PropWorld {
   // -------------------------------------------------------------------------
   step(dt, cars = []) {
     this.events.length = 0;
+    for (const car of cars) this.hitWalls(car);
     for (const car of cars) this.hitCar(dt, car);
     this.hitEachOther();
     this.integrate(dt);
@@ -275,6 +330,88 @@ export class PropWorld {
       if (p.K.squashAt && j > p.K.squashAt) p.squash = 1;
       this.events.push({ kind: p.kind, impulse: j, x: p.x, y: p.y, prop: p, broke: false });
       if (p.K.breakAt && j > p.K.breakAt) this.destroy(p, j, wnx, wny);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // CAR TO WALL. The car's four corners against the segments near it.
+  //
+  // Same shape as the prop contact and as js/collide.js's barrier: find the
+  // deepest corner, push it out, then apply an impulse at that corner with the
+  // lever arm from the centre of mass — which is what makes clipping a wall
+  // with the front-left spin the car instead of just slowing it.
+  //
+  // A wall never moves, so there is no mass ratio: the car takes all of it.
+  // -------------------------------------------------------------------------
+  hitWalls(car) {
+    const S = car.spec;
+    if (!S || !this.walls.length) return;
+    const hl = S.bodyL * 0.5, hw = S.bodyW * 0.5;
+    const cs = Math.cos(car.hdg), sn = Math.sin(car.hdg);
+    const near = this.wallsNear(car.x, car.y);
+    if (!near.length) return;
+    // Half the wall's own thickness: a barrier is a solid object, not a line,
+    // and a corner "touching" it at zero distance is already inside it.
+    const REACH = 0.35;
+    for (let pass = 0; pass < 2; pass++) {
+      let worst = null;
+      for (const [lx, ly] of [[hl, hw], [hl, -hw], [-hl, -hw], [-hl, hw]]) {
+        const px = car.x + lx * cs - ly * sn, py = car.y + lx * sn + ly * cs;
+        for (const w of near) {
+          const p = PropWorld.onWall(w, px, py);
+          // The segment is a line; the car has to be pushed to whichever side
+          // of it the corner is already on, or a glancing hit teleports the
+          // car through the barrier.
+          if (p.d > REACH) continue;
+          // NAMED, not spread. The first version was `{ ...p, w, lx, ly, px,
+          // py }` — and `p` already carries px/py for the point ON THE WALL,
+          // so the corner's px/py overwrote them. The normal is corner minus
+          // contact point, which was then exactly zero, so it took the
+          // degenerate branch, computed a penetration of -0.65 and returned.
+          // Walls existed, were found, were measured at 13 cm away, and did
+          // nothing at all.
+          if (!worst || p.d < worst.d) worst = { d: p.d, wx: p.px, wy: p.py, w, lx, ly };
+        }
+      }
+      if (!worst) return;
+      const { w } = worst;
+      const cornerX = car.x + worst.lx * cs - worst.ly * sn;
+      const cornerY = car.y + worst.lx * sn + worst.ly * cs;
+      // The normal points from the wall to the corner — which side of the
+      // segment the car is ALREADY on. Taking it from the wall's own geometry
+      // instead would push a glancing hit straight through the barrier.
+      let dx = cornerX - worst.wx, dy = cornerY - worst.wy;
+      let d = Math.hypot(dx, dy);
+      if (d < 1e-6) { dx = -w.uy; dy = w.ux; d = 1; }
+      const nx = dx / d, ny = dy / d;
+      const pen = REACH - d;
+      if (pen <= 0) return;
+
+      // push the whole car out by what the deepest corner owes
+      car.x += nx * pen; car.y += ny * pen;
+
+      // contact impulse at that corner
+      const rcx = cornerX - car.x, rcy = cornerY - car.y;
+      const cvx = car.vx * cs - car.vy * sn, cvy = car.vx * sn + car.vy * cs;
+      const vcx = cvx - car.r * rcy, vcy = cvy + car.r * rcx;
+      const vn = vcx * nx + vcy * ny;
+      if (vn >= 0) return;
+      const invM = 1 / S.m, invI = 1 / S.Izz;
+      const rN = rcx * ny - rcy * nx;
+      const j = -(1 + w.bounce) * vn / (invM + rN * rN * invI);
+      // friction along the wall face, Coulomb-capped
+      const tx = -ny, ty = nx;
+      const vt = vcx * tx + vcy * ty;
+      const rT = rcx * ty - rcy * tx;
+      let jt = -vt / (invM + rT * rT * invI);
+      const cap = 0.5 * j;
+      jt = Math.max(-cap, Math.min(cap, jt));
+      // Armco deforms. Same argument as the water barrier's absorb: a rigid
+      // corner impulse at 180 km/h span the car at 7.8 rad/s, which is 445
+      // degrees a second from one glancing hit — a cartoon, not a sim.
+      const keep = 1 - (w.absorb || 0);
+      this.push(car, (j * nx + jt * tx) * keep, (j * ny + jt * ty) * keep, rcx, rcy);
+      this.events.push({ kind: 'wall', impulse: j, x: cornerX, y: cornerY, wall: w, broke: false });
     }
   }
 

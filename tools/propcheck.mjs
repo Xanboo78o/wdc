@@ -190,6 +190,44 @@ console.log('\nIT IS THE SAME EVERY TIME');
   ok(a === b, 'a six-stack pile-up replays identically', `${a.split('|').length} bodies`);
 }
 
+console.log('\nWALLS');
+{
+  // A wall across the road at 40 m. The car must be stopped by it at every
+  // speed — a barrier a car can drive through at 300 km/h is scenery.
+  const through = [];
+  for (const kph of [60, 120, 200, 260, 320]) {
+    const w = new PropWorld({ seed: 60 });
+    w.addWall(40, -12, 40, 12);
+    const c = car(kph / 3.6);
+    drive(w, c, 60 / (kph / 3.6));
+    if (c.x > 41) through.push(`${kph} (x=${c.x.toFixed(1)})`);
+  }
+  ok(through.length === 0, 'a wall stops the car at every speed from 60 to 320 km/h',
+    through.length ? `THROUGH IT at ${through.join(', ')}` : '5 speeds');
+}
+{
+  // Clipped on one corner, it should spin the car and scrub speed, not stop it.
+  const w = new PropWorld({ seed: 61 });
+  // 1.2 m out, against a car half a metre wider than that: the corner runs
+  // 0.2 m inside the wall's 0.35 m reach. At 1.4 the corner clears it by 5 cm
+  // and the test was asserting contact that should not happen.
+  w.addWall(40, 1.2, 120, 1.2);
+  const c = car(180 / 3.6, { y: 0 });
+  drive(w, c, 1.6);
+  ok(Math.abs(c.r) > 0.02, 'a wall clipped on one side yaws the car', `${c.r.toFixed(3)} rad/s`);
+  ok(kmh(c.vx) > 90, 'and does not stop it dead', `${kmh(c.vx).toFixed(0)} km/h`);
+  ok(c.y < 1.4, 'and the car stays on its own side of it', `y=${c.y.toFixed(2)}`);
+}
+{
+  // Nothing near it: a wall must cost nothing to have.
+  const w = new PropWorld({ seed: 62 });
+  for (let i = 0; i < 400; i++) w.addWall(i * 8, 20, i * 8 + 8, 20);
+  const c = car(300 / 3.6);
+  const t0 = Date.now();
+  drive(w, c, 4);
+  ok(Date.now() - t0 < 2500, '400 walls cost nothing to drive past', `${Date.now() - t0} ms for 4 s of driving`);
+}
+
 console.log('\nTHE CAR IS NEVER TELEPORTED');
 {
   // Every impulse into the car is applied through one function. If it ever

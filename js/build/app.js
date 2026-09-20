@@ -16,6 +16,7 @@ import { phone, phoneLive, startPhoneWheel, mountPhoneCard, onPhone } from '../p
 import { BuildLook, foldTerrainUVs, Horizon } from './look.js';
 import { buildFlora } from './flora.js';
 import { PropYard } from './propview.js';
+import { Objects } from './objects.js';
 
 const $ = id => document.getElementById(id);
 const q = new URLSearchParams(location.search);
@@ -175,6 +176,14 @@ const tProps = performance.now();
 const yard = on('noprops') ? null : new PropYard(path, ground, LOOK, brand);
 if (yard) { yard.populate(); scene.add(yard.group); }
 const propMs = performance.now() - tProps;
+
+// The world's THINGS: model files from data/kit, standing where
+// data/build/objects.js says, each solid one handing the physics world a wall
+// to collide with. Nothing here is worked out from the track at run time.
+const tObj = performance.now();
+const objects = FLAT || on('noobjects') ? null
+  : await new Objects(scene, ground, yard ? yard.world : null).build();
+const objMs = performance.now() - tObj;
 
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -607,6 +616,7 @@ function loop(now) {
       floraMs: Math.round(floraMs), propMs: Math.round(propMs),
       flora: flora ? flora.stats() : null,
       props: yard ? yard.stats() : null,
+      objects: objects ? objects.stats() : null, objMs: Math.round(objMs),
     };
   }
 }
