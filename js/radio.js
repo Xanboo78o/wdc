@@ -66,8 +66,7 @@ export async function startRadio(opts = {}) {
     return;
   }
 
-  // Shift+R is reverse (js/input.js), so a shifted press is not a radio call.
-  addEventListener('keydown', e => { if (e.code === ptt.key && !e.shiftKey && !e.repeat) open(); });
+  addEventListener('keydown', e => { if (e.code === ptt.key && !e.repeat) open(); });
   addEventListener('keyup',   e => { if (e.code === ptt.key) close(); });
   if (ptt.pad !== null) pollPad();
 }

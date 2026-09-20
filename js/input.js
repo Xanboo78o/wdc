@@ -13,7 +13,7 @@
 export const KEYMAP = {
   left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
   throttle: ['ArrowUp', 'KeyW'], brake: ['ArrowDown', 'KeyS'],
-  drs: ['Space'], look: ['ShiftLeft', 'ShiftRight'],
+  drs: ['Space'],
 };
 
 // KEY LADDER PEDALS (pedals.html). A spare keyboard under two cardboard
@@ -29,13 +29,14 @@ export const LADDER = {
   brake: ['Digit1', 'Digit2', 'Digit3'],
 };
 
-// REVERSE. Shift + R, which is literally what you do: shift, to reverse.
+// REVERSE. Shift. That is the whole binding.
 //
-// There is no gear selector and no neutral. The gearbox shifts itself, as it
-// always has — gearbox.js is a sound model, not a drivetrain, so there was
-// never a mechanical gear to choose. This is one toggle for getting out of a
-// gravel trap, and physics.js caps it at a 25 km/h crawl.
-export const REVERSE_KEY = 'KeyR';
+// Shift was in KEYMAP as `look` and nothing anywhere read it — dead config —
+// so taking it costs nothing. There is no gear selector and no neutral:
+// gearbox.js is a sound model, not a drivetrain, so there was never a
+// mechanical gear to choose. Tap to go into reverse, tap to come out, and
+// physics.js caps it at a 25 km/h crawl.
+export const REVERSE_KEYS = ['ShiftLeft', 'ShiftRight'];
 export const selName = sel => sel < 0 ? 'R' : 'D';
 const LADDER_KEYS = new Set([...LADDER.throttle, ...LADDER.brake]);
 
@@ -101,9 +102,14 @@ export class Hands {
 
     this._kd = e => {
       if (e.repeat) return;
-      if (e.shiftKey && e.code === REVERSE_KEY) {
-        this.selector = this.selector < 0 ? 1 : -1;
-        e.preventDefault();
+      if (REVERSE_KEYS.includes(e.code)) {
+        // Not while typing: Shift is also how you make a capital letter, and
+        // silently dropping into reverse from the menu would be baffling.
+        const t = e.target && e.target.tagName;
+        if (t !== 'INPUT' && t !== 'TEXTAREA' && t !== 'SELECT') {
+          this.selector = this.selector < 0 ? 1 : -1;
+          e.preventDefault();
+        }
         return;
       }
       this.down.add(e.code);
