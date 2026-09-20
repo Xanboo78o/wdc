@@ -241,13 +241,45 @@ export class Engine {
     const m = this.mix;
 
     // ---- engine: rate from rpm, load from throttle --------------------------
+    // OFF THE TARMAC. Adam: "make it a lil wobbly and stuggly on grass".
+    //
+    // A car on grass is not a quieter car, it is a car whose wheels keep
+    // losing and finding the ground. So the rate WOBBLES and the level
+    // STUTTERS, on two fast waves that do not line up - the same
+    // no-common-multiple trick as the wind, at a speed you read as struggling
+    // rather than as vibrato. `off` scales all of it, so tarmac is untouched.
+    let wob = 1, stut = 1;
+    if (off > 0) {
+      const wt = this.ctx.currentTime - this.t0;
+      const w = 0.62 * Math.sin(wt * 37.2) + 0.38 * Math.sin(wt * 23.7 + 1.7);
+      wob = 1 + off * w * 0.045;                       // it bogs and catches
+      stut = 1 - off * (0.18 + 0.34 * Math.max(0, w)); // and keeps dropping out
+    }
+
     const rate = Math.max(RATE_MIN, Math.min(RATE_MAX, rpm / this.ref));
-    this.engine.src.playbackRate.value = rate;
+    this.engine.src.playbackRate.value = rate * wob;
     const t = Math.max(0, Math.min(1, throttle));
-    this.engine.filt.frequency.value = 500 + 7500 * Math.pow(t, 1.3);
+    // COASTING. The off-throttle floor was a flat 0.30, which made a car
+    // coasting at 12,000 rpm exactly as quiet as one idling at 4,000. An
+    // engine on the overrun at high revs is one of the LOUDEST things a race
+    // car does - engine braking is not silence, it is a different kind of
+    // noise. So the floor rises with revs, and full throttle is still 1.0
+    // whatever the revs are.
+    const rev = Math.min(1, rpm / (this.ref * 1.35));
+    const overrun = 0.16 + 0.44 * rev;
+    // IDLE HAS TO KEEP A NOTE. This floor was 500 Hz, which was fine when the
+    // engine was the only thing in the mix - but with +12 dB of shelf and an
+    // octave underneath it, closing to 500 at zero throttle leaves a shapeless
+    // rumble with no engine in it. Adam: "idling cuts audo". It did not cut;
+    // it lost everything that identified it. 1100 keeps the note, and the
+    // throttle still opens it the rest of the way.
+    // Brightness follows the throttle, but the floor rises with revs too: a
+    // 12,000 rpm overrun has a hard edge that an idle has not, and a filter
+    // that only watches the throttle cannot tell those apart.
+    this.engine.filt.frequency.value = 700 + 2200 * rev + 6000 * Math.pow(t, 1.3);
     // Level rises with load but never to zero: an engine on the overrun is
     // still an engine, and a car that goes silent mid-corner sounds broken.
-    const load = (0.30 + 0.70 * t) * (1 - 0.25 * off);
+    const load = (overrun + (1 - overrun) * t) * (1 - 0.25 * off) * stut;
     this.engine.gain.gain.value = this.master * load;
     this.engine.toCans.gain.value = m.engCans;
     this.engine.toRoom.gain.value = m.engRoom;
@@ -255,7 +287,7 @@ export class Engine {
     // The octave below, tracking the same note so it is weight and not a
     // second engine. Its own filter keeps it to body only.
     if (this.sub) {
-      this.sub.src.playbackRate.value = rate * 0.5;
+      this.sub.src.playbackRate.value = rate * 0.5 * wob;
       this.sub.filt.frequency.value = m.subCut;
       this.sub.gain.gain.value = this.master * load * m.sub;
     }

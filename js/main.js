@@ -113,7 +113,10 @@ async function start() {
     state.engine = new Engine({
       pick: +(qa.get('eng') || 1),
       ref: +(qa.get('engref') || 0) || undefined,
-      volume: qa.has('vol') ? +qa.get('vol') : 0.5,
+      // undefined, NOT 0.5 — a hardcoded default here silently beat MIX.master
+      // in audio.js, so raising the shipped volume did nothing at all and I
+      // spent a round wondering why it was still quiet. ?vol= still wins.
+      volume: qa.has('vol') ? +qa.get('vol') : undefined,
     });
   }
   $('hud').classList.remove('hidden');
