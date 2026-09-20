@@ -32,8 +32,11 @@ for (const a of args) if (a !== '--no-icons') { console.error(`unknown flag ${a}
 
 const sh = (cmd, a) => execFileSync(cmd, a, { cwd: ROOT }).toString().trim();
 const sha = sh('git', ['rev-parse', '--short', 'HEAD']);
-const dirty = sh('git', ['status', '--porcelain']).length > 0;
-const version = `${sha}${dirty ? '+' : ''}`;
+// The version is the COMMIT, not the working tree. Two releases cut from the
+// same commit are the same release, and a `+` that is always there (this is a
+// shared checkout — something is always dirty) says nothing.
+const dirty = sh('git', ['status', '--porcelain']).split('\n').filter(Boolean);
+const version = sha;
 // What changed, in the words of whoever changed it. A version string nobody
 // can read is a version string nobody checks.
 const note = sh('git', ['log', '-1', '--pretty=%s']);
@@ -103,7 +106,7 @@ if (!args.includes('--no-icons')) {
   try { shape = await icons(); } catch (e) { shape = `FAILED: ${e.message}`; }
 }
 
-console.log(`version   ${version}${dirty ? '   (working tree is dirty — commit before pushing)' : ''}`);
+console.log(`version   ${version}${dirty.length ? `   (${dirty.length} files dirty — this names HEAD, not them)` : ''}`);
 console.log(`offline   ${files.length} files, ${(bytes / 1048576).toFixed(1)} MB`);
 console.log(`icon      ${shape}`);
 console.log(`\nversion.json written. On a push, .github/workflows/stamp.yml does this`);
