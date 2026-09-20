@@ -1,7 +1,7 @@
 {
- "version": "c948031",
- "note": "Measure the fold, and do not count a bridge as one",
- "built": "2026-09-20T14:23:37.653Z",
+ "version": "4505e12",
+ "note": "Measure the fold at the model's radius, not the track's",
+ "built": "2026-09-20T14:28:57.875Z",
  "files": [
   "app.html",
   "build.html",
