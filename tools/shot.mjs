@@ -1,6 +1,6 @@
 // shot.mjs — my eyes on this project.
 //
-//   node tools/shot.mjs [track:car] [--photo s,lat,y,lead] [--out name] [--wait ms] [--lo]
+//   node tools/shot.mjs [track:car] [--photo s,lat,y,lead] [--out name] [--wait ms] [--lo] [--gpu]
 //
 //   node tools/shot.mjs monza:f1
 //   node tools/shot.mjs monza:f1 --photo 5350,-14,3,40 --out pits
@@ -213,12 +213,33 @@ for (const chunk of flagAll('q')) {
 const url = `${base || `http://127.0.0.1:${PORT}`}/index.html?${q}`;
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'wdc-chrome-'));
+// --gpu SHOOTS ON THE CARD THE GAME IS PLAYED ON.
+//
+// The line above this one used to say "this machine has no GPU available to
+// headless chromium". That was never true, it was only untried: this laptop
+// has a GeForce GTX 1060 behind an Intel UHD 620, and chromium takes the
+// Intel one unless DRI_PRIME says otherwise. Measured on Monza, vsync on:
+// Intel 112 ms a frame, GeForce 16.6 ms.
+//
+// It matters for a SCREENSHOT and not just for frame rate. SwiftShader is a
+// different implementation — anisotropic filtering, texture LOD and float
+// precision are all its own — so a colour matched against a SwiftShader
+// capture is a colour matched against a renderer nobody plays on. Anything
+// judging how the game LOOKS wants --gpu; anything asking whether it still
+// loads does not care and is faster without it.
+// ANGLE's VULKAN backend, which finds the GeForce by itself and needs no
+// DRI_PRIME. The obvious route — DRI_PRIME=1 with the GL backend — also gets
+// the card, at 60 fps, and then dies on the way back: it reaches the GeForce
+// through Mesa's zink (GL emulated on Vulkan), and zink loses the device on
+// readback, so `Page.captureScreenshot` times out and you get a tool that
+// renders perfectly and cannot hand you a picture. Vulkan direct does both.
+const GPU = args.includes('--gpu');
+const gl = GPU
+  ? ['--use-angle=vulkan', '--use-gl=angle']
+  : ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'];
 const chrome = spawn('/usr/bin/chromium', [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
-  // SwiftShader, because this machine has no GPU available to headless
-  // chromium. It is slow but it is a real GL implementation, so what it draws
-  // is what a real browser draws.
-  '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader',
+  ...gl,
   '--hide-scrollbars', '--mute-audio', '--disable-extensions',
   '--window-size=1600,900', `--remote-debugging-port=${CDP}`,
   `--user-data-dir=${profile}`, url,
@@ -313,6 +334,12 @@ try {
   if (stats) console.log('  world: ' + JSON.stringify(stats));
   console.log(`  build ${await cdp.eval('window.__wdcBuildMs || 0')} ms` +
     (fps != null ? `, ${fps} fps` : ', frame rate unmeasurable'));
+
+  const drewOn = await cdp.eval(`(() => { const c = document.createElement('canvas');
+    const g = c.getContext('webgl2'); if (!g) return 'no webgl';
+    const d = g.getExtension('WEBGL_debug_renderer_info');
+    return d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : 'unknown'; })()`).catch(() => 'unknown');
+  console.log('  drawn by: ' + String(drewOn).replace(/^ANGLE \(|\)$/g, ''));
 
   const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
   const file = path.join(OUT, `${outName}.png`);

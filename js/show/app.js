@@ -182,7 +182,15 @@ function rate(score) {
 // ---------------------------------------------------------------------------
 // Camera: a row seen from `dist`, or one exhibit orbited on its own.
 // ---------------------------------------------------------------------------
-let pick = 0, di = 2, solo = false, yaw = 0, pitch = 0.12;
+// The keys drive these, and so does the URL — because the whole point of a
+// showroom is to be PHOTOGRAPHED, and a camera that can only be reached by
+// pressing arrow keys cannot be. ?solo=1&pick=2&pitch=0 puts one exhibit on
+// its own at eye level, which is the angle a flat card disappears from.
+let pick = Math.max(0, (+q.get('pick') || 0));
+let di = q.get('dist') != null ? +q.get('dist') : 2;
+let solo = q.get('solo') === '1';
+let yaw = q.get('yaw') != null ? +q.get('yaw') : 0;
+let pitch = q.get('pitch') != null ? +q.get('pitch') : 0.12;
 const current = () => stands[cat][pick];
 
 function frame() {

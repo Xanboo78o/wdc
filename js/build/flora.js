@@ -67,26 +67,67 @@ function rng(seed) {
 // and shadowed inside, and a tree whose every leaf is the same bright green is
 // a cartoon of a tree no matter how many leaves you give it.
 // ---------------------------------------------------------------------------
-function card(rect, w, h, { rows = 2, bend = 0, tilt = 0, yaw = 0, at = [0, 0, 0], shade = 1, droop = 0 } = {}) {
+// KEEP IN STEP WITH js/trees.js, which is the showroom's copy of this. The
+// two were split apart on 2026-09-19 and every change since has had to be
+// made twice; if they ever disagree, this one is the one the game draws.
+function card(rect, w, h, { rows = 2, bend = 0, tilt = 0, yaw = 0, at = [0, 0, 0], shade = 1, droop = 0, roll = 0, cross = false } = {}) {
+  // CROSS: the same spray twice, the second rolled onto its edge.
+  //
+  // Adam, on this wood: "the leaves are paper thin, and from the side they
+  // look like they arent there. from above they look great."
+  //
+  // Those are one fact, not two. A card is a single ribbon whose width runs
+  // horizontally, so all of its area points UP — which is why it reads from
+  // above and is geometrically nothing from the side, a plane seen edge-on
+  // being a line. No amount of leaf detail can fix that; there is nothing
+  // there to light. The second copy, rolled 90 degrees about the spray's own
+  // growth axis, gives the pair area from every horizontal direction.
+  if (cross) {
+    const a = card(rect, w, h, { rows, bend, tilt, yaw, at, shade, droop, roll });
+    const b = card(rect, w, h, { rows, bend, tilt, yaw, at, shade: shade * 0.86, droop, roll: roll + Math.PI / 2 });
+    const n = a.pos.length / 3;
+    return {
+      pos: a.pos.concat(b.pos), uv: a.uv.concat(b.uv), sway: a.sway.concat(b.sway),
+      nor: a.nor.concat(b.nor), col: a.col.concat(b.col),
+      idx: a.idx.concat(b.idx.map(i => i + n)),
+    };
+  }
   const pos = [], uv = [], sway = [], nor = [], col = [], idx = [];
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const ct = Math.cos(tilt), st = Math.sin(tilt);
+  // Where the card's WIDTH points once rolled about the growth axis. At roll 0
+  // this is (1,0,0) and every line below is what it has always been.
+  const wx = Math.cos(roll), wy = -Math.sin(roll) * st, wz = Math.sin(roll) * ct;
   for (let r = 0; r <= rows; r++) {
     const t = r / rows;
     const lean = bend * t * t;
-    const y = h * t * Math.cos(tilt) - droop * t * t;
-    const z0 = h * t * Math.sin(tilt) + lean;
+    const y = h * t * ct - droop * t * t;
+    const z0 = h * t * st + lean;
     // Lighter toward the tip, darker at the root: the inside of a branch is
     // the shaded part.
     const k = shade * (0.74 + 0.26 * t);
     for (const s of [-0.5, 0.5]) {
       const x = s * w * (1 - 0.12 * t);
-      pos.push(x * cy - z0 * sy + at[0], y + at[1], x * sy + z0 * cy + at[2]);
+      const lx = x * wx, ly = y + x * wy, lz = z0 + x * wz;
+      pos.push(lx * cy - lz * sy + at[0], ly + at[1], lx * sy + lz * cy + at[2]);
       uv.push(rect.x + (s + 0.5) * rect.w, rect.y + t * rect.h);
       sway.push(t);
-      // Normals pushed toward vertical: the truth for a leaf is "this faces
-      // everywhere", and it is what stops a wood flickering black as the sun
-      // crosses it.
-      nor.push(-sy * 0.45, 0.89, cy * 0.45);
+      if (roll === 0) {
+        // Normals pushed toward vertical: the truth for a leaf is "this faces
+        // everywhere", and it is what stops a wood flickering black as the sun
+        // crosses it. Untouched, so any change on screen is the CROSS.
+        nor.push(-sy * 0.45, 0.89, cy * 0.45);
+      } else {
+        // The rolled copy stands on edge, where "mostly up" would light it
+        // like a floor. Real normal — growth crossed with width — leaned back
+        // toward the sky for the same anti-flicker reason.
+        let nx = ct * wz - st * wy, ny = st * wx, nz = -ct * wx;
+        if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        ny += 0.55;
+        const L = Math.hypot(nx, ny, nz) || 1;
+        nx /= L; ny /= L; nz /= L;
+        nor.push(nx * cy - nz * sy, ny, nx * sy + nz * cy);
+      }
       col.push(k, k, k);
     }
     if (r > 0) {
@@ -142,12 +183,12 @@ function coniferFoliage(rects, { h = 15, spread = 3.0, whorls = 16, perWhorl = 2
   for (let k = 0; k < whorls; k++) {
     const t = 0.2 + 0.8 * (k / (whorls - 1));
     const reach = spread * Math.pow(1 - t, 0.72) + 0.4;
-    const shade = 0.52 + 0.48 * t;
+    const shade = 0.30 + 0.70 * t;
     for (let j = 0; j < perWhorl; j++) {
       const rect = rects[(k + j) % rects.length];
       const yaw = k * 2.3999 + j * (Math.PI * 2 / perWhorl) + r() * 0.4;
       parts.push(card(rect, reach * 2.3, reach * 1.45, {
-        rows: 2, tilt: 1.28 + r() * 0.2, bend: -reach * 0.18, yaw, shade,
+        rows: 2, tilt: 1.28 + r() * 0.2, bend: -reach * 0.18, yaw, shade, cross: true,
         droop: reach * 0.22,
         at: [Math.cos(yaw) * reach * 0.18, h * t, Math.sin(yaw) * reach * 0.18],
       }));
@@ -171,7 +212,10 @@ function broadBranches(h, crown, seed) {
   return out;
 }
 
-function broadFoliage(rects, { h = 9.5, crown = 3.6, cards = 20, seed = 11 } = {}) {
+// 13 crossed sprays, not 20 flat ones. A cross is two ribbons, so this is 26
+// pieces of foliage against the old 20 — a third more triangles for area from
+// every direction instead of only from above.
+function broadFoliage(rects, { h = 9.5, crown = 3.6, cards = 13, seed = 11 } = {}) {
   const r = rng(seed), parts = [];
   for (let k = 0; k < cards; k++) {
     const rect = rects[k % rects.length];
@@ -183,11 +227,14 @@ function broadFoliage(rects, { h = 9.5, crown = 3.6, cards = 20, seed = 11 } = {
     const out = crown * (0.42 + r() * 0.72) * Math.max(0.35, Math.sin(up * Math.PI * 0.85));
     const size = crown * (0.78 + r() * 0.55);
     // The outside of a crown catches the sun; the middle and the underside
-    // never do.
-    const shade = 0.44 + 0.56 * Math.min(1, (out / crown) * 0.55 + up * 0.7);
+    // never do. The floor used to be 0.44, which made the deepest leaf in the
+    // crown a bit over half as bright as the sunlit rim — a tree lit like a
+    // lampshade. A canopy is metres of leaves stacked on leaves and almost no
+    // light reaches through; 0.16 is what "you cannot see into it" looks like.
+    const shade = 0.16 + 0.84 * Math.min(1, (out / crown) * 0.55 + up * 0.7);
     parts.push(card(rect, size, size * 0.92, {
       rows: 2, tilt: 0.55 + r() * 1.0, bend: (r() - 0.5) * size * 0.5, yaw, shade,
-      droop: size * 0.18,
+      droop: size * 0.18, cross: true,
       at: [Math.cos(yaw) * out, h * 0.6 + up * crown, Math.sin(yaw) * out],
     }));
   }
@@ -436,7 +483,19 @@ export class Flora {
         m.toArray(mat4.array, i * 16);
         // Real foliage is a spread of greens, never one, and a row further
         // back sits deeper in the shade of its own wood.
-        const shade = t.tint * (1 - t.row * 0.06);
+        //
+        // This was linear at 6% a row, which put the FIFTH row — the one that
+        // is supposed to be the far side of a wood — at 76% brightness. So
+        // every tree in the depth of the forest was plainly a tree, and Adam's
+        // note was exactly right: "trees block LOTS of light, and thats why
+        // forests look like a few trees then darkness rather you being able to
+        // see every single tree."
+        //
+        // Light through a canopy is Beer-Lambert: it falls off by a CONSTANT
+        // FRACTION per layer, not a constant amount, so the fifth row is not
+        // five steps darker, it is 0.66^4 — a fifth of the light. Which is
+        // what the eye reads as a wall with a wood behind it.
+        const shade = t.tint * Math.pow(0.66, t.row);
         tint.setXYZ(i, shade * 0.94, shade, shade * 0.84);
       });
       const mesh = (geo, material, shadow) => {

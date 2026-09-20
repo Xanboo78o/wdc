@@ -34,20 +34,54 @@ function rng(seed) {
 // ---------------------------------------------------------------------------
 export function card(rect, w, h, {
   rows = 2, bend = 0, tilt = 0, yaw = 0, at = [0, 0, 0], shade = 1, droop = 0,
-  normals = 'up', centre = [0, 0, 0], twist = 0,
+  normals = 'up', centre = [0, 0, 0], twist = 0, roll = 0, cross = false,
 } = {}) {
+  // CROSS: the same spray, twice, the second one rolled onto its edge.
+  //
+  // Adam, on the first wood: "the leaves are paper thin, and from the side
+  // they look like they arent there. from above they look great."
+  //
+  // Both halves of that are one fact. A card is a single ribbon whose width
+  // runs horizontally, so its area is presented UPWARDS — perfect from above,
+  // and geometrically zero from the side, because a plane seen edge-on is a
+  // line. No amount of leaf detail fixes it; there is nothing there to light.
+  //
+  // Rolling a second copy 90 degrees about the spray's own growth axis gives
+  // the pair area from every horizontal direction, for twice the triangles of
+  // one card. Crowns spend that by carrying FEWER sprays, which is the better
+  // trade anyway: 13 crossed sprays read as a denser tree than 20 flat ones
+  // from the side, and identically from above.
+  if (cross) {
+    const a = card(rect, w, h, { rows, bend, tilt, yaw, at, shade, droop, normals, centre, twist, roll });
+    const b = card(rect, w, h, {
+      rows, bend, tilt, yaw, at, shade: shade * 0.86, droop, normals, centre, twist,
+      roll: roll + Math.PI / 2,
+    });
+    const n = a.pos.length / 3;
+    return {
+      pos: a.pos.concat(b.pos), uv: a.uv.concat(b.uv), sway: a.sway.concat(b.sway),
+      nor: a.nor.concat(b.nor), col: a.col.concat(b.col),
+      idx: a.idx.concat(b.idx.map(i => i + n)),
+    };
+  }
+
   const pos = [], uv = [], sway = [], nor = [], col = [], idx = [];
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const ct = Math.cos(tilt), st = Math.sin(tilt);
   const N = new THREE.Vector3();
+  // Where the card's WIDTH points, once rolled about the growth axis. At
+  // roll 0 this is (1,0,0) and everything below is what it always was.
+  const wx = Math.cos(roll), wy = -Math.sin(roll) * st, wz = Math.sin(roll) * ct;
   for (let r = 0; r <= rows; r++) {
     const t = r / rows;
     const lean = bend * t * t;
-    const y = h * t * Math.cos(tilt) - droop * t * t;
-    const z0 = h * t * Math.sin(tilt) + lean;
+    const y = h * t * ct - droop * t * t;
+    const z0 = h * t * st + lean;
     const k = shade * (0.74 + 0.26 * t);
     for (const s of [-0.5, 0.5]) {
       const x = s * w * (1 - 0.12 * t) + twist * t * (s > 0 ? 1 : -1);
-      const px = x * cy - z0 * sy + at[0], py = y + at[1], pz = x * sy + z0 * cy + at[2];
+      const lx = x * wx, ly = y + x * wy, lz = z0 + x * wz;
+      const px = lx * cy - lz * sy + at[0], py = ly + at[1], pz = lx * sy + lz * cy + at[2];
       pos.push(px, py, pz);
       uv.push(rect.x + (s + 0.5) * rect.w, rect.y + t * rect.h);
       sway.push(t);
@@ -56,8 +90,20 @@ export function card(rect, w, h, {
         // wall, but it is not a floor either.
         N.set(px - centre[0], (py - centre[1]) * 0.85 + 0.35, pz - centre[2]).normalize();
         nor.push(N.x, N.y, N.z);
-      } else {
+      } else if (roll === 0) {
+        // Untouched, so a flat card shades in this build exactly as it did in
+        // the last one and any change on screen is the CROSS and not a normal.
         nor.push(-sy * 0.45, 0.89, cy * 0.45);
+      } else {
+        // The rolled copy stands on its edge, so "mostly up" would be a lie
+        // that lights it like a floor. Take the real normal — growth crossed
+        // with width — and lean it back toward the sky, because a leaf really
+        // does face everywhere and a wood that flickers black as the sun
+        // crosses it is worse than one shaded approximately.
+        N.set(ct * wz - st * wy, st * wx, -ct * wx);
+        if (N.y < 0) N.negate();
+        N.y += 0.55; N.normalize();
+        nor.push(N.x * cy - N.z * sy, N.y, N.x * sy + N.z * cy);
       }
       col.push(k, k, k);
     }
@@ -265,10 +311,10 @@ export function broadTree(rects, S) {
     const reach = (r() < S.strays) ? 1.35 + r() * 0.45 : 0.42 + r() * 0.72;
     const out = crown * reach * Math.max(0.35, Math.sin(up * Math.PI * 0.85));
     const size = crown * (S.cardScale ?? 1) * (0.78 + r() * 0.55) * (1 + S.lumpy * (r() - 0.5) * 1.3);
-    const shade = 0.4 + 0.6 * Math.min(1, (out / crown) * 0.5 + up * 0.7);
+    const shade = (S.floor ?? 0.4) + (1 - (S.floor ?? 0.4)) * Math.min(1, (out / crown) * 0.5 + up * 0.7);
     parts.push(card(rect, size, size * 0.92, {
       rows: 2, tilt: 0.5 + r() * 1.1, bend: (r() - 0.5) * size * 0.55, yaw, shade,
-      droop: size * S.droop, normals: S.normals, centre,
+      droop: size * S.droop, normals: S.normals, centre, cross: !!S.cross,
       at: [Math.cos(yaw) * out, h * 0.58 + up * crown, Math.sin(yaw) * out],
     }));
   }
@@ -299,7 +345,7 @@ export function coniferTree(rects, S) {
       const yaw = k * 2.3999 + j * (Math.PI * 2 / S.perWhorl) + r() * 0.4;
       parts.push(card(rect, reach * 2.3, reach * 1.45, {
         rows: 2, tilt: S.tilt + r() * 0.2, bend: -reach * 0.18, yaw, shade,
-        droop: reach * S.droop, normals: S.normals, centre,
+        droop: reach * S.droop, normals: S.normals, centre, cross: !!S.cross,
         at: [Math.cos(yaw) * reach * 0.2, h * t, Math.sin(yaw) * reach * 0.2],
       }));
     }
@@ -319,6 +365,19 @@ export const VARIANTS = {
     label: 'Broadleaf v1 — what shipped', atlas: 'leaf', make: broadTree,
     spec: { height: 9.5, crown: 3.6, cards: 20, branches: 4, trunkR: 0.42, sides: 6,
       lumpy: 0, strays: 0, droop: 0.18, normals: 'up', seed: 11 },
+  },
+  // Adam, 2026-09-20: "the leaves are paper thin, and from the side they look
+  // like they arent there... increase some thickness... and remember trees
+  // block LOTS of light".
+  'broad-cross': {
+    label: 'Broadleaf — crossed sprays, 13 not 20', atlas: 'leaf', make: broadTree,
+    spec: { height: 9.5, crown: 3.6, cards: 13, branches: 4, trunkR: 0.42, sides: 6,
+      lumpy: 0.4, strays: 0.14, droop: 0.2, normals: 'up', cross: true, seed: 11 },
+  },
+  'broad-cross-dark': {
+    label: 'Broadleaf — crossed, and a canopy you cannot see into', atlas: 'leaf', make: broadTree,
+    spec: { height: 9.5, crown: 3.6, cards: 13, branches: 4, trunkR: 0.42, sides: 6,
+      lumpy: 0.4, strays: 0.14, droop: 0.2, normals: 'up', cross: true, floor: 0.16, seed: 11 },
   },
   'broad-lumpy': {
     label: 'Broadleaf — lumpy crown, same count', atlas: 'leaf', make: broadTree,

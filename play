@@ -1,0 +1,48 @@
+#!/bin/sh
+# play — run WDC on the GeForce, not on the Intel chip.
+#
+# This laptop has two GPUs: an Intel UHD 620 welded to the CPU, and a GeForce
+# GTX 1060. Chromium picks the Intel one, every time, because that is what is
+# wired to the display and nothing tells it otherwise. Measured on Monza, same
+# page, same camera, vsync on:
+#
+#   Intel UHD 620    112.5 ms a frame    9 fps
+#   GTX 1060          16.6 ms a frame   60 fps     <- DRI_PRIME=1
+#
+# Almost seven times, for an environment variable. It is also the cooler
+# option, not the hotter one: the Intel chip pinned flat out at 9 fps is
+# working far harder than the GeForce loafing at 60.
+#
+#   ./play              the game, on the local server
+#   ./play build        the track builder
+#   ./play --live       the deployed site instead of this checkout
+#
+# If a page ever renders wrong here but fine in a normal browser, run it
+# without DRI_PRIME to find out whether the card or the code is at fault.
+set -e
+DIR=$(cd "$(dirname "$0")" && pwd)
+PAGE=index.html
+LIVE=""
+for a in "$@"; do
+  case "$a" in
+    build)   PAGE=build.html ;;
+    show)    PAGE=gameshow.html ;;
+    app)     PAGE=app.html ;;
+    --live)  LIVE=1 ;;
+    *)       PAGE="$a" ;;
+  esac
+done
+
+if [ -n "$LIVE" ]; then
+  URL="https://xanboo78o.github.io/wdc/$PAGE"
+else
+  PORT=8176
+  if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
+    node "$DIR/tools/serve.mjs" >/dev/null 2>&1 &
+    sleep 1
+  fi
+  URL="http://127.0.0.1:$PORT/$PAGE"
+fi
+
+echo "GeForce GTX 1060  ->  $URL"
+exec env DRI_PRIME=1 chromium --app="$URL" >/dev/null 2>&1
