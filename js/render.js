@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { Look, sunRig } from './tex.js';
+import { Post } from './post.js';
 import { bankTable, bankY, bankRoll } from './bank.js';
 import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
@@ -358,6 +359,34 @@ export class View {
     // tags, so a fresh clone still draws a circuit.
     this.surf = opts.surf || defaultSurface(track);
     this.rig = sunRig(this.scene, sky, { shadows: this.shadows });
+    // Where the sun IS, for the god rays. sky.sun is a direction; the rays
+    // want a point, so push it five kilometres that way and keep it relative
+    // to the camera, or a sun at the world origin sits behind you at Monza.
+    this.sunDir = new THREE.Vector3(...(sky?.sun || [0.55, 0.74, 0.38])).normalize();
+
+    // QUALITY IS DETECTED, NOT CHOSEN (LOOK.md). Ask the chip what it is.
+    // SwiftShader draws Monza at a frame every seven seconds and the Intel
+    // UHD 620 at 112 ms; neither gets a post chain. ?post= overrides.
+    const pq = new URLSearchParams(location.search).get('post');
+    let quality = pq || 'high';
+    if (!pq) {
+      try {
+        const gl = this.renderer.getContext();
+        const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+        const name = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
+        if (/swiftshader|software|llvmpipe/i.test(name)) quality = 'off';
+        else if (/intel|uhd|iris/i.test(name)) quality = 'off';
+      } catch { /* no extension, assume it can cope */ }
+    }
+    this.post = new Post(this.renderer, { quality });
+    // Tuning knobs, because every number in post.js is a judgement about
+    // light and I cannot see the screen. ?key=0.12&bloom=0.85&rays=0.75
+    const qp = new URLSearchParams(location.search);
+    for (const [k, f] of [['key', 'exposureKey'], ['bloom', 'bloom'], ['rays', 'rays'], ['thresh', 'threshold']]) {
+      if (qp.has(k) && this.post.on) this.post[f] = +qp.get(k);
+    }
+    if (typeof window !== 'undefined') window.__wdcPost = this.post;
+    this._lastT = 0;
     const t0 = (typeof performance !== 'undefined') ? performance.now() : 0;
     this.stats = this._world(opts.env);
     if (typeof window !== 'undefined') window.__wdcBuildMs = Math.round(performance.now() - t0);
@@ -505,11 +534,36 @@ export class View {
     this.resize();
   }
 
+  /** Every frame goes through here, so the post chain can never be skipped. */
+  _draw() {
+    // renderer.info RESETS on every render() call, and the post chain ends
+    // with a full-screen quad — so main.js's telemetry started reporting
+    // "draws: 1, tris: 2" for a circuit with two thousand buildings in it.
+    // Held across the whole frame instead, so the numbers now include the
+    // post passes, which is what a frame actually costs anyway.
+    const info = this.renderer.info;
+    info.autoReset = false;
+    info.reset();
+    const now = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
+    const dt = this._lastT ? Math.min(0.1, now - this._lastT) : 0.016;
+    this._lastT = now;
+    if (this.post && this.post.on) {
+      this.post.setSun(
+        this.sunDir.clone().multiplyScalar(5000).add(this.camera.position),
+        this.camera);
+      this.post.render(this.scene, this.camera, dt);
+    } else {
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
   resize() {
     const w = innerWidth, h = innerHeight;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    if (this.post) this.post.setSize(w, h);
   }
 
   _world(env) {
@@ -886,7 +940,7 @@ export class View {
       this.camera.lookAt(new THREE.Vector3(b.x, by + 0.9, Z(b.y)));
       if (this.camera.fov !== 55) { this.camera.fov = 55; this.camera.updateProjectionMatrix(); }
       this.rig.follow(a.x, Z(a.y));
-      this.renderer.render(this.scene, this.camera);
+      this._draw();
       return;
     }
     const rig = RIGS[this.mode];
@@ -960,7 +1014,7 @@ export class View {
     // always contains it.
     this.rig.follow(car.x, Z(car.y));
 
-    this.renderer.render(this.scene, this.camera);
+    this._draw();
 
     // Publish the real cost of a frame once, after there is one to measure.
     // Guessing at triangle counts from source is how a scene quietly ends up
