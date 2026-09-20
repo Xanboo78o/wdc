@@ -245,14 +245,38 @@ export class Race {
       bias += e.lastMove * d.defence * Math.max(0.6, t.w[i] - 2.4) * 0.85;
     }
 
-    // Do not drive into someone who is alongside. This overrides attack and
-    // defence, because wanting the line does not entitle you to the space.
+    // DO NOT DRIVE INTO SOMEONE WHO IS ALONGSIDE.
+    //
+    // This claimed to override attack and defence and it did not. It
+    // SUBTRACTED at most 3.8 * 0.7 = 2.66 m from a bias the attack branch
+    // above can push past four — so wanting the line outvoted leaving room,
+    // every time, and nothing in it knew where the wall was. Adam: "he kept
+    // like pushing and i tried to fight it but he just ran me into the wall
+    // causing my death".
+    //
+    // A clamp cannot be outvoted. This car may put itself anywhere it likes
+    // except inside ROOM of a car that is beside it.
+    const lineOff = this.lines.race.off[i];
+    const ROOM = 2.6;                       // a car is 2 m wide; this is that, plus a door
+    let yieldTo = null;
     for (const o of this.entries) {
       if (o === e || o.retired || o.inPit) continue;
-      const ds = t.gap(o.proj.s, e.proj.s);
-      if (Math.abs(ds) > 7) continue;
-      const dl = o.proj.lat - e.proj.lat;
-      if (Math.abs(dl) < 3.8) bias -= Math.sign(dl || 1) * (3.8 - Math.abs(dl)) * 0.7;
+      if (Math.abs(t.gap(o.proj.s, e.proj.s)) > 7) continue;
+      const dl = o.proj.lat - e.proj.lat;   // + = they are on my left
+      const keep = dl > 0 ? (o.proj.lat - ROOM) - lineOff
+                          : (o.proj.lat + ROOM) - lineOff;
+      const before = bias;
+      bias = dl > 0 ? Math.min(bias, keep) : Math.max(bias, keep);
+      // AND IF LEAVING ROOM MEANS LEAVING THE CIRCUIT, THERE IS NO ROOM.
+      //
+      // The answer to that is the brake, not the other car's door. Without
+      // this the clamp just gets undone by the track limit below and the
+      // squeeze happens anyway — which is the whole incident, because the
+      // car being squeezed is the one with the wall on its far side.
+      if (Math.abs(bias + lineOff) > lim) {
+        bias = before;
+        yieldTo = Math.min(yieldTo ?? Infinity, o.car.speed * 0.94);
+      }
     }
 
     // Car-following: settle at a sensible headway and MATCH the car ahead once
@@ -343,6 +367,10 @@ export class Race {
           : vA * Math.max(0.55, 1 + room * 0.06);
       }
     }
+
+    // The yield goes on last, so the car-following cap above cannot undo it.
+    // Backing out of a move you have no room for is not optional.
+    if (yieldTo != null) speedCap = Math.min(speedCap ?? Infinity, yieldTo);
 
     const off = this.lines.race.off[i];
     bias = Math.max(-lim - off, Math.min(lim - off, bias));
