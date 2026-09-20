@@ -53,11 +53,26 @@ const RATE_MIN = 0.35, RATE_MAX = 2.60;
 // Everything the sound bench can tune. sound.html writes these to localStorage
 // under the same origin, so tuning there changes the game without a rebuild —
 // and whatever is left here is what ships for anyone who never opens it.
+// Bumped when a DEFAULT changes in a way a saved mix would otherwise mask: a
+// stored roadLvl of 0.45 would keep the wind on forever, and nobody would
+// guess the fix was to clear their browser storage.
+export const MIX_KEY = 'wdc.sound.v2';
+
 export const MIX = {
   ref: REF_RPM,
   engCans: 1.00, engRoom: 1.00,
-  tyreLvl: 0.35, thresh: 0.18, tyreCans: 1.00, tyreRoom: 0.15,
-  roadLvl: 0.45, roadCut: 900, roadCans: 1.00, roadRoom: 0.70,
+  // BOTH OFF BY DEFAULT. Adam, after one drive: "i only hear wind, i only want
+  // engine". The road layer is still the tyre sample detuned and lowpassed, a
+  // placeholder meant to test whether SPEED belongs in the mix — and it does,
+  // that part worked. But a placeholder drone at 300 km/h beats a varying
+  // engine for attention every time, and shipping a stand-in at 45% was my
+  // error, not his taste.
+  //
+  // They stay in the code because the axes are right. They come back when
+  // there is a real road loop, and he can raise either from sound.html
+  // whenever he wants to hear where they are.
+  tyreLvl: 0.00, thresh: 0.18, tyreCans: 1.00, tyreRoom: 0.15,
+  roadLvl: 0.00, roadCut: 900, roadCans: 1.00, roadRoom: 0.70,
   gustD: 0.45, gustR: 0.70,
   muffle: 600,
   roomSink: null,
@@ -65,7 +80,7 @@ export const MIX = {
 
 function savedMix() {
   try {
-    const raw = localStorage.getItem('wdc.sound');
+    const raw = localStorage.getItem(MIX_KEY);
     if (!raw) return { ...MIX };
     return { ...MIX, ...JSON.parse(raw) };
   } catch { return { ...MIX }; }      // private window, blocked storage, bad JSON

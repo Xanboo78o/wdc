@@ -100,7 +100,7 @@
   <h2>TYRES &mdash; the new layer, and the one to judge</h2>
   <div class="row"><label>slip</label><input type="range" id="slip" min="0" max="100" value="0"><span class="val" id="slipV">0%</span></div>
   <div class="row"><label>gear</label><div style="flex:1" id="gears"></div><span class="val" id="spdV">&mdash;</span></div>
-  <div class="row"><label>level</label><input type="range" id="tyreLvl" min="0" max="100" value="35"><span class="val" id="tyreLvlV">35%</span></div>
+  <div class="row"><label>level</label><input type="range" id="tyreLvl" min="0" max="100" value="0"><span class="val" id="tyreLvlV">0%</span></div>
   <div class="row"><label>threshold</label><input type="range" id="thresh" min="0" max="60" value="18"><span class="val" id="threshV">0.18</span></div>
   <div class="row"><label>&rarr; CANS</label><input type="range" id="tyreCans" min="0" max="100" value="100"><span class="val" id="tyreCansV">100%</span></div>
   <div class="row"><label>&rarr; ROOM</label><input type="range" id="tyreRoom" min="0" max="100" value="15"><span class="val" id="tyreRoomV">15%</span></div>
@@ -125,7 +125,7 @@
     <b>This layer is a placeholder</b> &mdash; it is the tyre sample with the top end taken off,
     standing in for road roar until a proper CC0 one is sourced. Judge the IDEA, not the sound.
   </div>
-  <div class="row"><label>level</label><input type="range" id="roadLvl" min="0" max="100" value="45"><span class="val" id="roadLvlV">45%</span></div>
+  <div class="row"><label>level</label><input type="range" id="roadLvl" min="0" max="100" value="0"><span class="val" id="roadLvlV">0%</span></div>
   <div class="row"><label>tone</label><input type="range" id="roadCut" min="150" max="4000" value="900"><span class="val" id="roadCutV">900 Hz</span></div>
   <div class="row"><label>gust depth</label><input type="range" id="gustD" min="0" max="100" value="45"><span class="val" id="gustDV">45%</span></div>
   <div class="row"><label>gust speed</label><input type="range" id="gustR" min="10" max="200" value="70"><span class="val" id="gustRV">0.70x</span></div>
@@ -158,6 +158,7 @@
 // line for line, so what he hears is what the game already makes.
 const $ = id => document.getElementById(id);
 
+const KEY = 'wdc.sound.v2';   // must match MIX_KEY in js/audio.js
 const IDS = ['muffle', 'tyreLvl', 'thresh', 'tyreCans', 'tyreRoom',
              'engCans', 'engRoom', 'roadLvl', 'roadCut', 'roadCans', 'roadRoom',
              'gustD', 'gustR', 'ref'];
@@ -170,7 +171,7 @@ function save() {
   const mix = {};
   for (const i of IDS) mix[i] = PCT.has(i) ? +$(i).value / 100 : +$(i).value;
   if (roomSinkId) mix.roomSink = roomSinkId;
-  try { localStorage.setItem('wdc.sound', JSON.stringify(mix)); } catch { /* blocked */ }
+  try { localStorage.setItem(KEY, JSON.stringify(mix)); } catch { /* blocked */ }
   return mix;
 }
 // Same origin as the game, so every move of a slider retunes the car.
@@ -375,7 +376,7 @@ function tick() {
 // ---- controls ---------------------------------------------------------------
 // Come back to whatever was last dialled in, here or in the game.
 try {
-  const saved = JSON.parse(localStorage.getItem('wdc.sound') || 'null');
+  const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
   if (saved) for (const i of IDS) {
     if (saved[i] == null || !$(i)) continue;
     $(i).value = PCT.has(i) ? Math.round(saved[i] * 100) : saved[i];
