@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PAD INSPECTOR</title>
+<style>
+  :root { --bg:#0b0d10; --fg:#e8eaee; --dim:#7d8590; --mint:#35d6a0; --red:#d8352a; --line:#1e232b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace; padding:18px; }
+  h1 { font-size:15px; letter-spacing:.14em; margin:0 0 4px; }
+  .sub { color:var(--dim); margin-bottom:18px; font-size:13px; }
+  .pad { border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:16px; }
+  .id { color:var(--mint); word-break:break-all; margin-bottom:2px; }
+  .meta { color:var(--dim); font-size:12px; margin-bottom:12px; }
+  .warn { color:var(--red); }
+  table { border-collapse:collapse; width:100%; max-width:760px; }
+  td { padding:2px 8px 2px 0; vertical-align:middle; white-space:nowrap; }
+  td.n { color:var(--dim); width:44px; }
+  td.v { width:68px; text-align:right; font-variant-numeric:tabular-nums; }
+  .bar { position:relative; height:12px; background:#151a21; border-radius:2px; overflow:hidden; min-width:220px; }
+  .bar i { position:absolute; top:0; bottom:0; background:var(--mint); }
+  .bar.mid::after { content:""; position:absolute; left:50%; top:0; bottom:0; width:1px; background:#2d343e; }
+  .moved { color:var(--mint); }
+  .btn { display:inline-block; width:30px; text-align:center; padding:3px 0; margin:0 3px 3px 0;
+         border:1px solid var(--line); border-radius:4px; color:var(--dim); font-size:12px; }
+  .btn.on { background:var(--mint); color:#04150e; border-color:var(--mint); }
+  .btn.an { border-color:var(--mint); color:var(--mint); }
+  .none { color:var(--dim); }
+  h2 { font-size:13px; letter-spacing:.1em; color:var(--dim); margin:14px 0 6px; font-weight:400; }
+  #report { margin-top:22px; padding:12px; border:1px dashed var(--line); border-radius:8px;
+            color:var(--dim); font-size:12px; white-space:pre-wrap; max-width:760px; }
+</style>
+</head>
+<body>
+<h1>PAD INSPECTOR</h1>
+<div class="sub">
+  Every axis and button on every connected controller, live.
+  <b>Press a button or move a pedal first</b> — browsers hide gamepads until you do.
+</div>
+<div id="pads"><div class="none">nothing connected yet — press a button on the wheel or pad</div></div>
+<div id="report"></div>
+
+<script>
+// A wheel is not a gamepad, whatever the Gamepad API says.
+//
+// An Xbox pad uses the "standard" mapping: steering on axes[0], triggers as
+// buttons[6] and buttons[7] with an analogue .value. A racing wheel reports
+// mapping "" and puts its pedals on AXES, whose indices differ per device and
+// which usually rest at +1 and travel to -1 — the opposite of what anything
+// expects. There is no way to guess which axis is the brake. So: watch them
+// all, and say which ones moved.
+const PADS = document.getElementById('pads');
+const REPORT = document.getElementById('report');
+
+// Per-axis history, so a pedal that has been pressed once is marked for good.
+const seen = new Map();   // key `${padIndex}:${axis}` -> {min,max,moved}
+
+function track(key, v) {
+  let s = seen.get(key);
+  if (!s) { s = { min: v, max: v, moved: false, rest: v }; seen.set(key, s); }
+  if (v < s.min) s.min = v;
+  if (v > s.max) s.max = v;
+  if (s.max - s.min > 0.15) s.moved = true;
+  return s;
+}
+
+function bar(v, lo, hi) {
+  // Draw from the resting end, so a pedal fills up as you press it whichever
+  // direction its axis happens to run.
+  const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo || 1)));
+  return `<div class="bar${lo < 0 ? ' mid' : ''}"><i style="left:0;width:${(t * 100).toFixed(1)}%"></i></div>`;
+}
+
+function draw() {
+  const pads = (navigator.getGamepads ? navigator.getGamepads() : []) || [];
+  const live = [...pads].filter(p => p && p.connected);
+  if (!live.length) {
+    PADS.innerHTML = '<div class="none">nothing connected yet — press a button on the wheel or pad</div>';
+    REPORT.textContent = '';
+    requestAnimationFrame(draw);
+    return;
+  }
+
+  let html = '', notes = [];
+  for (const p of live) {
+    const std = p.mapping === 'standard';
+    html += `<div class="pad"><div class="id">${p.id}</div>`;
+    html += `<div class="meta">index ${p.index} &middot; mapping "${p.mapping || '(none)'}"` +
+            `${std ? '' : ' <span class="warn">— NOT the standard mapping, so pedals are on axes, not buttons</span>'}` +
+            ` &middot; ${p.axes.length} axes &middot; ${p.buttons.length} buttons</div>`;
+
+    html += '<h2>AXES</h2><table>';
+    for (let i = 0; i < p.axes.length; i++) {
+      const v = p.axes[i];
+      const s = track(`${p.index}:${i}`, v);
+      html += `<tr><td class="n${s.moved ? ' moved' : ''}">ax ${i}</td>` +
+              `<td>${bar(v, s.min, s.max)}</td>` +
+              `<td class="v${s.moved ? ' moved' : ''}">${v.toFixed(3)}</td>` +
+              `<td class="n">${s.moved ? `range ${s.min.toFixed(2)}..${s.max.toFixed(2)}` : 'still'}</td></tr>`;
+    }
+    html += '</table>';
+
+    html += '<h2>BUTTONS</h2><div>';
+    for (let i = 0; i < p.buttons.length; i++) {
+      const b = p.buttons[i];
+      const analogue = b.value > 0 && b.value < 1;
+      html += `<span class="btn${b.pressed ? ' on' : ''}${analogue ? ' an' : ''}">${i}</span>`;
+    }
+    html += '</div></div>';
+
+    // What to tell me: the axes that actually moved, with their travel.
+    const moved = [];
+    for (let i = 0; i < p.axes.length; i++) {
+      const s = seen.get(`${p.index}:${i}`);
+      if (s && s.moved) moved.push(`  ax ${i}: ${s.min.toFixed(2)} .. ${s.max.toFixed(2)}`);
+    }
+    notes.push(`${p.id}\n  mapping: "${p.mapping || '(none)'}"  axes: ${p.axes.length}  buttons: ${p.buttons.length}\n` +
+      (moved.length ? `moved so far:\n${moved.join('\n')}` : 'nothing has moved yet'));
+  }
+
+  PADS.innerHTML = html;
+  REPORT.textContent =
+    'COPY THIS AND SEND IT TO ME\n' +
+    'Move the wheel lock to lock, then press each pedal all the way down, one at a time.\n\n' +
+    notes.join('\n\n');
+  requestAnimationFrame(draw);
+}
+
+addEventListener('gamepadconnected', () => {});
+draw();
+</script>
+</body>
+</html>
