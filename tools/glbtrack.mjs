@@ -151,6 +151,31 @@ const track = {
   line: new Array(n).fill(0), corners: [], drs: [], pit: null, sponsors: [],
 };
 
+// --- does the road run into itself? -----------------------------------------
+// A hand-modelled circuit folds back on itself constantly, and at the width a
+// Blender bevel hands you by default the two legs can be the SAME TARMAC
+// without the author ever seeing it — in the viewport it reads as two roads
+// with a seam. It matters twice: it looks wrong, and `crossover` in the track
+// file is what tells foldcheck.mjs that a self-intersection here is legal.
+//
+// Reported in metres of lap rather than as a flag, because the number is the
+// actionable thing: it tells the author how much narrower the road wants to be.
+let overlap = 0, tightest = Infinity, tightAt = 0;
+const SKIP = Math.ceil(80 / DS);         // ignore your own neighbourhood
+for (let i = 0; i < n; i++) {
+  let bd = Infinity, bj = -1;
+  for (let j = 0; j < n; j++) {
+    const apart = Math.min(Math.abs(i - j), n - Math.abs(i - j));
+    if (apart < SKIP) continue;
+    const dd = (X[i] - X[j]) ** 2 + (Y[i] - Y[j]) ** 2;
+    if (dd < bd) { bd = dd; bj = j; }
+  }
+  bd = Math.sqrt(bd);
+  if (bd < half[i] + half[bj]) overlap += DS;
+  if (bd < tightest) { tightest = bd; tightAt = i * DS; }
+}
+track.crossover = overlap > 0;
+
 // --- what it is -------------------------------------------------------------
 const zMin = Math.min(...Z), zMax = Math.max(...Z);
 let climb = 0;
@@ -162,6 +187,13 @@ console.log(`  length        ${(total / 1000).toFixed(3)} km, resampled to ${n} 
 console.log(`  road width    ${wMin.toFixed(1)}..${wMax.toFixed(1)} m, mean ${wMean.toFixed(1)}`);
 console.log(`  elevation     ${zMin.toFixed(1)} .. ${zMax.toFixed(1)} m  (range ${(zMax - zMin).toFixed(1)}, ${climb.toFixed(0)} m climbed a lap)`);
 console.log(`  footprint     ${(track.bbox.x1 - track.bbox.x0).toFixed(0)} x ${(track.bbox.y1 - track.bbox.y0).toFixed(0)} m`);
+if (overlap > 0) {
+  console.log(`  SELF-OVERLAP  ${overlap} m of lap where the road lies on another part of itself`);
+  console.log(`                closest centrelines ${tightest.toFixed(1)} m apart, at s=${tightAt.toFixed(0)} m`);
+  console.log(`                at this width. A narrower road clears most of it.`);
+} else {
+  console.log(`  self-overlap  none — closest approach ${tightest.toFixed(1)} m at s=${tightAt.toFixed(0)}`);
+}
 
 if (out === '-') process.exit(0);
 const dest = out || new URL(`../data/tracks/${track.key}.json`, import.meta.url).pathname;
