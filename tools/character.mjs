@@ -83,7 +83,11 @@ const TESTS = [
 function loadBaked(key) {
   const file = new URL(`../data/tracks/${key}.json`, import.meta.url);
   const d = JSON.parse(fs.readFileSync(file, 'utf8'));
-  return { track: new Track(d), z: null, name: d.full || d.name || key };
+  // The five surveyed circuits carry no height — theirs lives in the
+  // renderer's ground. A circuit imported from a model does carry it, and
+  // that is usually the most interesting thing about it, so read it if it
+  // is there and say so honestly when it is not.
+  return { track: new Track(d), z: d.z || null, name: d.full || d.name || key };
 }
 
 async function loadMega() {
