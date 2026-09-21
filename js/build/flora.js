@@ -33,12 +33,59 @@ import { V } from './meshes.js';
 import { GROUND } from './ground.js';
 import { SCENERY, KINDS, FOREST_DEPTH } from '../../data/build/scenery.js';
 
-// --- the wood ---------------------------------------------------------------
-const ROWS = 5;                 // rows of trees along the edge, front to back
-const ROW_GAP = 5.5;            // m between them
-const ROW_PACK = [0.30, 0.55, 0.85, 1.15, 1.45];   // each row denser than the last
-const DARK_ROW = 2.6;           // which row the dark mass stands at
-const DARK_H = 7.2;             // m: under the canopy, so it never breaks the skyline
+// --- the wood, in five layers -----------------------------------------------
+// RE-LAYERED 2026-09-21 to Adam's cascade, which is an art note and a draw-call
+// budget at the same time — as his forest notes keep turning out to be:
+//
+//   "2 layers of randomly placed, roated, and sized trees, then with flat
+//    ribbon band of like ferns and such, then flat paper trees that rotate to
+//    face the player, and after 4 tight layers of those, just a forest
+//    backdrop that fills the gaps, and the brightness is taken wayyy down to
+//    show it get darker wit more trees"
+//
+//   1. NEAR    two rows of real geometry — trunk, branches, foliage cards
+//   2. FERNS   a low ribbon of bracken at their feet, hiding where trunk meets
+//              ground, which is the join the eye actually checks
+//   3. PAPER   four tight rows of single quads that yaw to face the camera
+//   4. BACK    the backdrop, filling whatever the paper rows leave open
+//   5. and every layer darker than the one in front of it
+//
+// The previous version was five rows of real trees. Two rows of geometry and
+// four of paper is the same wall for a fraction of the triangles, and the
+// paper never thins out at a grazing angle the way a fixed cross-card does,
+// because it turns.
+const NEAR_ROWS = 2;            // rows of real trees at the front
+const NEAR_GAP = 6.0;           // m between them
+// MEASURED, not chosen. At the first values this cascade planted 0.0178 trees
+// per square metre and you could see the sky through a pine wood — the
+// photograph was unambiguous. A 4 m canopy needs about 0.06 per square metre
+// before the gaps close. These are that, and no more.
+//
+// The two numbers mean different things and it matters. NEAR_PACK plants
+// STEMS, so it stays near the density authored in scenery.js. CARD_PACK is
+// not stems at all: it is the inside of the wood drawn as paper, and its
+// density is a visual quantity — how much foliage stands between you and the
+// backdrop — not an ecological one. A wood is not 30 trees per stem; a wood
+// is opaque, and this is what opaque costs in quads.
+const NEAR_PACK = [1.4, 2.2];   // the second row denser than the first
+const CARD_ROWS = 4;            // rows of camera-facing paper behind them
+const CARD_GAP = 3.6;           // m: TIGHT, so the rows overlap into a mass
+const CARD_PACK = [5.5, 6.5, 7.5, 8.5];
+// Light through a canopy is Beer-Lambert — a constant FRACTION per layer, not
+// a constant amount. At 0.68 the backdrop behind six layers of wood sits at
+// ten percent of full sun, which is what "wayyy down" measures out to.
+const LAYER_SHADE = 0.68;
+const NEAR_DEPTH = NEAR_ROWS * NEAR_GAP;            // 12 m of real trees
+const CARD_DEPTH = CARD_ROWS * CARD_GAP;            // 14.4 m of paper
+const BACK_AT = NEAR_DEPTH + CARD_DEPTH;            // where the backdrop stands
+const FERN_DEPTH = 7;           // m of bracken, from the treeline inward
+const FERN_STEP = 1.5;          // m along the road between fern clumps
+const FERN_H = 0.55;            // m: a frond stands about knee high
+const DARK_H = 10.0;            // m: under the canopy, so it never breaks the skyline
+// 7.2 m was set when the wood in front of it was five rows of real trees. From
+// the road, 26 m back, a 7.2 m wall covers about 15 degrees of elevation and a
+// 15 m tree covers 30 — so with any gap in the canopy you saw SKY over the top
+// of the backdrop, which is the one thing it exists to prevent.
 const DARK_DEPTH = 70;          // m of wood the dark mass covers, then it lands
 const DARK_CLEAR = 14;          // m: nearer than this the mass is invisible
 const DARK_SOLID = 75;          // m: by here it is the full darkness
@@ -59,6 +106,28 @@ const LOD_FAR = 520;            // m: one baked cross-card, then nothing
 // --- the fringe -------------------------------------------------------------
 const FRINGE_H = 0.34;          // m of blade standing at the edge of the verge
 const FRINGE_STEP = 1.6;        // m between tufts along it
+
+// ---------------------------------------------------------------------------
+// THE OFFSET BAND FOLDS THROUGH THE CENTRE OF A CORNER.
+//
+// `pointAt(path, i, lat)` steps lat metres to the left of sample i. The area
+// element of that mapping is (1 - k*lat), where k is the curvature — so at
+// lat = 1/k it is ZERO, and every sample along the road maps to the same
+// point: the centre of the arc. Past it the band turns inside out.
+//
+// The megatrack runs a 720-degree loop at R38 and the snail winds to R34. On
+// the INSIDE of those, wood planted 26 m out and bracken 7 m out is most of
+// the way to the centre, and what it draws is a fan of cards radiating from a
+// single point. It was invisible from the road and unmistakable in one
+// photograph taken from above.
+//
+// `roadSlack` cannot catch this — the middle of a hairpin is not a road, it is
+// grass, and the fold lands on legal ground. It is a defect of the
+// COORDINATES, so it has to be tested in them.
+const FOLD_MARGIN = 0.38;       // never place past 62% of the way to the centre
+function unfolded(p, i, lat) {
+  return 1 - (p.k?.[i] || 0) * lat > FOLD_MARGIN;
+}
 
 // Deterministic, so the same track always grows the same wood.
 function rng(seed) {
@@ -336,6 +405,93 @@ function bakeImpostor(renderer, parts, size = 512) {
   return { texture: rt.texture, size: half * 2, base: c.y - box.min.y };
 }
 
+// ---------------------------------------------------------------------------
+// PAPER TREES — one quad each, turned to face the camera every frame.
+//
+// Adam: "flat paper trees that rotate to face the player". The turning is the
+// whole point and it is why this beats the fixed cross-card it sits in front
+// of: a cross has area from every direction but always shows you its seam,
+// and a single fixed card goes to a line at a grazing angle. A card that
+// turns is always full width and never has a seam, for half the triangles.
+//
+// IT YAWS ONLY. A billboard that also pitches toward the camera lies down as
+// you climb above it, and this builder has a fly camera, so that failure is
+// not hypothetical — it would be the first thing seen from the air. Trees
+// rotate about their trunks. The horizon is not one of the axes.
+//
+// Done in the vertex shader rather than by rewriting matrices on the CPU:
+// twelve thousand instances is twelve thousand matrix composes a frame
+// otherwise, for a wood that has not changed.
+function paperGeometry() {
+  // A unit quad standing ON its origin: y from 0 to 1, x from -0.5 to 0.5.
+  // The instance matrix carries where and how big. Nothing here knows about
+  // the impostor's own framing, which is what made the fixed card ambiguous.
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(
+    [-0.5, 0, 0, 0.5, 0, 0, 0.5, 1, 0, -0.5, 1, 0], 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+  g.setIndex([0, 1, 2, 0, 2, 3]);
+  g.computeBoundingSphere();
+  return g;
+}
+
+function paperMaterial(texture) {
+  // The impostor is baked UNLIT, so it is albedo and it is lit here — by one
+  // number. A wood two hundred metres deep does not need a normal; it needs
+  // to be the right brightness and to sit in the same fog as everything else,
+  // or it floats in front of the sky like a sticker.
+  const mat = new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      { uMap: { value: texture }, uSun: { value: new THREE.Color(1, 1, 1) } },
+    ]),
+    vertexShader: `
+      attribute vec3 tint;
+      varying vec2 vUv;
+      varying vec3 vTint;
+      #include <common>
+      #include <fog_pars_vertex>
+      void main() {
+        vUv = uv;
+        vTint = tint;
+        // The instance matrix is translation and scale only for these, so its
+        // columns give both without a decompose.
+        vec3 origin = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+        float sx = length(instanceMatrix[0].xyz);
+        float sy = length(instanceMatrix[1].xyz);
+        // Face the camera in the HORIZONTAL plane. Degenerate exactly
+        // overhead, where a tree is a dot, so the fallback never shows.
+        vec3 toCam = cameraPosition - origin;
+        vec2 flat2 = toCam.xz;
+        float len = length(flat2);
+        vec2 dir = len > 1e-4 ? flat2 / len : vec2(0.0, 1.0);
+        vec3 right = vec3(dir.y, 0.0, -dir.x);
+        vec3 world = origin + right * (position.x * sx) + vec3(0.0, position.y * sy, 0.0);
+        vec4 mvPosition = viewMatrix * vec4(world, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `
+      uniform sampler2D uMap;
+      uniform vec3 uSun;
+      varying vec2 vUv;
+      varying vec3 vTint;
+      #include <common>
+      #include <fog_pars_fragment>
+      void main() {
+        vec4 t = texture2D(uMap, vUv);
+        if (t.a < 0.38) discard;
+        gl_FragColor = vec4(t.rgb * vTint * uSun, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`,
+    fog: true,
+  });
+  mat.uniforms.uMap.value = texture;   // merge() clones, so re-point the map
+  return mat;
+}
+
 function crossGeometry(w, h, base) {
   const parts = [];
   for (const yaw of [0, Math.PI / 2]) parts.push(card({ x: 0, y: 0, w: 1, h: 1 }, w, h, { rows: 1, yaw, at: [0, -base, 0] }));
@@ -358,7 +514,7 @@ export class Flora {
     this.forest = new THREE.Group();
     this.group.add(this.forest);
     this.cells = [];
-    this.counts = { trees: 0, cells: 0, blades: 0, darkRuns: 0 };
+    this.counts = { trees: 0, paper: 0, cells: 0, blades: 0, ferns: 0, darkRuns: 0 };
   }
 
   // -- which section of scenery a sample belongs to --------------------------
@@ -411,6 +567,9 @@ export class Flora {
         { geometry: sp.foliage, material: sp.mat },
         { geometry: sp.trunk, material: { map: this.mat.bark.map, alphaTest: 0 } },
       ]);
+      // The paper layer. One quad geometry shared by both species; only the
+      // material differs, because only the baked texture differs.
+      sp.paper = paperMaterial(sp.card.texture);
       sp.cross = crossGeometry(sp.card.size, sp.card.size, sp.card.base);
       sp.crossMat = new THREE.MeshStandardMaterial({
         map: sp.card.texture, alphaTest: 0.35, side: THREE.DoubleSide,
@@ -419,7 +578,19 @@ export class Flora {
       sp.crossMat.shadowSide = THREE.DoubleSide;
     }
     this.species = { conifer, broad };
+    this.paperGeom = paperGeometry();
     return true;
+  }
+
+  // The paper layer is lit by ONE number, so that number has to come from the
+  // same measured sky as everything else or the far wood changes weather
+  // independently of the near wood. 0.62 of the sun's own colour was chosen by
+  // photographing the two side by side and matching the near foliage.
+  paperLight() {
+    const s = this.look?.sun;
+    const c = new THREE.Color(0xffffff);
+    if (s) c.copy(s.color).multiplyScalar(Math.min(1.15, 0.42 + s.intensity * 0.22));
+    return c;
   }
 
   // -------------------------------------------------------------------------
@@ -442,8 +613,8 @@ export class Flora {
     const push = (t) => {
       const key = `${Math.floor(t.x / CELL)},${Math.floor(t.y / CELL)}`;
       let b = buckets.get(key);
-      if (!b) buckets.set(key, b = { conifer: [], broad: [] });
-      b[t.sp].push(t);
+      if (!b) buckets.set(key, b = { conifer: [], broad: [], paperConifer: [], paperBroad: [] });
+      b[t.paper ? (t.sp === 'conifer' ? 'paperConifer' : 'paperBroad') : t.sp].push(t);
     };
     const step = 5;                                  // m along the road between attempts
     const di = Math.max(1, Math.round(step / p.ds));
@@ -453,12 +624,22 @@ export class Flora {
         const kind = this.kindFor(i, side);
         if (!kind.trees) continue;
         const base = this.treeLine(i, side, kind);
+        // Layer 1 and layer 3 are planted by the same loop, because they are
+        // the same wood — only the thing that draws a tree changes. `paper`
+        // says which, and `layer` counts through all six for the shading, so
+        // the darkness carries on across the join instead of restarting.
+        const ROWS = NEAR_ROWS + CARD_ROWS;
         for (let row = 0; row < ROWS; row++) {
-          const n = (kind.trees / 10000) * (step * ROW_GAP) * ROW_PACK[row] * this.q.trees;
+          const paper = row >= NEAR_ROWS;
+          const gap = paper ? CARD_GAP : NEAR_GAP;
+          const pack = paper ? CARD_PACK[row - NEAR_ROWS] : NEAR_PACK[row];
+          const at = paper ? NEAR_DEPTH + (row - NEAR_ROWS) * CARD_GAP : row * NEAR_GAP;
+          const n = (kind.trees / 10000) * (step * gap) * pack * this.q.trees;
           for (let k = 0; k < Math.ceil(n); k++) {
             if (k > n - 1 && r() > n - Math.floor(n)) continue;
-            const lat = side * (base + row * ROW_GAP + r() * ROW_GAP);
+            const lat = side * (base + at + r() * gap);
             const j = Math.min(p.n - 1, i + Math.round(((r() - 0.5) * step) / p.ds));
+            if (!unfolded(p, j, lat)) continue;
             const pt = pointAt(p, j, lat);
             // EXACT clearance to the nearest road, not the chamfer grid. This
             // is what keeps a wood out from under a viaduct deck or inside the
@@ -466,9 +647,12 @@ export class Flora {
             // of the OTHER road that happens to be 10 m away.
             if (g.roadSlack(pt.x, pt.y) < TREE_CLEAR) continue;
             push({
-              sp: r() < kind.conifer ? 'conifer' : 'broad',
+              sp: r() < kind.conifer ? 'conifer' : 'broad', paper,
               x: pt.x, y: pt.y, h: g.height(pt.x, pt.y),
-              yaw: r() * Math.PI * 2, scale: 0.74 + r() * 0.6,
+              // A paper tree has no depth to hide behind, so it leans on
+              // variety instead: a wider spread of sizes than the real rows
+              // get, or four rows of identical cut-outs read as wallpaper.
+              yaw: r() * Math.PI * 2, scale: (paper ? 0.62 : 0.74) + r() * (paper ? 0.85 : 0.6),
               tint: 0.78 + r() * 0.4, row,
             });
           }
@@ -482,7 +666,61 @@ export class Flora {
 
   buildCell(key, b) {
     const [cx, cy] = key.split(',').map(Number);
-    const cell = { x: (cx + 0.5) * CELL, y: (cy + 0.5) * CELL, lods: [], n: 0 };
+    const cell = { x: (cx + 0.5) * CELL, y: (cy + 0.5) * CELL, lods: [], paper: [], n: 0 };
+
+    // -- layer 3: the paper rows --------------------------------------------
+    // These have no levels of detail. They ARE the level of detail, and they
+    // are already one quad; there is nothing cheaper to fall back to except
+    // the backdrop behind them, which is always drawn anyway.
+    for (const name of ['paperConifer', 'paperBroad']) {
+      const list = b[name];
+      if (!list.length) continue;
+      const sp = this.species[name === 'paperConifer' ? 'conifer' : 'broad'];
+      const mat4 = new THREE.InstancedBufferAttribute(new Float32Array(list.length * 16), 16);
+      const tint = new THREE.InstancedBufferAttribute(new Float32Array(list.length * 3), 3);
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion();
+      const pos = new THREE.Vector3(), scl = new THREE.Vector3();
+      list.forEach((t, i) => {
+        // NO rotation in the matrix: the shader decides which way this faces,
+        // and a baked-in yaw would fight it. The shader reads scale out of the
+        // column lengths, which only holds while the rotation is identity.
+        pos.set(t.x, t.h, -t.y);
+        // ITS OWN species' card size. A conifer bakes to a 15 m card and a
+        // broadleaf to 9.5; one size for both would grow every paper oak into
+        // a pine's silhouette standing behind real oaks half its height.
+        const w = sp.card.size * t.scale;
+        scl.set(w, w, w);
+        m.compose(pos, q.identity(), scl);
+        m.toArray(mat4.array, i * 16);
+        const shade = t.tint * Math.pow(LAYER_SHADE, t.row);
+        tint.setXYZ(i, shade * 0.94, shade, shade * 0.84);
+      });
+      // Its own geometry, sharing the quad's buffers. `tint` is per instance,
+      // so it cannot live on the one shared quad — every cell would overwrite
+      // the last, and the whole wood would take the colours of whichever cell
+      // was built most recently.
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', this.paperGeom.getAttribute('position'));
+      geo.setAttribute('uv', this.paperGeom.getAttribute('uv'));
+      geo.setIndex(this.paperGeom.getIndex());
+      geo.setAttribute('tint', tint);
+      const im = new THREE.InstancedMesh(geo, sp.paper, list.length);
+      im.instanceMatrix = mat4;
+      im.castShadow = false; im.receiveShadow = false;
+      // The shader moves every vertex, so three's computed bounds are wrong.
+      // Culling is still wanted — one bounding sphere on the CELL, inflated by
+      // the tallest tree it can hold, is both correct and cheap. Switching
+      // culling off instead draws every wood on the track from inside a
+      // tunnel, which is how a forest costs frames while invisible.
+      const big = this.species.conifer.card.size * 1.5;
+      geo.boundingSphere = new THREE.Sphere(
+        new THREE.Vector3(cell.x, 0, -cell.y), CELL * 0.75 + big);
+      this.forest.add(im);
+      cell.paper.push(im);
+      cell.n += list.length;
+      this.counts.paper += list.length;
+    }
+
     for (const name of ['conifer', 'broad']) {
       const list = b[name];
       if (!list.length) continue;
@@ -514,7 +752,7 @@ export class Flora {
         // FRACTION per layer, not a constant amount, so the fifth row is not
         // five steps darker, it is 0.66^4 — a fifth of the light. Which is
         // what the eye reads as a wall with a wood behind it.
-        const shade = t.tint * Math.pow(0.66, t.row);
+        const shade = t.tint * Math.pow(LAYER_SHADE, t.row);
         tint.setXYZ(i, shade * 0.94, shade, shade * 0.84);
       });
       const mesh = (geo, material, shadow) => {
@@ -643,14 +881,15 @@ export class Flora {
         // there is no wood to draw here at all.
         // outward from the near edge, stopping at the FIRST intrusion: a road
         // can cross the middle of a 70 m wedge while both its ends are clear.
-        let depth = DARK_ROW * ROW_GAP;
-        for (let f = DARK_ROW * ROW_GAP; f <= DARK_DEPTH; f += 4) {
+        let depth = BACK_AT;
+        for (let f = BACK_AT; f <= DARK_DEPTH; f += 4) {
+          if (!unfolded(p, i, run.side * (base + f))) break;
           const q = pointAt(p, i, run.side * (base + f));
           if (g.roadSlack(q.x, q.y) < 1) break;
           depth = f;
         }
-        if (depth <= DARK_ROW * ROW_GAP) { prev = null; continue; }
-        const inner = pointAt(p, i, run.side * (base + DARK_ROW * ROW_GAP));
+        if (depth <= BACK_AT || !unfolded(p, i, run.side * (base + BACK_AT))) { prev = null; continue; }
+        const inner = pointAt(p, i, run.side * (base + BACK_AT));
         if (g.roadSlack(inner.x, inner.y) < 1) { prev = null; continue; }
         const outer = pointAt(p, i, run.side * (base + depth));
         const hi = g.height(inner.x, inner.y), ho = g.height(outer.x, outer.y);
@@ -708,6 +947,7 @@ export class Flora {
         const run = side > 0 ? p.runL[i] : p.runR[i];
         if (run <= 1.4) continue;                    // a wall right at the kerb
         const lat = side * (p.w[i] + run + 0.15 + r() * 0.5);
+        if (!unfolded(p, i, lat)) continue;
         const pt = pointAt(p, i, lat);
         const y = surfaceY(p, i, side * p.w[i]) - GROUND.EPS;
         const rect = rects[Math.floor(r() * rects.length)];
@@ -720,6 +960,86 @@ export class Flora {
           }));
         }
         this.counts.blades += 2;
+      }
+      flush();
+    }
+    return this;
+  }
+
+  // -------------------------------------------------------------------------
+  // LAYER 2 — THE FERN RIBBON.
+  //
+  // Adam: "a flat ribbon band of like ferns and such". It does a specific job
+  // that the trees cannot: it hides the JOIN. A trunk is a cylinder ending on
+  // a triangle, and that meeting is the one place a wood always gives itself
+  // away, because in a real wood you never see the bottom of a tree — you see
+  // bracken, and the trunk goes into it.
+  //
+  // THERE IS NO FERN ON ambientCG. Every Foliage set there is grass or seed
+  // heads; I checked all eight by looking at them rather than by their names.
+  // But LeafSet019 is fir sprigs, and a fir sprig and a bracken frond have the
+  // same silhouette — a feathered blade tapering to a point. Tilted off
+  // vertical and drooped at the tip, it is bracken. No new asset was needed,
+  // which is the second time this atlas has paid for itself.
+  // -------------------------------------------------------------------------
+  undergrowth() {
+    if (!this.q.fringe || !this.mat?.needle) return this;
+    const p = this.path, g = this.ground;
+    const rects = this.look.cutouts('needle');
+    if (!rects.length) return this;
+    const r = rng(4242);
+    const PIECE = 260;
+    this.fernParts = [];
+    for (const side of [1, -1]) {
+      let parts = [], mark = 0;
+      const flush = () => {
+        if (!parts.length) return;
+        const m = new THREE.Mesh(assemble(parts), this.mat.needle);
+        m.castShadow = false; m.receiveShadow = false;
+        this.group.add(m);
+        this.fernParts.push(m);
+        parts = [];
+      };
+      for (let s = 0; s < p.length; s += FERN_STEP) {
+        if (s - mark > PIECE) { flush(); mark = s; }
+        const i = Math.min(p.n - 1, Math.round(s / p.ds));
+        if (p.tunIn && p.tunIn[i] > 0) continue;
+        const kind = this.kindFor(i, side);
+        if (!kind.trees) continue;                  // bracken grows under trees
+        const base = this.treeLine(i, side, kind);
+        // Thicker where the wood is thicker. `pine` at 120 trees a hectare
+        // gets a full band; `scrub` at 14 gets a few clumps and a lot of gaps,
+        // which is what scrub means.
+        const clumps = Math.max(1, Math.round(kind.trees / 45));
+        for (let c = 0; c < clumps; c++) {
+          const into = r() * FERN_DEPTH;
+          const lat = side * (base - 0.4 + into);
+          const j = Math.min(p.n - 1, i + Math.round(((r() - 0.5) * FERN_STEP) / p.ds));
+          if (!unfolded(p, j, lat)) continue;
+          const pt = pointAt(p, j, lat);
+          if (g.roadSlack(pt.x, pt.y) < 1.2) continue;
+          const y = g.height(pt.x, pt.y) - GROUND.EPS;
+          // Darker the deeper in it sits — the same Beer-Lambert the trees
+          // use, so the ribbon and the rows agree about where the light went.
+          const shade = (0.72 + r() * 0.28) * Math.pow(LAYER_SHADE, into / NEAR_GAP);
+          const h = FERN_H * (0.7 + r() * 0.8);
+          // Three fronds from one root at different yaws. A frond is a plane,
+          // so one of them is edge-on from somewhere; three never are.
+          const root = r() * Math.PI * 2;
+          for (let f = 0; f < 3; f++) {
+            const rect = rects[Math.floor(r() * rects.length)];
+            parts.push(card(rect, h * 2.2, h * 1.9, {
+              rows: 2,
+              yaw: root + f * 2.09 + (r() - 0.5) * 0.5,
+              tilt: 0.55 + r() * 0.45,          // leaning out from the root
+              droop: h * (0.3 + r() * 0.3),     // and arcing back down at the tip
+              bend: h * 0.25,
+              shade,
+              at: [pt.x, y, -pt.y],
+            }));
+          }
+          this.counts.ferns += 3;
+        }
       }
       flush();
     }
@@ -744,6 +1064,17 @@ export class Flora {
     }
   }
 
+  // The paper layer carries its light in a uniform, so it has to be told when
+  // the sky changes. Called once at build; call it again if the weather does.
+  relight() {
+    const c = this.paperLight();
+    for (const name of ['conifer', 'broad']) {
+      const m = this.species?.[name]?.paper;
+      if (m) m.uniforms.uSun.value.copy(c);
+    }
+    return this;
+  }
+
   stats() { return { ...this.counts }; }
 }
 
@@ -755,5 +1086,7 @@ export async function buildFlora(renderer, path, ground, look, quality) {
   f.plant();
   f.darkness();
   f.fringe();
+  f.undergrowth();
+  f.relight();
   return f;
 }
