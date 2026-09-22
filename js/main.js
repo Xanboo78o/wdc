@@ -552,6 +552,55 @@ function hud(over, rough) {
   $('tCur').className = state.invalid ? 'bad' : '';
   $('drsLight').classList.toggle('on', car.drsOpen);
   $('padLight').style.display = hands.usingPad ? '' : 'none';
+  inputReadout(hands, car);
+}
+
+// ---------------------------------------------------------------------------
+// ?input=1 — what the game thinks is driving it.
+//
+// Added the day the wheel arrived, because "the pedals don't work" has at
+// least four causes that look identical from the driving seat: no device seen
+// at all, a device seen but no saved profile, a profile saved under a
+// DIFFERENT ORIGIN (localStorage is per-origin, and this game is reachable at
+// 127.0.0.1, at localhost and at github.io — three separate stores), or a
+// profile whose device id no longer matches. Each of those sends the code down
+// the Xbox path, where steering happens to work off axes[0] and the pedals are
+// looked for on TRIGGERS that a wheel does not have. So: steering works,
+// pedals do nothing — the same symptom from four different faults.
+//
+// Guessing between them cost an hour. This prints the answer.
+let _inputBox = null;
+function inputReadout(hands, car) {
+  if (!new URLSearchParams(location.search).has('input')) return;
+  if (!_inputBox) {
+    _inputBox = document.createElement('div');
+    _inputBox.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:99;padding:8px 10px;'
+      + 'background:rgba(8,10,13,.86);color:#e8eaee;font:12px/1.55 ui-monospace,monospace;'
+      + 'border:1px solid #2a3039;border-radius:6px;white-space:pre;pointer-events:none';
+    document.body.appendChild(_inputBox);
+  }
+  const pads = (navigator.getGamepads ? [...navigator.getGamepads()] : []).filter(Boolean);
+  // Read the store ONCE, not sixty times a second. It cannot change while the
+  // page is open, and a synchronous localStorage hit per frame is exactly the
+  // kind of thing that turns a diagnostic into the thing being diagnosed.
+  if (_inputBox._prof === undefined) {
+    _inputBox._prof = null; _inputBox._err = '';
+    try {
+      const raw = localStorage.getItem('wdc.wheel');
+      _inputBox._prof = raw ? JSON.parse(raw) : null;
+    } catch (e) { _inputBox._err = String(e.message || e); }
+  }
+  const prof = _inputBox._prof, storeErr = _inputBox._err;
+  const p = pads[0];
+  const match = !!(prof && p && p.id === prof.id);
+  const L = [];
+  L.push(`origin    ${location.origin}`);
+  L.push(`devices   ${pads.length}${p ? '  ' + p.id.slice(0, 46) : '  — press a button on the wheel'}`);
+  L.push(`profile   ${prof ? prof.id.slice(0, 46) : (storeErr || 'NONE SAVED AT THIS ORIGIN')}`);
+  L.push(`match     ${match ? 'YES — using the wheel' : 'NO — falling back to the Xbox mapping'}`);
+  if (p) L.push(`axes      ${p.axes.map((v, i) => `${i}:${v.toFixed(2)}`).join(' ')}`);
+  L.push(`car       steer ${car.delta.toFixed(3)}   throttle ${car.throttle.toFixed(2)}   brake ${car.brake.toFixed(2)}`);
+  _inputBox.textContent = L.join('\n');
 }
 
 // ---------------------------------------------------------------------------
