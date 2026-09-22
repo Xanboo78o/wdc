@@ -53,10 +53,12 @@ const TRACKS = [
   // wheel's pairing code — ?auto=test:f1 skips the menu, which is why the
   // phone would not connect to it.
   ['test', 'The test map', 'HAND-BUILT'],
-  // Modelled in Blender and read in by tools/glbtrack.mjs. It carries real
-  // elevation in `z`, which nothing on this side reads yet — so it drives flat
-  // for now, and that is the next thing it wants.
-  ['adam1', "Adam's first track", 'BLENDER'],
+  // Adam's own, modelled outside this project and read in by
+  // tools/importtrack.mjs. Both carry real elevation in `z`, which nothing on
+  // this side reads yet — so they drive flat for now, and that is the next
+  // thing they want.
+  ['street', 'Street Circuit', "ADAM'S OWN"],
+  ['adam1', "Adam's first track", "ADAM'S OWN"],
   ['monza', 'Monza', 'ITALY'],
   ['zandvoort', 'Zandvoort', 'NETHERLANDS'],
   ['suzuka', 'Suzuka', 'JAPAN'],
