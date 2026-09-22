@@ -402,7 +402,21 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
   const base = new THREE.Color(land.col);
   const c = new THREE.Color();
 
-  const CELL = 26;
+  // THE CELL IS SET BY HOW MUCH THE LAND MOVES, not by a constant.
+  //
+  // Between two grid points this mesh is a flat CHORD, and where that chord
+  // runs above the road the grass wins the depth test and stands over the
+  // tarmac. 26 m was chosen when every circuit was flat and the only elevation
+  // came from a 30 m DEM. A circuit modelled with thirty metres of elevation
+  // is a different problem: measured on Street, 24 of 2,325 points on the
+  // racing surface had grass at or above the road, worst +0.387 m — and the
+  // 0.35 m sink in World.groundY cannot cover a chord error twice its size.
+  //
+  // The error falls with the SQUARE of the cell, so this is a square root.
+  // Below about ten metres of rise nothing changes and the surveyed circuits
+  // that were always fine stay byte-identical.
+  const rise = world?.elev?.range ? world.elev.range[1] - world.elev.range[0] : 0;
+  const CELL = rise > 10 ? Math.max(9, Math.min(26, 26 * Math.sqrt(10 / rise))) : 26;
   // How far out this grid has to go, measured off the plate instead of
   // guessed. A fixed hole+60 left ground missing from about 300 m to 700 m
   // out — 230 of 3523 sampled points with nothing under them at all.
