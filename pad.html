@@ -42,14 +42,16 @@
 </style>
 </head>
 <body>
-<h1>PAD INSPECTOR</h1>
+<h1>WHEEL SETUP</h1>
 <div class="sub">
-  Every axis and button on every connected controller, live.
-  <b>Press a button or move a pedal first</b> — browsers hide gamepads until you do.
+  <b>1.</b> Press any button on the wheel. (Browsers hide a controller until you touch it.)<br>
+  <b>2.</b> Click a green button below. It will tell you what to do, one step at a time.<br>
+  <b>3.</b> When it finishes, the game just works. Everything under this is only there if
+  something goes wrong.
 </div>
 <div id="cal">
-  <button id="calBtn">CALIBRATE THIS WHEEL</button>
-  <button id="btnBtn">MAP THE BUTTONS</button>
+  <button id="calBtn">SET UP WHEEL &amp; PEDALS</button>
+  <button id="btnBtn">SET UP BUTTONS</button>
   <span id="calState"></span>
   <div id="calStep"></div>
 </div>
@@ -138,8 +140,7 @@ function draw() {
   PADS.innerHTML = html;
   if (REPORTOVERRIDE) { REPORT.textContent = REPORTOVERRIDE; requestAnimationFrame(draw); return; }
   REPORT.textContent =
-    'COPY THIS AND SEND IT TO ME\n' +
-    'Move the wheel lock to lock, then press each pedal all the way down, one at a time.\n\n' +
+    '(This part is just a live readout. You do not need it unless something is wrong.)\n\n' +
     notes.join('\n\n');
   requestAnimationFrame(draw);
 }
@@ -248,7 +249,7 @@ function calCapture() {
 }
 
 calBtn.onclick = () => {
-  if (!livePad()) { calState.textContent = 'press a button on the wheel first so the browser admits it exists'; return; }
+  if (!livePad()) { calState.textContent = 'Press a button on the wheel first, then click this again.'; return; }
   BTN.at = -1;                       // the two flows share one panel
   CAL.at = 0; CAL.got = {}; CAL.rest = null; REPORTOVERRIDE = null;
   calState.textContent = '';
@@ -341,7 +342,7 @@ function btnNext() {
 }
 
 btnBtn.onclick = () => {
-  if (!livePad()) { calState.textContent = 'press a button on the wheel first so the browser admits it exists'; return; }
+  if (!livePad()) { calState.textContent = 'Press a button on the wheel first, then click this again.'; return; }
   CAL.at = -1;                       // the two flows share one panel
   BTN.at = 0; BTN.got = {}; BTN.restB = null; REPORTOVERRIDE = null;
   calState.textContent = '';
