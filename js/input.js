@@ -58,6 +58,16 @@ const approach = (v, target, up, dn) =>
 
 const PAD_BUTTONS = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, back: 8, start: 9 };
 
+// A calibration saved by pad.html, if this origin has one.
+function readStored() {
+  try {
+    const raw = localStorage.getItem('wdc.wheel');
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    return (p && p.steer && p.throttle && p.brake) ? p : null;
+  } catch { return null; }          // blocked storage: keyboard still works
+}
+
 // The driver's hands, as rates. Exported so tools/human.mjs drives with the
 // SAME numbers instead of a copy that silently drifts from the game.
 //
@@ -164,15 +174,38 @@ export class Hands {
    */
   _profile() {
     if (this._prof !== undefined) return this._prof;
-    this._prof = null;
-    try {
-      const raw = localStorage.getItem('wdc.wheel');
-      if (raw) {
-        const p = JSON.parse(raw);
-        if (p && p.steer && p.throttle && p.brake) this._prof = p;
-      }
-    } catch { /* private browsing, blocked storage: keyboard still works */ }
+    this._prof = readStored();
     return this._prof;
+  }
+
+  /**
+   * Load a wheel profile, from storage or from the repo.
+   *
+   * WHY THERE IS A FILE. localStorage is per ORIGIN, and this game is reachable
+   * at 127.0.0.1:8176, at localhost:8176 and at xanboo78o.github.io — three
+   * separate stores. Calibrate in one, drive in another, and the profile is
+   * simply not there. The code then falls down the Xbox path, where steering
+   * works off axes[0] by luck and the pedals are hunted for on TRIGGERS a
+   * wheel does not have. Symptom: the steering works and the pedals are dead,
+   * with nothing anywhere saying why. That cost an evening.
+   *
+   * So a calibration also ships as data/wheel.json, which is served from
+   * whatever origin the game is on and cannot go missing. Storage still wins
+   * when it has something — a calibration you just did on the machine in front
+   * of you should beat a file committed last week.
+   */
+  async loadProfile(base = './') {
+    const stored = readStored();
+    if (stored) { this._prof = stored; return stored; }
+    try {
+      const r = await fetch(`${base}data/wheel.json`);
+      if (r.ok) {
+        const p = await r.json();
+        if (p && p.steer && p.throttle && p.brake) { this._prof = p; return p; }
+      }
+    } catch { /* no file: keyboard and pads still work exactly as before */ }
+    this._prof = null;
+    return null;
   }
 
   _readWheel(p, prof) {
@@ -212,7 +245,16 @@ export class Hands {
       if (!p || !p.connected) continue;
       this.pad = p;
       const prof = this._profile();
-      if (prof && p.id === prof.id) {
+      // MATCH ON SHAPE, NOT ON NAME. Requiring p.id === prof.id meant any
+      // difference in the device string — a different browser build, a
+      // profile that travelled from another machine, a wheel reconnected
+      // under a slightly different name — silently dropped a perfectly good
+      // calibration and fell through to the Xbox mapping. What actually
+      // matters is whether this device HAS the axes the profile refers to: an
+      // Xbox pad has four, so a profile needing axis 5 correctly declines it,
+      // and a wheel that has them is a wheel whatever it calls itself.
+      const needs = Math.max(prof ? prof.steer.ax : 0, prof ? prof.throttle.ax : 0, prof ? prof.brake.ax : 0);
+      if (prof && p.axes.length > needs) {
         const now = {};
         for (const [name, idx] of Object.entries(PAD_BUTTONS)) now[name] = !!(p.buttons[idx] && p.buttons[idx].pressed);
         for (const name in now) if (now[name] && !this._padPrev[name]) this.pressed.add('pad:' + name);

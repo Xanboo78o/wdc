@@ -142,6 +142,9 @@ async function start() {
       if (r.ok) registerAero(k, makeAero(await r.json()));
     } catch { /* fall back to the constants; the car still drives */ }
   }
+  // The wheel's calibration, before anything can be driven. Storage first, then
+  // data/wheel.json — see Hands.loadProfile for why a file exists at all.
+  await hands.loadProfile('./');
   const t = await Track.load(pickTrack);
   const spec = CARS[pickCar];
   // buildLines gives the racing line AND the centreline, plus `at(which, grip)`
@@ -574,30 +577,35 @@ function inputReadout(hands, car) {
   if (!new URLSearchParams(location.search).has('input')) return;
   if (!_inputBox) {
     _inputBox = document.createElement('div');
+    _inputBox.id = 'inputBox';
     _inputBox.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:99;padding:8px 10px;'
       + 'background:rgba(8,10,13,.86);color:#e8eaee;font:12px/1.55 ui-monospace,monospace;'
       + 'border:1px solid #2a3039;border-radius:6px;white-space:pre;pointer-events:none';
     document.body.appendChild(_inputBox);
   }
   const pads = (navigator.getGamepads ? [...navigator.getGamepads()] : []).filter(Boolean);
-  // Read the store ONCE, not sixty times a second. It cannot change while the
-  // page is open, and a synchronous localStorage hit per frame is exactly the
-  // kind of thing that turns a diagnostic into the thing being diagnosed.
-  if (_inputBox._prof === undefined) {
-    _inputBox._prof = null; _inputBox._err = '';
-    try {
-      const raw = localStorage.getItem('wdc.wheel');
-      _inputBox._prof = raw ? JSON.parse(raw) : null;
-    } catch (e) { _inputBox._err = String(e.message || e); }
+  // Report the profile the game is ACTUALLY USING, not a fresh read of
+  // localStorage. Those are different things now that a profile can also come
+  // from data/wheel.json, and a diagnostic that reports a different source
+  // from the one in play is worse than no diagnostic.
+  const prof = hands._prof || null;
+  let storeErr = '';
+  if (_inputBox._where === undefined) {
+    _inputBox._where = 'none';
+    try { _inputBox._where = localStorage.getItem('wdc.wheel') ? 'localStorage (calibrated here)' : (prof ? 'data/wheel.json (shipped)' : 'none'); }
+    catch (e) { storeErr = String(e.message || e); }
   }
-  const prof = _inputBox._prof, storeErr = _inputBox._err;
   const p = pads[0];
-  const match = !!(prof && p && p.id === prof.id);
+  // Same shape test the input layer uses: does this device HAVE the axes the
+  // profile names? Matching on the device string is what broke before.
+  const needs = prof ? Math.max(prof.steer.ax, prof.throttle.ax, prof.brake.ax) : 0;
+  const match = !!(prof && p && p.axes.length > needs);
   const L = [];
   L.push(`origin    ${location.origin}`);
   L.push(`devices   ${pads.length}${p ? '  ' + p.id.slice(0, 46) : '  — press a button on the wheel'}`);
-  L.push(`profile   ${prof ? prof.id.slice(0, 46) : (storeErr || 'NONE SAVED AT THIS ORIGIN')}`);
-  L.push(`match     ${match ? 'YES — using the wheel' : 'NO — falling back to the Xbox mapping'}`);
+  L.push(`profile   ${prof ? prof.id.slice(0, 46) : (storeErr || 'NONE — no calibration and no data/wheel.json')}`);
+  L.push(`   from   ${_inputBox._where}`);
+  L.push(`match     ${match ? `YES — wheel ax ${prof.steer.ax}, pedals ${prof.throttle.ax}/${prof.brake.ax}` : 'NO — falling back to the Xbox mapping'}`);
   if (p) L.push(`axes      ${p.axes.map((v, i) => `${i}:${v.toFixed(2)}`).join(' ')}`);
   L.push(`car       steer ${car.delta.toFixed(3)}   throttle ${car.throttle.toFixed(2)}   brake ${car.brake.toFixed(2)}`);
   _inputBox.textContent = L.join('\n');

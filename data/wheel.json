@@ -1,0 +1,8 @@
+{
+  "note": "Adam's MOZA R3, measured by pad.html on 2026-09-22 and verified against the kernel (/dev/input/js0: wheel on axis 0, pedals on axes 2 and 5, all pedals resting at -1). Shipped as a FILE because localStorage is per-origin and this game is reachable at 127.0.0.1, at localhost and at github.io — calibrating at one and driving at another is invisible and looks exactly like a broken pedal. A calibration saved on the origin you are playing at still wins over this.",
+  "id": "Gudsen R3 Racing Wheel and Pedals (Vendor: 346e Product: 0005)",
+  "saved": "2026-09-22T19:38",
+  "steer": { "ax": 0, "centre": -0.0024, "left": -0.9998, "right": 1 },
+  "throttle": { "ax": 2, "rest": -1, "full": 0.9999 },
+  "brake": { "ax": 5, "rest": -1, "full": 0.9998 }
+}
