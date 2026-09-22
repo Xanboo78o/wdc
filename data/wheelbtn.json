@@ -1,0 +1,18 @@
+{
+  "note": "SHIPPED GUESS, not a measurement. The d-pad IS measured — axes 8 and 9 are the hat on Adam's R3, confirmed from /dev/input/js0. The BUTTONS are the common positions, several bound per action so something works where the guess is wrong. A rim reports BTN_TRIGGER/BTN_THUMB/... with no semantics, so which physical button is MENU cannot be derived — only pressed. Running SET UP BUTTONS in pad.html overrides all of this.",
+  "id": "Gudsen R3 Racing Wheel and Pedals (Vendor: 346e Product: 0005)",
+  "map": {
+    "pause":   [{ "b": 9 }, { "b": 8 }, { "b": 11 }],
+    "back":    [{ "b": 10 }, { "b": 1 }],
+    "confirm": [{ "b": 0 }, { "b": 7 }],
+    "up":      { "ax": 9, "dir": -1 },
+    "down":    { "ax": 9, "dir": 1 },
+    "left":    { "ax": 8, "dir": -1 },
+    "right":   { "ax": 8, "dir": 1 },
+    "shiftUp": [{ "b": 5 }],
+    "shiftDn": [{ "b": 4 }],
+    "drs":     [{ "b": 2 }],
+    "cam":     [{ "b": 3 }],
+    "radio":   [{ "b": 6 }]
+  }
+}

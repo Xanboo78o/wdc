@@ -69,6 +69,14 @@ const PAD_BUTTONS = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, back: 8, start: 9 };
 // wheel needs no code change, only two minutes of pressing things.
 function controlDown(p, c) {
   if (!c) return false;
+  // An ARRAY means several candidates for one action. That is not sloppiness,
+  // it is the only honest thing to ship without the wheel in front of me: the
+  // R3 reports BTN_TRIGGER, BTN_THUMB, BTN_THUMB2 ... — generic joystick codes
+  // carrying no meaning, so nothing in software can know which one is MENU.
+  // Binding the two or three usual positions means the action works even where
+  // the guess was wrong, at the cost of a spare button doing the same job.
+  // One press into pad.html replaces the whole guess with the truth.
+  if (Array.isArray(c)) return c.some(x => controlDown(p, x));
   if (c.b != null) return !!(p.buttons[c.b] && p.buttons[c.b].pressed);
   if (c.ax != null) {
     const v = p.axes[c.ax];

@@ -362,6 +362,23 @@ function loop(now) {
     return;
   }
 
+  // THE PADDLES ARE THE SELECTOR — drive and reverse, the real one.
+  //
+  // Not the gearbox: js/gearbox.js invents ratios so the engine has something
+  // to sing and states outright that it does not change how the car
+  // accelerates. `selector` is the thing that is actually mechanical —
+  // physics.js reads it and caps reverse at a 25 km/h crawl.
+  //
+  // Reverse only from near a standstill, because selecting it at racing speed
+  // is not a gearshift, it is a typo with consequences. Forward always.
+  if (hands.tapped('w:shiftUp') && hands.selector < 0) {
+    hands.selector = 1; toast('DRIVE');
+  }
+  if (hands.tapped('w:shiftDn') && hands.selector > 0) {
+    if (car.speed < 5) { hands.selector = -1; toast('REVERSE'); }
+    else toast('TOO FAST FOR REVERSE');
+  }
+
   if (hands.tapped('KeyC') || hands.tapped('pad:y') || hands.tapped('w:cam')) {
     view.setMode(view.mode + 1);
     toast('CAMERA ' + CAMS[view.mode]);
