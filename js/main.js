@@ -37,6 +37,7 @@ const state = {
   // HUD needs about the player in a race hangs off that one object rather than
   // being copied into `state` and going stale.
   race: null, field: null, me: null, lightsWere: 0, shown: false,
+  paused: false, menuAt: 0,
   box: null, engine: null,
 };
 const hands = new Hands();
@@ -145,6 +146,7 @@ async function start() {
   // The wheel's calibration, before anything can be driven. Storage first, then
   // data/wheel.json — see Hands.loadProfile for why a file exists at all.
   await hands.loadProfile('./');
+  await hands.loadButtons('./');
   const t = await Track.load(pickTrack);
   const spec = CARS[pickCar];
   // buildLines gives the racing line AND the centreline, plus `at(which, grip)`
@@ -335,7 +337,32 @@ function loop(now) {
   const { track, line, car, view } = state;
   const spec = car.spec;
 
-  if (hands.tapped('KeyC') || hands.tapped('pad:y')) {
+  // ---- the pause menu ----------------------------------------------------
+  // MENU opens it, HOME closes it, the D-PAD moves and START chooses — which
+  // is what every wheel expects and what Escape-reloads-the-page was not.
+  // READ EACH TAP EXACTLY ONCE. `tapped()` CONSUMES the event — it is a read
+  // that clears. Writing `hands.tapped('Escape') && !state.paused` therefore
+  // ate the Escape whenever the menu was open, because && evaluates the call
+  // first and then throws the result away, so the branch that closes the menu
+  // never saw it. The menu opened and would not shut.
+  const tapPause = hands.tapped('w:pause');
+  const tapBack = hands.tapped('w:back');
+  const tapEsc = hands.tapped('Escape');
+  if (!state.paused && (tapPause || tapEsc)) setPaused(true);
+  else if (state.paused && (tapPause || tapBack || tapEsc)) setPaused(false);
+  if (state.paused) {
+    if (hands.tapped('w:up') || hands.tapped('ArrowUp')) moveMenu(-1);
+    if (hands.tapped('w:down') || hands.tapped('ArrowDown')) moveMenu(1);
+    if (hands.tapped('w:confirm') || hands.tapped('Enter')) chooseMenu();
+    hands.endFrame();
+    // Drop the accumulated time. Without this, every second spent in the menu
+    // is a second the physics owes, and resuming fast-forwards the car into a
+    // barrier — the same trap the frame cap at the top of this loop exists for.
+    acc = 0;
+    return;
+  }
+
+  if (hands.tapped('KeyC') || hands.tapped('pad:y') || hands.tapped('w:cam')) {
     view.setMode(view.mode + 1);
     toast('CAMERA ' + CAMS[view.mode]);
   }
@@ -354,7 +381,6 @@ function loop(now) {
     toast(me.pitRequest ? 'BOX THIS LAP' : 'PIT CANCELLED');
   }
   if (hands.tapped('KeyM') && state.engine) toast('SOUND ' + (state.engine.toggleMute() ? 'OFF' : 'ON'));
-  if (hands.tapped('Escape')) { location.reload(); return; }
 
   let rough = 0;
   let steps = 0;
@@ -365,7 +391,7 @@ function loop(now) {
     // ---- race: the session steps every car, including yours ---------------
     if (race) {
       const inp = hands.update(FIXED_DT);
-      if (spec.drs && hands.tapped('Space')) car.drsOpen = !car.drsOpen;
+      if (spec.drs && (hands.tapped('Space') || hands.tapped('w:drs'))) car.drsOpen = !car.drsOpen;
       race.tick(FIXED_DT, {
         throttle: inp.throttle, brake: inp.brake,
         delta: inp.wheel * steerLock(car.speed),
@@ -409,7 +435,7 @@ function loop(now) {
       if (al > proj.w + 0.9) { state.offT += FIXED_DT; if (state.offT > 0.35) state.invalid = true; }
     }
 
-    if (spec.drs && hands.tapped('Space')) car.drsOpen = !car.drsOpen;
+    if (spec.drs && (hands.tapped('Space') || hands.tapped('w:drs'))) car.drsOpen = !car.drsOpen;
     if (car.brake > 0.05) car.drsOpen = false;   // DRS shuts under braking
 
     step(car, FIXED_DT, { surface, bank: proj.bank, bankDir: Math.sign(proj.curv),
@@ -572,6 +598,56 @@ function hud(over, rough) {
 // pedals do nothing — the same symptom from four different faults.
 //
 // Guessing between them cost an hour. This prints the answer.
+// ---------------------------------------------------------------------------
+// THE PAUSE MENU.
+//
+// Escape used to reload the page. That is not a pause menu, it is a way to
+// lose a lap, and on a wheel there is no Escape key within reach anyway.
+//
+// Built in JS rather than in index.html on purpose: the pre-commit hook
+// restamps the importmap only while index.html is otherwise clean, so keeping
+// new UI out of that file keeps cache-busting working.
+const MENU_ITEMS = () => [
+  ['RESUME', () => setPaused(false)],
+  [state.race ? 'REJOIN' : 'RESTART LAP', () => { setPaused(false); if (state.race) rejoin(); else resetCar(); }],
+  ['CAMERA — ' + CAMS[state.view.mode], () => { state.view.setMode(state.view.mode + 1); drawMenu(); }],
+  ['IDEAL LINE', () => { state.view.toggleLine(); drawMenu(); }],
+  ['SOUND', () => { if (state.engine) state.engine.toggleMute(); drawMenu(); }],
+  ['QUIT TO MENU', () => location.reload()],
+];
+let _menuBox = null;
+function setPaused(on) {
+  state.paused = on;
+  if (on) state.menuAt = 0;
+  if (!_menuBox) {
+    _menuBox = document.createElement('div');
+    _menuBox.id = 'pauseMenu';
+    _menuBox.style.cssText = 'position:fixed;inset:0;z-index:120;display:flex;align-items:center;'
+      + 'justify-content:center;background:rgba(6,8,11,.72);backdrop-filter:blur(3px);'
+      + 'font:16px/2.1 ui-monospace,monospace;color:#e8eaee';
+    document.body.appendChild(_menuBox);
+  }
+  _menuBox.style.display = on ? 'flex' : 'none';
+  if (on) drawMenu();
+}
+function drawMenu() {
+  if (!_menuBox) return;
+  const items = MENU_ITEMS();
+  _menuBox.innerHTML = '<div style="min-width:320px;padding:22px 26px;border:1px solid #2a3039;'
+    + 'border-radius:10px;background:rgba(10,13,17,.92)">'
+    + '<div style="letter-spacing:.2em;color:#7d8590;font-size:12px;margin-bottom:14px">PAUSED</div>'
+    + items.map(([label], i) => `<div style="padding:2px 10px;border-radius:5px;${i === state.menuAt
+        ? 'background:#35d6a0;color:#04150e;font-weight:700' : ''}">${i === state.menuAt ? '\u203a ' : '\u00a0\u00a0'}${label}</div>`).join('')
+    + '<div style="margin-top:16px;color:#7d8590;font-size:11px;letter-spacing:.1em">'
+    + 'D-PAD MOVE &middot; START SELECT &middot; HOME CLOSE</div></div>';
+}
+function moveMenu(d) {
+  const n = MENU_ITEMS().length;
+  state.menuAt = (state.menuAt + d + n) % n;
+  drawMenu();
+}
+function chooseMenu() { MENU_ITEMS()[state.menuAt][1](); }
+
 let _inputBox = null;
 function inputReadout(hands, car) {
   if (!new URLSearchParams(location.search).has('input')) return;

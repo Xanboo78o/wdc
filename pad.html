@@ -49,6 +49,7 @@
 </div>
 <div id="cal">
   <button id="calBtn">CALIBRATE THIS WHEEL</button>
+  <button id="btnBtn">MAP THE BUTTONS</button>
   <span id="calState"></span>
   <div id="calStep"></div>
 </div>
@@ -248,6 +249,7 @@ function calCapture() {
 
 calBtn.onclick = () => {
   if (!livePad()) { calState.textContent = 'press a button on the wheel first so the browser admits it exists'; return; }
+  BTN.at = -1;                       // the two flows share one panel
   CAL.at = 0; CAL.got = {}; CAL.rest = null; REPORTOVERRIDE = null;
   calState.textContent = '';
   calShow();
@@ -256,6 +258,100 @@ addEventListener('keydown', e => { if (e.code === 'Space' && CAL.at >= 0) { e.pr
 
 const saved = (() => { try { return localStorage.getItem('wdc.wheel'); } catch { return null; } })();
 if (saved) calState.innerHTML = `<span class="dim">a profile is already saved for “${JSON.parse(saved).id.slice(0, 30)}” — calibrating replaces it</span>`;
+
+// ---------------------------------------------------------------------------
+// BUTTON MAPPING — the same argument as the axes, one level up.
+//
+// A wheel rim has 128 declared buttons and perhaps a dozen real ones, and
+// nothing says which index is MENU. Worse, a D-PAD is usually not buttons at
+// all: on this R3 it is a HAT, two axes that sit at 0 and jump to ±1. So the
+// mapper accepts either, and records which.
+//
+// Controls are named by what they DO, not by where they are, so a different
+// wheel with the buttons somewhere else needs no code change — only another
+// two minutes of pressing things.
+const CONTROLS = [
+  ['pause',   'MENU — the button that should open the pause menu'],
+  ['back',    'HOME — the button that should act as Escape'],
+  ['confirm', 'START — the button that should click / confirm'],
+  ['up',      'D-PAD UP'],
+  ['down',    'D-PAD DOWN'],
+  ['left',    'D-PAD LEFT'],
+  ['right',   'D-PAD RIGHT'],
+  ['shiftUp', 'RIGHT PADDLE (upshift)'],
+  ['shiftDn', 'LEFT PADDLE (downshift)'],
+  ['radio',   'RADIO — hold this to talk to your engineer'],
+  ['drs',     'DRS'],
+  ['cam',     'CAMERA'],
+];
+const BTN = { at: -1, got: {}, restAx: null, restB: null, pad: null };
+const btnBtn = document.getElementById('btnBtn');
+
+function btnShow() {
+  if (BTN.at < 0) { calStep.innerHTML = ''; return; }
+  const [key, text] = CONTROLS[BTN.at];
+  const done = Object.entries(BTN.got).map(([k, v]) =>
+    `${k}=${v.b != null ? 'button ' + v.b : 'hat ' + v.ax + (v.dir > 0 ? '+' : '-')}`).join('  ');
+  calStep.innerHTML = `<div class="step"><b>${BTN.at + 1} of ${CONTROLS.length}</b> — ${text}` +
+    `<br><span class="dim">press it. Or press SPACE to skip if your wheel has no such control.</span>` +
+    (done ? `<br><span class="dim">so far: ${done}</span>` : '') + `</div>`;
+}
+
+// A control is whatever CHANGED since the step began: a button that went down,
+// or a hat axis that left its resting value. Sampling both is what lets one
+// flow handle a rim where the d-pad is buttons and a rim where it is a hat.
+function btnPoll() {
+  if (BTN.at < 0) return;
+  const p = livePad();
+  if (!p) return;
+  if (!BTN.restB) { BTN.restB = p.buttons.map(b => b.pressed); BTN.restAx = [...p.axes]; BTN.pad = p.id; return; }
+  for (let i = 0; i < p.buttons.length; i++) {
+    if (p.buttons[i].pressed && !BTN.restB[i]) { btnTake({ b: i }); return; }
+  }
+  for (let i = 0; i < p.axes.length; i++) {
+    const d = p.axes[i] - (BTN.restAx[i] ?? 0);
+    // Only a HAT: a steering axis or a pedal would trip this too, so require a
+    // decisive jump and ignore axes the wheel profile has already claimed.
+    if (Math.abs(d) > 0.7 && !claimedAxis(i)) { btnTake({ ax: i, dir: Math.sign(d) }); return; }
+  }
+}
+
+function claimedAxis(i) {
+  const w = (() => { try { return JSON.parse(localStorage.getItem('wdc.wheel') || 'null'); } catch { return null; } })();
+  if (!w) return false;
+  return i === w.steer.ax || i === w.throttle.ax || i === w.brake.ax;
+}
+
+function btnTake(what) {
+  BTN.got[CONTROLS[BTN.at][0]] = what;
+  btnNext();
+}
+
+function btnNext() {
+  BTN.at++;
+  BTN.restB = null; BTN.restAx = null;
+  if (BTN.at < CONTROLS.length) { btnShow(); return; }
+  const out = { id: BTN.pad, saved: new Date().toISOString().slice(0, 16), map: BTN.got };
+  try { localStorage.setItem('wdc.wheelbtn', JSON.stringify(out)); } catch { }
+  BTN.at = -1;
+  calStep.innerHTML = '';
+  calState.innerHTML = '<b class="ok">BUTTONS MAPPED</b> — saved.';
+  REPORTOVERRIDE = 'YOUR BUTTON MAP (saved to this browser)\n\n' + JSON.stringify(out, null, 2)
+    + '\n\nPaste this to me and I will ship it with the game so it works everywhere.';
+}
+
+btnBtn.onclick = () => {
+  if (!livePad()) { calState.textContent = 'press a button on the wheel first so the browser admits it exists'; return; }
+  CAL.at = -1;                       // the two flows share one panel
+  BTN.at = 0; BTN.got = {}; BTN.restB = null; REPORTOVERRIDE = null;
+  calState.textContent = '';
+  btnShow();
+};
+// SPACE skips a control here, rather than capturing one as it does in the axis
+// flow — there is nothing to hold still, and a rim without a d-pad must not be
+// a dead end.
+addEventListener('keydown', e => { if (e.code === 'Space' && BTN.at >= 0) { e.preventDefault(); btnNext(); } });
+setInterval(btnPoll, 40);
 
 addEventListener('gamepadconnected', () => {});
 draw();

@@ -58,6 +58,25 @@ const approach = (v, target, up, dn) =>
 
 const PAD_BUTTONS = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, back: 8, start: 9 };
 
+// The rim's controls, named by what they DO.
+//
+// A wheel declares 128 buttons and has about a dozen, and nothing says which
+// index is MENU. Worse, a D-PAD is usually not buttons at all — on the R3 it
+// is a HAT: two axes resting at 0 that jump to ±1. So a control is either
+// `{b: index}` or `{ax: index, dir: ±1}`, and pad.html records which.
+//
+// Everything downstream asks for 'w:pause', never for button 9. A different
+// wheel needs no code change, only two minutes of pressing things.
+function controlDown(p, c) {
+  if (!c) return false;
+  if (c.b != null) return !!(p.buttons[c.b] && p.buttons[c.b].pressed);
+  if (c.ax != null) {
+    const v = p.axes[c.ax];
+    return v != null && Math.abs(v) > 0.5 && Math.sign(v) === c.dir;
+  }
+  return false;
+}
+
 // A calibration saved by pad.html, if this origin has one.
 function readStored() {
   try {
@@ -108,6 +127,12 @@ export class Hands {
     // -1..1 while it is live, or null. Kept as a hook so this file never
     // needs the network to run — the Node harnesses import it.
     this.wheelSource = null;
+    // Which named rim controls are held right now, and the map that names
+    // them. `wheelDown` exists for hold-to-talk radio; taps come through
+    // `pressed` as 'w:<name>' like any key.
+    this.wheelDown = new Set();
+    this._btnMap = null;
+    this._wheelPrev = {};
     this.selector = 1;               // 1 drive, -1 reverse. Shift+R toggles.
 
     this._kd = e => {
@@ -208,6 +233,23 @@ export class Hands {
     return null;
   }
 
+  /** The rim's button map. Storage first, then the shipped file — same rule. */
+  async loadButtons(base = './') {
+    try {
+      const raw = localStorage.getItem('wdc.wheelbtn');
+      if (raw) { const m = JSON.parse(raw); if (m && m.map) { this._btnMap = m.map; return m.map; } }
+    } catch { /* blocked storage */ }
+    try {
+      const r = await fetch(`${base}data/wheelbtn.json`);
+      if (r.ok) { const m = await r.json(); if (m && m.map) { this._btnMap = m.map; return m.map; } }
+    } catch { /* none: the wheel still steers, the keys still work */ }
+    this._btnMap = null;
+    return null;
+  }
+
+  /** Is a named rim control held down right now? */
+  wheelHeld(name) { return this.wheelDown.has(name); }
+
   _readWheel(p, prof) {
     // Map through the two ends that were actually recorded, so an inverted
     // axis needs no flag — it inverts itself. `centre` is the RESTING value
@@ -259,8 +301,23 @@ export class Hands {
         for (const [name, idx] of Object.entries(PAD_BUTTONS)) now[name] = !!(p.buttons[idx] && p.buttons[idx].pressed);
         for (const name in now) if (now[name] && !this._padPrev[name]) this.pressed.add('pad:' + name);
         this._padPrev = now;
+        // Named rim controls, edge-detected into `pressed` exactly like keys,
+        // so main.js binds 'w:pause' and never learns a button index.
+        if (this._btnMap) {
+          this.wheelDown.clear();
+          for (const name in this._btnMap) {
+            const down = controlDown(p, this._btnMap[name]);
+            if (down) this.wheelDown.add(name);
+            if (down && !this._wheelPrev[name]) this.pressed.add('w:' + name);
+            this._wheelPrev[name] = down;
+          }
+        }
         const w = this._readWheel(p, prof);
         this.usingWheel = w.live;
+        // NOTE the buttons above are read before this returns null. A rim
+        // sitting still is not live for STEERING, but MENU must still open the
+        // pause menu — the first version bailed out here and the buttons only
+        // worked while the car was already being driven.
         return w.live ? { steer: w.steer, throttle: w.throttle, brake: w.brake } : null;
       }
       const ax = p.axes[0] || 0;
