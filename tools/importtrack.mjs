@@ -344,3 +344,74 @@ if (out === '-') process.exit(0);
 const dest = out || new URL(`../data/tracks/${track.key}.json`, import.meta.url).pathname;
 fs.writeFileSync(dest, JSON.stringify(track));
 console.log(`  written       ${dest}  (${(fs.statSync(dest).size / 1024).toFixed(0)} KB)`);
+
+// ---------------------------------------------------------------------------
+// THE ELEVATION FILE — which is what actually makes the hills exist.
+//
+// The game has carried height since data/elev/<key>.json existed, and nothing
+// in it needed changing for this: js/world.js already blends a per-sample
+// profile along the racing line (`s`) with a grid of the land around it
+// (`grid`), and `lift()` displaces any finished geometry by the field under
+// it. A modelled circuit already HAS the per-sample profile — that is what z
+// is — so the whole job is writing the file the game is already looking for.
+//
+// WHAT THE LAND DOES, when the only survey is the road itself.
+// There is no DEM for a circuit somebody invented. But the road is a
+// measurement of its own landscape: where the road is high, the land is high.
+// So each grid node takes an inverse-distance-weighted average of the track's
+// heights near it. On the road it equals the road; a few hundred metres out it
+// relaxes toward the mean; in between it slopes the way the circuit does.
+// Nothing else could be honest here — anything more detailed would be invented
+// terrain, and flat ground would put a 23 m hilltop on a plinth.
+//
+// N IS NOT 32. tools/baketrack.mjs paid for this one: at 32 the cells are tens
+// of metres, the ground between two nodes is a flat CHORD, and wherever that
+// chord runs above the road the grass wins the depth test and buries the car —
+// which it did, on the start line, in the first screenshot. Cells here are
+// about ten metres and the chord error falls with the square of the cell.
+if (!out) {
+  const span = Math.max(track.bbox.x1 - track.bbox.x0, track.bbox.y1 - track.bbox.y0);
+  const pad = 220;
+  const N = Math.max(48, Math.min(200, Math.round((span + 2 * pad) / 10)));
+  const gx0 = track.bbox.x0 - pad, gy0 = track.bbox.y0 - pad;
+  const dx = (track.bbox.x1 - track.bbox.x0 + 2 * pad) / (N - 1);
+  const dy = (track.bbox.y1 - track.bbox.y0 + 2 * pad) / (N - 1);
+
+  let mean = 0;
+  for (let i = 0; i < n; i++) mean += Z[i];
+  mean /= n;
+  const s = Z.map(v => +(v - mean).toFixed(2));
+
+  // Inverse distance, softened by a 60 m core so a node sitting exactly on a
+  // sample does not take that one sample's height alone and pock the land.
+  // Weight dies off past ~300 m, which is beyond world.js's FAR of 240 — so by
+  // the time the grid is the only thing being read, it is already the mean.
+  const CORE2 = 60 * 60, REACH2 = 330 * 330;
+  const stride = Math.max(1, Math.round(n / 900));   // ~900 samples is plenty
+  const h = [];
+  for (let j = 0; j < N; j++) {
+    const gy = gy0 + j * dy;
+    for (let i = 0; i < N; i++) {
+      const gx = gx0 + i * dx;
+      let wsum = 0, hsum = 0;
+      for (let k = 0; k < n; k += stride) {
+        const d2 = (X[k] - gx) ** 2 + (Y[k] - gy) ** 2;
+        if (d2 > REACH2) continue;
+        const w = 1 / (d2 + CORE2);
+        wsum += w; hsum += w * (Z[k] - mean);
+      }
+      h.push(wsum ? +(hsum / wsum).toFixed(2) : 0);
+    }
+  }
+
+  const elev = {
+    key: track.key, dataset: 'modelled', ds: DS,
+    note: 'metres relative to the mean height of the modelled road; RENDERING ONLY, physics is 2D',
+    mean: +mean.toFixed(1), range: [Math.min(...s), Math.max(...s)],
+    s, grid: { x0: +gx0.toFixed(0), y0: +gy0.toFixed(0), dx: +dx.toFixed(3), dy: +dy.toFixed(3), n: N, h },
+  };
+  const ed = new URL(`../data/elev/${track.key}.json`, import.meta.url).pathname;
+  fs.writeFileSync(ed, JSON.stringify(elev));
+  console.log(`  elevation     ${ed}  (${(fs.statSync(ed).size / 1024).toFixed(0)} KB, ${N}x${N} grid at ${dx.toFixed(1)} m)`);
+  console.log(`                road ${elev.range[0].toFixed(1)} to ${elev.range[1].toFixed(1)} m about its own mean`);
+}
