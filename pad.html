@@ -30,6 +30,15 @@
   h2 { font-size:13px; letter-spacing:.1em; color:var(--dim); margin:14px 0 6px; font-weight:400; }
   #report { margin-top:22px; padding:12px; border:1px dashed var(--line); border-radius:8px;
             color:var(--dim); font-size:12px; white-space:pre-wrap; max-width:760px; }
+  #cal { border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:16px; }
+  #cal button { background:var(--mint); color:#04130d; border:0; border-radius:5px; padding:7px 12px;
+                font:inherit; font-weight:700; letter-spacing:.06em; cursor:pointer; }
+  #cal button:hover { filter:brightness(1.1); }
+  .step { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:15px; line-height:1.7; }
+  .step b { color:var(--mint); }
+  .dim { color:var(--dim); }
+  .ok { color:var(--mint); }
+  #calState { margin-left:12px; color:var(--dim); }
 </style>
 </head>
 <body>
@@ -37,6 +46,11 @@
 <div class="sub">
   Every axis and button on every connected controller, live.
   <b>Press a button or move a pedal first</b> — browsers hide gamepads until you do.
+</div>
+<div id="cal">
+  <button id="calBtn">CALIBRATE THIS WHEEL</button>
+  <span id="calState"></span>
+  <div id="calStep"></div>
 </div>
 <div id="pads"><div class="none">nothing connected yet — press a button on the wheel or pad</div></div>
 <div id="report"></div>
@@ -50,6 +64,7 @@
 // which usually rest at +1 and travel to -1 — the opposite of what anything
 // expects. There is no way to guess which axis is the brake. So: watch them
 // all, and say which ones moved.
+let REPORTOVERRIDE = null;
 const PADS = document.getElementById('pads');
 const REPORT = document.getElementById('report');
 
@@ -120,12 +135,127 @@ function draw() {
   }
 
   PADS.innerHTML = html;
+  if (REPORTOVERRIDE) { REPORT.textContent = REPORTOVERRIDE; requestAnimationFrame(draw); return; }
   REPORT.textContent =
     'COPY THIS AND SEND IT TO ME\n' +
     'Move the wheel lock to lock, then press each pedal all the way down, one at a time.\n\n' +
     notes.join('\n\n');
   requestAnimationFrame(draw);
 }
+
+// ---------------------------------------------------------------------------
+// CALIBRATION — because "which axis moved" is not the same question as "which
+// one is the brake".
+//
+// The report above says a wheel has three live axes. It cannot say which is
+// the brake, and no amount of staring at it will: there is no convention. So
+// ask the driver to move one thing at a time and watch which axis answers.
+//
+// Each step records every axis's value, compares it to REST, and takes the one
+// that moved furthest. That is robust to a wheel whose pedals rest at +1 and
+// travel to -1 (most of them), to inverted steering, and to a device with
+// eight axes of which five are noise — none of which can be guessed, and all
+// of which are obvious the moment somebody presses the pedal.
+//
+// What comes out is written to localStorage under `wdc.wheel`, which is what
+// js/input.js looks for. It is also printed, so it can be pasted into a
+// message or kept somewhere safe.
+const CAL = {
+  steps: [
+    ['Hands OFF the wheel, feet OFF the pedals.', 'rest'],
+    ['Turn the wheel FULL LEFT and hold it there.', 'left'],
+    ['Turn the wheel FULL RIGHT and hold it there.', 'right'],
+    ['Press the THROTTLE all the way down and hold.', 'throttle'],
+    ['Press the BRAKE all the way down and hold.', 'brake'],
+  ],
+  at: -1, rest: null, got: {}, pad: null,
+};
+const calBtn = document.getElementById('calBtn');
+const calStep = document.getElementById('calStep');
+const calState = document.getElementById('calState');
+
+function livePad() {
+  const pads = (navigator.getGamepads ? navigator.getGamepads() : []) || [];
+  return [...pads].find(p => p && p.connected) || null;
+}
+
+function calShow() {
+  if (CAL.at < 0) { calStep.innerHTML = ''; return; }
+  const [text] = CAL.steps[CAL.at];
+  calStep.innerHTML = `<div class="step"><b>Step ${CAL.at + 1} of ${CAL.steps.length}</b><br>${text}` +
+    `<br><span class="dim">then press SPACE, or click CAPTURE</span> ` +
+    `<button id="calCap">CAPTURE</button></div>`;
+  document.getElementById('calCap').onclick = calCapture;
+}
+
+// Which axis moved furthest from rest, ignoring ones already claimed. A
+// threshold, because a wheel's unpressed pedals drift by a few thousandths and
+// claiming an axis on noise would silently assign the brake to nothing.
+function biggestMove(p, taken) {
+  let best = -1, bd = 0.25;
+  for (let i = 0; i < p.axes.length; i++) {
+    if (taken.includes(i)) continue;
+    const d = Math.abs(p.axes[i] - CAL.rest[i]);
+    if (d > bd) { bd = d; best = i; }
+  }
+  return best;
+}
+
+function calCapture() {
+  const p = livePad();
+  if (!p) { calState.textContent = 'no device — press a button on it first'; return; }
+  const kind = CAL.steps[CAL.at][1];
+  if (kind === 'rest') {
+    CAL.rest = [...p.axes];
+    CAL.pad = p.id;
+  } else if (kind === 'left' || kind === 'right') {
+    const taken = [];
+    const ax = CAL.got.steerAx != null ? CAL.got.steerAx : biggestMove(p, taken);
+    if (ax < 0) { calState.textContent = 'nothing moved — turn it further and capture again'; return; }
+    CAL.got.steerAx = ax;
+    CAL.got[kind] = p.axes[ax];
+  } else {
+    const taken = [CAL.got.steerAx, CAL.got.throttleAx].filter(v => v != null);
+    const ax = biggestMove(p, taken);
+    if (ax < 0) { calState.textContent = 'nothing moved — press it all the way down and capture again'; return; }
+    CAL.got[kind + 'Ax'] = ax;
+    CAL.got[kind + 'Full'] = p.axes[ax];
+    CAL.got[kind + 'Rest'] = CAL.rest[ax];
+  }
+  CAL.at++;
+  if (CAL.at < CAL.steps.length) { calState.textContent = ''; calShow(); return; }
+
+  // Done. `centre` is the resting position of the steering axis and is not
+  // assumed to be zero — a wheel that has not been re-centred since power-on
+  // can rest anywhere, and assuming 0 puts a permanent input into the rack.
+  const g = CAL.got;
+  const profile = {
+    id: CAL.pad,
+    saved: new Date().toISOString().slice(0, 16),
+    steer: { ax: g.steerAx, centre: +CAL.rest[g.steerAx].toFixed(4), left: +g.left.toFixed(4), right: +g.right.toFixed(4) },
+    throttle: { ax: g.throttleAx, rest: +g.throttleRest.toFixed(4), full: +g.throttleFull.toFixed(4) },
+    brake: { ax: g.brakeAx, rest: +g.brakeRest.toFixed(4), full: +g.brakeFull.toFixed(4) },
+  };
+  try { localStorage.setItem('wdc.wheel', JSON.stringify(profile)); } catch { }
+  CAL.at = -1;
+  calStep.innerHTML = '';
+  calState.innerHTML = '<b class="ok">CALIBRATED</b> — saved. Go and drive; the game will pick it up.';
+  REPORTOVERRIDE = 'YOUR WHEEL PROFILE (saved to this browser)\n\n' + JSON.stringify(profile, null, 2)
+    + '\n\nSteering runs ' + (profile.steer.left > profile.steer.right ? 'POSITIVE left' : 'NEGATIVE left')
+    + ', throttle travels ' + profile.throttle.rest.toFixed(2) + ' -> ' + profile.throttle.full.toFixed(2)
+    + ', brake ' + profile.brake.rest.toFixed(2) + ' -> ' + profile.brake.full.toFixed(2) + '.';
+}
+
+calBtn.onclick = () => {
+  if (!livePad()) { calState.textContent = 'press a button on the wheel first so the browser admits it exists'; return; }
+  CAL.at = 0; CAL.got = {}; CAL.rest = null; REPORTOVERRIDE = null;
+  calState.textContent = '';
+  calShow();
+};
+addEventListener('keydown', e => { if (e.code === 'Space' && CAL.at >= 0) { e.preventDefault(); calCapture(); } });
+
+const saved = (() => { try { return localStorage.getItem('wdc.wheel'); } catch { return null; } })();
+if (saved) calState.innerHTML = `<span class="dim">a profile is already saved for “${JSON.parse(saved).id.slice(0, 30)}” — calibrating replaces it</span>`;
 
 addEventListener('gamepadconnected', () => {});
 draw();

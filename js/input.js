@@ -151,11 +151,76 @@ export class Hands {
     } catch { /* ignore */ }
   }
 
+  /**
+   * A calibrated wheel, if pad.html has saved one.
+   *
+   * A wheel is not a pad. The "standard" mapping puts steering on axes[0] and
+   * the pedals on the two TRIGGERS; a wheel reports no mapping at all and puts
+   * its pedals on AXES, at indices that differ per manufacturer and usually
+   * resting at +1 and travelling to -1. None of that is guessable, so it is
+   * measured once in pad.html and stored — and everything below works off the
+   * measurement rather than off a table of device names that would need a new
+   * entry for every wheel ever made.
+   */
+  _profile() {
+    if (this._prof !== undefined) return this._prof;
+    this._prof = null;
+    try {
+      const raw = localStorage.getItem('wdc.wheel');
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && p.steer && p.throttle && p.brake) this._prof = p;
+      }
+    } catch { /* private browsing, blocked storage: keyboard still works */ }
+    return this._prof;
+  }
+
+  _readWheel(p, prof) {
+    // Map through the two ends that were actually recorded, so an inverted
+    // axis needs no flag — it inverts itself. `centre` is the RESTING value
+    // and is not assumed to be zero: a wheel that has not been re-centred
+    // since power-on can rest anywhere, and assuming 0 leaves a permanent
+    // input in the rack that reads as the car pulling to one side.
+    const s = prof.steer, raw = p.axes[s.ax] || 0;
+    const off = raw - s.centre;
+    const toLeft = s.left - s.centre;     // signed travel from rest to full left
+    const toRight = s.right - s.centre;   // ... and to full right
+    // A few thousandths of play at centre. NOT the pad's 8% — a wheel has real
+    // resolution there and a fat deadzone throws away its whole advantage.
+    const DZ = 0.012;
+    let steer = 0;
+    if (Math.abs(off) > DZ) {
+      // Whichever end the wheel has moved toward decides the sign, and the
+      // ratio to that end's own travel decides the amount. An axis that runs
+      // backwards inverts itself here with no flag anywhere: if full left was
+      // recorded as -0.9 then toLeft is negative, off is negative, and the
+      // quotient comes out positive — which is LEFT in sim terms.
+      if (toLeft && Math.sign(off) === Math.sign(toLeft)) steer = Math.min(1, off / toLeft);
+      else if (toRight) steer = -Math.min(1, off / toRight);
+    }
+    const ped = (d) => {
+      const t = d.full - d.rest;
+      return t ? Math.max(0, Math.min(1, ((p.axes[d.ax] || 0) - d.rest) / t)) : 0;
+    };
+    const throttle = ped(prof.throttle), brake = ped(prof.brake);
+    return { steer, throttle, brake, live: Math.abs(steer) > 0.02 || throttle > 0.03 || brake > 0.03 };
+  }
+
   _readPad() {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const p of pads) {
       if (!p || !p.connected) continue;
       this.pad = p;
+      const prof = this._profile();
+      if (prof && p.id === prof.id) {
+        const now = {};
+        for (const [name, idx] of Object.entries(PAD_BUTTONS)) now[name] = !!(p.buttons[idx] && p.buttons[idx].pressed);
+        for (const name in now) if (now[name] && !this._padPrev[name]) this.pressed.add('pad:' + name);
+        this._padPrev = now;
+        const w = this._readWheel(p, prof);
+        this.usingWheel = w.live;
+        return w.live ? { steer: w.steer, throttle: w.throttle, brake: w.brake } : null;
+      }
       const ax = p.axes[0] || 0;
       const rt = p.buttons[7] ? p.buttons[7].value : 0;
       const lt = p.buttons[6] ? p.buttons[6].value : 0;
