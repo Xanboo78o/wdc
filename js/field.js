@@ -36,7 +36,7 @@
 import * as THREE from 'three';
 import { Z } from './geom.js';
 import { bankY, bankRoll } from './bank.js';
-import { buildCar } from './car.js';
+import { buildCar, buildGT3 } from './car.js';
 import { crushParts, applyCrush } from './render.js';
 
 // ---------------------------------------------------------------------------
@@ -124,13 +124,15 @@ export class Field {
    * @param {View}  view    the renderer, for its scene, its lighting-aware
    *                        material cache, the surveyed ground and the banking
    * @param {Array} entries race.entries — the player's is skipped
+   * @param {string} cls    the class being raced. A GT3 race was a grid of
+   *                        GT3 physics wearing single-seater bodies.
    */
-  constructor(view, entries) {
+  constructor(view, entries, cls = 'f1') {
     this.view = view;
     this.track = view.track;
     this.rigs = [];
 
-    const ref = buildCar(view.look, REF_COLOUR);
+    const ref = cls === 'gt3' ? buildGT3(view.look, REF_COLOUR) : buildCar(view.look, REF_COLOUR);
     // Which materials are the paint? The ones wearing the reference colour.
     // Nothing else on the car is that red: the rims are grey, the hubs and the
     // visor near-black, the helmet off-white, and the carbon is a photograph.

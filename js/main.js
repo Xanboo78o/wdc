@@ -252,7 +252,7 @@ async function start() {
   // View's material cache and its sky-lit environment map — a car built against
   // a different `look` than the world it stands in reads as a sticker.
   if (state.race) {
-    state.field = new Field(state.view, state.race.entries);
+    state.field = new Field(state.view, state.race.entries, spec.key);
     const c = state.field.cost();
     if (typeof window !== 'undefined' && window.__wdc) {
       window.__wdc.cars = c.cars + 1;
