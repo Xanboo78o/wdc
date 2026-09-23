@@ -36,8 +36,10 @@ const PUSH_TIME = 8;          // s for a crew to heave a car back to the tarmac
 
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
-                tier = 'medium', seed = 1, player = true, pits = true }) {
+                tier = 'medium', seed = 1, player = true, pits = true, noDnf = false }) {
     this.track = track; this.lines = lines; this.spec = spec;
+    // NO DNF (Adam): YOUR car cannot retire. The bots still can.
+    this.noDnf = noDnf;
     this.laps = laps; this.peak = peakSlip(spec);
     this.time = 0; this.state = 'grid'; this.lights = 3.2;
     this.safety = 0;            // s of safety car remaining, 0 = racing
@@ -462,6 +464,17 @@ export class Race {
       // counts as contact is how they come to disagree.
       if (hit && e.isPlayer && hit.closing > 3.5) {
         e.bump = { what: 'barrier', closing: hit.closing, harm: hit.harm, part: hit.part };
+      }
+      // NO DNF: the damage still counts — the wings still come off, the pit
+      // stop still has work to do — it just never reaches the retirement line.
+      // Upside down, the car is put back on its wheels where it lies.
+      if (e.isPlayer && this.noDnf) {
+        car.damage = Math.min(car.damage || 0, 0.95);
+        if (car.onRoof && car.speed < 8) {
+          car.onRoof = false; car.airborne = false;
+          car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0;
+          this.log('crash', `${e.name} BACK ON FOUR WHEELS`, e);
+        }
       }
       if (car.damage >= 1 && !e.retired) { e.retired = true; this.log('crash', `${e.name} RETIRES`, e); }
       // A car on its roof is not rejoining. Retire it once it has stopped

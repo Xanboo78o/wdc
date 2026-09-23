@@ -73,6 +73,35 @@ let pickTrack = 'monza', pickCar = 'f4';
 // thing and 6 is a sprint you can actually see all of.
 let pickMode = 'hotlap', pickGrid = 22, pickTier = 'medium', pickLaps = 3, pickStart = 'mid';
 
+let pickNoDnf = false;
+
+// The menu remembers what you last picked (Adam: "save my previous race
+// settings"). Every value is checked against what exists NOW, so a circuit
+// that was renamed or a tier that was removed falls back to the default
+// instead of booting a session that cannot load. Storage is per ORIGIN —
+// localhost:8175 and github.io each remember their own.
+const MENU_KEY = 'wdc.menu';
+function loadMenu() {
+  let m;
+  try { m = JSON.parse(localStorage.getItem(MENU_KEY) || 'null'); } catch { m = null; }
+  if (!m) return;
+  if (TRACKS.some(t => t[0] === m.track)) pickTrack = m.track;
+  if (CARS[m.car]) pickCar = m.car;
+  if (m.mode === 'race' || m.mode === 'hotlap') pickMode = m.mode;
+  if ([6, 12, 16, 22].includes(m.grid)) pickGrid = m.grid;
+  if (TIERS[m.tier]) pickTier = m.tier;
+  if ([2, 3, 5, 10].includes(m.laps)) pickLaps = m.laps;
+  if (['pole', 'front', 'mid', 'back'].includes(m.start)) pickStart = m.start;
+  pickNoDnf = m.noDnf === true;
+}
+function saveMenu() {
+  try {
+    localStorage.setItem(MENU_KEY, JSON.stringify({
+      track: pickTrack, car: pickCar, mode: pickMode, grid: pickGrid, tier: pickTier,
+      laps: pickLaps, start: pickStart, noDnf: pickNoDnf,
+    }));
+  } catch { /* private window: it just won't remember */ }
+}
 // One card list, built the same way everywhere: the value, the big label, the
 // small one under it, and what to do when it is clicked.
 function cards(el, items, current, set, tight) {
@@ -101,6 +130,8 @@ function buildMenu() {
     ['pole', 'POLE'], ['front', 'FRONT'], ['mid', 'MIDFIELD'], ['back', 'LAST'],
   ], pickStart, v => pickStart = v);
   $('raceOpts').classList.toggle('off', pickMode !== 'race');
+  cards('dnfList', [[false, 'NORMAL'], [true, 'NO DNF']], pickNoDnf, v => pickNoDnf = v);
+  saveMenu();
 }
 
 // Which slot on the grid you line up in, 1 being pole.
@@ -176,6 +207,7 @@ async function start() {
       track: t, lines, spec, slots: gridSlots(t, grid), laps, grid,
       playerGrid: slot, tier, player: true,
       seed: +q.get('seed') || (1 + Math.floor(Math.random() * 9973)),
+      noDnf: q.has('nodnf') ? q.get('nodnf') === '1' : pickNoDnf,
     });
     state.me = state.race.entries.find(e => e.isPlayer);
     state.car = state.me.car;
@@ -940,6 +972,7 @@ mountDashCard(document.querySelector('#menu .keys'));
 // tests.
 const Q = new URLSearchParams(location.search);
 if (Q.has('race')) pickMode = Q.get('race') === '0' ? 'hotlap' : 'race';
+loadMenu();   // before the URL, so ?race= and friends still win
 if (Q.has('grid')) pickGrid = Math.max(2, Math.min(22, +Q.get('grid') || 22));
 if (TIERS[Q.get('tier')]) pickTier = Q.get('tier');
 if (Q.has('laps')) pickLaps = Math.max(1, Math.min(60, +Q.get('laps') || 3));
