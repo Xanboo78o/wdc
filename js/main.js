@@ -19,7 +19,7 @@ import { gridSlots } from './grid.js';
 import { Z } from './geom.js';
 import { PropWorld } from './props.js';
 import { Objects } from './build/objects.js';
-import { TIERS, makeAutopilot, makeDriver } from './autopilot.js';
+import { TIERS, BATTLE, makeAutopilot, makeDriver } from './autopilot.js';
 import { Field } from './field.js';
 import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
@@ -75,6 +75,8 @@ let pickTrack = 'monza', pickCar = 'f4';
 // thing and 6 is a sprint you can actually see all of.
 let pickMode = 'hotlap', pickGrid = 22, pickTier = 'medium', pickLaps = 3, pickStart = 'mid';
 let pickNoDnf = false;
+// SUPERCASUAL's OVERTAKES submode: how hard the pack around you fights.
+let pickBattle = 'medium';
 
 // The menu remembers what you last picked (Adam: "save my previous race
 // settings"). Every value is checked against what exists NOW, so a circuit
@@ -94,12 +96,13 @@ function loadMenu() {
   if ([2, 3, 5, 10].includes(m.laps)) pickLaps = m.laps;
   if (['pole', 'front', 'mid', 'back'].includes(m.start)) pickStart = m.start;
   pickNoDnf = m.noDnf === true;
+  if (BATTLE[m.battle]) pickBattle = m.battle;
 }
 function saveMenu() {
   try {
     localStorage.setItem(MENU_KEY, JSON.stringify({
       track: pickTrack, car: pickCar, mode: pickMode, grid: pickGrid, tier: pickTier,
-      laps: pickLaps, start: pickStart, noDnf: pickNoDnf,
+      laps: pickLaps, start: pickStart, noDnf: pickNoDnf, battle: pickBattle,
     }));
   } catch { /* private window: it just won't remember */ }
 }
@@ -127,6 +130,8 @@ function buildMenu() {
   ], pickMode, v => pickMode = v);
   cards('gridList', [[6, '6'], [12, '12'], [16, '16'], [22, '22']], pickGrid, v => pickGrid = v);
   cards('tierList', Object.keys(TIERS).map(k => [k, TIERS[k].name]), pickTier, v => pickTier = v);
+  cards('battleList', Object.keys(BATTLE).map(k => [k, BATTLE[k].name]), pickBattle, v => pickBattle = v);
+  $('battleOpt').classList.toggle('off', pickTier !== 'supercasual');
   cards('lapList', [[2, '2'], [3, '3'], [5, '5'], [10, '10']], pickLaps, v => pickLaps = v);
   cards('startList', [
     ['pole', 'POLE'], ['front', 'FRONT'], ['mid', 'MIDFIELD'], ['back', 'LAST'],
@@ -202,12 +207,15 @@ async function start() {
     const grid = Math.max(2, Math.min(22, +q.get('grid') || pickGrid));
     const laps = Math.max(1, Math.min(60, +q.get('laps') || pickLaps));
     const tier = TIERS[q.get('tier')] ? q.get('tier') : pickTier;
+    // ?battle=easy|medium|hard (or 0 for the old, passive supercasual field)
+    const battle = tier !== 'supercasual' ? null
+      : q.has('battle') ? (BATTLE[q.get('battle')] ? q.get('battle') : null) : pickBattle;
     const slot = Math.max(1, Math.min(grid, +q.get('start') || startSlot(grid)));
     $('load').innerHTML = `<div class="loadbox">BUILDING A GRID OF ${grid}…</div>`;
     await new Promise(r => setTimeout(r, 30));
     state.race = new Race({
       track: t, lines, spec, slots: gridSlots(t, grid), laps, grid,
-      playerGrid: slot, tier, player: true,
+      playerGrid: slot, tier, player: true, battle,
       noDnf: q.has('nodnf') ? q.get('nodnf') === '1' : pickNoDnf,
       seed: +q.get('seed') || (1 + Math.floor(Math.random() * 9973)),
     });
@@ -285,6 +293,14 @@ async function start() {
   // The rest of the grid. It is built after the View because it needs the
   // View's material cache and its sky-lit environment map — a car built against
   // a different `look` than the world it stands in reads as a sticker.
+  // The rear-view mirror: on in a race, off on an empty circuit, V toggles it,
+  // and the choice is remembered. ?mirror=0|1 overrides for a headless check.
+  {
+    let pref = null;
+    try { pref = localStorage.getItem('wdc.mirror'); } catch { /* private window */ }
+    const on = q.has('mirror') ? q.get('mirror') !== '0' : pref != null ? pref === '1' : !!state.race;
+    state.view.setMirror(on);
+  }
   if (state.race) {
     state.field = new Field(state.view, state.race.entries, spec.key);
     const c = state.field.cost();
@@ -432,6 +448,11 @@ function loop(now) {
     const me = state.me;
     me.pitRequest = !me.pitRequest;
     toast(me.pitRequest ? 'BOX THIS LAP' : 'PIT CANCELLED');
+  }
+  if (hands.tapped('KeyV')) {
+    const on = view.setMirror(!view.mirrorOn);
+    try { localStorage.setItem('wdc.mirror', on ? '1' : '0'); } catch { /* fine */ }
+    toast('MIRROR ' + (on ? 'ON' : 'OFF'));
   }
   if (hands.tapped('KeyM') && state.engine) toast('SOUND ' + (state.engine.toggleMute() ? 'OFF' : 'ON'));
 

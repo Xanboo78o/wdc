@@ -10,7 +10,7 @@ import { driverAt, teamOf, applyProfile } from './drivers.js';
 // running order. A driver knows how to drive; only the session knows who is
 // ahead, who is being caught, and whose fault the contact was.
 import { makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor } from './physics.js';
-import { makeAutopilot, makeDriver } from './autopilot.js';
+import { makeAutopilot, makeDriver, BATTLE } from './autopilot.js';
 import { resolveBarrier, resolveCars } from './collide.js';
 import { wakeAt, newWake } from './aero.js';
 import { makeLane, shouldPit, updateStop } from './pitstop.js';
@@ -33,10 +33,12 @@ const NEIGH_EVERY = 4;        // substeps between neighbour/racecraft updates
 const SAFETY_TIME = 30;       // s the car stays out once it is called
 const SAFETY_SPEED = 80 / 3.6;
 const PUSH_TIME = 8;          // s for a crew to heave a car back to the tarmac
+const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
 
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
-                tier = 'medium', seed = 1, player = true, pits = true, noDnf = false }) {
+                tier = 'medium', seed = 1, player = true, pits = true, noDnf = false,
+                battle = null }) {
     this.track = track; this.lines = lines; this.spec = spec;
     // NO DNF (Adam): YOUR car cannot retire. The bots still can.
     this.noDnf = noDnf;
@@ -52,6 +54,9 @@ export class Race {
     this.pits = pits;
     this.events = [];
     this.sub = 0;
+    // SUPERCASUAL's OVERTAKES submode — see BATTLE in js/autopilot.js.
+    this.battle = BATTLE[battle] || null;
+    this.bandAt = 0;
 
     const n = Math.min(grid, slots.length);
     this.entries = [];
@@ -73,6 +78,7 @@ export class Race {
         col: isPlayer ? '#ffffff' : team.col,
         team: isPlayer ? null : team,
         drive: isPlayer ? null : makeAutopilot(track, lines, spec, this.peak, { driver }),
+        biasS: 0, atkSide: 0, atkAt: -99, atkOn: null,
         proj: track.project(p.x, p.y), hint: slot.i,
         lap: 0, gridPos: k + 1, pos: k + 1, crossed0: false, pastHalf: false,
         lapStart: 0, lastLap: null, bestLap: null,
@@ -84,7 +90,53 @@ export class Race {
         recover: null,
       });
     }
+    if (this.battle) {
+      const B = this.battle, rng = mulberry(seed * 977 + 5);
+      for (const e of this.entries) {
+        const d = e.driver;
+        if (!d) continue;
+        // Everyone knows the racing line now. What stays personal is how
+        // bold they are, spread either side of the submode's number.
+        d.lineKind = 'race';
+        d.aggression = Math.min(1, B.aggression * (0.8 + rng() * 0.4));
+        d.defence = Math.min(1, B.defence * (0.8 + rng() * 0.4));
+        d.moveGap = B.moveGap;
+        d.lungeMax = B.lunge;
+        // A personal offset inside the band, so the pack is not twenty-one
+        // copies of one car.
+        d.bandOff = (rng() - 0.5) * 0.04;
+      }
+      this.band();
+    }
     this.order();
+  }
+
+  // ---- the OVERTAKES band --------------------------------------------------
+  // Where in its grip window each rival drives, from how far it is from you:
+  // `band` metres behind you it is at the top, the same distance ahead at the
+  // bottom, level with you in the middle. Saturated, so the whole field is
+  // drawn toward the fight rather than only the car nearest it.
+  band() {
+    const B = this.battle, me = this.entries.find(e => e.isPlayer);
+    const pMe = me && !me.retired ? this.progress(me) : null;
+    for (const e of this.entries) {
+      const d = e.driver;
+      if (!d || e.retired || d.ceiling == null) continue;
+      const behindYou = pMe == null ? 0 : pMe - this.progress(e);
+      const f = Math.max(0, Math.min(1, 0.5 + behindYou / (2 * B.band)));
+      d.gripNow = d.ceiling * (B.lo + (B.hi - B.lo) * f + (d.bandOff || 0));
+    }
+  }
+
+  // Which way the next real corner turns within `look` metres: +1 left,
+  // -1 right, 0 if nothing worth diving for. The inside of it is where an
+  // attack goes and what a defender covers.
+  insideAhead(s, look) {
+    const cur = this.lines.race.cur, t = this.track;
+    const i0 = t.idx(s);
+    let turn = 0;
+    for (let k = 0; k < look / t.ds; k++) turn += (cur[(i0 + k) % t.n] || 0) * t.ds;
+    return Math.abs(turn) > 0.35 ? Math.sign(turn) : 0;
   }
 
   log(kind, text, e = null) {
@@ -230,22 +282,76 @@ export class Race {
       bias += (Math.sign(this.lane.off) || 1) * lim * 1.5;
     }
 
-    if (!pitting && e.ahead && e.aheadGapT < 1.4 && !e.inPit) {
-      // get out of the wake and take the inside for the next braking zone
-      const side = e.ahead.proj.lat > 0 ? -1 : 1;
-      const pull = this.brakingZone(e.proj.s, 130) ? 0.75 + 0.5 * d.aggression : 0.35;
-      bias += side * pull * Math.max(0.8, t.w[i] - 2.2) * Math.min(1, (1.4 - e.aheadGapT) / 1.0);
-    }
-    // A car on its way to the pits does not defend. It has somewhere to be.
-    if (!pitting && e.behind && e.behindGapT < 0.75 && !e.inPit && this.brakingZone(e.proj.s, 150)) {
-      // ONE move. Pick a side, commit, and do not weave — that is the actual
-      // rule, and a defender who keeps moving is both illegal and slower.
-      if (this.time - e.movedAt > 3.5) {
-        e.lastMove = -Math.sign(this.lines.race.off[i]) || 1;
-        e.movedAt = this.time;
+    // ---- attack -------------------------------------------------------------
+    // Adam, 2026-09-23: "racing feels like im racing a bunch of ghost overlays".
+    // The old attack pulled to whichever side the car ahead was NOT on, every
+    // tick, so it never chose anything — it drifted. A real attack is a plan:
+    // pick the INSIDE of the next corner, commit to it, and if the defender has
+    // already shut that door, go round the outside and set up the switchback.
+    const lineOff = this.lines.race.off[i];
+    const L = this.spec.bodyL;
+    const moveGap = d.moveGap ?? 3.5;
+    let want = 0, lunge = 0, pressure = 0;
+    const reach = this.battle ? 1.8 : 1.4;
+    if (!pitting && e.ahead && e.aheadGapT < reach && !e.inPit) {
+      const o = e.ahead;
+      const ds = t.gap(o.proj.s, e.proj.s);
+      const braking = this.brakingZone(e.proj.s, 130);
+      // Re-plan every 2.5 s, on a new target, or the moment the defender shuts
+      // the door on the side already chosen — that last one is the switchback.
+      const shut = e.atkOn === o && o.proj.lat * e.atkSide > 1.4 && Math.abs(o.proj.lat - e.proj.lat) < 1.6;
+      if (e.atkOn !== o || this.time - e.atkAt > 2.5 || (shut && this.time - e.atkAt > 0.8)) {
+        const inside = this.insideAhead(e.proj.s, 200);
+        let side = inside || (o.proj.lat > e.proj.lat ? -1 : 1);
+        // The door is shut: they are already sitting on the inside.
+        if (inside && o.proj.lat * inside > 1.4) side = -inside;
+        e.atkSide = side; e.atkAt = this.time; e.atkOn = o;
       }
-      bias += e.lastMove * d.defence * Math.max(0.6, t.w[i] - 2.4) * 0.85;
+      // Out of the slipstream late, not from a second back: sit in the tow
+      // down the straight, then pull out once there is nothing left to gain.
+      const pull = braking ? 0.75 + 0.5 * d.aggression
+                 : ds < 30 ? 0.55 + 0.4 * d.aggression : 0.35;
+      want += e.atkSide * pull * Math.max(0.8, t.w[i] - 2.2) * Math.min(1, (reach - e.aheadGapT) / 1.0);
+      // The dive: brake later than the line says, once you are out of their
+      // wake and nearly alongside. The tyres decide whether it sticks.
+      if (braking && ds < L * 2.2 && Math.abs(o.proj.lat - e.proj.lat) > 1.2) {
+        lunge = (d.lungeMax ?? 0.02) * d.aggression;
+      }
+      if (ds < 25) pressure = 0.6;
     }
+
+    // ---- defence ------------------------------------------------------------
+    // Two moves, and both are ONE decision at a time rather than a weave:
+    //   into a braking zone, cover the inside;
+    //   on a straight, when the car behind pulls out of your wake, go with it
+    //   and shut the door before it has a nose alongside.
+    // How often a defender may change its mind is `moveGap` — 3.5 s is the
+    // gentlemanly default; the OVERTAKES submodes shorten it, and that is the
+    // swerve. Nobody moves once a car is actually alongside: the ROOM clamp
+    // below makes sure of that whatever this block asks for.
+    // A car on its way to the pits does not defend. It has somewhere to be.
+    const defendT = this.battle ? 1.0 : 0.75;
+    if (!pitting && e.behind && e.behindGapT < defendT && !e.inPit) {
+      const o = e.behind;
+      const ds = t.gap(e.proj.s, o.proj.s);          // + : they are behind me
+      const dl = o.proj.lat - e.proj.lat;
+      const braking = this.brakingZone(e.proj.s, 150);
+      let move = 0;
+      if (braking) move = this.insideAhead(e.proj.s, 220) || -Math.sign(lineOff) || 1;
+      else if (d.defence > 0.5 && ds > L * 1.05 && ds < 28 && Math.abs(dl) > 0.9) move = Math.sign(dl);
+      if (move && move !== e.lastMove && this.time - e.movedAt > moveGap) {
+        e.lastMove = move; e.movedAt = this.time;
+      }
+      if (move || this.time - e.movedAt < 1.2) {
+        want += e.lastMove * d.defence * Math.max(0.6, t.w[i] - 2.4) * 0.85;
+      }
+      pressure = Math.max(pressure, Math.min(1, 1 - e.behindGapT / defendT));
+    }
+    // Smoothed: a car changes lane at a few metres a second. It used to teleport
+    // its target, and the controller made that look like a twitch rather than a
+    // move. (The pit peel-off above is added unsmoothed, as it always was.)
+    const slew = (3.0 + 2.5 * d.aggression) * NEIGH_EVERY * FIXED_DT;
+    bias += e.biasS + Math.max(-slew, Math.min(slew, want - e.biasS));
 
     // DO NOT DRIVE INTO SOMEONE WHO IS ALONGSIDE.
     //
@@ -258,7 +364,6 @@ export class Race {
     //
     // A clamp cannot be outvoted. This car may put itself anywhere it likes
     // except inside ROOM of a car that is beside it.
-    const lineOff = this.lines.race.off[i];
     const ROOM = 2.6;                       // a car is 2 m wide; this is that, plus a door
     let yieldTo = null;
     for (const o of this.entries) {
@@ -376,7 +481,10 @@ export class Race {
 
     const off = this.lines.race.off[i];
     bias = Math.max(-lim - off, Math.min(lim - off, bias));
-    e.ctx = { offBias: bias, speedCap };
+    // What the slew starts from next time is where the car was ALLOWED to go,
+    // pit bias excluded (it is re-added fresh each pass).
+    e.biasS = bias - (pitting && this.lane ? (Math.sign(this.lane.off) || 1) * lim * 1.5 : 0);
+    e.ctx = { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure };
   }
 
   // ---- one substep --------------------------------------------------------
@@ -395,6 +503,7 @@ export class Race {
 
     // Neighbours and racecraft change slowly compared with 400 Hz, and they are
     // the O(n^2) part. A quarter of the rate is invisible and four times cheaper.
+    if (this.battle && this.time - this.bandAt > BAND_EVERY) { this.bandAt = this.time; this.band(); }
     if (this.sub++ % NEIGH_EVERY === 0) {
       this.neighbours();
       for (const e of this.entries) if (!e.isPlayer && !e.retired) this.racecraft(e);
@@ -628,4 +737,13 @@ export class Race {
       }
     }
   }
+}
+
+function mulberry(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
 }

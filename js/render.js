@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { Look, sunRig } from './tex.js';
 import { Post } from './post.js';
+let RIGS_NAMES = [];
 import { ProcSky } from './sky.js';
 import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation } from './weather.js';
 import { bankTable, bankY, bankRoll } from './bank.js';
@@ -564,6 +565,7 @@ export class View {
     this.camMount = new THREE.Object3D();
     this.camTarget = new THREE.Object3D();
     this.car.add(this.camMount, this.camTarget);
+    this._mirror();
     // Scratch, so a 400 Hz-adjacent loop allocates nothing.
     this._v0 = new THREE.Vector3(); this._v1 = new THREE.Vector3(); this._v2 = new THREE.Vector3();
     this._q = new THREE.Quaternion(); this._up = new THREE.Vector3(0, 1, 0);
@@ -582,6 +584,81 @@ export class View {
    * rebuilds its cube when the sun has actually moved, and the weather is
    * fetched every ten minutes rather than every sixteen milliseconds.
    */
+  // ---- the mirror ---------------------------------------------------------
+  // Adam: "also add mirrors". A race you cannot see behind is a race where the
+  // car that passes you arrives from nowhere — which is exactly how a field of
+  // real rivals ends up feeling like ghosts. One wide virtual mirror across the
+  // top of the screen, the way ACC and iRacing do it: the scene from just behind
+  // the rear wing, looking back, drawn into a small target and flipped left for
+  // right as a mirror is.
+  //
+  // Cheap on purpose, because draw calls are this game's budget: a 700 m far
+  // plane (everything behind that is scenery nobody is racing), the shadow map
+  // reused from the main pass rather than re-rendered, and no post chain.
+  _mirror() {
+    const box = new THREE.Box3().setFromObject(this.car);
+    const rear = Number.isFinite(box.min.x) ? box.min.x : -2.6;
+    this.mirMount = new THREE.Object3D();
+    this.mirTarget = new THREE.Object3D();
+    this.mirMount.position.set(rear - 0.55, 0.98, 0);
+    this.mirTarget.position.set(rear - 60, 0.55, 0);
+    this.car.add(this.mirMount, this.mirTarget);
+    this.mirCam = new THREE.PerspectiveCamera(34, 4.2, 0.4, 700);
+    this.mirRT = new THREE.WebGLRenderTarget(640, 152, { samples: 2 });
+    // Brightened: the main view goes through post.js's eye adaptation and this
+    // does not, so at dusk the raw pass came out a stop and a half darker than
+    // the windscreen it sits on top of.
+    const mat = new THREE.MeshBasicMaterial({ map: this.mirRT.texture, depthTest: false, depthWrite: false,
+                                              color: new THREE.Color(1.9, 1.9, 1.9) });
+    this.mirRT.texture.wrapS = THREE.RepeatWrapping;
+    this.mirRT.texture.repeat.set(-1, 1);          // a mirror swaps left and right
+    this.mirQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+    this.mirQuad.frustumCulled = false;
+    this.mirScene = new THREE.Scene();
+    this.mirScene.add(this.mirQuad);
+    this.mirFlat = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.mirrorOn = false;
+  }
+
+  setMirror(on) {
+    this.mirrorOn = !!on;
+    // The start lights and the message line live where the mirror is drawn.
+    if (typeof document !== 'undefined') document.body.classList.toggle('mirror', this.mirrorOn);
+    return this.mirrorOn;
+  }
+
+  _drawMirror() {
+    if (!this.mirrorOn || this.photo || RIGS_NAMES[this.mode] === 'TV') return;
+    const r = this.renderer;
+    this.car.updateWorldMatrix(true, false);
+    this.mirMount.getWorldPosition(this._v0);
+    this.mirTarget.getWorldPosition(this._v1);
+    this.mirCam.up.set(0, 1, 0);
+    this.mirCam.position.copy(this._v0);
+    this.mirCam.lookAt(this._v1);
+    const sm = r.shadowMap.autoUpdate;
+    r.shadowMap.autoUpdate = false;
+    r.setRenderTarget(this.mirRT);
+    r.clear();
+    r.render(this.scene, this.mirCam);
+    r.shadowMap.autoUpdate = sm;
+    r.setRenderTarget(null);
+    // Top centre, a third of the screen wide, with a dark frame round it.
+    const size = r.getSize(this._mirSize || (this._mirSize = new THREE.Vector2()));
+    const w = Math.round(Math.min(size.x * 0.34, 560)), h = Math.round(w / 4.2);
+    const x = Math.round((size.x - w) / 2), y = Math.round(size.y - h - 10);
+    const auto = r.autoClear;
+    r.autoClear = false;
+    r.setScissorTest(true);
+    r.setViewport(x - 3, y - 3, w + 6, h + 6); r.setScissor(x - 3, y - 3, w + 6, h + 6);
+    r.setClearColor(0x0a0a0c, 1); r.clear(true, false, false);
+    r.setViewport(x, y, w, h); r.setScissor(x, y, w, h);
+    r.render(this.mirScene, this.mirFlat);
+    r.setScissorTest(false);
+    r.setViewport(0, 0, size.x, size.y);
+    r.autoClear = auto;
+  }
+
   _sky(now) {
     if (!this.proc) return;
     const when = this.fixedTime || new Date();
@@ -645,6 +722,7 @@ export class View {
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.scene, this.camera);
     }
+    this._drawMirror();
   }
 
   resize() {
@@ -1009,6 +1087,7 @@ export class View {
     // handing the car off to each other as it comes past, ZOOMING to hold it
     // at a constant size in frame. The zoom is the tell — it is what makes
     // footage read as televised rather than as a game replay.
+    RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV'];
     const RIGS = [
       { name: 'ONBOARD', kind: 'bolted', at: [-0.34, 1.19, 0], aim: 24, fov: 56, kick: 0.55, roll: 0.55 },
       { name: 'CHASE', kind: 'chase', dist: 5.6, height: 1.66, lead: 13, fov: 55, kick: 1 },

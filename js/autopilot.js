@@ -76,6 +76,33 @@ export const TIERS = {
   hard:        { name: 'HARD',        line: 'race',   gripFrac: 1.00, spread: 0.012, consistency: 0.92, aggression: 0.80, defence: 0.85, mistakes: 0.22, place: 0.97 },
 };
 
+// SUPERCASUAL's three OVERTAKES submodes (Adam, 2026-09-23: "racing feels like
+// im racing a bunch of ghost overlays ... they swerve and battle and really try,
+// and try to overtake YOU, so you really have to battle").
+//
+// A supercasual field was slow for an honest reason — the centreline — and the
+// result was that you drove past twenty-one people who never once came back at
+// you. These keep the field forgiving and make the people AROUND you fight:
+//
+//   every bot takes the racing line (they know where to go now);
+//   `lo..hi` is the window of the circuit's grip ceiling a bot may use, and
+//     WHERE in it depends on how far it is from you — behind you it digs in,
+//     ahead of you it eases off. That is a rubber band, and it is said here
+//     out loud: it is the one place in this game a rival's pace depends on
+//     yours. It is still a GRIP fraction, re-solved, never a speed multiplier,
+//     so a car that has caught you is a car that is braking later and carrying
+//     more through the corners — the same car you then have to beat;
+//   aggression/defence are how hard they attack and cover; `moveGap` is how
+//     often a defender may change its mind (the swerve); `lunge` is how much
+//     later than the line an attacker dares to brake on a dive — which is also
+//     how they get it wrong, because the physics does not honour a lunge the
+//     tyres cannot carry.
+export const BATTLE = {
+  easy:   { name: 'EASY',   lo: 0.74, hi: 0.88, aggression: 0.45, defence: 0.45, moveGap: 2.4, lunge: 0.03, band: 220 },
+  medium: { name: 'MEDIUM', lo: 0.80, hi: 0.96, aggression: 0.72, defence: 0.72, moveGap: 1.5, lunge: 0.06, band: 170 },
+  hard:   { name: 'HARD',   lo: 0.86, hi: 1.01, aggression: 0.95, defence: 0.95, moveGap: 0.9, lunge: 0.09, band: 130 },
+};
+
 function mulberry(a) {
   return function () {
     a |= 0; a = a + 0x6D2B79F5 | 0;
@@ -126,10 +153,16 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
   // Resolve this driver's actual grip against the circuit's measured ceiling,
   // and record it on the driver so the harness reports the same number the
   // controller is driving. `gripOverride` is for measurement runs only.
-  d.grip = d.gripOverride ?? Math.max(0.35, Math.min(1.05, d.gripFrac * ceilingFor(track, spec)));
+  d.ceiling = ceilingFor(track, spec);
+  d.grip = d.gripOverride ?? Math.max(0.35, Math.min(1.05, d.gripFrac * d.ceiling));
   // The profile is solved at THIS driver's grip, so pace differences live in
   // the physics rather than in a speed multiplier.
   let line = lines.at(d.T.line, d.grip);
+  // Which profile is live, so the race can move a driver onto another line or
+  // another grip mid-session (`d.lineKind`, `d.gripNow` — the OVERTAKES band)
+  // and the solve happens once per change. Quantised to 0.01 of grip, because
+  // lines.at caches per value and a continuous band would re-solve every tick.
+  let lineKey = `${d.T.line}:${d.grip}`;
 
   // ---- and what happens when the car changes underneath the driver --------
   // Losing a front wing costs 56% of the front downforce. Until this existed
@@ -186,16 +219,26 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     // not have to know this code exists: it clears `car.lost.frontWing` and the
     // driver picks its pace back up on its own. `lines.at` is cached, so going
     // back costs a map lookup.
-    const hurt = !!(car.lost && car.lost.frontWing);
-    if (hurt !== wingless) {
-      wingless = hurt;
-      line = lines.at(d.T.line, hurt ? Math.max(0.35, d.grip * WINGLESS_GRIP) : d.grip);
+    wingless = !!(car.lost && car.lost.frontWing);
+    {
+      const kind = d.lineKind || d.T.line;
+      // A driver nobody has touched keeps its exact grip, so a race without
+      // the band drives the same numbers it always did.
+      let g = d.gripNow ?? d.grip;
+      if (wingless) g = Math.max(0.35, g * WINGLESS_GRIP);
+      if (d.gripNow != null || wingless) g = Math.round(g * 100) / 100;
+      const key = `${kind}:${g}`;
+      if (key !== lineKey) { lineKey = key; line = lines.at(kind, g); }
     }
 
     // ---- mistakes: scheduled, with consequences ---------------------------
     // Not jitter. A real error is a lockup, a missed apex, or a snap on exit,
     // and it costs time because the physics makes it cost time.
-    d.nextMistake -= 1 / cfg.hz;
+    // Pressure makes mistakes. A car with someone filling its mirrors, or one
+    // halfway up the inside of somebody, errs more often than one circulating
+    // alone — that is where real errors come from, and it is what makes a
+    // battle something you can WIN rather than something that just happens.
+    d.nextMistake -= (1 + 1.6 * (ctx?.pressure || 0) * (1.15 - d.consistency)) / cfg.hz;
     if (d.nextMistake <= 0 && !d.mistake && v > 20) {
       const r = d.rng();
       d.mistake = { kind: r < 0.45 ? 'lock' : r < 0.8 ? 'wide' : 'snap', t: 0.35 + d.rng() * 0.5 };
@@ -272,6 +315,11 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     const look = Math.min(60, v * 0.30);
     let need = line.v[idxAt(look)] * mod;
     if (lost) need = Math.min(need, 13);                 // you cannot rejoin at 250 km/h
+    // The lunge: an attacker diving up the inside brakes LATER than the line
+    // says it can. Read `look` ahead, so it is the braking point that moves.
+    // Nothing guarantees the car makes the apex after that — the tyres decide,
+    // and sometimes they say no. That miss is the point.
+    if (ctx?.lunge) need *= 1 + ctx.lunge;
     if (ctx?.speedCap != null) need = Math.min(need, ctx.speedCap);
 
     const err = need - v;
