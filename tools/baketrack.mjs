@@ -33,11 +33,16 @@ import path from 'path';
 const ROOT = new URL('../', import.meta.url).pathname;
 const args = process.argv.slice(2);
 const KEY = args.find(a => !a.startsWith('--')) || 'test';
-for (const a of args) if (a.startsWith('--')) { console.error(`unknown flag ${a}`); process.exit(2); }
+// --pieces=data/build/kate.js bakes a track other than the test map's.
+let PIECE_FILE = 'data/build/pieces.js';
+for (const a of args) {
+  if (a.startsWith('--pieces=')) PIECE_FILE = a.slice(9);
+  else if (a.startsWith('--')) { console.error(`unknown flag ${a}`); process.exit(2); }
+}
 
 const { buildPath } = await import(ROOT + 'js/build/path.js');
 const { Ground } = await import(ROOT + 'js/build/ground.js');
-const { TRACK, PIECES } = await import(ROOT + 'data/build/pieces.js');
+const { TRACK, PIECES } = await import(ROOT + PIECE_FILE);
 
 const p = buildPath(PIECES, { closed: !!TRACK.closed });
 const ground = new Ground(p);
@@ -98,17 +103,29 @@ const corners = [];
 // --- DRS: anything straight for more than half a kilometre ------------------
 const drs = [];
 {
-  let from = 0;
-  for (let i = 1; i <= p.n; i++) {
-    const straight = i < p.n && Math.abs(p.k[i]) <= TURN;
+  // A CLOSED lap has no beginning: the straight through the start line is one
+  // straight, not the end of one and the start of another. So the scan starts
+  // at the first corner and walks one full lap from there — otherwise the run
+  // up to the line and the start straight are counted as two short pieces and
+  // the most important DRS zone on the lap is cut in half (Kate Mascoi: 968 m
+  // of a 1.4 km straight). An open track starts at 0 exactly as before.
+  const n = p.n, wrap = !!TRACK.closed;
+  let i0 = 0;
+  if (wrap) while (i0 < n && Math.abs(p.k[i0]) <= TURN) i0++;
+  if (i0 >= n) i0 = 0;
+  let from = i0;
+  const last = wrap ? i0 + n : n;
+  for (let j = i0 + 1; j <= last; j++) {
+    const i = j % n;
+    const straight = j < last && Math.abs(p.k[i]) <= TURN;
     if (straight) continue;
-    const len = (i - from) * p.ds;
+    const len = (j - from) * p.ds;
     if (len > 500) {
-      const start = (from + 12) * p.ds, end = (i - 8) * p.ds;
+      const start = ((from + 12) * p.ds) % p.length, end = ((j - 8) * p.ds) % p.length;
       drs.push({ from: Math.round(start), to: Math.round(end),
-        detect: Math.round((start - 175 + p.length) % p.length), len: Math.round(end - start) });
+        detect: Math.round((start - 175 + p.length) % p.length), len: Math.round((j - 8 - from - 12) * p.ds) });
     }
-    from = i + 1;
+    from = j + 1;
   }
 }
 

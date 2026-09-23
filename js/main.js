@@ -56,6 +56,7 @@ const TRACKS = [
   // wheel's pairing code — ?auto=test:f1 skips the menu, which is why the
   // phone would not connect to it.
   ['test', 'The test map', 'HAND-BUILT'],
+  ['kate', 'Kate Mascoi Circuit', 'WIDE · FAST · BATTLES'],
   // Adam's own, modelled outside this project and read in by
   // tools/importtrack.mjs. Both carry real elevation in `z`, which nothing on
   // this side reads yet — so they drive flat for now, and that is the next

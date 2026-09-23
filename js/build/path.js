@@ -117,7 +117,14 @@ export function buildPath(pieces, { closed = false } = {}) {
       note: p.note || '', part: p.part || null,
     });
   });
-  if (s >= next - 1e-9) emit(0, 0, pieces.length - 1);   // the very end
+  // The very end. On a CLOSED lap that point IS the start line, so emitting it
+  // would put a duplicate sample one zero-length step from sample 0; the game's
+  // closed circuits all end one DS short of their first sample.
+  if (s >= next - 1e-9 && !closed) emit(0, 0, pieces.length - 1);
+  // ...and rounding can land that same point a hair early, inside the loop.
+  if (closed && X.length > 1 && Math.hypot(X[X.length - 1] - X[0], Y[Y.length - 1] - Y[0]) < DS / 2) {
+    for (const A of [X, Y, ZL, H, K, B, W, RL, RR, P, TU, BR]) A.pop();
+  }
 
   // Height: straight lines between the pieces' ends, then eased, so every
   // change of gradient is a vertical curve. sigma 22 m turns a 10% change of
@@ -128,7 +135,7 @@ export function buildPath(pieces, { closed = false } = {}) {
   const RLs = smooth(RL, 8, closed), RRs = smooth(RR, 8, closed);
 
   return {
-    ds: DS, n: X.length, length: (X.length - 1) * DS, closed,
+    ds: DS, n: X.length, length: (closed ? X.length : X.length - 1) * DS, closed,   // a lap includes the step from the last sample back to the first
     x: Float64Array.from(X), y: Float64Array.from(Y), z: Z,
     hdg: Float64Array.from(H), k: Float64Array.from(K), bank: Float64Array.from(B),
     w: Wd, runL: RLs, runR: RRs, piece: Int32Array.from(P),

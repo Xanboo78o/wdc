@@ -25,10 +25,15 @@ import { PIER, pierSites, pierBox } from '../js/build/piers.js';
 
 const args = process.argv.slice(2);
 const known = new Set(['--break']);
-for (const a of args) if (!known.has(a)) { console.error(`unknown flag ${a}`); process.exit(2); }
+// --pieces=data/build/kate.js checks a track other than the test map's.
+let PIECE_FILE = 'data/build/pieces.js';
+for (const a of args) {
+  if (a.startsWith('--pieces=')) PIECE_FILE = a.slice(9);
+  else if (!known.has(a)) { console.error(`unknown flag ${a}`); process.exit(2); }
+}
 const BREAK = args.includes('--break');
 
-const { TRACK, PIECES } = await import(`../data/build/pieces.js?t=${Date.now()}`);
+const { TRACK, PIECES } = await import(`../${PIECE_FILE}?t=${Date.now()}`);
 const t0 = performance.now();
 const path = buildPath(PIECES, { closed: !!TRACK.closed });
 const ground = new Ground(path, BREAK ? { VERGE: -12, CUT: 4, NEAR: 6 } : {});
