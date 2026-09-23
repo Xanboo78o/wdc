@@ -40,7 +40,8 @@ FF_GAIN, FF_AUTOCENTER = 0x60, 0x61
 EVIOCSFF = 0x40304580
 EVIOCRMFF = 0x40044581
 RAMP = 3.0            # seconds from zero to full strength after the wheel is opened
-SLEW = 0.05           # most the torque may change per message (~0.3 s end to end at 60 Hz)
+SLEW = 0.15           # most the torque may change per message. Was 0.05, which smoothed
+                      # every bump flat; raised after clean runs at 10/20/30%.
 DIR = 0x4000          # the X axis. Which way + goes is what --probe is for.
 
 

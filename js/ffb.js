@@ -25,10 +25,21 @@ const URL_ = 'ws://127.0.0.1:8179';
 const MECH = 0.3;            // caster's share of the trail, relative to pneumatic
 const SCALE = 0.9;           // front force / weight that reads as ~70% torque
 
+// ROAD TEXTURE, in the steering torque itself — not the base's own vibration
+// effect, which stays off since the 2026-09-23 shutdown (one effect on the
+// base, not three). Keyed to DISTANCE travelled, not time, so a bump is a
+// place: the same ripple comes back at the same spot, and it comes faster the
+// faster you go, which is how a real road feels.
+const hash = i => { const x = Math.sin(i * 127.1) * 43758.5453; return (x - Math.floor(x)) * 2 - 1; };
+const vnoise = x => { const i = Math.floor(x), t = x - i, u = t * t * (3 - 2 * t); return hash(i) * (1 - u) + hash(i + 1) * u; };
+const ROAD = 0.07;           // tarmac ripple at speed
+const KERB = 0.28;           // the rumble strip: a hard square wave, stripe by stripe
+const OFF = 0.38;            // grass and gravel: big, random, jerky
+
 export class FFB {
   constructor() {
     this.ws = null; this.live = false; this.wheel = null;
-    this.jolt = 0;
+    this.jolt = 0; this.dist = 0; this.kick = 1;
     this._retry = 0;
     this.off = new URLSearchParams(location.search).get('ffb') === '0';
   }
@@ -65,6 +76,19 @@ export class FFB {
     f *= Math.min(1, (car.speed || 0) / 5);   // nothing at all on the grid or parked
 
     this.jolt = Math.max(0, this.jolt - dt * 4);
+
+    // Bumps, only with the wheels on the ground.
+    const v = car.speed || 0;
+    this.dist += v * dt;
+    if (!car.airborne) {
+      const x = this.dist, sp = Math.min(1, v / 30);
+      let tex = ROAD * sp * (0.6 * vnoise(x / 1.5) + 0.4 * vnoise(x / 0.35));
+      if (rough >= 0.4) tex += OFF * Math.min(1, v / 8) * vnoise(x / 0.25);
+      else if (rough > 0) tex += KERB * Math.min(1, v / 8) * Math.sign(Math.sin(x * Math.PI / 2.0));
+      // A hit is a jerk: a hard shove that flips side each frame while it lasts.
+      if (this.jolt > 0) { this.kick = -this.kick; tex += this.kick * this.jolt * 0.5; }
+      f = Math.max(-1, Math.min(1, f + tex));
+    }
     const r = Math.min(1, rough * 0.8 + this.jolt * 0.8);
     // A real rack has weight even unloaded, most of it at a crawl.
     const d = 0.1 + 0.2 * Math.max(0, 1 - (car.speed || 0) / 15);
