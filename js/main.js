@@ -457,6 +457,7 @@ function loop(now) {
         state.me.bump = null;
         hands.rumble(Math.min(1, bump.closing / 14), 0.5, 160);
         ffb.hit(bump.closing / 14);
+        if (state.engine) state.engine.hit(bump.closing);
         toast(bump.what === 'car'
           ? (bump.harm > 1.2 ? 'CONTACT — WHEEL TO WHEEL' : 'RUBBING')
           : (bump.harm > 0.12 ? `HEAVY CONTACT — ${String(bump.part).toUpperCase()}` : 'CONTACT'));
@@ -499,6 +500,7 @@ function loop(now) {
     if (hit && hit.closing > 3.5) {
       hands.rumble(Math.min(1, hit.closing / 14), 0.5, 160);
       ffb.hit(hit.closing / 14);
+      if (state.engine) state.engine.hit(hit.closing);
       toast(hit.harm > 0.12 ? `HEAVY CONTACT — ${hit.part.toUpperCase()}` : 'CONTACT');
     }
 
@@ -558,10 +560,11 @@ function loop(now) {
         state._peak = peakSlip(car.spec); state._peakFor = car.spec;
       }
       state.engine.update(state.box.rpm, car.throttle, {
-        off: car.surface < 1 ? 1 : 0,
+        off: car.surface < 0.9 ? 1 : 0,   // grass and gravel, not kerbs
         speed: car.speed,
         slip: Math.max(Math.abs(car.slipF), Math.abs(car.slipR)),
         peak: state._peak,
+        surf: car.surface, wall: !!car.wallTouch, dt: frame,
       });
     }
   }

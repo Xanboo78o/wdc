@@ -1,0 +1,40 @@
+<script type="module">
+const SR = 44100, LEN = 12;
+const off = new OfflineAudioContext(2, SR * LEN, SR);
+window.AudioContext = function () { return off; };
+const { Engine, FX } = await import('/js/audio.js');
+if (location.hash === '#fx') Object.assign(FX, { engBoost: 0, grit: 0 });
+if (location.hash === '#old') Object.assign(FX, { engBoost: 1, grit: 0, tyreMin: 0, gravel: 0, grass: 0, kerb: 0, stones: 0, crash: 0, scrape: 0, concuss: 0 });
+const e = new Engine({ pick: 1 });
+localStorage.clear();
+await e.start('/');
+// scenario: [t0, t1, what]
+const seg = [[0, 2, 'tarmac 250kmh full throttle', { surf: 1 }], [2, 4, 'gravel 150kmh', { surf: 0.58 }],
+  [4, 6, 'grass 120kmh', { surf: 0.42 }], [6, 7.5, 'kerb 180kmh', { surf: 0.93 }],
+  [7.5, 9, 'wall scrape 120kmh', { surf: 1, wall: true }], [9, 12, 'BIG CRASH 25m/s at 9.0s', { surf: 1 }]];
+const kmh = { 0: 250, 2: 150, 4: 120, 6: 180, 7.5: 120, 9: 60 };
+let hitDone = false;
+for (let t = 0.02; t < LEN; t += 1 / 60) {
+  off.suspend(t).then(() => {
+    const s = seg.find(q => t >= q[0] && t < q[1]);
+    const v = (kmh[s[0]] || 100) / 3.6;
+    e.update(11500, t < 9 ? 1 : 0.2, { speed: v, slip: 0, peak: 0.12, off: s[3].surf < 0.9 ? 1 : 0, ...s[3], dt: 1 / 60 });
+    if (t >= 9 && !hitDone) { hitDone = true; e.hit(25); }
+    off.resume();
+  });
+}
+const buf = await off.startRendering();
+const L = buf.getChannelData(0);
+const out = [];
+for (const [a, b, name] of seg) {
+  let sq = 0, pk = 0; const i0 = Math.floor(a * SR), i1 = Math.floor(b * SR);
+  for (let i = i0; i < i1; i++) { sq += L[i] * L[i]; pk = Math.max(pk, Math.abs(L[i])); }
+  out.push(`${name.padEnd(28)} rms ${(20 * Math.log10(Math.sqrt(sq / (i1 - i0)))).toFixed(1)} dBFS  peak ${(20 * Math.log10(pk)).toFixed(1)}`);
+}
+// the concussion: brightness (high band energy) after the hit vs before
+const hf = (a, b) => { let s = 0, n = 0; for (let i = Math.floor(a * SR) + 1; i < b * SR; i++) { const d = L[i] - L[i - 1]; s += d * d; n++; } return 10 * Math.log10(s / n); };
+out.push(`high-freq energy: before hit ${hf(8.5, 9).toFixed(1)}  0.5-1s after ${hf(9.5, 10).toFixed(1)}  2.5-3s after ${hf(11.5, 12).toFixed(1)} dB`);
+out.push(`clipped samples (>=1.0): ${L.reduce((n, x) => n + (Math.abs(x) >= 0.999), 0)}`);
+out.push(`loaded: gravel ${!!e.gravel} grass ${!!e.grass} scrape ${!!e.scrape} bufs ${Object.keys(e.bufs || {}).length}`);
+document.body.innerText = out.join('\n'); document.title = 'done';
+</script>

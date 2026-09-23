@@ -58,3 +58,24 @@ engine loops:
 
 If the CC-BY attribution is ever unwanted, this file is the one to replace —
 everything else here is public domain and carries no obligation.
+
+# Ground, kerbs and crashes (2026-09-23)
+
+From **Stunt Rally sounds** — https://opengameart.org/content/stunt-rally-sounds
+(submitted by Calinou), **licence CC-BY-SA 3.0**. Attribution required; these
+files (and any edit of them) stay CC-BY-SA. Recordings, not synthesis.
+
+| file | from | author |
+|---|---|---|
+| surf_gravel.wav, surf_grass.wav | gravel.wav, grass.wav | VDrift project (original VDrift sounds) |
+| bump_1.wav, bump_2.wav | bump_front.wav, bump_rear.wav | VDrift project |
+| dirt_1..4.wav | terrain1,3,4,5.wav — "hit with dirt spray" | halleck (freesound.org) |
+| crash_01..11.wav | crash/02..12.wav — metal hits, side impacts, metal crash | Halleck (freesound 121621/121622/121655/121664/121665/121668/121685) |
+| crash_heavy.wav | crash/scrap.wav — "metal roll cage hits heavy" | Halleck (freesound 121669) |
+| scrape.wav | crash/screech.wav — "metal screech and scraping" | Halleck (freesound 121677) |
+
+Converted to mono 16-bit 44.1 kHz with ffmpeg. The three loops
+(surf_gravel, surf_grass, scrape) had their last 120 ms crossfaded into their
+first 120 ms so they repeat without a click at the seam (jump 3984 -> 700 on
+gravel, which is the size of an ordinary sample-to-sample step in that noise).
+crash/01.wav (peaks at -15 dB) and dirt2.wav (-13 dB) were left out as too quiet.

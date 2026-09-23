@@ -624,6 +624,9 @@ export function step(car, dt, env = {}) {
   // this the same way. The floor is mandatory, not a tuning knob.
   const vSafe = Math.max(Math.abs(car.vx), 6.0);
   const surf = env.surface ?? 1;
+  // Kept on the car for whoever wants to know what it is standing on — the
+  // audio and the HUD read car.surface, and nothing ever wrote it.
+  car.surface = surf;
 
   // ---- aero ---------------------------------------------------------------
   const q = 0.5 * S.rho * v * v;

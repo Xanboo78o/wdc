@@ -102,6 +102,30 @@ export const MIX = {
   roomSink: null,
 };
 
+// THE INTENSE PASS (Adam, 2026-09-23: "sound mixing needs WAYYYY MORE, engines
+// need to be INTENSE, going off track i wanna hear the dirt and gravel.
+// Crashes? Traumatizing."). Kept OUT of MIX on purpose: a mix saved from
+// sound.html before this existed would otherwise pin every one of these at
+// whatever the old bench stored, and "I asked for more and nothing changed"
+// would be the result.
+//
+// Every sound here is a RECORDING (data/audio/SOURCE.md) — Stunt Rally's
+// set: VDrift's gravel and grass loops and bump thuds, Halleck's metal crash
+// hits, dirt-spray hits, a roll-cage hit and a metal scrape.
+export const FX = {
+  engBoost: 1.55,   // engine level on top of the saved mix
+  grit: 0.55,       // parallel distortion: the rasp a clean loop has not got
+  gritAt: 2400,     // centre of the rasp band
+  tyreMin: 0.55,    // squeal is ON now, whatever an old bench saved
+  gravel: 1.25, grass: 1.05, kerb: 0.9, stones: 0.8,
+  crash: 1.6,       // impact level
+  scrape: 1.4,      // bodywork along a wall
+  concuss: 1.0,     // the big-hit muffle: 0 turns it off
+  trim: 0.5,        // after the limiter: its automatic makeup gain, taken back out
+};
+const CRASH_FILES = ['crash_01', 'crash_02', 'crash_03', 'crash_04', 'crash_05', 'crash_06',
+  'crash_07', 'crash_08', 'crash_09', 'crash_10', 'crash_11'];
+
 function savedMix() {
   try {
     const raw = localStorage.getItem(MIX_KEY);
@@ -144,7 +168,37 @@ export class Engine {
       // both buses land on the same speakers, the filtered copy just adds
       // boom to the unfiltered one, which is worse than not having it.
       this.cans = this.ctx.createGain();
-      this.cans.connect(this.ctx.destination);
+      // THE LAST TWO THINGS BEFORE THE SPEAKERS.
+      //   concuss  a lowpass that sits wide open (20 kHz) until a big hit
+      //            slams it shut, then eases back over seconds — the world
+      //            going to cotton wool, which is what "traumatizing" is.
+      //   limiter  everything is louder now, and loud without a limiter is
+      //            clipping. A brick wall at -1 dB lets the level go up
+      //            without the crackle.
+      this.concuss = this.ctx.createBiquadFilter();
+      this.concuss.type = 'lowpass'; this.concuss.frequency.value = 20000; this.concuss.Q.value = 0.9;
+      //   MEASURED before this stage existed (tools/shots/audiotest.html, an
+      //   OfflineAudioContext render of a scripted lap): the OLD mix clipped
+      //   38,551 samples in 12 s at full throttle. Loud without a ceiling is
+      //   crackle. Chrome's DynamicsCompressor adds its own makeup gain, so a
+      //   compressor alone is not a ceiling — hence the trim after it and a
+      //   tanh soft-clip last, which can never exceed full scale and bends
+      //   the peaks instead of chopping them.
+      this.limiter = this.ctx.createDynamicsCompressor();
+      this.limiter.threshold.value = -10; this.limiter.knee.value = 6;
+      this.limiter.ratio.value = 12; this.limiter.attack.value = 0.003; this.limiter.release.value = 0.15;
+      this.trim = this.ctx.createGain(); this.trim.gain.value = FX.trim;
+      this.clip = this.ctx.createWaveShaper();
+      {
+        const n = 4096, c = new Float32Array(n);
+        for (let i = 0; i < n; i++) { const x = (i / (n - 1) * 2 - 1) * 2; c[i] = 0.96 * Math.tanh(x); }
+        this.clip.curve = c; this.clip.oversample = '4x';
+      }
+      this.cans.connect(this.concuss);
+      this.concuss.connect(this.limiter);
+      this.limiter.connect(this.trim);
+      this.trim.connect(this.clip);
+      this.clip.connect(this.ctx.destination);
       this.room = this.ctx.createGain();
       this.room.gain.value = this.mix.roomSink ? 1 : 0;
       this.roomLP = this.ctx.createBiquadFilter();
@@ -217,6 +271,35 @@ export class Engine {
       this.shakeLP.connect(this.shakeGain);
       this.shakeGain.connect(this.cans);
       this.shakeGain.connect(this.room);
+      // THE RASP. A copy of the engine through a waveshaper — hard tanh
+      // saturation — then a band around 2.4 kHz, mixed back in parallel. A
+      // recording played faster gets higher, not angrier; saturation is what
+      // adds the harmonics that make a note sound like it is being ABUSED.
+      this.shaper = this.ctx.createWaveShaper();
+      {
+        const n = 2048, c = new Float32Array(n), k = 6;
+        for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); }
+        this.shaper.curve = c; this.shaper.oversample = '2x';
+      }
+      this.gritBP = this.ctx.createBiquadFilter();
+      this.gritBP.type = 'bandpass'; this.gritBP.frequency.value = FX.gritAt; this.gritBP.Q.value = 0.8;
+      this.gritGain = this.ctx.createGain(); this.gritGain.gain.value = 0;
+      this.shelf.connect(this.shaper); this.shaper.connect(this.gritBP);
+      this.gritBP.connect(this.gritGain); this.gritGain.connect(this.cans);
+
+      // One-shots and surface loops all land on one FX bus, so a crash can
+      // duck the engine without ducking itself.
+      this.fx = this.ctx.createGain(); this.fx.connect(this.cans);
+      const optional = n => this._layer(baseUrl, n, 'lowpass', this.fx).catch(() => null);
+      this.gravel = await optional('surf_gravel');
+      this.grass = await optional('surf_grass');
+      this.scrape = await optional('scrape');
+      this.bufs = {};
+      await Promise.all(['dirt_1', 'dirt_2', 'dirt_3', 'dirt_4', 'bump_1', 'bump_2', 'crash_heavy', ...CRASH_FILES]
+        .map(n => this._buf(baseUrl, n).then(b => { this.bufs[n] = b; }).catch(() => {})));
+      this.duck = 1;          // engine level after a big hit, recovers to 1
+      this.lastStone = 0; this.kerbDist = 0; this.wasOff = false; this.lastHit = -9;
+
       // Tyres and road are OPTIONAL: a missing file must cost the engine
       // nothing, because the engine is the one sound this game cannot be
       // played without.
@@ -236,7 +319,63 @@ export class Engine {
     }
   }
 
-  async _layer(baseUrl, name, filter) {
+  async _buf(baseUrl, name) {
+    const r = await fetch(`${baseUrl}data/audio/${name}.wav`);
+    if (!r.ok) throw new Error(`${name}.wav: HTTP ${r.status}`);
+    return this.ctx.decodeAudioData(await r.arrayBuffer());
+  }
+
+  // Fire a recording once. `rate` a little off 1 each time so twenty hits in
+  // a race are not twenty copies of the same hit.
+  _once(name, gain, rate = 1, delay = 0) {
+    const b = this.bufs && this.bufs[name];
+    if (!b || !this.ok || this.muted) return;
+    const src = this.ctx.createBufferSource(); src.buffer = b;
+    src.playbackRate.value = rate * (0.94 + Math.random() * 0.12);
+    const g = this.ctx.createGain(); g.gain.value = this.master * gain;
+    src.connect(g); g.connect(this.fx);
+    src.start(this.ctx.currentTime + delay);
+  }
+
+  /**
+   * A hit. `closing` is the impact speed in m/s (collide.js), which is how
+   * hard it was and so which recordings, how many, and how loud.
+   *   < 6 m/s    a knock: one light metal hit
+   *   6 - 12     a proper hit: a heavy hit and a bump under it
+   *   > 12       a wreck: two big hits a beat apart, the roll-cage crunch,
+   *              the engine ducks, and the world goes to cotton wool
+   */
+  hit(closing) {
+    if (!this.ok || this.muted || !this.bufs) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastHit < 0.09) return;       // one contact reported twice
+    this.lastHit = now;
+    const k = Math.min(1, closing / 20);
+    const pick = (lo, hi) => CRASH_FILES[lo + Math.floor(Math.random() * (hi - lo + 1))];
+    if (closing < 6) {
+      this._once(pick(0, 4), FX.crash * (0.35 + 0.5 * k));
+      return;
+    }
+    this._once(pick(5, 10), FX.crash * (0.6 + 0.6 * k));
+    this._once(Math.random() < 0.5 ? 'bump_1' : 'bump_2', FX.crash * 0.9, 0.7);
+    if (closing < 12) return;
+    this._once(pick(5, 10), FX.crash * (0.7 + 0.5 * k), 0.85, 0.07 + Math.random() * 0.08);
+    this._once('crash_heavy', FX.crash * (0.8 + 0.6 * k), 0.9 + 0.2 * Math.random());
+    this._once(`dirt_${1 + Math.floor(Math.random() * 4)}`, FX.crash * 0.7, 1, 0.12);
+    if (FX.concuss > 0) {
+      // Slammed shut, then a slow way back. Harder hits close further and take
+      // longer to come back from.
+      const f = this.concuss.frequency, hold = 0.35 + 1.2 * k, back = 2.5 + 3 * k;
+      f.cancelScheduledValues(now);
+      f.setValueAtTime(20000, now);
+      f.exponentialRampToValueAtTime(Math.max(180, 900 - 700 * k * FX.concuss), now + 0.06);
+      f.setValueAtTime(Math.max(180, 900 - 700 * k * FX.concuss), now + hold);
+      f.exponentialRampToValueAtTime(20000, now + hold + back);
+      this.duck = 0.25;
+    }
+  }
+
+  async _layer(baseUrl, name, filter, bus = null) {
     const r = await fetch(`${baseUrl}data/audio/${name}.wav`);
     if (!r.ok) throw new Error(`${name}.wav: HTTP ${r.status}`);
     const buf = await this.ctx.decodeAudioData(await r.arrayBuffer());
@@ -247,7 +386,7 @@ export class Engine {
     const toCans = this.ctx.createGain(), toRoom = this.ctx.createGain();
     src.connect(filt); filt.connect(gain);
     gain.connect(toCans); gain.connect(toRoom);
-    toCans.connect(this.cans); toRoom.connect(this.room);
+    toCans.connect(bus || this.cans); toRoom.connect(this.room);
     src.start();
     return { src, filt, gain, toCans, toRoom };
   }
@@ -260,7 +399,7 @@ export class Engine {
    *   slip   the larger of |slipF|,|slipR| in radians
    *   peak   physics.peakSlip(spec) — the slip angle this car peaks at
    */
-  update(rpm, throttle, { off = 0, speed = 0, slip = 0, peak = 0 } = {}) {
+  update(rpm, throttle, { off = 0, speed = 0, slip = 0, peak = 0, surf = 1, wall = false, dt = 1 / 60 } = {}) {
     if (!this.ok || this.muted) { if (this.gain) this.gain.gain.value = 0; return; }
     const m = this.mix;
 
@@ -304,7 +443,12 @@ export class Engine {
     // Level rises with load but never to zero: an engine on the overrun is
     // still an engine, and a car that goes silent mid-corner sounds broken.
     const load = (overrun + (1 - overrun) * t) * (1 - 0.25 * off) * stut;
-    this.engine.gain.gain.value = this.master * load;
+    // After a big hit the engine is pushed down under the crash and comes back
+    // over a second or two, instead of carrying on as if nothing happened.
+    this.duck = Math.min(1, (this.duck ?? 1) + dt * 0.45);
+    const boost = FX.engBoost * this.duck;
+    this.engine.gain.gain.value = this.master * load * boost;
+    if (this.gritGain) this.gritGain.gain.value = this.master * FX.grit * boost * (0.25 + 0.75 * t) * (0.4 + 0.6 * rev);
     this.engine.toCans.gain.value = m.engCans;
     this.engine.toRoom.gain.value = m.engRoom;
 
@@ -313,7 +457,7 @@ export class Engine {
     if (this.sub) {
       this.sub.src.playbackRate.value = rate * 0.5 * wob;
       this.sub.filt.frequency.value = m.subCut;
-      this.sub.gain.gain.value = this.master * load * m.sub;
+      this.sub.gain.gain.value = this.master * load * m.sub * boost;
     }
     if (this.shelf) {
       this.shelf.frequency.value = m.bassAt;
@@ -344,7 +488,7 @@ export class Engine {
       const frac = peak > 0 ? Math.min(1.6, Math.abs(slip) / peak) : 0;
       const over = Math.max(0, frac - m.thresh) / Math.max(0.01, 1 - m.thresh);
       const sp = Math.min(1, kmh / 90);     // scrubbing at walking pace is nothing
-      this.tyre.gain.gain.value = this.master * m.tyreLvl * Math.pow(over, 1.4) * sp;
+      this.tyre.gain.gain.value = this.master * Math.max(m.tyreLvl, FX.tyreMin) * Math.pow(over, 1.4) * sp;
       this.tyre.src.playbackRate.value = 0.72 + 0.55 * Math.min(1, over);
       this.tyre.filt.frequency.value = 700 + 9000 * Math.pow(Math.min(1, over), 0.8);
       this.tyre.toCans.gain.value = m.tyreCans;
@@ -369,6 +513,51 @@ export class Engine {
       this.road.filt.frequency.value = Math.max(80, m.roadCut * tone);
       this.road.toCans.gain.value = m.roadCans;
       this.road.toRoom.gain.value = m.roadRoom;
+    }
+
+    // ---- the ground: gravel, grass, kerbs, and stones off the floor ---------
+    // car.surface: 1 tarmac, 0.93 kerb, 0.58 run-off (the gravel trap), 0.42
+    // grass. The loops scale with speed and pitch up with it — the faster the
+    // wheels go through it, the harder the stones hit the floor.
+    const sp = Math.min(1, kmh / 140), moving = Math.min(1, kmh / 15);
+    const onGravel = surf > 0.5 && surf < 0.7, onGrass = surf < 0.5, onKerb = surf > 0.9 && surf < 1;
+    if (this.gravel) {
+      this.gravel.gain.gain.value = onGravel ? this.master * FX.gravel * moving * (0.45 + 0.55 * sp) : 0;
+      this.gravel.src.playbackRate.value = 0.75 + 0.55 * sp;
+      this.gravel.filt.frequency.value = 2500 + 9000 * sp;
+    }
+    if (this.grass) {
+      this.grass.gain.gain.value = onGrass ? this.master * FX.grass * moving * (0.4 + 0.6 * sp) : 0;
+      this.grass.src.playbackRate.value = 0.8 + 0.4 * sp;
+      this.grass.filt.frequency.value = 1500 + 7000 * sp;
+    }
+    const nowT = this.ctx.currentTime;
+    if (this.bufs) {
+      const offNow = onGravel || onGrass;
+      // Dropping a wheel off the road at speed is a spray of dirt, once.
+      if (offNow && !this.wasOff && kmh > 40) this._once(`dirt_${1 + Math.floor(Math.random() * 4)}`, FX.stones * (0.6 + 0.6 * sp));
+      this.wasOff = offNow;
+      // In the gravel, stones keep flicking up into the floor: more often and
+      // harder the faster you are going.
+      if (onGravel && kmh > 20 && nowT > this.lastStone) {
+        this._once(`dirt_${1 + Math.floor(Math.random() * 4)}`, FX.stones * (0.25 + 0.5 * sp) * Math.random(), 1.1);
+        this.lastStone = nowT + 0.08 + Math.random() * (0.5 - 0.35 * sp);
+      }
+      // A kerb is a row of thuds, one per stripe — distance, not time, so it
+      // drums faster the faster you cross it.
+      if (onKerb && kmh > 10) {
+        this.kerbDist += speed * dt;
+        if (this.kerbDist > 2.0) {
+          this.kerbDist = 0;
+          this._once(Math.random() < 0.5 ? 'bump_1' : 'bump_2', FX.kerb * (0.35 + 0.65 * sp), 0.8 + 0.3 * sp);
+        }
+      } else this.kerbDist = 1.9;              // the first stripe lands at once
+    }
+    // Along a wall: the scrape, while there is contact and the car is moving.
+    if (this.scrape) {
+      this.scrape.gain.gain.value = wall && kmh > 15 ? this.master * FX.scrape * Math.min(1, kmh / 80) : 0;
+      this.scrape.src.playbackRate.value = 0.8 + 0.5 * sp;
+      this.scrape.filt.frequency.value = 12000;
     }
 
     if (this.roomLP) this.roomLP.frequency.value = m.muffle;
