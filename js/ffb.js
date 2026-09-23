@@ -62,6 +62,7 @@ export class FFB {
     const sat = -(car.Fyf || 0) * (tp + MECH) / (1 + MECH) / (spec.m * 9.81);
     let f = Math.tanh(sat / SCALE);
     if (car.airborne) f = 0;                   // nothing on the ground, nothing in the hands
+    f *= Math.min(1, (car.speed || 0) / 5);   // nothing at all on the grid or parked
 
     this.jolt = Math.max(0, this.jolt - dt * 4);
     const r = Math.min(1, rough * 0.8 + this.jolt * 0.8);

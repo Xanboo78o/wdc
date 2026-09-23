@@ -39,6 +39,8 @@ FF_GAIN, FF_AUTOCENTER = 0x60, 0x61
 # pointer, which aligns the union to 8). _IOW('E', 0x80, struct ff_effect).
 EVIOCSFF = 0x40304580
 EVIOCRMFF = 0x40044581
+RAMP = 3.0            # seconds from zero to full strength after the wheel is opened
+SLEW = 0.05           # most the torque may change per message (~0.3 s end to end at 60 Hz)
 DIR = 0x4000          # the X axis. Which way + goes is what --probe is for.
 
 
@@ -92,8 +94,16 @@ def find_wheel(want):
 
 
 class Wheel:
-    def __init__(self, path, name, maxf, invert):
+    def __init__(self, path, name, maxf, invert, extras=False):
         self.path, self.name, self.maxf, self.sign = path, name, maxf, -1 if invert else 1
+        self.extras = extras
+        # AFTER THE 2026-09-23 SHUTDOWN (first run at 80%: the R3 overloaded,
+        # dropped off USB and took ten minutes to come back). The cause is not
+        # known, so: forces ramp in from zero over RAMP seconds, the torque can
+        # only move SLEW per update, and texture + damper stay off unless
+        # --extras asks for them — one effect on the base, not three.
+        self.t0 = time.time()
+        self.f = 0.0
         self.fd = os.open(path, os.O_RDWR)
         ev(self.fd, EV_FF, FF_GAIN, 0xffff)
         try:
@@ -103,8 +113,9 @@ class Wheel:
         self.ids = {}
         self.last = {}
         self.upload('f', FF_CONSTANT, constant(0))
-        self.upload('r', FF_PERIODIC, sine(0, 25))
-        self.upload('d', FF_DAMPER, damper(0))
+        if extras:
+            self.upload('r', FF_PERIODIC, sine(0, 25))
+            self.upload('d', FF_DAMPER, damper(0))
         for eid in self.ids.values():
             ev(self.fd, EV_FF, eid, 1)
 
@@ -115,16 +126,24 @@ class Wheel:
 
     def set(self, f=0.0, r=0.0, d=0.0):
         clamp = lambda x, lo, hi: max(lo, min(hi, x))
-        f = int(clamp(f, -1, 1) * self.maxf * self.sign * 32767)
-        r = int(clamp(r, 0, 1) * self.maxf * 32767)
-        d = int(clamp(d, 0, 1) * 32767)
+        ramp = min(1.0, (time.time() - self.t0) / RAMP)
+        if f == 0 and r == 0 and d == 0:
+            self.f = 0.0                     # letting GO is never slew-limited
+        else:
+            self.f += clamp(clamp(f, -1, 1) * ramp - self.f, -SLEW, SLEW)
+        f = int(self.f * self.maxf * self.sign * 32767)
+        r = int(clamp(r, 0, 1) * ramp * self.maxf * 32767)
+        d = int(clamp(d, 0, 1) * ramp * self.maxf * 32767)
         # Every upload is a USB report. Skip the ones nobody could feel.
         if abs(f - self.last.get('f', 1e9)) > 40:
             self.upload('f', FF_CONSTANT, constant(f)); self.last['f'] = f
+        if not self.extras:
+            return f
         if abs(r - self.last.get('r', 1e9)) > 200:
             self.upload('r', FF_PERIODIC, sine(r, 25)); self.last['r'] = r
         if abs(d - self.last.get('d', 1e9)) > 200:
             self.upload('d', FF_DAMPER, damper(d)); self.last['d'] = d
+        return f
 
     def close(self):
         try:
@@ -192,7 +211,7 @@ async def serve(args):
             path, name = find_wheel(args.device)
             if path:
                 try:
-                    state['wheel'] = Wheel(path, name, args.max, args.invert)
+                    state['wheel'] = Wheel(path, name, args.max, args.invert, args.extras)
                     print(f'holding {name} at {path}  (max {args.max:.0%}{", inverted" if args.invert else ""})')
                 except OSError as e:
                     print(f'found {name} but could not open {path}: {e}')
@@ -204,12 +223,17 @@ async def serve(args):
             state['wheel'] = None
             print('wheel gone — waiting for it (power button?)')
 
+    log = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ffb.log'), 'a')
+    log.write(f'--- {time.strftime("%F %T")} max {args.max} extras {args.extras}\n')
+
     def apply(**kw):
         w = wheel()
         if not w:
             return
         try:
-            w.set(**kw)
+            out = w.set(**kw)
+            # Every force that reached the base, so the next fault has a record.
+            log.write(f'{time.time():.3f} in {kw.get("f", 0):+.3f} out {out:+6d}\n'); log.flush()
         except OSError as e:
             if e.errno in (errno.ENODEV, errno.EIO):
                 drop()
@@ -301,8 +325,9 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description='Force feedback bridge for the WDC wheel.')
     ap.add_argument('--port', type=int, default=8179)
     ap.add_argument('--device', default='', help='part of the wheel name (default: first FFB device)')
-    ap.add_argument('--max', type=float, default=0.8, help='strongest force, 0..1 of what the base can do')
+    ap.add_argument('--max', type=float, default=0.1, help='strongest force, 0..1 of what the base can do')
     ap.add_argument('--invert', action='store_true', help='flip the torque (see --probe)')
+    ap.add_argument('--extras', action='store_true', help='also kerb texture + damper (off since the 2026-09-23 shutdown)')
     ap.add_argument('--dry', action='store_true', help='print the forces the game sends; never touch the wheel')
     ap.add_argument('--probe', action='store_true', help='nudge the rim both ways and report which way + turns it')
     ap.add_argument('--probe-force', type=float, default=0.2)
