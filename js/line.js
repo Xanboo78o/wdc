@@ -6,9 +6,11 @@ import { corneringSpeed, topSpeed, limitMu } from './physics.js';
 // tight and is slower; what you want is the gentlest arc the corridor allows.
 // Gradient descent on the sum of squared second differences, clamped to the
 // track edges.
-export function racingLine(track, margin = 0.35, iters = 6000, step = 0.12) {
+// `init` is an optional starting line (a coarse solve, spread back out) — the
+// smoother converges very slowly over long corners, see tools/baketrack.mjs.
+export function racingLine(track, margin = 0.35, iters = 6000, step = 0.12, init = null) {
   const n = track.n;
-  const off = new Float32Array(n);
+  const off = init ? Float32Array.from(init) : new Float32Array(n);
   const nx = new Float32Array(n), ny = new Float32Array(n);
   const lim = new Float32Array(n);
   for (let i = 0; i < n; i++) {

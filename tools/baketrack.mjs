@@ -192,6 +192,34 @@ const elev = {
   s, grid: { x0: round(gx0), y0: round(gy0), dx: round(dx, 3), dy: round(dy, 3), n: N, h },
 };
 
+// THE RACING LINE. The game solves one only when the file has none, and this
+// file always had one — all zeros — so on a hand-built lap every car drove the
+// dead centre of the road: widening Kate Mascoi from 26 to 40 m changed the lap
+// time by exactly 0.000 s. A closed lap gets the same minimum-curvature line
+// the surveyed circuits ship with. (An open stage keeps zeros: the solver wraps
+// the ends together.)
+if (TRACK.closed) {
+  const { Track } = await import(ROOT + 'js/track.js');
+  const { racingLine } = await import(ROOT + 'js/line.js');
+  // 6000 iterations (the survey bake's default) barely moves off the centre on
+  // a 40 m road: this smoother converges like the 4th power of a corner's
+  // length in SAMPLES, so 150,000 iterations still only reached -3.9..+1.8 m.
+  // So solve COARSE first — every 5th sample, 5^4 = 625x faster to converge —
+  // then spread that back to every sample and let the fine solve finish it.
+  const tk = new Track(track), C = 5, m = Math.floor(tk.n / C);
+  const coarse = { n: m, x: [], y: [], hdg: [], w: [] };
+  for (let q = 0; q < m; q++) {
+    const i = q * C;
+    coarse.x.push(tk.x[i]); coarse.y.push(tk.y[i]); coarse.hdg.push(tk.hdg[i]); coarse.w.push(tk.w[i]);
+  }
+  const oc = racingLine(coarse, 0.35, 60000);
+  const seed = new Float32Array(tk.n);
+  for (let i = 0; i < tk.n; i++) {
+    const f = i / C, q = Math.floor(f) % m, r = (q + 1) % m, t = f - Math.floor(f);
+    seed[i] = oc[q] * (1 - t) + oc[r] * t;
+  }
+  track.line = Array.from(racingLine(tk, 0.35, 6000, 0.12, seed), v => round(v, 2));
+}
 fs.writeFileSync(path.join(ROOT, `data/tracks/${KEY}.json`), JSON.stringify(track));
 fs.writeFileSync(path.join(ROOT, `data/elev/${KEY}.json`), JSON.stringify(elev));
 

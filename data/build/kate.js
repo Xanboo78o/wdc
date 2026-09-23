@@ -5,9 +5,12 @@
 // call it.... Kate Mascoi Circuit".
 //
 // So every piece has one of three jobs, and says which:
-//   BATTLE  26 m of road (a normal circuit is 12-15) so two or three cars fit
-//           side by side, heavy braking at the end of long straights so there
-//           is always a pass on, and corners with more than one line.
+//   BATTLE  40 m of road (a normal circuit is 12-15). It was 26; Adam:
+//           "wider, i wanna recreate that race where they ended 3 wide and
+//           still had room to spare". Three cars side by side take ~9 m with
+//           gaps; 40 m is three wide with a car's width of air either side.
+//           Heavy braking at the end of long straights so there is always a
+//           pass on, and corners with more than one line.
 //   CLIPS   huge run-off where the big moments happen (35 m at the hairpin,
 //           30 m at Last Chance): room to go in too deep, spin, and live.
 //   SPEED   the walls pulled in to 2.5-5 m where it is fastest. Speed is felt
@@ -29,11 +32,11 @@ export const TRACK = {
 };
 
 export const PIECES = [
-  { part: 'Start', kind: 'straight', length: 1000, width: 26, run: 14,
+  { part: 'Start', kind: 'straight', length: 1000, width: 40, run: 14,
     note: 'BATTLE/SPEED — 1 km, and the run out of Last Chance adds 419 m more: 1.4 km of slipstream' },
 
   { part: 'Mascoi Hairpin', kind: 'turn', dir: 'right', angle: 180, radius: 45, run: 35,
-    note: 'BATTLE/CLIPS — the heaviest stop on the lap, 26 m wide so there is an inside, an outside and a switchback; 35 m of run-off for when you send it' },
+    note: 'BATTLE/CLIPS — the heaviest stop on the lap, 40 m wide so there is an inside, an outside and a switchback; 35 m of run-off for when you send it' },
   { kind: 'straight', length: 200.6974, run: 14,
     note: 'solved — sets where the lap lands on the 2 m sample grid' },
 

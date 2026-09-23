@@ -612,6 +612,10 @@ export class Race {
         if (!e.pastHalf && !e.crossed0) {
           // the grid sits behind the line, so the first crossing is the START
           e.crossed0 = true; e.lapStart = this.time;
+        } else if (!e.pastHalf) {
+          // Back over the line and forward again without having been anywhere:
+          // a car shoved backwards in a start-line pile-up. Not a lap — that is
+          // how Kate Mascoi's first 12-car race logged a 0:00.025 best lap.
         } else {
           e.lap++; e.pastHalf = false;
           const lt = this.time - e.lapStart;
