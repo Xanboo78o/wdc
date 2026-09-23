@@ -10,6 +10,7 @@ import { buildLines } from './line.js';
 import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor, registerAero } from './physics.js';
 import { makeAero } from './aero.js';
 import { Hands, steerLock } from './input.js';
+import { FFB } from './ffb.js';
 import { View } from './render.js';
 import { loadEnv } from './env.js';
 import { resolveBarrier } from './collide.js';
@@ -41,6 +42,7 @@ const state = {
   box: null, engine: null,
 };
 const hands = new Hands();
+const ffb = new FFB();
 // the phone steers while it is live; keys and pedals are untouched
 // (the phone used to steer here; a real wheel comes in through input.js)
 
@@ -421,6 +423,7 @@ function loop(now) {
       if (bump) {
         state.me.bump = null;
         hands.rumble(Math.min(1, bump.closing / 14), 0.5, 160);
+        ffb.hit(bump.closing / 14);
         toast(bump.what === 'car'
           ? (bump.harm > 1.2 ? 'CONTACT — WHEEL TO WHEEL' : 'RUBBING')
           : (bump.harm > 0.12 ? `HEAVY CONTACT — ${String(bump.part).toUpperCase()}` : 'CONTACT'));
@@ -462,6 +465,7 @@ function loop(now) {
     const hit = resolveBarrier(car, track, state.hint);
     if (hit && hit.closing > 3.5) {
       hands.rumble(Math.min(1, hit.closing / 14), 0.5, 160);
+      ffb.hit(hit.closing / 14);
       toast(hit.harm > 0.12 ? `HEAVY CONTACT — ${hit.part.toUpperCase()}` : 'CONTACT');
     }
 
@@ -497,6 +501,7 @@ function loop(now) {
     state.best = me.bestLap;
     state.invalid = false;
   }
+  ffb.update(car, rough, frame);   // the wheel pushes back (tools/ffb.py)
 
   // how far past the peak the rear tyre is — this drives the smoke AND the HUD
   const over = Math.max(0, (Math.abs(car.slipR) - state.peak) / state.peak);

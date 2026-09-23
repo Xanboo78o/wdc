@@ -992,6 +992,9 @@ export function step(car, dt, env = {}) {
   // rotating-frame terms and are only correct for integrating the velocities.
   car._Fxp = Fx; car._Fyp = Fy;
   car.muF = muF; car.muR = muR;
+  // The front axle's lateral force and load, for force feedback (js/ffb.js):
+  // the wheel's weight IS this force acting on the steering's trail.
+  car.Fyf = Fyf; car.Fzf = Fzf;
   return car;
 }
 
