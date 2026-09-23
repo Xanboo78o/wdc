@@ -72,7 +72,6 @@ let pickTrack = 'monza', pickCar = 'f4';
 // Race settings. `pickGrid` counts EVERY car including yours, so 22 is the real
 // thing and 6 is a sprint you can actually see all of.
 let pickMode = 'hotlap', pickGrid = 22, pickTier = 'medium', pickLaps = 3, pickStart = 'mid';
-
 let pickNoDnf = false;
 
 // The menu remembers what you last picked (Adam: "save my previous race
@@ -102,6 +101,7 @@ function saveMenu() {
     }));
   } catch { /* private window: it just won't remember */ }
 }
+
 // One card list, built the same way everywhere: the value, the big label, the
 // small one under it, and what to do when it is clicked.
 function cards(el, items, current, set, tight) {
@@ -129,9 +129,9 @@ function buildMenu() {
   cards('startList', [
     ['pole', 'POLE'], ['front', 'FRONT'], ['mid', 'MIDFIELD'], ['back', 'LAST'],
   ], pickStart, v => pickStart = v);
-  $('raceOpts').classList.toggle('off', pickMode !== 'race');
   cards('dnfList', [[false, 'NORMAL'], [true, 'NO DNF']], pickNoDnf, v => pickNoDnf = v);
   saveMenu();
+  $('raceOpts').classList.toggle('off', pickMode !== 'race');
 }
 
 // Which slot on the grid you line up in, 1 being pole.
@@ -206,8 +206,8 @@ async function start() {
     state.race = new Race({
       track: t, lines, spec, slots: gridSlots(t, grid), laps, grid,
       playerGrid: slot, tier, player: true,
-      seed: +q.get('seed') || (1 + Math.floor(Math.random() * 9973)),
       noDnf: q.has('nodnf') ? q.get('nodnf') === '1' : pickNoDnf,
+      seed: +q.get('seed') || (1 + Math.floor(Math.random() * 9973)),
     });
     state.me = state.race.entries.find(e => e.isPlayer);
     state.car = state.me.car;
@@ -971,8 +971,8 @@ mountDashCard(document.querySelector('#menu .keys'));
 // session. A flag that only works down the automated path is a flag nobody
 // tests.
 const Q = new URLSearchParams(location.search);
-if (Q.has('race')) pickMode = Q.get('race') === '0' ? 'hotlap' : 'race';
 loadMenu();   // before the URL, so ?race= and friends still win
+if (Q.has('race')) pickMode = Q.get('race') === '0' ? 'hotlap' : 'race';
 if (Q.has('grid')) pickGrid = Math.max(2, Math.min(22, +Q.get('grid') || 22));
 if (TIERS[Q.get('tier')]) pickTier = Q.get('tier');
 if (Q.has('laps')) pickLaps = Math.max(1, Math.min(60, +Q.get('laps') || 3));
