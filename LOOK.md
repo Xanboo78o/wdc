@@ -149,3 +149,51 @@ foundation the grade and the weather both sit on.
 
 Then real time and weather, then air and distance, with TAA and AO going in
 underneath whenever they are needed to make the rest affordable.
+
+---
+
+## Amendment, 2026-09-23: the graphics upgrade
+
+Adam's brief for the next pass, answered in three rounds. Where it touches the
+twenty decisions above, the amendment rules.
+
+**The house style.** *"Mariokart, but shaders BUTTT more realistic, like ACC
+but more smooth, and less harsh."* Asked whether that overturns decision 1, he
+chose to **blend the two**: materials and surfaces go soft, warm and smooth
+(Mario Kart), the world stays a real place (ACC), and a low sun may still
+blind you as a racing hazard (decision 4 stands). Bloom (decision 7) softens
+from "fires hard" to generous but gentle. All three Mario Kart qualities count
+equally — soft light with nothing pitch black, rich colour, clean edges — and
+**sun rays** above all (decision 6, now a headline item).
+
+**Budget.** 50 fps minimum while driving with the wheel.
+
+**Scope.** Everything: the race game and the builder share one look.
+
+**Worst offenders today:** the trackside world and the car.
+
+**The car:** better paint (clear coat, soft reflections, rim light), better
+shape (halo, sidepods, wing elements, suspension, lettered tyres), liveries,
+and alive details (spinning/steering wheels, glowing discs, rain light,
+sparks). **And damage, especially damage:** parts fly off as physics debris,
+bodywork deforms where struck, scuffs and scrapes build up over a race.
+Standing bug in his words: *"crashing can remove your front wing, but when it
+does, the hinges connect to nothing... and it also looks super goofy without
+it."* A lost wing must leave a broken stub and real mounting points, not
+floating hinges and a bald nose.
+
+**Trackside:** richer buildings, the builder's flora and props brought into
+the race circuits, barrier dressing (boards, tyre walls, catch fencing, worn
+Armco).
+
+**The forest — Adam's own recipe, verbatim intent.** Front to back:
+1. Three rows of real trees, each randomly resized and spun.
+2. Between the 2nd and 3rd row, a **short banner** of flora — paper thin, flat 2D.
+3. A **taller banner** behind the 3rd row.
+4. Then three layers of **cut-out trees that slowly rotate to face the
+   player**, a little taller than the real rows.
+5. Then a big **super-dark green backdrop**, near BLACK, that still blends in.
+
+The law of the whole stack: **the deeper it goes, the darker it gets.**
+
+**Build order:** the forest first.
