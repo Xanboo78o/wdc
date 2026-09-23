@@ -1,5 +1,5 @@
 <script type="module">
-const SR = 44100, LEN = 12;
+const SR = 44100, LEN = 15;
 const off = new OfflineAudioContext(2, SR * LEN, SR);
 window.AudioContext = function () { return off; };
 const { Engine, FX } = await import('/js/audio.js');
@@ -11,12 +11,16 @@ await e.start('/');
 // scenario: [t0, t1, what]
 const seg = [[0, 2, 'tarmac 250kmh full throttle', { surf: 1 }], [2, 4, 'gravel 150kmh', { surf: 0.58 }],
   [4, 6, 'grass 120kmh', { surf: 0.42 }], [6, 7.5, 'kerb 180kmh', { surf: 0.93 }],
-  [7.5, 9, 'wall scrape 120kmh', { surf: 1, wall: true }], [9, 12, 'BIG CRASH 25m/s at 9.0s', { surf: 1 }]];
-const kmh = { 0: 250, 2: 150, 4: 120, 6: 180, 7.5: 120, 9: 60 };
+  [7.5, 9, 'wall scrape 120kmh', { surf: 1, wall: true }], [9, 12, 'BIG CRASH 25m/s at 9.0s', { surf: 1 }], [12, 13, 'gravel again 150kmh', { surf: 0.58 }],
+  [13, 15, 'PAUSED at 13s (no update) — must go silent', { surf: 0.58, paused: true }]];
+const kmh = { 0: 250, 2: 150, 4: 120, 6: 180, 7.5: 120, 9: 60, 12: 150, 13: 150 };
 let hitDone = false;
 for (let t = 0.02; t < LEN; t += 1 / 60) {
-  off.suspend(t).then(() => {
+  off.suspend(t).then(async () => {
     const s = seg.find(q => t >= q[0] && t < q[1]);
+    // Paused: nobody calls update(). Give the page's watchdog real time to
+    // notice, exactly as it would in the pause menu.
+    if (s[3].paused) { await new Promise(r => setTimeout(r, 40)); off.resume(); return; }
     const v = (kmh[s[0]] || 100) / 3.6;
     e.update(11500, t < 9 ? 1 : 0.2, { speed: v, slip: 0, peak: 0.12, off: s[3].surf < 0.9 ? 1 : 0, ...s[3], dt: 1 / 60 });
     if (t >= 9 && !hitDone) { hitDone = true; e.hit(25); }
@@ -33,6 +37,8 @@ for (const [a, b, name] of seg) {
 }
 // the concussion: brightness (high band energy) after the hit vs before
 const hf = (a, b) => { let s = 0, n = 0; for (let i = Math.floor(a * SR) + 1; i < b * SR; i++) { const d = L[i] - L[i - 1]; s += d * d; n++; } return 10 * Math.log10(s / n); };
+{ let sq = 0; const i0 = Math.floor(13.5 * SR), i1 = 15 * SR; for (let i = i0; i < i1; i++) sq += L[i] * L[i];
+  out.push(`paused, 0.5 s on: rms ${(20 * Math.log10(Math.sqrt(sq / (i1 - i0)) + 1e-12)).toFixed(1)} dBFS  (${Math.sqrt(sq / (i1 - i0)) < 0.0056 ? 'SILENT (< -45 dB) - ok' : 'STILL PLAYING - FAIL'})`); }
 out.push(`high-freq energy: before hit ${hf(8.5, 9).toFixed(1)}  0.5-1s after ${hf(9.5, 10).toFixed(1)}  2.5-3s after ${hf(11.5, 12).toFixed(1)} dB`);
 out.push(`clipped samples (>=1.0): ${L.reduce((n, x) => n + (Math.abs(x) >= 0.999), 0)}`);
 out.push(`loaded: gravel ${!!e.gravel} grass ${!!e.grass} scrape ${!!e.scrape} bufs ${Object.keys(e.bufs || {}).length}`);

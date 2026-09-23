@@ -113,15 +113,20 @@ export const MIX = {
 // set: VDrift's gravel and grass loops and bump thuds, Halleck's metal crash
 // hits, dirt-spray hits, a roll-cage hit and a metal scrape.
 export const FX = {
-  engBoost: 1.55,   // engine level on top of the saved mix
-  grit: 0.55,       // parallel distortion: the rasp a clean loop has not got
+  // Adam, round two: "i want engine the LOUDEST and most intense... watching
+  // a car race is LOUD, its GRITTY, not smooth and quiet lil softie".
+  engBoost: 2.2,    // engine level on top of the saved mix
+  grit: 1.3,        // parallel distortion: the rasp a clean loop has not got
   gritAt: 2400,     // centre of the rasp band
+  bark: 0.9,        // a second, lower distortion band: the bark under the rasp
+  barkAt: 850,
   tyreMin: 0.55,    // squeal is ON now, whatever an old bench saved
   gravel: 1.25, grass: 1.05, kerb: 0.9, stones: 0.8,
   crash: 1.6,       // impact level
   scrape: 1.4,      // bodywork along a wall
-  concuss: 1.0,     // the big-hit muffle: 0 turns it off
-  trim: 0.5,        // after the limiter: its automatic makeup gain, taken back out
+  concuss: 0,       // the big-hit muffle. OFF: Adam, first listen: "very muddy"
+  trim: 0.95,       // into the tanh clip: hotter = more saturation = grittier. It
+                    // bends peaks, it cannot exceed full scale (0.96 ceiling).
 };
 const CRASH_FILES = ['crash_01', 'crash_02', 'crash_03', 'crash_04', 'crash_05', 'crash_06',
   'crash_07', 'crash_08', 'crash_09', 'crash_10', 'crash_11'];
@@ -277,19 +282,28 @@ export class Engine {
       // adds the harmonics that make a note sound like it is being ABUSED.
       this.shaper = this.ctx.createWaveShaper();
       {
-        const n = 2048, c = new Float32Array(n), k = 6;
+        const n = 2048, c = new Float32Array(n), k = 11;
         for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); }
         this.shaper.curve = c; this.shaper.oversample = '2x';
       }
       this.gritBP = this.ctx.createBiquadFilter();
-      this.gritBP.type = 'bandpass'; this.gritBP.frequency.value = FX.gritAt; this.gritBP.Q.value = 0.8;
+      this.gritBP.type = 'bandpass'; this.gritBP.frequency.value = FX.gritAt; this.gritBP.Q.value = 0.55;
       this.gritGain = this.ctx.createGain(); this.gritGain.gain.value = 0;
       this.shelf.connect(this.shaper); this.shaper.connect(this.gritBP);
       this.gritBP.connect(this.gritGain); this.gritGain.connect(this.cans);
+      this.barkBP = this.ctx.createBiquadFilter();
+      this.barkBP.type = 'bandpass'; this.barkBP.frequency.value = FX.barkAt; this.barkBP.Q.value = 0.7;
+      this.barkGain = this.ctx.createGain(); this.barkGain.gain.value = 0;
+      this.shaper.connect(this.barkBP); this.barkBP.connect(this.barkGain); this.barkGain.connect(this.cans);
 
       // One-shots and surface loops all land on one FX bus, so a crash can
       // duck the engine without ducking itself.
-      this.fx = this.ctx.createGain(); this.fx.connect(this.cans);
+      // A highpass on the whole bus: the recordings carry rumble below 180 Hz
+      // that the engine's own bass already owns, and two things fighting over
+      // the bottom octave is what muddy IS.
+      this.fxHP = this.ctx.createBiquadFilter();
+      this.fxHP.type = 'highpass'; this.fxHP.frequency.value = 180; this.fxHP.Q.value = 0.7;
+      this.fx = this.ctx.createGain(); this.fx.connect(this.fxHP); this.fxHP.connect(this.cans);
       const optional = n => this._layer(baseUrl, n, 'lowpass', this.fx).catch(() => null);
       this.gravel = await optional('surf_gravel');
       this.grass = await optional('surf_grass');
@@ -298,6 +312,16 @@ export class Engine {
       await Promise.all(['dirt_1', 'dirt_2', 'dirt_3', 'dirt_4', 'bump_1', 'bump_2', 'crash_heavy', ...CRASH_FILES]
         .map(n => this._buf(baseUrl, n).then(b => { this.bufs[n] = b; }).catch(() => {})));
       this.duck = 1;          // engine level after a big hit, recovers to 1
+      // THE LOOPS MUST STOP WHEN THE GAME DOES. update() only runs while the
+      // car is being driven, so in the pause menu, on the results screen or
+      // after leaving the circuit the loops just kept playing at whatever
+      // level they had last — Adam: "even after ive left the sound is still
+      // playing". If nobody has called update() for a fifth of a second,
+      // everything is faded out.
+      this.lastUpd = 0;
+      this.watch = setInterval(() => {
+        if (this.ok && this.ctx.currentTime - this.lastUpd > 0.2) this.silence();
+      }, 100);
       this.lastStone = 0; this.kerbDist = 0; this.wasOff = false; this.lastHit = -9;
 
       // Tyres and road are OPTIONAL: a missing file must cost the engine
@@ -323,6 +347,21 @@ export class Engine {
     const r = await fetch(`${baseUrl}data/audio/${name}.wav`);
     if (!r.ok) throw new Error(`${name}.wav: HTTP ${r.status}`);
     return this.ctx.decodeAudioData(await r.arrayBuffer());
+  }
+
+  // Glide a gain instead of stepping it. A value set straight each frame is a
+  // step in the waveform every frame, which is a click, which sixty times a
+  // second is crackle.
+  _to(param, v, tc = 0.03) { param.setTargetAtTime(v, this.ctx.currentTime, tc); }
+
+  /** Every continuous sound down to nothing (pause, menu, muted, gone). */
+  silence() {
+    for (const L of [this.engine, this.sub, this.tyre, this.road, this.gravel, this.grass, this.scrape]) {
+      if (L) this._to(L.gain.gain, 0, 0.05);
+    }
+    if (this.shakeGain) this._to(this.shakeGain.gain, 0, 0.05);
+    if (this.gritGain) this._to(this.gritGain.gain, 0, 0.05);
+    if (this.barkGain) this._to(this.barkGain.gain, 0, 0.05);
   }
 
   // Fire a recording once. `rate` a little off 1 each time so twenty hits in
@@ -400,7 +439,9 @@ export class Engine {
    *   peak   physics.peakSlip(spec) — the slip angle this car peaks at
    */
   update(rpm, throttle, { off = 0, speed = 0, slip = 0, peak = 0, surf = 1, wall = false, dt = 1 / 60 } = {}) {
-    if (!this.ok || this.muted) { if (this.gain) this.gain.gain.value = 0; return; }
+    if (!this.ok) return;
+    if (this.muted) { this.silence(); return; }
+    this.lastUpd = this.ctx.currentTime;
     const m = this.mix;
 
     // ---- engine: rate from rpm, load from throttle --------------------------
@@ -447,8 +488,9 @@ export class Engine {
     // over a second or two, instead of carrying on as if nothing happened.
     this.duck = Math.min(1, (this.duck ?? 1) + dt * 0.45);
     const boost = FX.engBoost * this.duck;
-    this.engine.gain.gain.value = this.master * load * boost;
-    if (this.gritGain) this.gritGain.gain.value = this.master * FX.grit * boost * (0.25 + 0.75 * t) * (0.4 + 0.6 * rev);
+    this._to(this.engine.gain.gain, this.master * load * boost, 0.02);
+    if (this.gritGain) this._to(this.gritGain.gain, this.master * FX.grit * boost * (0.25 + 0.75 * t) * (0.4 + 0.6 * rev), 0.02);
+    if (this.barkGain) this._to(this.barkGain.gain, this.master * FX.bark * boost * (0.3 + 0.7 * t), 0.02);
     this.engine.toCans.gain.value = m.engCans;
     this.engine.toRoom.gain.value = m.engRoom;
 
@@ -457,7 +499,7 @@ export class Engine {
     if (this.sub) {
       this.sub.src.playbackRate.value = rate * 0.5 * wob;
       this.sub.filt.frequency.value = m.subCut;
-      this.sub.gain.gain.value = this.master * load * m.sub * boost;
+      this._to(this.sub.gain.gain, this.master * load * m.sub * boost, 0.02);
     }
     if (this.shelf) {
       this.shelf.frequency.value = m.bassAt;
@@ -469,7 +511,7 @@ export class Engine {
       // Follows the load, so it breathes with the throttle instead of
       // rumbling flat all lap - which is the difference between a car and a
       // fridge.
-      this.shakeGain.gain.value = this.master * load * m.shake;
+      this._to(this.shakeGain.gain, this.master * load * m.shake * boost, 0.02);
     }
     if (this.comp) {
       // More drive is a lower threshold and more makeup: the peaks come down
@@ -488,7 +530,7 @@ export class Engine {
       const frac = peak > 0 ? Math.min(1.6, Math.abs(slip) / peak) : 0;
       const over = Math.max(0, frac - m.thresh) / Math.max(0.01, 1 - m.thresh);
       const sp = Math.min(1, kmh / 90);     // scrubbing at walking pace is nothing
-      this.tyre.gain.gain.value = this.master * Math.max(m.tyreLvl, FX.tyreMin) * Math.pow(over, 1.4) * sp;
+      this._to(this.tyre.gain.gain, this.master * Math.max(m.tyreLvl, FX.tyreMin) * Math.pow(over, 1.4) * sp, 0.03);
       this.tyre.src.playbackRate.value = 0.72 + 0.55 * Math.min(1, over);
       this.tyre.filt.frequency.value = 700 + 9000 * Math.pow(Math.min(1, over), 0.8);
       this.tyre.toCans.gain.value = m.tyreCans;
@@ -508,7 +550,7 @@ export class Engine {
       // louder is a volume knob; a real one changes character as it hits.
       const amp = Math.max(0, 1 + m.gustD * gust * 0.8);
       const tone = 1 + m.gustD * gust * 0.45;
-      this.road.gain.gain.value = this.master * m.roadLvl * Math.pow(sn, 1.7) * amp;
+      this._to(this.road.gain.gain, this.master * m.roadLvl * Math.pow(sn, 1.7) * amp, 0.05);
       this.road.src.playbackRate.value = 0.45 + 0.5 * sn;
       this.road.filt.frequency.value = Math.max(80, m.roadCut * tone);
       this.road.toCans.gain.value = m.roadCans;
@@ -522,12 +564,12 @@ export class Engine {
     const sp = Math.min(1, kmh / 140), moving = Math.min(1, kmh / 15);
     const onGravel = surf > 0.5 && surf < 0.7, onGrass = surf < 0.5, onKerb = surf > 0.9 && surf < 1;
     if (this.gravel) {
-      this.gravel.gain.gain.value = onGravel ? this.master * FX.gravel * moving * (0.45 + 0.55 * sp) : 0;
+      this._to(this.gravel.gain.gain, onGravel ? this.master * FX.gravel * moving * (0.45 + 0.55 * sp) : 0, 0.06);
       this.gravel.src.playbackRate.value = 0.75 + 0.55 * sp;
       this.gravel.filt.frequency.value = 2500 + 9000 * sp;
     }
     if (this.grass) {
-      this.grass.gain.gain.value = onGrass ? this.master * FX.grass * moving * (0.4 + 0.6 * sp) : 0;
+      this._to(this.grass.gain.gain, onGrass ? this.master * FX.grass * moving * (0.4 + 0.6 * sp) : 0, 0.06);
       this.grass.src.playbackRate.value = 0.8 + 0.4 * sp;
       this.grass.filt.frequency.value = 1500 + 7000 * sp;
     }
@@ -555,7 +597,7 @@ export class Engine {
     }
     // Along a wall: the scrape, while there is contact and the car is moving.
     if (this.scrape) {
-      this.scrape.gain.gain.value = wall && kmh > 15 ? this.master * FX.scrape * Math.min(1, kmh / 80) : 0;
+      this._to(this.scrape.gain.gain, wall && kmh > 15 ? this.master * FX.scrape * Math.min(1, kmh / 80) : 0, 0.05);
       this.scrape.src.playbackRate.value = 0.8 + 0.5 * sp;
       this.scrape.filt.frequency.value = 12000;
     }
@@ -568,7 +610,7 @@ export class Engine {
 
   setVolume(v) { this.master = Math.max(0, Math.min(1, v)); }
   toggleMute() { this.muted = !this.muted; return this.muted; }
-  stop() { try { this.src?.stop(); this.ctx?.close(); } catch { /* going away anyway */ } this.ok = false; }
+  stop() { clearInterval(this.watch); try { this.src?.stop(); this.ctx?.close(); } catch { /* going away anyway */ } this.ok = false; }
 }
 
 export const ENGINE_FILES = FILES;
