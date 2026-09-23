@@ -45,6 +45,9 @@ const LAND = {
   zandvoort: { lo: 10, hi: 34,  col: 0x9c9070, rough: 0.5,  sea: 0x33566b, trees: null },
   monaco:    { lo: 90, hi: 360, col: 0x5c5f4e, rough: 0.9,  sea: 0x2f5368, trees: null },
   baku:      { lo: 25, hi: 110, col: 0x7a7256, rough: 0.6,  sea: 0x2e5064, trees: null },
+  // The Nürburgring sits at ~620 m on the Eifel plateau: rolling wooded hills,
+  // spruce forest right up to the fences, Hohe Acht (747 m) on the skyline.
+  nurburgring: { lo: 40, hi: 150, col: 0x4b5a3a, rough: 0.7, sea: null,     trees: 0x2f4128 },
   _:         { lo: 20, hi: 70,  col: 0x5a6340, rough: 0.6,  sea: null,     trees: 0x3d4d2c },
 };
 

@@ -21,14 +21,16 @@ const UA = 'wdc-racing-sim/0.1 (hobby racing sim; contact adamcoll.ac@gmail.com)
 const ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.osm.ch/api/interpreter',
+  // NOT overpass.osm.ch: it only holds Switzerland, and for anywhere else it
+  // answers 200 with ZERO elements — which gets cached as "there are no
+  // buildings here". Found adding the Nürburgring (tools/bakereal.mjs).
 ];
 // Same ids geo.mjs uses, so the centroid — and therefore the metre grid — is
 // identical to the one the track was baked on. Get this wrong and every
 // building sits 40 m from where it belongs.
 const CIRCUITS = {
   suzuka: 'jp-1962', zandvoort: 'nl-1948', monaco: 'mc-1929',
-  monza: 'it-1922', baku: 'az-2016',
+  monza: 'it-1922', baku: 'az-2016', nurburgring: 'de-1927',
 };
 const PAD = 600;        // metres of world to fetch beyond the track's bounding box
 

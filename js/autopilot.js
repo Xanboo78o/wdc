@@ -44,6 +44,11 @@ const CEILING = {
   suzuka:    { f4: 0.88, f1: 0.92 },
   monaco:    { f4: 0.84, f1: 0.78 },
   baku:      { f4: 0.88, f1: 0.95 },
+  // Measured 2026-09-23: F4 clean to 0.95 but fastest at 0.92; F1 still clean
+  // at 1.01, the top of the sweep. Monza re-measures 1.01 today too, so the
+  // rows above are older than the current physics — 0.95 keeps this row in
+  // step with them rather than making the Ring's bots the fastest anywhere.
+  nurburgring: { f4: 0.92, f1: 0.95 },
 };
 const ceilingFor = (track, spec) => CEILING[track.key]?.[spec.key] ?? 0.82;
 

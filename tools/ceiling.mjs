@@ -14,7 +14,7 @@
 import { loadTrack, runLaps, fmt } from './harness.mjs';
 
 const a = process.argv.slice(2).filter(x => !x.startsWith('--'));
-const TRACKS = a[0] === 'all' ? ['monza', 'zandvoort', 'suzuka', 'monaco', 'baku'] : [a[0] || 'monza'];
+const TRACKS = a[0] === 'all' ? ['monza', 'zandvoort', 'suzuka', 'monaco', 'baku', 'nurburgring'] : [a[0] || 'monza'];
 const cls = a[1] || 'f4';
 const GRIPS = [0.72, 0.78, 0.84, 0.88, 0.92, 0.95, 0.98, 1.01];
 

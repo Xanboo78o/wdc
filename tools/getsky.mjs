@@ -41,6 +41,7 @@ const SKIES = {
 };
 const TRACK_SKY = {
   monza: 'cloud', suzuka: 'cloud', zandvoort: 'overcast', monaco: 'clear', baku: 'clear',
+  nurburgring: 'overcast',   // the Eifel: grey and changeable, famously
 };
 
 // ---------------------------------------------------------------------------

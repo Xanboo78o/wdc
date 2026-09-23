@@ -91,7 +91,7 @@ const ROOFS = {
 // circuit. Zandvoort is a Dutch seaside town and is mostly brick; Monaco is a
 // Mediterranean city and is almost entirely render. This one number per track
 // does more for "it actually looks like the area" than any amount of geometry.
-const BRICKINESS = { zandvoort: 0.78, monza: 0.42, suzuka: 0.2, monaco: 0.1, baku: 0.16 };
+const BRICKINESS = { zandvoort: 0.78, monza: 0.42, suzuka: 0.2, monaco: 0.1, baku: 0.16, nurburgring: 0.25 };
 
 // A stable pseudo-random in [0,1) from a position, so a building looks the
 // same every time the page loads instead of re-rolling its colour on reload.

@@ -156,7 +156,7 @@ async function bake(key, force) {
 }
 
 const want = (process.argv[2] && process.argv[2] !== 'all')
-  ? [process.argv[2]] : ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco'];
+  ? [process.argv[2]] : ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco', 'nurburgring'];
 const force = process.argv.includes('--force');
 for (const key of want) await bake(key, force);
 
