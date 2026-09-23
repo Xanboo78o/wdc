@@ -197,3 +197,9 @@ Armco).
 The law of the whole stack: **the deeper it goes, the darker it gets.**
 
 **Build order:** the forest first.
+
+**Forest particulars.** Species **per circuit** (the scenery file's per-section
+forest type decides it). Depth **depends on the area**: each section carries
+its own depth, not one global number. Placement **both**: the stack replaces
+every existing tree line on every circuit, and Adam adds or removes sections
+in the scenery file afterwards.
