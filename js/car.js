@@ -35,6 +35,7 @@
 // wheelbase, 720 mm tyres.
 import * as THREE from 'three';
 import { Atlas, fitText } from './geom.js';
+import { drawBrand, brandNamed } from './brands.js';
 
 // A superellipse: exponent 2 is an ellipse, 4 is a rounded rectangle, and the
 // stations below walk from one to the other as the nose becomes a chassis.
@@ -177,34 +178,58 @@ function tyre(radius, width) {
 const SPONSORS = ['XANBOO78O', 'FOGLAST', 'VROOM', 'CRITTERS', 'ORBIX', 'XANCOIN',
   'TERMINAL TYCOON', 'MOLT', 'OMMOR', 'EVERYDEATH', 'DEEPWALK', 'CORN'];
 
-function liveryAtlas(primary) {
-  const A = new Atlas(2, 8, 512, 128);
+// The same eight cells in the same order whoever draws them, so a TEAM's
+// livery (js/field.js) is a different texture on the SAME geometry — the UVs
+// are fixed by cell index. `team` is { fg, sp: [brand names] } from
+// js/drivers.js; without one this is the player's own car, as it always was.
+// `scale` halves a team atlas to 512 px: eleven of them at full size would be
+// 44 MB of video memory for stickers.
+export function liveryAtlas(primary, team = null, scale = 1) {
+  const A = new Atlas(2, 8, 512 * scale, 128 * scale);
   const cells = {};
-  const put = (key, text, bg, fg, weight) => {
+  const put = (key, text, fg) => {
     cells[key] = A.cell((g, w, h) => {
-      if (bg) { g.fillStyle = bg; g.fillRect(0, 0, w, h); }
-      else { g.clearRect(0, 0, w, h); }
-      fitText(g, text, w / 2, h / 2, w * 0.9, h * 0.78, { colour: fg, weight: weight || '900' });
+      g.clearRect(0, 0, w, h);
+      const b = team && brandNamed(text);
+      if (b) drawBrand(g, w, h, b, { bare: true, colour: team.fg });
+      else fitText(g, text, w / 2, h / 2, w * 0.9, h * 0.78, { colour: fg, weight: '900' });
     });
   };
-  put('title', SPONSORS[0], null, '#ffffff');
-  put('podL', SPONSORS[1], null, '#ffffff');
-  put('podR', SPONSORS[2], null, '#ffffff');
-  put('cover', SPONSORS[3], null, '#f2f2f2');
-  put('wing', SPONSORS[4], null, '#ffffff');
-  put('epL', SPONSORS[5], null, '#e9e9e9');
-  put('epR', SPONSORS[6], null, '#e9e9e9');
-  put('nose', SPONSORS[7], null, '#ffffff');
-  // A number board, because a racing car has a number on it.
-  cells.number = A.cell((g, w, h) => {
-    g.clearRect(0, 0, w, h);
-    g.fillStyle = primary;
-    g.beginPath(); g.ellipse(w / 2, h / 2, h * 0.46, h * 0.46, 0, 0, 6.3); g.fill();
-    fitText(g, '78', w / 2, h / 2, h * 0.7, h * 0.62, { colour: '#ffffff' });
-  });
+  // Title sponsor where it is seen most — sidepods, engine cover, rear wing —
+  // the way a real title sponsor buys the car.
+  const sp = team ? team.sp : SPONSORS;
+  const T = sp[0], S1 = sp[1] || T, S2 = sp[2] || S1, S3 = sp[3] || S2;
+  const order = team
+    ? [['title', S1], ['podL', T], ['podR', T], ['cover', T], ['wing', T], ['epL', S2], ['epR', S3], ['nose', S1]]
+    : [['title', SPONSORS[0]], ['podL', SPONSORS[1]], ['podR', SPONSORS[2]], ['cover', SPONSORS[3]],
+       ['wing', SPONSORS[4]], ['epL', SPONSORS[5]], ['epR', SPONSORS[6]], ['nose', SPONSORS[7]]];
+  const fgs = { cover: '#f2f2f2', epL: '#e9e9e9', epR: '#e9e9e9' };
+  for (const [k, text] of order) put(k, text, fgs[k] || '#ffffff');
   const tex = A.texture();
   tex.premultiplyAlpha = false;
   return { atlas: A, cells, texture: tex };
+}
+
+// The race number: its own tiny texture, because it is the one thing on a car
+// that differs between team-mates. A roundel on the nose; the number alone,
+// outlined, on the endplates.
+export function numberTexture(num, primary = '#d8352a', fg = '#ffffff') {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  const txt = String(num);
+  // left half: the nose roundel
+  g.fillStyle = fg === '#ffffff' || fg === '#e8eaee' ? '#101014' : '#ffffff';
+  g.beginPath(); g.arc(64, 64, 60, 0, 6.2832); g.fill();
+  fitText(g, txt, 64, 66, 96, 80, { colour: fg === '#ffffff' || fg === '#e8eaee' ? '#ffffff' : '#101014' });
+  // right half: the bare number
+  g.lineWidth = 7; g.strokeStyle = '#101014'; g.lineJoin = 'round';
+  g.font = 'italic 900 96px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.strokeText(txt, 192, 68); g.fillStyle = fg; g.fillText(txt, 192, 68);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
 }
 
 // A decal: a flat quad lying on a panel, pushed out along its normal.
@@ -470,9 +495,27 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
 
   // --- stickers ------------------------------------------------------------
   const livery = liveryAtlas(primary);
+  // The number has its own material so js/field.js can give every rival its
+  // own number without a per-car sticker atlas.
+  const numMat = new THREE.MeshStandardMaterial({
+    map: numberTexture(78, primary), transparent: true, roughness: 0.22, metalness: 0.1,
+    // FrontSide: a sticker on the far side of the car faces away from you and
+    // must not be drawn. DoubleSide plus the polygon offset let it punch
+    // through thin bodywork, mirror-written (VELOCITA read ATICOLEV).
+    envMapIntensity: 1.1, side: THREE.FrontSide, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -6,
+  });
+  // UV halves of the number texture: [0] the roundel, [1] the bare number.
+  const half = (k, flip) => {
+    const u0 = k * 0.5 + 0.002, u1 = k * 0.5 + 0.498, a = flip ? u1 : u0, b = flip ? u0 : u1;
+    return [[a, 0.01], [b, 0.01], [b, 0.99], [a, 0.99]];
+  };
   const decalMat = new THREE.MeshStandardMaterial({
     map: livery.texture, transparent: true, roughness: 0.22, metalness: 0.1,
-    envMapIntensity: 1.1, side: THREE.DoubleSide, depthWrite: false,
+    // FrontSide: a sticker on the far side of the car faces away from you and
+    // must not be drawn. DoubleSide plus the polygon offset let it punch
+    // through thin bodywork, mirror-written (VELOCITA read ATICOLEV).
+    envMapIntensity: 1.1, side: THREE.FrontSide, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -6,
   });
   const stickers = [
@@ -492,11 +535,22 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
     // visible was the far-side one bleeding through.
     [livery.cells.title, [1.24, 0.258, 0.198], [0.52, 0.09], [0, 0.22, 1], [1, 0, 0]],
     [livery.cells.nose, [1.24, 0.258, -0.198], [0.52, 0.09], [0, 0.22, -1], [-1, 0, 0]],
-    // the number, lying on the nose and read from in front
-    [livery.cells.number, [2.02, 0.262, 0], [0.22, 0.22], [0.25, 1, 0], [0, 0, -1]],
   ];
   for (const [cell, at, size, n, along] of stickers) {
     const m = new THREE.Mesh(decal(livery, cell, at, size, n, along, false), decalMat);
+    m.renderOrder = 2;
+    g.add(m);
+  }
+  // Numbers: the roundel lying on the nose, read from in front, and the bare
+  // number low on each rear-wing endplate, where a real car carries it.
+  const numbers = [
+    [0, [2.02, 0.262, 0], [0.22, 0.22], [0.25, 1, 0], [0, 0, -1]],
+    [1, [-2.50, 0.66, 0.545], [0.34, 0.17], [0, 0.05, 1], [1, 0, 0]],
+    [1, [-2.50, 0.66, -0.545], [0.34, 0.17], [0, 0.05, -1], [-1, 0, 0]],
+  ];
+  for (const [k, at, size, n, along] of numbers) {
+    const geo = decal({ atlas: { uv: () => half(k, false) } }, 0, at, size, n, along, false);
+    const m = new THREE.Mesh(geo, numMat);
     m.renderOrder = 2;
     g.add(m);
   }
@@ -523,7 +577,7 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
 
   // Where the driver's eyes are, for the first-person camera. A single-seater
   // sits low and far back, behind the halo.
-  return { group: g, wheels, steer, hubs, drs, R, wings, eye: [-0.22, 0.95, 0] };
+  return { group: g, wheels, steer, hubs, drs, R, wings, eye: [-0.22, 0.95, 0], decalMat, numMat };
 }
 
 // ---------------------------------------------------------------------------

@@ -4,36 +4,83 @@ import { corneringSpeed, topSpeed, limitMu } from './physics.js';
 
 // Minimum-CURVATURE line, not minimum length. Pulling the line taut apexes too
 // tight and is slower; what you want is the gentlest arc the corridor allows.
-// Gradient descent on the sum of squared second differences, clamped to the
-// track edges.
-// `init` is an optional starting line (a coarse solve, spread back out) — the
-// smoother converges very slowly over long corners, see tools/baketrack.mjs.
-export function racingLine(track, margin = 0.35, iters = 6000, step = 0.12, init = null) {
+// Projected gradient descent on the sum of squared second differences, clamped
+// to the track edges.
+//
+// IT WAS NEVER SOLVED, and that was the line Adam called inaccurate (2026-09-23:
+// "we need ACCURATE lines that have correct entries and exits"). The penalty is
+// a fourth-difference operator, and plain gradient descent on one spreads a
+// correction about (step x iterations)^(1/4) samples — 6000 steps of 0.12 reach
+// FIVE samples, ten metres. A corner is two hundred. So the old line was the
+// centreline smoothed locally: it never swung out for the entry, never reached
+// the apex, never ran out to the exit kerb. Measured, it was still getting
+// faster at 150,000 iterations (Monza 90.52 -> 88.11 s, Suzuka 102.4 -> 98.2).
+//
+// Now: coarse to fine (every 32nd sample, then 8th, 2nd, every one), each level
+// started from the one above and solved with accelerated projected gradient
+// (FISTA). Converged — 6000 and 20000 iterations agree to 0.02 s — and the
+// AUTOPILOT, not just the profile, confirms it (HARD, F1, clean, 0.0 s off):
+//   Monza 98.67 -> 94.34 s   Suzuka 111.11 -> 102.99 s   Monaco 97.43 -> 93.38 s
+//
+// MEASURED AND REJECTED: a lap-time polish on top (nudge the line in smooth
+// bumps, keep what the speed profile says is quicker). It "found" another 4-6 s
+// that the physics would not honour — HARD spun at Suzuka for 6-16 s a lap and
+// Monaco came out no faster. It was optimising the model's blind spots.
+//
+// FISTA's step must stay under 1/L = 1/16 for this operator; 0.12 (plain
+// gradient descent's old step) diverges into a 160-second line.
+export function racingLine(track, margin = 0.35, iters = 6000) {
   const n = track.n;
-  const off = init ? Float32Array.from(init) : new Float32Array(n);
-  const nx = new Float32Array(n), ny = new Float32Array(n);
-  const lim = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    nx[i] = -Math.sin(track.hdg[i]); ny[i] = Math.cos(track.hdg[i]);
-    lim[i] = Math.max(0.2, track.w[i] - margin);
+  const off = new Float64Array(n);
+  for (const k of [32, 8, 2, 1]) {
+    if (k > 1 && n / k < 24) continue;
+    const m = Math.floor(n / k);
+    const cx = new Float64Array(m), cy = new Float64Array(m);
+    const nx = new Float64Array(m), ny = new Float64Array(m);
+    const lim = new Float64Array(m), init = new Float64Array(m);
+    for (let j = 0; j < m; j++) {
+      const i = j * k;
+      cx[j] = track.x[i]; cy[j] = track.y[i];
+      nx[j] = -Math.sin(track.hdg[i]); ny[j] = Math.cos(track.hdg[i]);
+      lim[j] = Math.max(0.2, track.w[i] - margin);
+      init[j] = off[i];
+    }
+    const sol = minCurvature(cx, cy, nx, ny, lim, init, iters);
+    for (let j = 0; j < m; j++) {
+      const i0 = j * k, i1 = j + 1 < m ? (j + 1) * k : n, a = sol[j], b = sol[(j + 1) % m];
+      for (let i = i0; i < i1; i++) off[i] = a + (b - a) * (i - i0) / (i1 - i0);
+    }
   }
-  const px = new Float32Array(n), py = new Float32Array(n);
-  const dx = new Float32Array(n), dy = new Float32Array(n);
+  return Float32Array.from(off);
+}
+
+function minCurvature(cx, cy, nx, ny, lim, init, iters, step = 0.06) {
+  const n = cx.length;
+  const x = Float64Array.from(init), y = Float64Array.from(init), xPrev = new Float64Array(n);
+  const px = new Float64Array(n), py = new Float64Array(n);
+  const dx = new Float64Array(n), dy = new Float64Array(n);
+  let t = 1;
   for (let k = 0; k < iters; k++) {
-    for (let i = 0; i < n; i++) { px[i] = track.x[i] + nx[i] * off[i]; py[i] = track.y[i] + ny[i] * off[i]; }
+    for (let i = 0; i < n; i++) { px[i] = cx[i] + nx[i] * y[i]; py[i] = cy[i] + ny[i] * y[i]; }
     for (let i = 0; i < n; i++) {
       const a = (i - 1 + n) % n, b = (i + 1) % n;
       dx[i] = px[a] - 2 * px[i] + px[b];
       dy[i] = py[a] - 2 * py[i] + py[b];
     }
+    xPrev.set(x);
     for (let i = 0; i < n; i++) {
       const a = (i - 1 + n) % n, b = (i + 1) % n;
       const g = nx[i] * (dx[a] - 2 * dx[i] + dx[b]) + ny[i] * (dy[a] - 2 * dy[i] + dy[b]);
-      const v = off[i] - step * g;
-      off[i] = v > lim[i] ? lim[i] : v < -lim[i] ? -lim[i] : v;
+      const v = y[i] - step * g;
+      x[i] = v > lim[i] ? lim[i] : v < -lim[i] ? -lim[i] : v;
     }
+    const t1 = (1 + Math.sqrt(1 + 4 * t * t)) / 2, mom = (t - 1) / t1;
+    for (let i = 0; i < n; i++) y[i] = x[i] + mom * (x[i] - xPrev[i]);
+    t = t1;
+    // Restart the momentum now and then, or it overshoots the edge clamps.
+    if (k % 500 === 499) { t = 1; y.set(x); }
   }
-  return off;
+  return x;
 }
 
 function ptOf(t, off, i) {

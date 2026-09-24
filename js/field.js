@@ -36,7 +36,7 @@
 import * as THREE from 'three';
 import { Z } from './geom.js';
 import { bankY, bankRoll } from './bank.js';
-import { buildCar, buildGT3 } from './car.js';
+import { buildCar, buildGT3, liveryAtlas, numberTexture } from './car.js';
 import { carLamps } from './lamps.js';
 import { crushParts, applyCrush } from './render.js';
 
@@ -151,19 +151,40 @@ export class Field {
 
     for (const e of entries) {
       if (e.isPlayer) { this.rigs.push(null); continue; }
-      this.rigs.push(this.make(e.col));
+      this.rigs.push(this.make(e.col, e));
     }
   }
 
   // One car, in one team's colour, parked at the origin until it is posed.
-  make(colour) {
+  make(colour, entry = null) {
     const src = this.ref;
+    // The livery. Team-mates share one sticker atlas (their sponsors) and each
+    // car gets only its own number — Adam: "make cars look like actual f1 cars
+    // with sponsors and numbers". A GT3 body has no livery materials to swap.
+    const team = entry && entry.team;
+    const livery = new Map();
+    if (team && src.decalMat) {
+      this._teamMat = this._teamMat || new Map();
+      let tm = this._teamMat.get(team);
+      if (!tm) {
+        tm = src.decalMat.clone();
+        tm.map = liveryAtlas(colour, team, 0.5).texture;
+        this._teamMat.set(team, tm);
+      }
+      livery.set(src.decalMat, tm);
+    }
+    if (entry && src.numMat) {
+      const nm = src.numMat.clone();
+      nm.map = numberTexture(entry.num, colour, (team && team.fg) || '#ffffff');
+      livery.set(src.numMat, nm);
+    }
 
     // Repaint. One new material per car, cloned from the reference so it keeps
     // the clearcoat settings, the environment intensity and the texture maps.
     // Both versions of the car share it, so a rival cannot be two colours.
     const repainted = new Map();
     const swap = mat => {
+      if (livery.has(mat)) return livery.get(mat);
       if (!this.refPaints.has(mat)) return mat;
       let got = repainted.get(mat);
       if (!got) { got = mat.clone(); got.color = new THREE.Color(colour); repainted.set(mat, got); }

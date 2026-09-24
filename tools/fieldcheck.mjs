@@ -64,8 +64,20 @@ function one(track, lines, spec, seed) {
     tier: TIER, seed, player: false, pits: PITS,
   });
   const maxT = LAPS * 260 + 90;
-  let t = 0;
-  while (race.state !== 'over' && t < maxT) { race.tick(FIXED_DT, null); t += FIXED_DT; }
+  let t = 0, k = 0, lineErr = 0, offLine = 0, nLine = 0;
+  const lo = lines.race.off;
+  while (race.state !== 'over' && t < maxT) {
+    race.tick(FIXED_DT, null); t += FIXED_DT;
+    // How far off the racing line the field drives, sampled at 10 Hz. Adam,
+    // 2026-09-23: "the bots try to stay on em more and more".
+    if (race.state === 'green' && k++ % 40 === 0) {
+      for (const e of race.entries) {
+        if (e.retired || e.inPit || e.finished || e.recover) continue;
+        const d = Math.abs(e.proj.lat - lo[e.proj.i]);
+        lineErr += d; if (d > 1.5) offLine++; nLine++;
+      }
+    }
+  }
 
   const retired = race.entries.filter(e => e.retired).length;
   // WHEN they go out is the whole diagnosis. Everything happening in the first
@@ -85,7 +97,8 @@ function one(track, lines, spec, seed) {
   const retiredNoWing = race.entries.filter(e => e.retired && e.car.lost && e.car.lost.frontWing).length;
   const best = Math.min(...race.entries.map(e => e.bestLap || 1e9));
   return { retired, lap1, contacts, wings, retiredNoWing, stops,
-           passes: race.passes || 0, best, ideal: lines.race.lapTime };
+           passes: race.passes || 0, best, ideal: lines.race.lapTime,
+           lineErr: lineErr / Math.max(1, nLine), offLine: offLine / Math.max(1, nLine) * 100 };
 }
 
 const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
@@ -123,11 +136,13 @@ for (const key of TRACKS) {
     contacts: mean(runs.map(r => r.contacts)),
     passes: mean(runs.map(r => r.passes)),
     off: mean(runs.map(r => (r.best / r.ideal - 1) * 100)),
+    lineErr: mean(runs.map(r => r.lineErr)),
+    offLine: mean(runs.map(r => r.offLine)),
   });
 }
 
 console.log(`${GRID} cars · ${LAPS} laps · ${TIER} · ${CLS} · ${SEEDS} seeds each · pit stops ${PITS ? 'ON' : 'OFF'}\n`);
-console.log('CIRCUIT      RETIRED  WORST  IN FIRST 30s  NO FRONT WING  ...OF THEM RETIRED  PIT STOPS  CONTACTS  PASSES  BEST vs IDEAL');
+console.log('CIRCUIT      RETIRED  WORST  IN FIRST 30s  NO FRONT WING  ...OF THEM RETIRED  PIT STOPS  CONTACTS  PASSES  BEST vs IDEAL  LINE ERR  >1.5m OFF');
 for (const r of rows) {
   console.log([
     r.key.padEnd(12),
@@ -140,6 +155,8 @@ for (const r of rows) {
     r.contacts.toFixed(0).padStart(9),
     r.passes.toFixed(0).padStart(7),
     (r.off.toFixed(1) + '%').padStart(13),
+    (r.lineErr.toFixed(2) + 'm').padStart(9),
+    (r.offLine.toFixed(0) + '%').padStart(9),
   ].join(' '));
 }
 

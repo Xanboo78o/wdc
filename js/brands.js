@@ -165,9 +165,11 @@ export const BRANDS = [
  * lever on whether something reads as a bank or as an energy drink — so it is
  * set here rather than approximated by drawing letters one at a time.
  */
-export function drawBrand(g, w, h, b, { flat = false } = {}) {
-  g.fillStyle = b.bg;
-  g.fillRect(0, 0, w, h);
+// `bare` draws only the mark and the wordmark, in `colour`, on a transparent
+// cell — a sticker on paint, which is how most sponsors sit on a car.
+export function drawBrand(g, w, h, b, { flat = false, bare = false, colour = null } = {}) {
+  if (bare) { flat = true; b = { ...b, fg: colour || b.fg }; g.clearRect(0, 0, w, h); }
+  else { g.fillStyle = b.bg; g.fillRect(0, 0, w, h); }
 
   // A thin rule in the text colour along the bottom. Real boards are printed
   // edge to edge, and it is what stops this reading as a flat rectangle when
@@ -199,4 +201,6 @@ export function drawBrand(g, w, h, b, { flat = false } = {}) {
 }
 
 /** A stable pick, so the same circuit always wears the same boards. */
+export function brandNamed(n) { return BRANDS.find(b => b.n === n) || null; }
+
 export function brandAt(i) { return BRANDS[((i % BRANDS.length) + BRANDS.length) % BRANDS.length]; }

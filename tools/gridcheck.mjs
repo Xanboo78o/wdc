@@ -26,7 +26,7 @@ import { FIXED_DT } from '../js/physics.js';
 import { DRIVERS, TEAMS, teamOf } from '../js/drivers.js';
 
 const args = process.argv.slice(2);
-const KNOWN = new Set(['seeds', 'tracks', 'laps', 'tier', 'car']);
+const KNOWN = new Set(['seeds', 'tracks', 'laps', 'tier', 'car', 'battle']);
 const BREAK = args.includes('--break');
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -42,6 +42,8 @@ const SEEDS = +flag('seeds', 8);
 const TRACKS = String(flag('tracks', 'monza,suzuka')).split(',');
 const LAPS = +flag('laps', 3);
 const TIER = flag('tier', 'medium');
+// SUPERCASUAL's OVERTAKES submode — where Adam saw Lawson 4th and Gasly 20th.
+const BATTLE = flag('battle', null);
 const CLS = flag('car', 'f1');
 const GRID = DRIVERS.length;
 
@@ -54,7 +56,7 @@ for (const key of TRACKS) {
   for (let s = 0; s < SEEDS; s++) {
     const race = new Race({
       track, lines, spec, slots: gridSlots(track, GRID), laps: LAPS, grid: GRID,
-      tier: TIER, seed: 1000 + s * 17, player: false, pits: false,
+      tier: TIER, battle: BATTLE, seed: 1000 + s * 17, player: false, pits: false,
     });
     // --break drives the fix out: everyone gets the same car, which is what
     // the code did before js/drivers.js and what this gate exists to notice.
@@ -91,7 +93,7 @@ const rows = DRIVERS.map(d => ({
   best: lapN.get(d.n) ? lap.get(d.n) / lapN.get(d.n) : null,
 })).sort((a, b) => (a.best ?? 1e9) - (b.best ?? 1e9));
 
-console.log(`\n${races} races · ${TRACKS.join(', ')} · ${SEEDS} seeds · ${LAPS} laps · tier ${TIER}`);
+console.log(`\n${races} races · ${TRACKS.join(', ')} · ${SEEDS} seeds · ${LAPS} laps · tier ${TIER}${BATTLE ? ' / overtakes ' + BATTLE : ''}`);
 if (races < 12) console.log('  FEW RACES — the bottom of this table is noise. --seeds 10 --tracks monza,suzuka.');
 console.log('');
 console.log('  BEST LAP  MEAN POS  DRIVER        TEAM       pace    agg   def');

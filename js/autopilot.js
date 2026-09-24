@@ -39,16 +39,17 @@ import { steerLock } from './input.js';
 // Re-run `node tools/ceiling.mjs all f1` after any physics change — if the
 // physics gets easier to drive, these are free lap time left on the table.
 const CEILING = {
-  monza:     { f4: 0.84, f1: 0.84 },
-  zandvoort: { f4: 0.84, f1: 0.88 },
-  suzuka:    { f4: 0.88, f1: 0.92 },
-  monaco:    { f4: 0.84, f1: 0.78 },
-  baku:      { f4: 0.88, f1: 0.95 },
-  // Measured 2026-09-23: F4 clean to 0.95 but fastest at 0.92; F1 still clean
-  // at 1.01, the top of the sweep. Monza re-measures 1.01 today too, so the
-  // rows above are older than the current physics — 0.95 keeps this row in
-  // step with them rather than making the Ring's bots the fastest anywhere.
-  nurburgring: { f4: 0.92, f1: 0.95 },
+  // RE-MEASURED 2026-09-23 after the racing line was actually solved and the
+  // pedals were rewritten (see line.js and the pedal block below). The old
+  // rows were measured on an unconverged line that was 4-8 s a lap slower.
+  // Zandvoort F4 is the weak one: the new line through its esses lets the
+  // rear step out at any grip above 0.78, with the old controller too.
+  monza:     { f4: 0.88, f1: 0.92 },
+  zandvoort: { f4: 0.78, f1: 0.95 },
+  suzuka:    { f4: 0.88, f1: 1.01 },
+  monaco:    { f4: 0.98, f1: 0.95 },
+  baku:      { f4: 0.84, f1: 1.01 },
+  nurburgring: { f4: 0.78, f1: 1.01 },
 };
 const ceilingFor = (track, spec) => CEILING[track.key]?.[spec.key] ?? 0.82;
 
@@ -98,9 +99,9 @@ export const TIERS = {
 //     how they get it wrong, because the physics does not honour a lunge the
 //     tyres cannot carry.
 export const BATTLE = {
-  easy:   { name: 'EASY',   lo: 0.74, hi: 0.88, aggression: 0.45, defence: 0.45, moveGap: 2.4, lunge: 0.03, band: 220 },
-  medium: { name: 'MEDIUM', lo: 0.80, hi: 0.96, aggression: 0.72, defence: 0.72, moveGap: 1.5, lunge: 0.06, band: 170 },
-  hard:   { name: 'HARD',   lo: 0.86, hi: 1.01, aggression: 0.95, defence: 0.95, moveGap: 0.9, lunge: 0.09, band: 130 },
+  easy:   { name: 'EASY',   lo: 0.74, hi: 0.88, aggression: 0.45, defence: 0.45, moveGap: 2.4, lunge: 0.03, band: 220, mistakes: 1.2, consistency: 0.72 },
+  medium: { name: 'MEDIUM', lo: 0.80, hi: 0.96, aggression: 0.72, defence: 0.72, moveGap: 1.5, lunge: 0.06, band: 170, mistakes: 0.9, consistency: 0.78 },
+  hard:   { name: 'HARD',   lo: 0.86, hi: 1.01, aggression: 0.95, defence: 0.95, moveGap: 0.9, lunge: 0.09, band: 130, mistakes: 0.6, consistency: 0.86 },
 };
 
 function mulberry(a) {
@@ -160,7 +161,7 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
   let line = lines.at(d.T.line, d.grip);
   // Which profile is live, so the race can move a driver onto another line or
   // another grip mid-session (`d.lineKind`, `d.gripNow` — the OVERTAKES band)
-  // and the solve happens once per change. Quantised to 0.01 of grip, because
+  // and the solve happens once per change. Quantised to 1/400 of grip, because
   // lines.at caches per value and a continuous band would re-solve every tick.
   let lineKey = `${d.T.line}:${d.grip}`;
 
@@ -189,7 +190,14 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
   // making it stop racing.
   let wingless = false;
 
-  let acc = 1e9, want = 0, thr = 0, brk = 0;
+  let acc = 1e9, want = 0, thr = 0, brk = 0, braking = false;
+  // How far over target before it is a braking zone rather than a lift.
+  const BRAKE_ON = 1.6;
+  // How much of the car's braking a corner must demand before the pedal goes on.
+  // Late and firm, then held. 0.45 eased in early and spent MORE time braking
+  // (Monza 10% -> 12% of the lap). 0.70, 0.85 and 0.95 measured identical —
+  // the 1.6 m/s overspeed test fires first at that point — so this is a floor.
+  const BRAKE_AT = 0.85;
   let info = { need: 0, err: 0, cross: 0, budget: 1, mistake: null };
   // `ctx` is racecraft, decided by whoever knows the running order — which is
   // never this file. It carries a lateral bias in metres (move off the line to
@@ -226,7 +234,10 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
       // the band drives the same numbers it always did.
       let g = d.gripNow ?? d.grip;
       if (wingless) g = Math.max(0.35, g * WINGLESS_GRIP);
-      if (d.gripNow != null || wingless) g = Math.round(g * 100) / 100;
+      // 1/400, not 1/100: neighbouring teams differ by ~0.0025 of grip, and
+      // rounding to 0.01 put five teams on the same profile (gridcheck, battle
+      // mode: pace-to-lap-time rho fell to 0.67).
+      if (d.gripNow != null || wingless) g = Math.round(g * 400) / 400;
       const key = `${kind}:${g}`;
       if (key !== lineKey) { lineKey = key; line = lines.at(kind, g); }
     }
@@ -322,9 +333,54 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     if (ctx?.lunge) need *= 1 + ctx.lunge;
     if (ctx?.speedCap != null) need = Math.min(need, ctx.speedCap);
 
+    // ---- pedals: like a driver, not a thermostat ---------------------------
+    // Adam, 2026-09-23: "fastest with more feel with less braking and more
+    // holding throttle". This used to brake the instant the car was 0.25 m/s
+    // over target and coast whenever it was under, so it pulsed both pedals all
+    // lap long. Measured, F4, a quiet HARD driver: 91 brake applications a lap
+    // at Monza and 240 at Monaco — 90%+ of them stabs shorter than 0.4 s — for
+    // a circuit with six braking zones.
+    //
+    // Now: a HOLD throttle that balances drag and rolling resistance, so being
+    // on target means being ON the throttle; a small overspeed is a LIFT; and
+    // the brake only goes on for a real braking zone, stays on until the job is
+    // done, and comes off progressively as the speed arrives (the trail).
     const err = need - v;
-    thr = err > 0.4 ? Math.min(1, err / 2.5) : 0;
-    brk = err < -0.25 ? Math.min(1, -err / 1.5) : 0;
+    const Fres = 0.5 * spec.rho * spec.CdA * v * v + spec.rollRes;
+    const Fcap = Math.min(spec.Pmax / Math.max(v, 9), spec.Fdrive);
+    // ...but not while the tyres are already full of cornering. Mid-corner at
+    // the limit the rear has nothing spare for drive, and a steady throttle
+    // there is power oversteer (Zandvoort F4: clean ceiling 0.78 -> 0.72 and
+    // up to 10 s a lap sideways until this scaled it by what is left).
+    const gripNow = Math.min(car.muF ?? spec.mu, car.muR ?? spec.mu);
+    const latUse = Math.min(1, Math.abs((car.gLat || 0) * 9.81)
+      / Math.max(4, gripNow * (spec.m * 9.81 + 0.5 * spec.rho * v * v * spec.ClA) / spec.m));
+    const hold = Math.min(0.85, Fres / Fcap) * Math.max(0, 1 - latUse * latUse);
+    // PLAN THE STOP. Reacting to the speed error alone braked, overshot the
+    // target, released, coasted, and braked again — 5 to 10 stabs per corner,
+    // traced at Monza's first chicane. A driver looks at the corner and picks
+    // ONE deceleration that gets them there: the largest (v^2 - vk^2)/(2 d)
+    // over the road ahead. That is the pedal, held, easing off as the corner
+    // arrives — which is what trail braking looks like from outside.
+    const qv = 0.5 * spec.rho * v * v;
+    const aBrk = (Math.min((car.muF ?? spec.mu) * (spec.m * 9.81 + qv * spec.ClA), spec.Fbrake)
+                  + qv * spec.CdA) / spec.m;
+    let aReq = 0;
+    const reachM = Math.min(220, 20 + v * 2.2);
+    for (let dm = 6; dm < reachM; dm += 4) {
+      const vk = line.v[idxAt(dm)] * mod;
+      if (vk < v) { const a = (v * v - vk * vk) / (2 * dm); if (a > aReq) aReq = a; }
+    }
+    const bWant = aReq / Math.max(1, aBrk);
+    if (braking) { if (bWant < 0.12 && err > -0.3) braking = false; }
+    else if (bWant > BRAKE_AT || err < -BRAKE_ON) braking = true;
+    if (braking) {
+      thr = 0;
+      brk = Math.min(1, bWant * 1.08 + Math.max(0, -err) / 3);
+    } else {
+      brk = 0;
+      thr = Math.max(0, Math.min(1, hold + err / 2.5));
+    }
 
     // ---- the friction circle: brakes and steering spend the same grip ------
     // This is the trail-braking budget. Without it the driver asks for full

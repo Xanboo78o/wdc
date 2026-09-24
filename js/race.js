@@ -34,6 +34,7 @@ const SAFETY_TIME = 30;       // s the car stays out once it is called
 const SAFETY_SPEED = 80 / 3.6;
 const PUSH_TIME = 8;          // s for a crew to heave a car back to the tarmac
 const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
+const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
 
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
@@ -81,7 +82,12 @@ export class Race {
         col: isPlayer ? '#ffffff' : team.col,
         team: isPlayer ? null : team,
         drive: isPlayer ? null : makeAutopilot(track, lines, spec, this.peak, { driver }),
-        biasS: 0, atkSide: 0, atkAt: -99, atkOn: null,
+        // Where this car sits relative to the racing line on the grid. Adam:
+        // "when the cars start thry IMMEDIATLY go for the line, make them slowly
+        // veer over to it like HUMANS". So the lateral target STARTS at the grid
+        // box and drifts to the line at MERGE_RATE after the lights.
+        biasS: slot.lat - (lines.race.off[track.idx(slot.s)] || 0), merge: true,
+        atkSide: 0, atkAt: -99, atkOn: null,
         proj: track.project(p.x, p.y), hint: slot.i,
         lap: 0, gridPos: k + 1, pos: k + 1, crossed0: false, pastHalf: false,
         lapStart: 0, lastLap: null, bestLap: null,
@@ -105,9 +111,12 @@ export class Race {
         d.defence = Math.min(1, B.defence * (0.8 + rng() * 0.4));
         d.moveGap = B.moveGap;
         d.lungeMax = B.lunge;
-        // A personal offset inside the band, so the pack is not twenty-one
-        // copies of one car.
-        d.bandOff = (rng() - 0.5) * 0.04;
+        // Their mistake RATE and their wobble come from the submode, not from
+        // SUPERCASUAL. errScale multiplies the tier's rate, so rescale it.
+        const r = B.mistakes / d.T.mistakes;
+        d.errScale = (d.errScale ?? 1) * r;
+        d.nextMistake /= Math.max(0.2, r);
+        d.consistency = B.consistency;
       }
       this.band();
     }
@@ -127,7 +136,9 @@ export class Race {
       if (!d || e.retired || d.ceiling == null) continue;
       const behindYou = pMe == null ? 0 : pMe - this.progress(e);
       const f = Math.max(0, Math.min(1, 0.5 + behindYou / (2 * B.band)));
-      d.gripNow = d.ceiling * (B.lo + (B.hi - B.lo) * f + (d.bandOff || 0));
+      // The band sets WHERE in the window; the car and the driver still set
+      // the order inside it. Without paceMul the band erased the teams.
+      d.gripNow = d.ceiling * (B.lo + (B.hi - B.lo) * f) * (d.paceMul ?? 1);
     }
   }
 
@@ -353,7 +364,12 @@ export class Race {
     // Smoothed: a car changes lane at a few metres a second. It used to teleport
     // its target, and the controller made that look like a twitch rather than a
     // move. (The pit peel-off above is added unsmoothed, as it always was.)
-    const slew = (3.0 + 2.5 * d.aggression) * NEIGH_EVERY * FIXED_DT;
+    // Off the grid, a car eases across to the line over the first few hundred
+    // metres rather than snapping onto it; on the grid it holds its box.
+    if (e.merge && (Math.abs(e.biasS) < 0.3 || this.time > 40)) e.merge = false;
+    const slew = e.merge
+      ? (this.state === 'green' ? MERGE_RATE * NEIGH_EVERY * FIXED_DT : 0)
+      : (3.0 + 2.5 * d.aggression) * NEIGH_EVERY * FIXED_DT;
     bias += e.biasS + Math.max(-slew, Math.min(slew, want - e.biasS));
 
     // DO NOT DRIVE INTO SOMEONE WHO IS ALONGSIDE.

@@ -206,19 +206,12 @@ if (TRACK.closed) {
   // length in SAMPLES, so 150,000 iterations still only reached -3.9..+1.8 m.
   // So solve COARSE first — every 5th sample, 5^4 = 625x faster to converge —
   // then spread that back to every sample and let the fine solve finish it.
-  const tk = new Track(track), C = 5, m = Math.floor(tk.n / C);
-  const coarse = { n: m, x: [], y: [], hdg: [], w: [] };
-  for (let q = 0; q < m; q++) {
-    const i = q * C;
-    coarse.x.push(tk.x[i]); coarse.y.push(tk.y[i]); coarse.hdg.push(tk.hdg[i]); coarse.w.push(tk.w[i]);
-  }
-  const oc = racingLine(coarse, 0.35, 60000);
-  const seed = new Float32Array(tk.n);
-  for (let i = 0; i < tk.n; i++) {
-    const f = i / C, q = Math.floor(f) % m, r = (q + 1) % m, t = f - Math.floor(f);
-    seed[i] = oc[q] * (1 - t) + oc[r] * t;
-  }
-  track.line = Array.from(racingLine(tk, 0.35, 6000, 0.12, seed), v => round(v, 2));
+  // racingLine() does the coarse-to-fine solve itself now (2026-09-23): every
+  // 32nd sample, then 8th, 2nd, every one, with an accelerated solver at each
+  // level. The coarse pass that lived here (and racingLine's `init` argument
+  // it fed) was the first version of the same idea and is folded into it.
+  const tk = new Track(track);
+  track.line = Array.from(racingLine(tk, 0.35), v => round(v, 2));
 }
 fs.writeFileSync(path.join(ROOT, `data/tracks/${KEY}.json`), JSON.stringify(track));
 fs.writeFileSync(path.join(ROOT, `data/elev/${KEY}.json`), JSON.stringify(elev));
