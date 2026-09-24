@@ -1,6 +1,10 @@
 :root{
-  --bg:#0b0d10; --ink:#e8eaee; --dim:#8b94a3;
-  --good:#35d6a0; --warn:#ffc23d; --bad:#ff4d3d; --line:#1f242c;
+  --bg:#0b0d10; --ink:#e8eaee;
+  /* The team's colours (js/main.js applyTheme). --good/--warn/--bad stay
+     traffic lights for the tyres and pedals whatever team you are. */
+  --pri:#ffb300; --sec:#a35cff; --onpri:#0a0a0a;
+  --dim:color-mix(in srgb,var(--ink) 55%,var(--bg));
+  --good:#3ddc6a; --warn:#ffc23d; --bad:#ff4d3d; --line:color-mix(in srgb,var(--ink) 11%,var(--bg));
   --font:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box}
@@ -14,84 +18,81 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 /* Every full-screen page (menu, loading, results) shares this. */
 .screen{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:26px;padding:24px;
-  background:radial-gradient(120% 90% at 50% 0%,#141922 0%,#0b0d10 60%)}
+  background:radial-gradient(120% 90% at 50% 0%,color-mix(in srgb,var(--pri) 9%,var(--bg)) 0%,var(--bg) 60%)}
 .brand{text-align:center}
 .brand h1{margin:0;font-size:clamp(34px,7vw,66px);letter-spacing:.16em;font-weight:900;font-style:italic}
-.brand h1 span{color:var(--good)}
+.brand h1 span{color:var(--pri)}
 .brand p{margin:10px 0 0;color:var(--dim);letter-spacing:.09em;font-size:13px;text-transform:uppercase}
 
 .go{cursor:pointer;border:0;border-radius:3px;padding:15px 62px;
-  background:var(--good);color:#04130d;font:italic 900 17px/1 var(--font);letter-spacing:.2em;transition:.12s;
+  background:var(--pri);color:var(--onpri);font:italic 900 17px/1 var(--font);letter-spacing:.2em;transition:.12s;
   clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%)}
 .go:hover{filter:brightness(1.1)}
 .loadbox{letter-spacing:.24em;font-size:12px;color:var(--dim)}
 
 /* The main menu: the circuit on the left, one list on the right. */
 #menu{flex-direction:row;align-items:stretch;justify-content:stretch;gap:0;padding:0;
-  background:radial-gradient(90% 120% at 30% 40%,#131820 0%,#0b0d10 62%)}
+  background:radial-gradient(90% 120% at 30% 40%,color-mix(in srgb,var(--pri) 10%,var(--bg)) 0%,var(--bg) 62%)}
 #menu .hero{position:relative;flex:1 1 auto;min-width:0;display:flex;flex-direction:column;padding:34px 20px 26px 44px}
 .mark{font:italic 900 20px/1 var(--font);letter-spacing:.2em}
-.mark span{color:var(--good)}
+.mark span{color:var(--pri)}
 #map{flex:1 1 auto;min-height:0;width:100%;margin:22px 0 14px;overflow:visible}
-#map .casing{fill:none;stroke:#161b23;stroke-width:14px;stroke-linejoin:round;stroke-linecap:round}
-#map .tarmac{fill:none;stroke:#e8eaee;stroke-width:3px;stroke-linejoin:round;stroke-linecap:round;
+#map .casing{fill:none;stroke:color-mix(in srgb,var(--ink) 7%,var(--bg));stroke-width:14px;stroke-linejoin:round;stroke-linecap:round}
+#map .tarmac{fill:none;stroke:var(--ink);stroke-width:3px;stroke-linejoin:round;stroke-linecap:round;
   stroke-dasharray:1000;animation:mapDraw 1.1s cubic-bezier(.3,.7,.2,1) both}
-/* A lone car lapping the outline, forever. Pure CSS: a short dash on a path
-   of pathLength 1000, sliding round. */
-#map .car{fill:none;stroke:var(--good);stroke-width:5px;stroke-linecap:round;
-  stroke-dasharray:14 986;animation:mapLap 9s linear infinite;filter:drop-shadow(0 0 6px rgba(53,214,160,.9))}
+/* A lone car lapping the outline, forever (animateMotion, js/main.js). */
+#map .car{fill:var(--sec);filter:drop-shadow(0 0 6px var(--sec))}
 #map .sf{stroke:var(--bad);stroke-width:4px;stroke-linecap:butt}
 @keyframes mapDraw{from{stroke-dashoffset:1000}to{stroke-dashoffset:0}}
-@keyframes mapLap{from{stroke-dashoffset:1000}to{stroke-dashoffset:0}}
-.heroText small{display:block;font-size:12px;letter-spacing:.34em;color:var(--good);font-weight:700}
+.heroText small{display:block;font-size:12px;letter-spacing:.34em;color:var(--pri);font-weight:700}
 .heroText b{display:block;margin:4px 0 6px;font:italic 900 clamp(38px,6vw,86px)/.95 var(--font);
   letter-spacing:-.01em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .heroText i{display:block;font-style:normal;font-size:12px;letter-spacing:.2em;color:var(--dim)}
-.drivekeys{margin-top:18px;max-width:640px;font-size:10.5px;letter-spacing:.06em;line-height:1.9;color:#4d5563}
-.drivekeys b{color:#8a93a1;font-weight:700;margin:0 2px 0 8px}
+.drivekeys{margin-top:18px;max-width:640px;font-size:10.5px;letter-spacing:.06em;line-height:1.9;color:color-mix(in srgb,var(--ink) 32%,var(--bg))}
+.drivekeys b{color:var(--dim);font-weight:700;margin:0 2px 0 8px}
 .drivekeys b:first-child{margin-left:0}
 .drivekeys a{color:inherit}
 
 #menu .panel{flex:0 0 min(470px,44vw);display:flex;flex-direction:column;justify-content:center;
-  padding:30px 34px 26px 58px;background:linear-gradient(180deg,#0e1117,#0a0c10);
+  padding:30px 34px 26px 58px;background:linear-gradient(180deg,color-mix(in srgb,var(--ink) 4%,var(--bg)),var(--bg));
   clip-path:polygon(34px 0,100% 0,100% 100%,0 100%);overflow:hidden}
 #rows{overflow-y:auto;min-height:0;scrollbar-width:none;padding:2px 0}
 #rows::-webkit-scrollbar{display:none}
-.mgrp{padding:16px 0 5px 18px;font-size:9.5px;letter-spacing:.34em;color:#4b5461;font-weight:700}
+.mgrp{padding:12px 0 4px 18px;font-size:9.5px;letter-spacing:.34em;color:color-mix(in srgb,var(--ink) 35%,var(--bg));font-weight:700}
 .mgrp:first-child{padding-top:0}
 .mrow{position:relative;display:grid;grid-template-columns:112px 26px 1fr 26px;align-items:center;
-  min-height:42px;padding:3px 6px 3px 18px;cursor:pointer;user-select:none;border-radius:2px}
-.mrow + .mrow{box-shadow:inset 0 1px 0 #151a21}
+  min-height:38px;padding:2px 6px 2px 18px;cursor:pointer;user-select:none;border-radius:2px}
+.mrow + .mrow{box-shadow:inset 0 1px 0 var(--line)}
 .mrow .mk{font-size:10.5px;letter-spacing:.22em;color:var(--dim);font-weight:700}
 .mrow .mv{text-align:center;min-width:0}
 .mrow .mv b{display:block;font:italic 800 16px/1.15 var(--font);letter-spacing:.05em;text-transform:uppercase;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mrow .mv small{display:block;font-size:9px;letter-spacing:.2em;color:#5d6675;margin-top:1px}
+.mrow .mv small{display:block;font-size:9px;letter-spacing:.2em;color:color-mix(in srgb,var(--ink) 42%,var(--bg));margin-top:1px}
 .mrow .ar{background:none;border:0;padding:0;height:100%;color:var(--ink);font:700 20px/1 var(--font);
   cursor:pointer;opacity:0;transition:opacity .1s}
 .pips{display:none;gap:3px;justify-content:center;margin-top:5px}
-.pips i{width:9px;height:2px;background:#29303a;display:block}
-.pips i.on{background:var(--good)}
-.mrow.on{background:linear-gradient(90deg,rgba(53,214,160,.16),rgba(53,214,160,.03) 70%,transparent)}
+.pips i{width:9px;height:2px;background:var(--line);display:block}
+.pips i.on{background:var(--pri)}
+.mrow.on{background:linear-gradient(90deg,color-mix(in srgb,var(--pri) 20%,transparent),color-mix(in srgb,var(--pri) 4%,transparent) 70%,transparent)}
 .mrow.on::before{content:'';position:absolute;left:2px;top:7px;bottom:7px;width:4px;
-  background:var(--good);transform:skewX(-14deg)}
+  background:var(--pri);transform:skewX(-14deg)}
 .mrow.on .mk{color:var(--ink)}
 .mrow.on .ar{opacity:1}
 .mrow.on .pips{display:flex}
-.mrow .ar:hover{color:var(--good)}
+.mrow .ar:hover{color:var(--pri)}
 
 /* GO is the start gantry: five lamps, then lights out. */
-#go{margin-top:20px;width:100%;display:flex;align-items:center;justify-content:space-between;
-  padding:0 26px 0 30px;height:62px;background:#151a21;color:var(--ink);flex:none}
+#go{margin-top:16px;width:100%;display:flex;align-items:center;justify-content:space-between;
+  padding:0 26px 0 30px;height:62px;background:color-mix(in srgb,var(--ink) 8%,var(--bg));color:var(--ink);flex:none}
 #go .lamps{display:flex;gap:7px}
 #go .lamps i{width:13px;height:13px;border-radius:50%;background:#2a1414;box-shadow:inset 0 0 0 2px #3a1c1c;display:block;transition:background .06s}
 #go .lamps i.on{background:#ff2a18;box-shadow:0 0 12px rgba(255,42,24,.8),inset 0 0 0 2px #ff6a58}
 #go b{font:italic 900 19px/1 var(--font);letter-spacing:.2em}
-#go.on{background:var(--good);color:#04130d}
-#go.on .lamps i:not(.on){background:#0d3a2a;box-shadow:inset 0 0 0 2px #0b2c20}
-#go.fire{background:#151a21;color:var(--ink)}
-#menu .keys{margin-top:14px;padding-left:18px;font-size:10px;letter-spacing:.14em;color:#4b5461}
-#menu .keys b{color:#8a93a1}
+#go.on{background:var(--pri);color:var(--onpri)}
+#go.on .lamps i:not(.on){background:color-mix(in srgb,var(--onpri) 25%,var(--pri));box-shadow:none}
+#go.fire{background:color-mix(in srgb,var(--ink) 8%,var(--bg));color:var(--ink)}
+#menu .keys{margin-top:14px;padding-left:18px;font-size:10px;letter-spacing:.14em;color:color-mix(in srgb,var(--ink) 35%,var(--bg))}
+#menu .keys b{color:var(--dim)}
 
 @media (max-width:760px){
   #menu{flex-direction:column;overflow-y:auto}
@@ -112,16 +113,16 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 .carline{font-size:11px;letter-spacing:.1em;color:var(--dim);margin-top:3px}
 
 #times{top:18px;right:20px;min-width:212px;
-  background:rgba(11,13,16,.62);border:1px solid var(--line);border-radius:9px;padding:10px 13px}
+  background:color-mix(in srgb,var(--bg) 62%,transparent);border:1px solid var(--line);border-radius:9px;padding:10px 13px}
 #times .row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
   font-size:11px;letter-spacing:.14em;color:var(--dim);padding:2px 0}
 #times .row em{font-style:normal;font-size:14px;color:var(--ink);letter-spacing:.02em}
 #times .big em{font-size:21px;font-weight:700}
 #times .big em.bad{color:var(--bad)}
-#times .best em{color:var(--good)}
+#times .best em{color:var(--sec)}
 
 #slip{left:20px;bottom:20px;width:298px;
-  background:rgba(11,13,16,.62);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
+  background:color-mix(in srgb,var(--bg) 62%,transparent);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
 .sliphead{font-size:10px;letter-spacing:.22em;color:var(--dim);margin-bottom:9px}
 .sliphead i{float:right;font-style:normal;color:#5d6675;letter-spacing:.08em}
 .sliprow{display:flex;align-items:center;gap:9px;margin:5px 0}
@@ -149,8 +150,8 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 .ped.brake i{background:var(--bad)}
 .lights{margin-top:9px;display:flex;gap:6px;justify-content:flex-end}
 .lights span{font-size:9.5px;letter-spacing:.16em;padding:3px 8px;border-radius:4px;
-  border:1px solid var(--line);color:#4c5563;background:rgba(11,13,16,.6)}
-.lights span.on{color:#04130d;background:var(--good);border-color:var(--good)}
+  border:1px solid var(--line);color:var(--dim);background:color-mix(in srgb,var(--bg) 60%,transparent)}
+.lights span.on{color:var(--onpri);background:var(--pri);border-color:var(--pri)}
 
 #msg{left:50%;top:15%;transform:translateX(-50%);
   font-size:13px;letter-spacing:.24em;color:var(--warn)}
@@ -162,10 +163,10 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
    grey of a retired row and the red of its DNF both washed out completely
    wherever a sponsor board happened to be behind them. */
 #tower{top:64px;left:20px;width:242px;
-  background:rgba(9,11,14,.82);border:1px solid var(--line);border-radius:9px;
+  background:color-mix(in srgb,var(--bg) 82%,transparent);border:1px solid var(--line);border-radius:9px;
   padding:6px 7px;font-size:11px;letter-spacing:.06em}
 .trow{display:flex;align-items:center;gap:6px;padding:2px 3px;border-radius:4px;line-height:1.5}
-.trow.me{background:rgba(53,214,160,.16);box-shadow:inset 0 0 0 1px rgba(53,214,160,.3)}
+.trow.me{background:color-mix(in srgb,var(--pri) 20%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pri) 45%,transparent)}
 .trow.out{opacity:.5}
 .trow b{width:19px;text-align:right;color:var(--dim);font-weight:700;font-size:10.5px}
 .trow i{width:3px;height:12px;border-radius:2px;flex:none;display:block}
@@ -186,11 +187,11 @@ body.mirror #startLights,body.mirror #msg{top:calc(min(34vw,560px) / 4.2 + 26px)
 /* ---------------- results ---------------- */
 #results{gap:18px}
 #resTable{width:100%;max-width:560px;max-height:52vh;overflow:auto;
-  background:#12161d;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  background:color-mix(in srgb,var(--ink) 5%,var(--bg));border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 #resTable .trow{font-size:12.5px;padding:3px 4px}
 #resTable .trow em{min-width:78px}
 
-#times .row.pos em{font-size:26px;font-weight:800;color:var(--good)}
+#times .row.pos em{font-size:26px;font-weight:800;color:var(--pri)}
 
 @media (max-width:640px){
   #slip{width:calc(100% - 40px)}
@@ -198,3 +199,28 @@ body.mirror #startLights,body.mirror #msg{top:calc(min(34vw,560px) / 4.2 + 26px)
   #times{min-width:170px}
   #tower{width:186px;font-size:10px}
 }
+
+/* ---------------- team select ---------------- */
+/* One team on screen at a time, and the page wears its colours. */
+#teamPick{z-index:30;gap:0;transition:background .35s;
+  background:radial-gradient(80% 70% at 50% 45%,color-mix(in srgb,var(--pri) 22%,var(--bg)) 0%,var(--bg) 70%)}
+.tpHead{position:absolute;top:30px;left:40px;font:italic 900 20px/1 var(--font);letter-spacing:.2em}
+.tpHead span{color:var(--pri)}
+.tpAsk{font-size:12px;letter-spacing:.4em;color:var(--dim);font-weight:700}
+.tpRow{display:flex;align-items:center;gap:26px;margin:26px 0 22px;width:min(900px,100%)}
+.tpMid{flex:1;text-align:center;min-width:0}
+.tpMid small{display:block;font-size:12px;letter-spacing:.34em;color:var(--pri);font-weight:700}
+.tpMid b{display:block;margin:8px 0 12px;font:italic 900 clamp(44px,9vw,120px)/.95 var(--font);
+  letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tpMid i{display:block;font-style:normal;font-size:13px;letter-spacing:.24em;color:var(--dim)}
+.tpAr{background:none;border:0;color:var(--ink);font:300 64px/1 var(--font);cursor:pointer;padding:0 10px;opacity:.7}
+.tpAr:hover{opacity:1;color:var(--pri)}
+.tpSwatch{display:flex;gap:0;height:10px;width:min(360px,70%);transform:skewX(-14deg)}
+.tpSwatch i{flex:1;display:block}
+.tpSwatch i:first-child{flex:3}
+.tpPips{display:flex;gap:5px;margin:26px 0 30px;flex-wrap:wrap;justify-content:center;max-width:90%}
+.tpPips i{width:14px;height:4px;display:block;opacity:.3;transform:skewX(-14deg)}
+.tpPips i.on{opacity:1;width:28px}
+#tpJoin{padding:17px 70px;font-size:18px}
+.tpKeys{margin-top:18px;font-size:10.5px;letter-spacing:.14em;color:color-mix(in srgb,var(--ink) 38%,var(--bg))}
+.tpKeys b{color:var(--dim)}

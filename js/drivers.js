@@ -65,6 +65,33 @@ export const TEAMS = {
               sp: ['KESTREL', 'ARGENT', 'SIGNALIS', 'SKYLARK'] },   // Aston Martin
   ivory:    { name: 'IVORY',     col: '#e9e9e9', pace: 0.944, fg: '#101014',
               sp: ['CRITTERS', 'ORBIX', 'CARGOLINE', 'NOVACORE'] },   // Cadillac, the new team
+
+  // THE MARQUES (2026-09-24, Adam: "we're adding fantasy teams, bugatti,
+  // mazda, ford etc ... also on the grid", then "like jeep!"). Same rule as
+  // above: the colours are the maker's own, the NAMES are invented — each is
+  // the town the car comes from or a name tied to it, never the badge.
+  molsheim:  { name: 'MOLSHEIM',  col: '#1f5eff', pace: 0.989, fg: '#0a0f1f', marque: true,
+               sp: ['HALCYON', 'ARGENT', 'CHRONA', 'NOVACORE'] },    // Bugatti
+  weissach:  { name: 'WEISSACH',  col: '#d5001c', pace: 0.987, fg: '#f7c600', marque: true,
+               sp: ['MERIDIAN', 'GRIPMAX', 'SKYLARK', 'KESTREL'] },  // Porsche
+  santagata: { name: "SANT'AGATA", col: '#ffc000', pace: 0.982, fg: '#111111', marque: true,
+               sp: ['VELOCITA', 'ZEST', 'BITWAVE', 'RUSH'] },        // Lamborghini
+  angelholm: { name: 'ÄNGELHOLM', col: '#006aa7', pace: 0.985, fg: '#fecc02', marque: true,
+               sp: ['NORTHWAY', 'SIGNALIS', 'PYRA', 'HALDANE'] },    // Koenigsegg
+  dearborn:  { name: 'DEARBORN',  col: '#e21b23', pace: 0.972, fg: '#ffffff', marque: true,
+               sp: ['ATLAS FREIGHT', 'CARGOLINE', 'BRAKEWELL', 'ORBIX'] },   // Ford
+  hiroshima: { name: 'HIROSHIMA', col: '#00a651', pace: 0.966, fg: '#ff6f00', marque: true,
+               sp: ['FOGLAST', 'CRITTERS', 'DEEPWALK', 'ZEST'] },    // Mazda, the 787B's colours
+  koromo:    { name: 'KOROMO',    col: '#eb0a1e', pace: 0.978, fg: '#ffffff', marque: true,
+               sp: ['VOLTSURGE', 'MOLT', 'NOVACORE', 'GRIPMAX'] },   // Toyota
+  toledo:    { name: 'TOLEDO',    col: '#9aae3c', pace: 0.948, fg: '#1b1d12', marque: true,
+               sp: ['DEEPWALK', 'ATLAS FREIGHT', 'NORTHFLOW', 'PYRA'] },   // Jeep
+  portello:  { name: 'PORTELLO',  col: '#c8102e', pace: 0.962, fg: '#00843d', marque: true,
+               sp: ['VELOCITA', 'HALCYON', 'EVERYDEATH', 'SKYLARK'] },   // Alfa Romeo
+  pleiades:  { name: 'PLEIADES',  col: '#2b5bd7', pace: 0.958, fg: '#f5c400', marque: true,
+               sp: ['KESTREL', 'TERMINAL TYCOON', 'BITWAVE', 'MERIDIAN'] },   // Subaru
+  garching:  { name: 'GARCHING',  col: '#6bb3e8', pace: 0.975, fg: '#e22718', marque: true,
+               sp: ['CHRONA', 'SIGNALIS', 'XANBOO78O', 'HALDANE'] },   // BMW M
 };
 
 // agg  — how willing to commit to a move that might not be there
@@ -104,7 +131,79 @@ export const DRIVERS = [
   { n: 'BOTTAS',     t: 'ivory',    num: 77, agg: 0.62, def: 0.80, err: 0.90, sk: 0.999 },
 ];
 
-export function driverAt(i) { return DRIVERS[((i % DRIVERS.length) + DRIVERS.length) % DRIVERS.length]; }
+// The marques' drivers. Invented people, like the team names.
+export const MARQUE_DRIVERS = [
+  { n: 'DELACROIX',  t: 'molsheim',  num: 9,  agg: 0.70, def: 0.84, err: 0.85, sk: 1.004 },
+  { n: 'FONTAINE',   t: 'molsheim',  num: 29, agg: 0.62, def: 0.70, err: 1.05, sk: 1.000 },
+  { n: 'KELLER',     t: 'weissach',  num: 91, agg: 0.66, def: 0.90, err: 0.80, sk: 1.004 },
+  { n: 'BRANDT',     t: 'weissach',  num: 19, agg: 0.74, def: 0.72, err: 1.00, sk: 1.001 },
+  { n: 'ROSSETTI',   t: 'santagata', num: 64, agg: 0.92, def: 0.70, err: 1.30, sk: 1.003 },
+  { n: 'BIANCHI',    t: 'santagata', num: 7,  agg: 0.80, def: 0.76, err: 1.10, sk: 1.000 },
+  { n: 'LINDQVIST',  t: 'angelholm', num: 21, agg: 0.86, def: 0.78, err: 1.10, sk: 1.005 },
+  { n: 'EKBERG',     t: 'angelholm', num: 2,  agg: 0.68, def: 0.74, err: 0.95, sk: 1.000 },
+  { n: 'CALLAHAN',   t: 'dearborn',  num: 66, agg: 0.84, def: 0.88, err: 1.00, sk: 1.002 },
+  { n: 'MERCER',     t: 'dearborn',  num: 50, agg: 0.64, def: 0.70, err: 1.05, sk: 0.999 },
+  { n: 'TAKEDA',     t: 'hiroshima', num: 86,  agg: 0.72, def: 0.80, err: 0.85, sk: 1.004 },
+  { n: 'MORIMOTO',   t: 'hiroshima', num: 17, agg: 0.60, def: 0.66, err: 1.00, sk: 0.999 },
+  { n: 'HAYASHI',    t: 'koromo',    num: 8,  agg: 0.70, def: 0.86, err: 0.80, sk: 1.003 },
+  { n: 'OGAWA',      t: 'koromo',    num: 37, agg: 0.76, def: 0.68, err: 1.15, sk: 1.000 },
+  { n: 'DALTON',     t: 'toledo',    num: 4,  agg: 0.95, def: 0.90, err: 1.40, sk: 1.002 },
+  { n: 'REYES',      t: 'toledo',    num: 99, agg: 0.82, def: 0.64, err: 1.25, sk: 0.998 },
+  { n: 'CASTELLI',   t: 'portello',  num: 33, agg: 0.88, def: 0.72, err: 1.15, sk: 1.003 },
+  { n: 'VALENTI',    t: 'portello',  num: 46, agg: 0.66, def: 0.78, err: 0.95, sk: 1.000 },
+  { n: 'HALONEN',    t: 'pleiades',  num: 22, agg: 0.80, def: 0.70, err: 1.00, sk: 1.002 },
+  { n: 'AALTO',      t: 'pleiades',  num: 28, agg: 0.74, def: 0.76, err: 1.05, sk: 1.000 },
+  { n: 'VOGEL',      t: 'garching',  num: 13, agg: 0.72, def: 0.92, err: 0.85, sk: 1.003 },
+  { n: 'HARTMANN',   t: 'garching',  num: 24, agg: 0.68, def: 0.74, err: 1.00, sk: 1.000 },
+];
+
+// WHO IS ON THE GRID. `DRIVERS` stays the F1 grid on its own (the tools
+// measure it), and the menu's FIELD row picks which table driverAt() reads:
+// the F1 grid, the marques, or both — MIXED takes a team from each in turn,
+// so a 12-car race is still half and half rather than the first six rows.
+function mixed() {
+  const byTeam = list => { const m = new Map(); for (const d of list) { if (!m.has(d.t)) m.set(d.t, []); m.get(d.t).push(d); } return [...m.values()]; };
+  const a = byTeam(DRIVERS), b = byTeam(MARQUE_DRIVERS), out = [];
+  for (let i = 0; i < Math.max(a.length, b.length); i++) { if (a[i]) out.push(...a[i]); if (b[i]) out.push(...b[i]); }
+  return out;
+}
+export const FIELDS = { f1: 'F1 GRID', marques: 'MARQUES', mixed: 'MIXED' };
+let ACTIVE = DRIVERS;
+export function setField(kind) {
+  ACTIVE = kind === 'marques' ? MARQUE_DRIVERS : kind === 'mixed' ? mixed() : DRIVERS;
+}
+export function driverAt(i) { return ACTIVE[((i % ACTIVE.length) + ACTIVE.length) % ACTIVE.length]; }
+
+// The UI in a team's colours: [background, ink, primary, secondary]. The
+// background is always a near-black tinted toward the team, because the HUD
+// sits over a sunlit circuit and the menu over nothing — a pale page would
+// fight both. Primary is what YOU are (focus, your row, lights out); the
+// secondary is the car lapping the map and your best lap.
+export const TEAM_UI = {
+  silver:    ['#080b0c', '#e9eef0', '#27f4d2', '#c0c6cc'],
+  scarlet:   ['#100607', '#f6ecea', '#e8002d', '#ffd400'],
+  papaya:    ['#0d0a07', '#f7efe7', '#ff8000', '#47c7fc'],
+  navy:      ['#060918', '#eef0fa', '#3a5bff', '#ff1e2d'],
+  graphite:  ['#0c0c0d', '#eeeeee', '#d8dadc', '#e10600'],
+  rose:      ['#070b18', '#f3f3fb', '#ff87bc', '#3a6cff'],
+  cobalt:    ['#080b17', '#eef1ff', '#6692ff', '#ff2d55'],
+  titan:     ['#0b0b0c', '#efefef', '#c9ccd1', '#f50537'],
+  azure:     ['#050c16', '#eaf5fc', '#00a0de', '#ffd000'],
+  emerald:   ['#06100c', '#eef5f1', '#229971', '#cedc00'],
+  ivory:     ['#0a0a0a', '#f2f2f2', '#ececec', '#c9a449'],
+  molsheim:  ['#050a18', '#eef2ff', '#1f5eff', '#8fb4ff'],
+  weissach:  ['#0f0707', '#f5efe9', '#d5001c', '#f7c600'],
+  santagata: ['#0d0c05', '#f6f3e6', '#ffc000', '#7bd400'],
+  angelholm: ['#050b12', '#eef4f8', '#1a86d0', '#fecc02'],
+  dearborn:  ['#0f0708', '#f4f1f1', '#e21b23', '#3d7bff'],
+  hiroshima: ['#04100a', '#eef6f1', '#00a651', '#ff6f00'],
+  koromo:    ['#0e0808', '#f3eeee', '#eb0a1e', '#c5c9cc'],
+  toledo:    ['#0b0c07', '#f1efe4', '#9aae3c', '#e0a84a'],
+  portello:  ['#10070a', '#f6eef0', '#d0142f', '#1fae5b'],
+  pleiades:  ['#060a18', '#eef1fb', '#3a6bf0', '#f5c400'],
+  garching:  ['#070a12', '#eef3f9', '#6bb3e8', '#e22718'],
+};
+
 export function teamOf(d) { return TEAMS[d.t] || TEAMS.ivory; }
 
 /**

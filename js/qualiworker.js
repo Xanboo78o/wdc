@@ -9,9 +9,11 @@ import { buildLines } from './line.js';
 import { CARS, registerAero, setWetness } from './physics.js';
 import { makeAero } from './aero.js';
 import { qualiDriver, qualiRun } from './quali.js';
+import { setField } from './drivers.js';
 
 self.onmessage = async ev => {
-  const { base, track: key, cls, tier, seed, drivers, wet = 0 } = ev.data;
+  const { base, track: key, cls, tier, seed, drivers, wet = 0, field = 'f1' } = ev.data;
+  setField(field);                 // the same grid the page is racing
   setWetness(wet);                 // a wet qualifying is wet for the bots too
   try {
     // The aero map MUST be registered here too, before the first car is made:

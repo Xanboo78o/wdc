@@ -25,7 +25,7 @@ import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
 import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
 import { TIME_PHASES, timeFor, WEATHER_KINDS } from './weather.js';
-import { driverAt, teamOf } from './drivers.js';
+import { driverAt, teamOf, TEAMS, TEAM_UI, FIELDS, setField, DRIVERS, MARQUE_DRIVERS } from './drivers.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 
 const $ = id => document.getElementById(id);
@@ -83,6 +83,10 @@ let pickTime = 'live';   // or a phase of the day: weather.js TIME_PHASES
 let pickWeather = 'live';   // or a WEATHER_KINDS entry, or 'changing'
 // SUPERCASUAL's OVERTAKES submode: how hard the pack around you fights.
 let pickBattle = 'medium';
+// The team you drive for. It paints the whole interface (applyTheme), and it
+// is null until you have chosen one — which is what opens the team screen.
+let pickTeam = null;
+let pickField = 'f1';   // who else is on the grid: drivers.js FIELDS
 
 // The menu remembers what you last picked (Adam: "save my previous race
 // settings"). Every value is checked against what exists NOW, so a circuit
@@ -106,12 +110,15 @@ function loadMenu() {
   if (m.time === 'live' || TIME_PHASES.includes(m.time)) pickTime = m.time;
   if (m.weather === 'live' || m.weather === 'changing' || WEATHER_KINDS.includes(m.weather)) pickWeather = m.weather;
   if (BATTLE[m.battle]) pickBattle = m.battle;
+  if (TEAMS[m.team]) pickTeam = m.team;
+  if (FIELDS[m.field]) pickField = m.field;
 }
 function saveMenu() {
   try {
     localStorage.setItem(MENU_KEY, JSON.stringify({
       track: pickTrack, car: pickCar, mode: pickMode, grid: pickGrid, tier: pickTier,
       laps: pickLaps, start: pickStart, noDnf: pickNoDnf, quali: pickQuali, time: pickTime, weather: pickWeather, battle: pickBattle,
+      team: pickTeam, field: pickField,
     }));
   } catch { /* private window: it just won't remember */ }
 }
@@ -124,13 +131,15 @@ function saveMenu() {
 function menuRows() {
   const onoff = [[false, 'OFF'], [true, 'ON']];
   const R = [
-    { g: 'SESSION', k: 'CIRCUIT', opts: TRACKS, get: () => pickTrack, set: v => pickTrack = v },
+    { g: 'SESSION', k: 'TEAM', opts: TEAM_OPTS, get: () => pickTeam, set: v => { pickTeam = v; applyTheme(v); } },
+    { k: 'CIRCUIT', opts: TRACKS, get: () => pickTrack, set: v => pickTrack = v },
     { k: 'CAR', opts: ['f4', 'gt3', 'f1'].map(k => [k, CARS[k].name, CARS[k].full]), get: () => pickCar, set: v => pickCar = v },
     { k: 'MODE', opts: [['hotlap', 'HOT LAP', 'EMPTY CIRCUIT'], ['race', 'RACE', 'WHEEL TO WHEEL']], get: () => pickMode, set: v => pickMode = v },
   ];
   if (pickMode === 'race') {
     R.push(
-      { g: 'RACE', k: 'LAPS', opts: [[2, '2'], [3, '3'], [5, '5'], [10, '10']], get: () => pickLaps, set: v => pickLaps = v },
+      { g: 'RACE', k: 'FIELD', opts: Object.entries(FIELDS).map(([k, n]) => [k, n, k === 'f1' ? 'THE ELEVEN TEAMS' : k === 'marques' ? 'THE CARMAKERS' : 'BOTH, TEAM BY TEAM']), get: () => pickField, set: v => pickField = v },
+      { k: 'LAPS', opts: [[2, '2'], [3, '3'], [5, '5'], [10, '10']], get: () => pickLaps, set: v => pickLaps = v },
       { k: 'GRID', opts: [[6, '6 CARS'], [12, '12 CARS'], [16, '16 CARS'], [22, '22 CARS']], get: () => pickGrid, set: v => pickGrid = v },
       { k: 'RIVALS', opts: Object.keys(TIERS).map(k => [k, TIERS[k].name]), get: () => pickTier, set: v => pickTier = v },
     );
@@ -247,7 +256,12 @@ async function drawHero() {
   if (!o) { svg.innerHTML = ''; return; }
   svg.setAttribute('viewBox', o.vb);
   const p = cls => `<path class="${cls}" d="${o.d}" pathLength="1000" vector-effect="non-scaling-stroke"/>`;
-  svg.innerHTML = p('casing') + p('tarmac') + p('car')
+  // The lapping car rides the path itself (animateMotion) rather than being a
+  // dash slid along it: dash lengths on a pathLength path with a
+  // non-scaling stroke did not survive the renderer, and the car vanished.
+  const r = o.vb.split(' ').slice(2).reduce((m, v) => Math.max(m, +v), 0) * 0.011;
+  svg.innerHTML = p('casing') + p('tarmac')
+    + `<circle class="car" r="${r.toFixed(1)}"><animateMotion dur="9s" repeatCount="indefinite" path="${o.d}"/></circle>`
     + `<line class="sf" x1="${o.sf[0]}" y1="${o.sf[1]}" x2="${o.sf[2]}" y2="${o.sf[3]}" vector-effect="non-scaling-stroke"/>`;
 }
 
@@ -264,12 +278,74 @@ function launch() {
   setTimeout(() => { lamps.forEach(l => l.classList.remove('on')); setTimeout(start, 140); }, 140 * 5 + 260);
 }
 
+// ---------------------------------------------------------------------------
+// THE TEAM. Eleven F1 teams and eleven marques; the one you join paints the
+// interface in its four colours. First visit: a screen with nothing on it but
+// the team, repainting itself as you step through them. After that it is the
+// TEAM row at the top of the menu.
+// ---------------------------------------------------------------------------
+const TEAM_KEYS = Object.keys(TEAMS);
+const teamDrivers = k => [...DRIVERS, ...MARQUE_DRIVERS].filter(d => d.t === k).map(d => d.n);
+const TEAM_OPTS = TEAM_KEYS.map(k => [k, TEAMS[k].name, TEAMS[k].marque ? 'MARQUE' : 'F1']);
+
+// Black or white, whichever reads on a colour. Relative luminance, the WCAG
+// formula: a yellow (Sant'Agata) needs black text and a navy needs white,
+// and guessing per team is how one of 22 ends up unreadable.
+function inkOn(hex) {
+  const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const L = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  return L > 0.3 ? '#0a0a0a' : '#ffffff';
+}
+function applyTheme(key) {
+  const ui = TEAM_UI[key];
+  if (!ui) return;
+  const [bg, ink, pri, sec] = ui, r = document.documentElement.style;
+  r.setProperty('--bg', bg);
+  r.setProperty('--ink', ink);
+  r.setProperty('--pri', pri);
+  r.setProperty('--sec', sec);
+  r.setProperty('--onpri', inkOn(pri));
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = bg;
+}
+
+let picking = false, pickAt = 0;
+function drawTeamPick() {
+  const k = TEAM_KEYS[pickAt], t = TEAMS[k];
+  applyTheme(k);
+  $('tpKind').textContent = t.marque ? 'MARQUE' : 'FORMULA 1';
+  $('tpName').textContent = t.name;
+  $('tpDrivers').textContent = teamDrivers(k).join('  ·  ');
+  $('tpSwatch').innerHTML = [2, 3, 1].map(i => TEAM_UI[k][i]).map(c => `<i style="background:${c}"></i>`).join('');
+  $('tpPips').innerHTML = TEAM_KEYS.map((x, i) => `<i class="${i === pickAt ? 'on' : ''}" style="background:${TEAM_UI[x][2]}"></i>`).join('');
+}
+function openTeamPick() {
+  picking = true;
+  pickAt = Math.max(0, TEAM_KEYS.indexOf(pickTeam));
+  $('teamPick').classList.remove('hidden');
+  drawTeamPick();
+}
+function stepTeam(d) { pickAt = (pickAt + d + TEAM_KEYS.length) % TEAM_KEYS.length; drawTeamPick(); }
+function joinTeam() {
+  pickTeam = TEAM_KEYS[pickAt];
+  picking = false;
+  $('teamPick').classList.add('hidden');
+  menuAt = 'CIRCUIT';
+  buildMenu();
+}
+
 // Menu input. Keys arrive as events; pads and the wheel's rim are POLLED,
 // because the Gamepad API has no events for buttons. A held direction repeats
 // like a held key, so running down to the tenth circuit is one long press.
 let menuLive = true;
 function menuInput(what) {
   if (!menuLive) return;
+  if (picking) {
+    if (what === 'left' || what === 'right') stepTeam(what === 'left' ? -1 : 1);
+    else if (what === 'ok' || what === 'go') joinTeam();
+    return;
+  }
   if (what === 'up') moveFocus(-1);
   else if (what === 'down') moveFocus(1);
   else if (what === 'go') launch();
@@ -332,6 +408,7 @@ function startSlot(grid) {
 
 async function start() {
   menuLive = false;
+  setField(pickField);
   hands.endFrame();
   $('menu').classList.add('hidden');
   // Engine audio MUST be created inside a real user gesture. A context made
@@ -614,7 +691,7 @@ function qualiBegin() {
     };
     w.onerror = e => { const q = state.quali; if (q) { q.err = e.message || 'worker failed'; q.workerDone = true; } };
     w.postMessage({ base: new URL('../', import.meta.url).href, track: pickTrack, cls: pickCar,
-      tier: c.tier, seed: c.seed, drivers: bots,
+      tier: c.tier, seed: c.seed, drivers: bots, field: pickField,
       // quali starts before the weather does; a rain or storm session starts soaked
       wet: ['rain', 'storm'].includes(new URLSearchParams(location.search).get('weather') || pickWeather) ? 1 : 0 });
     state.qualiWorker = w;
@@ -1045,7 +1122,7 @@ function hud(over, rough) {
   const bar = (el, a) => {
     const frac = Math.min(1, Math.abs(a) / (peak * 1.4));
     el.style.width = (frac * 100).toFixed(1) + '%';
-    el.style.background = Math.abs(a) > peak ? '#ff4d3d' : Math.abs(a) > peak * 0.8 ? '#ffc23d' : '#35d6a0';
+    el.style.background = Math.abs(a) > peak ? '#ff4d3d' : Math.abs(a) > peak * 0.8 ? '#ffc23d' : '#3ddc6a';
   };
   bar($('slipFbar'), car.slipF);
   bar($('slipRbar'), car.slipR);
@@ -1104,8 +1181,8 @@ function setPaused(on) {
     _menuBox = document.createElement('div');
     _menuBox.id = 'pauseMenu';
     _menuBox.style.cssText = 'position:fixed;inset:0;z-index:120;display:flex;align-items:center;'
-      + 'justify-content:center;background:rgba(6,8,11,.72);backdrop-filter:blur(3px);'
-      + 'font:16px/2.1 ui-monospace,monospace;color:#e8eaee';
+      + 'justify-content:center;background:color-mix(in srgb,var(--bg) 72%,transparent);backdrop-filter:blur(3px);'
+      + 'font:16px/2.1 ui-monospace,monospace;color:var(--ink)';
     document.body.appendChild(_menuBox);
   }
   _menuBox.style.display = on ? 'flex' : 'none';
@@ -1114,12 +1191,12 @@ function setPaused(on) {
 function drawMenu() {
   if (!_menuBox) return;
   const items = MENU_ITEMS();
-  _menuBox.innerHTML = '<div style="min-width:320px;padding:22px 26px;border:1px solid #2a3039;'
-    + 'border-radius:10px;background:rgba(10,13,17,.92)">'
-    + '<div style="letter-spacing:.2em;color:#7d8590;font-size:12px;margin-bottom:14px">PAUSED</div>'
+  _menuBox.innerHTML = '<div style="min-width:320px;padding:22px 26px;border:1px solid var(--line);'
+    + 'border-radius:10px;background:color-mix(in srgb,var(--bg) 92%,transparent)">'
+    + '<div style="letter-spacing:.2em;color:var(--dim);font-size:12px;margin-bottom:14px">PAUSED</div>'
     + items.map(([label], i) => `<div style="padding:2px 10px;border-radius:5px;${i === state.menuAt
-        ? 'background:#35d6a0;color:#04150e;font-weight:700' : ''}">${i === state.menuAt ? '\u203a ' : '\u00a0\u00a0'}${label}</div>`).join('')
-    + '<div style="margin-top:16px;color:#7d8590;font-size:11px;letter-spacing:.1em">'
+        ? 'background:var(--pri);color:var(--onpri);font-weight:700' : ''}">${i === state.menuAt ? '\u203a ' : '\u00a0\u00a0'}${label}</div>`).join('')
+    + '<div style="margin-top:16px;color:var(--dim);font-size:11px;letter-spacing:.1em">'
     + 'D-PAD MOVE &middot; START SELECT &middot; HOME CLOSE</div></div>';
 }
 function moveMenu(d) {
@@ -1404,7 +1481,12 @@ if (Q.has('grid')) pickGrid = Math.max(2, Math.min(22, +Q.get('grid') || 22));
 if (TIERS[Q.get('tier')]) pickTier = Q.get('tier');
 if (Q.has('laps')) pickLaps = Math.max(1, Math.min(60, +Q.get('laps') || 3));
 
+if (pickTeam) applyTheme(pickTeam);
 buildMenu();
+if (!pickTeam && !Q.has('auto')) openTeamPick();
+$('tpPrev').onclick = () => stepTeam(-1);
+$('tpNext').onclick = () => stepTeam(1);
+$('tpJoin').onclick = joinTeam;
 $('go').onclick = launch;
 $('go').onmousemove = () => { if (menuAt !== 'GO') { menuAt = 'GO'; paintFocus(); } };
 // the rim's buttons need their map before the menu can read them
