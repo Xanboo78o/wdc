@@ -75,6 +75,12 @@ export class Post {
     this.bloom = 0.85;
     this.rays = 0.75;
     this.threshold = 1.15;       // bloom starts ABOVE white, so only real light glows
+    // HOW FAR THE EYE MAY ADAPT. The floor under the adapted luminance was
+    // 1e-4, i.e. none: at night the exposure climbed until a dark scene read
+    // as a grey foggy day — black tyres turned grey, the road went milky, and
+    // Adam's dawn "looks like night" was really night looking like nothing.
+    // A real eye and a real camera stop adapting; so does this.
+    this.lumFloor = 0.05;
     this.adapt = { up: 0.40, down: 1.20 };   // see below — asymmetric on purpose
     this.sun = new THREE.Vector3(0, 1, 0);
     this.sunUp = 0;              // 0 when the sun is behind you or below the horizon
@@ -134,15 +140,15 @@ export class Post {
     // glow; at noon it rises and only the sun does. A fixed threshold makes
     // night either black or a smear.
     this.bright = new Pass(`
-      uniform sampler2D tSrc, tAdapt; uniform float uKey, uThresh;
+      uniform sampler2D tSrc, tAdapt; uniform float uKey, uThresh, uFloor;
       void main() {
         vec3 c = texture(tSrc, vUv).rgb;
-        float ev = uKey / max(texture(tAdapt, vec2(0.5)).r, 1e-4);
+        float ev = uKey / max(texture(tAdapt, vec2(0.5)).r, uFloor);
         c *= ev;
         float l = dot(c, ${LUM});
         float k = smoothstep(uThresh, uThresh * 2.0, l);
         fragColour = vec4(c * k, 1.0);
-      }`, { tSrc: u(null), tAdapt: u(null), uKey: u(0.22), uThresh: u(1.15) });
+      }`, { tSrc: u(null), tAdapt: u(null), uKey: u(0.22), uThresh: u(1.15), uFloor: u(1e-4) });
 
     this.blur = new Pass(`
       uniform sampler2D tSrc; uniform vec2 uDir;
@@ -186,7 +192,7 @@ export class Post {
     // ---- composite --------------------------------------------------------
     this.comp = new Pass(`
       uniform sampler2D tScene, tBloom, tRays, tAdapt;
-      uniform float uKey, uBloom, uRays, uSunUp;
+      uniform float uKey, uBloom, uRays, uSunUp, uFloor;
 
       // ACES, the fitted curve. The renderer used to do this; it happens here
       // now because everything above has to run in LINEAR light and tone
@@ -195,7 +201,7 @@ export class Post {
         return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
       }
       void main() {
-        float ev = uKey / max(texture(tAdapt, vec2(0.5)).r, 1e-4);
+        float ev = uKey / max(texture(tAdapt, vec2(0.5)).r, uFloor);
         vec3 c = texture(tScene, vUv).rgb * ev;
         c += texture(tBloom, vUv).rgb * uBloom;
         c += texture(tRays, vUv).rgb * uRays * uSunUp;
@@ -207,7 +213,7 @@ export class Post {
         fragColour = vec4(c, 1.0);
       }`, {
       tScene: u(null), tBloom: u(null), tRays: u(null), tAdapt: u(null),
-      uKey: u(0.22), uBloom: u(0.85), uRays: u(0.75), uSunUp: u(0.0),
+      uKey: u(0.22), uBloom: u(0.85), uRays: u(0.75), uSunUp: u(0.0), uFloor: u(1e-4),
     });
 
     // Bloom and rays run at a quarter of the width. Nobody has ever noticed a
@@ -284,7 +290,7 @@ export class Post {
     // 3. bright -> blur -> bloom, and bright -> radial -> rays
     const b = this.bright.mat.uniforms;
     b.tSrc.value = this.sceneRT.texture; b.tAdapt.value = adapt;
-    b.uKey.value = this.exposureKey; b.uThresh.value = this.threshold;
+    b.uKey.value = this.exposureKey; b.uThresh.value = this.threshold; b.uFloor.value = this.lumFloor;
     this.bright.to(r, this.bloomRT[0]);
 
     if (this.sunUp > 0.001 && this.sunScreen) {
@@ -308,7 +314,7 @@ export class Post {
     c.tBloom.value = this.bloomRT[0].texture;
     c.tRays.value = this.rayRT.texture;
     c.tAdapt.value = adapt;
-    c.uKey.value = this.exposureKey;
+    c.uKey.value = this.exposureKey; c.uFloor.value = this.lumFloor;
     c.uBloom.value = this.bloom;
     c.uRays.value = this.rays;
     c.uSunUp.value = this.sunUp;

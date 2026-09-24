@@ -255,3 +255,59 @@ export function atBiome(read, dryness = 0) {
     punch: Math.min(1, read.punch * (1 + d * 0.35)),
   };
 }
+
+// ---------------------------------------------------------------------------
+// THE PHASES OF A DAY
+//
+// Adam: "this looks like night time but irl it looks like morning ... theres
+// not js day or night, theres night morning dusk day dawn sunset night".
+// Right: the sun below the horizon is not night. Civil twilight (to 6 degrees
+// under) is bright enough to read by, and the game treated all of it as dark.
+//
+//   NIGHT     below -12        the sky is black-blue, lamps full
+//   DAWN/DUSK -12 .. -1        blue hour: no sun, a lit sky, lamps coming on/off
+//   SUNRISE/SUNSET -1 .. 8     the sun on the horizon, long orange light
+//   MORNING/EVENING 8 .. 25    low, warm, long shadows
+//   DAY       above 25
+//
+// `dark` (0 day .. 1 night) is what the lamps follow, so they fade in through
+// dusk instead of snapping on at one number.
+// ---------------------------------------------------------------------------
+export function dayPhase(elevation, azimuth) {
+  const rising = azimuth < 180;          // east of south: before solar noon
+  const e = elevation;
+  const name = e < -12 ? 'NIGHT' : e < -1 ? (rising ? 'DAWN' : 'DUSK')
+    : e < 8 ? (rising ? 'SUNRISE' : 'SUNSET') : e < 25 ? (rising ? 'MORNING' : 'EVENING') : 'DAY';
+  const dark = Math.max(0, Math.min(1, (2 - e) / 10));
+  return { name, dark, rising };
+}
+
+// The moment today (in the player's own clock) when the sun is at a phase.
+// Searched minute by minute, which is 1440 evaluations of ninety lines of
+// arithmetic, once, when a session starts.
+const PHASE_AT = {
+  night: { mid: -1 }, dawn: { e: -5, rise: true }, sunrise: { e: 2, rise: true },
+  morning: { e: 15, rise: true }, day: { noon: true }, evening: { e: 15, rise: false },
+  sunset: { e: 2, rise: false }, dusk: { e: -5, rise: false },
+};
+export const TIME_PHASES = Object.keys(PHASE_AT);
+
+export function timeFor(phase, now, lat, lon) {
+  const want = PHASE_AT[phase];
+  if (!want) return null;
+  const day0 = new Date(now); day0.setHours(0, 0, 0, 0);
+  let best = null, score = Infinity;
+  for (let m = 0; m < 1440; m++) {
+    const d = new Date(+day0 + m * 60000);
+    const s = solarPosition(d, lat, lon);
+    let k;
+    if (want.noon) k = -s.elevation;
+    else if (want.mid) k = s.elevation;
+    else {
+      if ((s.azimuth < 180) !== want.rise) continue;
+      k = Math.abs(s.elevation - want.e);
+    }
+    if (k < score) { score = k; best = d; }
+  }
+  return best;
+}

@@ -15,7 +15,7 @@ import { Look, sunRig } from './tex.js';
 import { Post } from './post.js';
 let RIGS_NAMES = [];
 import { ProcSky } from './sky.js';
-import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation } from './weather.js';
+import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation, dayPhase } from './weather.js';
 import { bankTable, bankY, bankRoll } from './bank.js';
 import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
@@ -411,7 +411,7 @@ export class View {
     // Tuning knobs, because every number in post.js is a judgement about
     // light and I cannot see the screen. ?key=0.12&bloom=0.85&rays=0.75
     const qp = new URLSearchParams(location.search);
-    for (const [k, f] of [['key', 'exposureKey'], ['bloom', 'bloom'], ['rays', 'rays'], ['thresh', 'threshold']]) {
+    for (const [k, f] of [['key', 'exposureKey'], ['bloom', 'bloom'], ['rays', 'rays'], ['thresh', 'threshold'], ['lumfloor', 'lumFloor']]) {
       if (qp.has(k) && this.post.on) this.post[f] = +qp.get(k);
     }
     if (typeof window !== 'undefined') window.__wdcPost = this.post;
@@ -493,9 +493,9 @@ export class View {
       this.lamps = [];
       const face = new THREE.MeshBasicMaterial({ color: 0xfff4dc });
       for (const side of [-1, 1]) {
-        const L = new THREE.SpotLight(0xfff2d8, 0, 260, 0.42, 0.55, 2);
+        const L = new THREE.SpotLight(0xfff2d8, 0, 260, 0.34, 0.6, 2);
         L.position.set(nose, h, side * 0.55);
-        L.target.position.set(nose + 30, 0, side * 1.2);
+        L.target.position.set(nose + 45, 0, side * 1.2);
         L.castShadow = false;
         const glow = new THREE.Mesh(new THREE.CircleGeometry(0.09, 16), face);
         glow.position.set(nose + 0.01, h, side * 0.55); glow.rotation.y = Math.PI / 2;
@@ -700,12 +700,26 @@ export class View {
     // as much air — the same reason the sky goes red, seen from the other end.
     const up = Math.max(0, Math.min(1, sol.elevation / 45));
     const warm = Math.pow(1 - up, 2.2);
-    this.rig.sun.intensity = 3.1 * up * this.wx.punch;
+    // THE PHASES (weather.js dayPhase). The sun no longer switches off at the
+    // horizon: it fades in over the first six degrees, so a sunrise has light
+    // in it, and below the horizon the SKY still lights the world — blue and
+    // dimming through dawn and dusk, dark blue at night — instead of the day's
+    // ambient left on all night (0.55..1.0 regardless).
+    const ph = dayPhase(sol.elevation, sol.azimuth);
+    this.phase = ph;
+    const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const rise = sm(-1.5, 6, sol.elevation);
+    this.rig.sun.intensity = 3.1 * Math.max(up, 0.10 * rise) * rise * this.wx.punch;
     this.rig.sun.color.setRGB(1, 1 - warm * 0.30, 1 - warm * 0.62);
     this.rig.sun.castShadow = this.shadows && sol.elevation > 3 && this.wx.punch > 0.25;
-    // Ambient has to RISE as the sun falls, or dusk is simply black. At night
-    // it is all there is.
-    this.rig.hemi.intensity = 0.55 + (1 - up) * 0.45 + this.wx.cloud * 0.5;
+    // Ambient still RISES as the sun falls (or dusk is black), but only while
+    // there is a lit sky to give it: from 2 degrees down to -12 it thins out
+    // and turns blue.
+    const lit = sm(-12, 2, sol.elevation);
+    const hemi = this.rig.hemi;
+    if (!hemi.userData.base) hemi.userData.base = hemi.color.clone();
+    hemi.intensity = (0.55 + (1 - up) * 0.45 + this.wx.cloud * 0.5) * (0.30 + 0.70 * lit);
+    hemi.color.setRGB(0.36, 0.46, 0.85).lerp(hemi.userData.base, lit);
 
     if (now - this._skyAt > 0.25) {
       this._skyAt = now;
@@ -717,10 +731,13 @@ export class View {
     }
     this.sunElevation = sol.elevation;
     if (this.lamps) {
-      const on = this.lampsForced ?? sol.elevation < 4;
-      for (const { L, glow } of this.lamps) { L.intensity = on ? 420 : 0; glow.visible = on; }
+      // 420 whitewashed the road into a glare that the exposure then fought
+      // (road white, everything else black). They fade in with the dark now.
+      const on = this.lampsForced ?? ph.dark > 0.2;
+      const k = this.lampsForced ? 1 : ph.dark;
+      for (const { L, glow } of this.lamps) { L.intensity = on ? 16 * Math.max(0.35, k) : 0; glow.visible = on; }
     }
-    if (this.courseLights) this.courseLights.setNight(sol.elevation < 4);
+    if (this.courseLights) this.courseLights.setNight(ph.dark);
 
     // Weather, every ten minutes, and never blocking a frame.
     if (now - this._wxAt > 600 || !this._wxAt) {
@@ -983,10 +1000,11 @@ export class View {
 
   setMode(m) { this.mode = ((m % 4) + 4) % 4; }
   /** Is it dark enough for lamps? The sun, not the H key: that is yours alone. */
-  nightOn() { return (this.sunElevation ?? 90) < 4; }
+  // How dark it is, 0..1 — or 0 until it is dark enough for lamps (truthy = on).
+  nightOn() { const d = this.phase ? this.phase.dark : 0; return d > 0.2 ? d : 0; }
 
   toggleHeadlights() {
-    const now = this.lampsForced ?? (this.sunElevation ?? 90) < 4;
+    const now = this.lampsForced ?? !!this.nightOn();
     this.lampsForced = !now;
     return this.lampsForced;
   }

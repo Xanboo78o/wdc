@@ -90,11 +90,13 @@ export function carLamps(group, box, { heads = true, pool = true } = {}) {
     m.renderOrder = 2; m.visible = false; group.add(m); out.pool = m;
   }
 
+  // `night` is 0..1 darkness (render.js nightOn), 0 = off.
   out.update = (night, brake) => {
-    for (const m of out.heads) m.visible = night;
-    if (out.pool) out.pool.visible = night;
+    night = +night || 0;
+    for (const m of out.heads) m.visible = night > 0;
+    if (out.pool) { out.pool.visible = night > 0; out.pool.material.opacity = 0.2 * night; }
     const b = brake > 0.05;
-    for (const m of out.rear) m.visible = night || b;
+    for (const m of out.rear) m.visible = night > 0 || b;
     rm.color.copy(b ? BRAKE : TAIL);
   };
   return out;
@@ -168,13 +170,17 @@ export function buildCourseLights(scene, track, world = null, { spacing = 70 } =
     (out.emitters || (out.emitters = [])).push(e);
   }
   out.count = n;
-  out.setNight = on => {
+  // Darkness 0..1: lamps fade in through dusk. The pools were 0.42 opacity
+  // every 70 m and whitewashed the road; 0.13 at full dark now.
+  out.setNight = dark => {
+    dark = +dark || 0;
+    const on = dark > 0.2;
     // By day an UNLIT basic material is a flat colour with no shading, and a
     // light grey one reads as a lamp that is on (the forest session saw "lit"
     // street lamps at 14:00). So by day the head is a dark housing.
     headMat.color.setRGB(on ? 8 : 0.07, on ? 7.6 : 0.075, on ? 6.8 : 0.08);
-    poolMesh.visible = on;
-    for (const e of out.emitters || []) e.gain = on ? 0.8 : 0;
+    poolMesh.visible = on; poolMat.opacity = 0.13 * dark;
+    for (const e of out.emitters || []) e.gain = on ? 0.8 * dark : 0;
   };
   return out;
 }

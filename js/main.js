@@ -24,6 +24,7 @@ import { Field } from './field.js';
 import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
 import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
+import { TIME_PHASES, timeFor } from './weather.js';
 import { driverAt, teamOf } from './drivers.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 
@@ -78,6 +79,7 @@ let pickTrack = 'monza', pickCar = 'f4';
 let pickMode = 'hotlap', pickGrid = 22, pickTier = 'medium', pickLaps = 3, pickStart = 'mid';
 let pickNoDnf = false;
 let pickQuali = false;
+let pickTime = 'live';   // or a phase of the day: weather.js TIME_PHASES
 // SUPERCASUAL's OVERTAKES submode: how hard the pack around you fights.
 let pickBattle = 'medium';
 
@@ -100,13 +102,14 @@ function loadMenu() {
   if (['pole', 'front', 'mid', 'back'].includes(m.start)) pickStart = m.start;
   pickNoDnf = m.noDnf === true;
   pickQuali = m.quali === true;
+  if (m.time === 'live' || TIME_PHASES.includes(m.time)) pickTime = m.time;
   if (BATTLE[m.battle]) pickBattle = m.battle;
 }
 function saveMenu() {
   try {
     localStorage.setItem(MENU_KEY, JSON.stringify({
       track: pickTrack, car: pickCar, mode: pickMode, grid: pickGrid, tier: pickTier,
-      laps: pickLaps, start: pickStart, noDnf: pickNoDnf, quali: pickQuali, battle: pickBattle,
+      laps: pickLaps, start: pickStart, noDnf: pickNoDnf, quali: pickQuali, time: pickTime, battle: pickBattle,
     }));
   } catch { /* private window: it just won't remember */ }
 }
@@ -142,6 +145,7 @@ function buildMenu() {
   ], pickStart, v => pickStart = v);
   cards('dnfList', [[false, 'NORMAL'], [true, 'NO DNF']], pickNoDnf, v => pickNoDnf = v);
   cards('qualiList', [[false, 'OFF'], [true, 'ON']], pickQuali, v => pickQuali = v);
+  cards('timeList', [['live', 'LIVE'], ...TIME_PHASES.map(k => [k, k.toUpperCase()])], pickTime, v => pickTime = v);
   saveMenu();
   $('raceOpts').classList.toggle('off', pickMode !== 'race');
 }
@@ -309,6 +313,12 @@ async function start() {
     });
   } else {
     location.reload(); return;          // changing circuit rebuilds the world
+  }
+  // TIME: LIVE is the real clock; a phase freezes the sun there, today, at
+  // your own location. ?time= on the URL still wins.
+  if (pickTime !== 'live' && !q.has('time') && state.view.at) {
+    const at = timeFor(pickTime, new Date(), state.view.at.lat, state.view.at.lon);
+    if (at) { state.view.fixedTime = at; state.view._skyAt = -99; }
   }
 
   // The rest of the grid. It is built after the View because it needs the
