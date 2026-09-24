@@ -20,10 +20,20 @@
 // motor instead of clipping flat.
 
 import { peakSlip } from './physics.js';
+import { steerLock } from './input.js';
 
 const URL_ = 'ws://127.0.0.1:8179';
 const MECH = 0.3;            // caster's share of the trail, relative to pneumatic
-const SCALE = 0.9;           // front force / weight that reads as ~70% torque
+// Adam, 2026-09-24: "it ONLY resist on crashes". Measured over a Monza lap,
+// SCALE 0.9 sent an F4 a MEDIAN of 0.12 — 8% of the base at his 70% cap —
+// and nothing at all on a straight, so the only thing that reached his hands
+// was the 0.5 crash jolt. 0.45 plus the centring spring below: F4 median
+// ~0.29, F1 ~0.5, and the tanh still lets it go light past the grip peak.
+const SCALE = 0.45;          // front force / weight
+// The centring spring: a real rack's caster and the tyres' own stiffness hold
+// it on centre on a straight, where the aligning torque is almost zero. Fades
+// in with speed so the car can still be turned at a crawl.
+const CENTRE = 0.22;
 
 // ROAD TEXTURE, in the steering torque itself — not the base's own vibration
 // effect, which stays off since the 2026-09-23 shutdown (one effect on the
@@ -71,7 +81,9 @@ export class FFB {
     // +Fyf pushes the front LEFT; the aligning torque turns the wheel back the
     // other way, and + means LEFT to the bridge. Hence the minus.
     const sat = -(car.Fyf || 0) * (tp + MECH) / (1 + MECH) / (spec.m * 9.81);
-    let f = Math.tanh(sat / SCALE);
+    const dn = (car.delta || 0) / Math.max(0.02, steerLock(car.speed || 0));
+    const centre = -CENTRE * Math.tanh(dn * 6) * Math.min(1, (car.speed || 0) / 20);
+    let f = Math.tanh(sat / SCALE + centre);
     if (car.airborne) f = 0;                   // nothing on the ground, nothing in the hands
     f *= Math.min(1, (car.speed || 0) / 5);   // nothing at all on the grid or parked
 

@@ -43,6 +43,14 @@ RAMP = 3.0            # seconds from zero to full strength after the wheel is op
 SLEW = 0.15           # most the torque may change per message. Was 0.05, which smoothed
                       # every bump flat; raised after clean runs at 10/20/30%.
 DIR = 0x4000          # the X axis. Which way + goes is what --probe is for.
+# THE R3 PLAYS A CONSTANT FORCE WEAKER THE MORE OFTEN IT IS RE-SENT. Measured
+# with Adam's hands on the rim, 2026-09-24, 25% held left: sent once and held
+# = a clear push; re-uploaded 30x a second (what the game did every frame) =
+# "much weaker"; 10x and 5x a second = as strong as held. That is why the game
+# only ever came through on crashes ("it ONLY resist on crashes"): steering
+# weight changes a little every frame, so it was re-sent every frame and
+# arrived as almost nothing, while a crash jolt is big enough to survive it.
+UPLOAD_EVERY = 0.1    # s — at most 10 force updates a second; letting go is instant
 
 
 def effect(kind, eid, body):
@@ -105,6 +113,7 @@ class Wheel:
         # --extras asks for them — one effect on the base, not three.
         self.t0 = time.time()
         self.f = 0.0
+        self.sent_at = 0.0
         self.fd = os.open(path, os.O_RDWR)
         ev(self.fd, EV_FF, FF_GAIN, 0xffff)
         try:
@@ -135,9 +144,11 @@ class Wheel:
         f = int(self.f * self.maxf * self.sign * 32767)
         r = int(clamp(r, 0, 1) * ramp * self.maxf * 32767)
         d = int(clamp(d, 0, 1) * ramp * self.maxf * 32767)
-        # Every upload is a USB report. Skip the ones nobody could feel.
-        if abs(f - self.last.get('f', 1e9)) > 40:
-            self.upload('f', FF_CONSTANT, constant(f)); self.last['f'] = f
+        # Every upload is a USB report. Skip the ones nobody could feel, and
+        # never more than one per UPLOAD_EVERY — except letting go to zero.
+        now = time.time()
+        if abs(f - self.last.get('f', 1e9)) > 40 and (f == 0 or now - self.sent_at >= UPLOAD_EVERY):
+            self.upload('f', FF_CONSTANT, constant(f)); self.last['f'] = f; self.sent_at = now
         if not self.extras:
             return f
         if abs(r - self.last.get('r', 1e9)) > 200:
