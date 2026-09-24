@@ -241,18 +241,26 @@ export class Hands {
     return null;
   }
 
-  /** The rim's button map. Storage first, then the shipped file — same rule. */
+  /**
+   * The rim's button map: whichever of storage and the shipped file is NEWER.
+   * It was "storage first", which meant a map saved once from the old guess
+   * kept the rim dead forever, however right the file became. A saved map
+   * with no date is the oldest thing there is.
+   */
   async loadButtons(base = './') {
+    let saved = null, file = null;
     try {
       const raw = localStorage.getItem('wdc.wheelbtn');
-      if (raw) { const m = JSON.parse(raw); if (m && m.map) { this._btnMap = m.map; return m.map; } }
+      if (raw) { const m = JSON.parse(raw); if (m && m.map) saved = m; }
     } catch { /* blocked storage */ }
     try {
       const r = await fetch(`${base}data/wheelbtn.json`);
-      if (r.ok) { const m = await r.json(); if (m && m.map) { this._btnMap = m.map; return m.map; } }
+      if (r.ok) { const m = await r.json(); if (m && m.map) file = m; }
     } catch { /* none: the wheel still steers, the keys still work */ }
-    this._btnMap = null;
-    return null;
+    const pick = saved && (!file || String(saved.saved || '') > String(file.saved || '')) ? saved : file;
+    this._btnMap = pick ? pick.map : null;
+    this._btnFrom = pick === saved ? 'storage' : pick ? 'file' : null;
+    return this._btnMap;
   }
 
   /** Is a named rim control held down right now? */

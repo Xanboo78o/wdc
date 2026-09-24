@@ -1,18 +1,20 @@
 {
-  "note": "SHIPPED GUESS, not a measurement. The d-pad IS measured — axes 8 and 9 are the hat on Adam's R3, confirmed from /dev/input/js0. The BUTTONS are the common positions, several bound per action so something works where the guess is wrong. A rim reports BTN_TRIGGER/BTN_THUMB/... with no semantics, so which physical button is MENU cannot be derived — only pressed. Running SET UP BUTTONS in pad.html overrides all of this.",
+  "note": "MEASURED 2026-09-24 on Adam's R3: he pressed each control in a given order while /dev/input/js0 was logged (Chrome's gamepad buttons are the joydev numbers). The shipped guess before this matched NONE of them, which is why no rim button worked. The d-pad is the hat on axes 8/9, measured 2026-09-22. A map saved later by pad.html's SET UP BUTTONS still wins; an OLDER saved map loses to this file (see Hands.loadButtons).",
   "id": "Gudsen R3 Racing Wheel and Pedals (Vendor: 346e Product: 0005)",
+  "saved": "2026-09-24T06:30",
+  "measured": true,
   "map": {
-    "pause":   [{ "b": 9 }, { "b": 8 }, { "b": 11 }],
-    "back":    [{ "b": 10 }, { "b": 1 }],
-    "confirm": [{ "b": 0 }, { "b": 7 }],
+    "pause":   [{ "b": 37 }],
+    "back":    [{ "b": 3 }],
+    "confirm": [{ "b": 35 }],
     "up":      { "ax": 9, "dir": -1 },
     "down":    { "ax": 9, "dir": 1 },
     "left":    { "ax": 8, "dir": -1 },
     "right":   { "ax": 8, "dir": 1 },
-    "shiftUp": [{ "b": 5 }],
-    "shiftDn": [{ "b": 4 }],
-    "drs":     [{ "b": 2 }],
-    "cam":     [{ "b": 3 }],
-    "radio":   [{ "b": 6 }]
+    "shiftUp": [{ "b": 13 }],
+    "shiftDn": [{ "b": 12 }],
+    "drs":     [{ "b": 1 }],
+    "cam":     [{ "b": 21 }],
+    "radio":   [{ "b": 22 }]
   }
 }
