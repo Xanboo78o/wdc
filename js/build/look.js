@@ -394,7 +394,7 @@ async function swapSky(look, name) {
 // ---------------------------------------------------------------------------
 // The plants. Colour is sRGB, opacity is DATA and must stay linear — marking an
 // alpha map as sRGB bends its cutoff and eats the thin end of every blade.
-async function loadFlora(renderer) {
+export async function loadFlora(renderer) {
   const loader = new THREE.TextureLoader();
   const aniso = Math.min(16, renderer.capabilities.getMaxAnisotropy());
   const get = async (url, srgb) => {

@@ -46,25 +46,24 @@ export const SCENERY = {
 };
 
 // What each of those words means in trees per hectare and which species.
-// `conifer` and `broad` are the two tree species the builder knows; `grass` is
-// how thick the near-field grass is, as a multiplier on the default.
-export const KINDS = {
-  pine:   { trees: 120, conifer: 0.88, near: 8,  grass: 0.8 },
-  wood:   { trees: 70,  conifer: 0.18, near: 12, grass: 1.0 },
-  mixed:  { trees: 88,  conifer: 0.5,  near: 10, grass: 1.0 },
-  scrub:  { trees: 14,  conifer: 0.35, near: 16, grass: 1.15 },
-  meadow: { trees: 0,   conifer: 0,    near: 20, grass: 1.3 },
-  bare:   { trees: 0,   conifer: 0,    near: 20, grass: 0.25 },
-};
-
-// How far out the forest goes. Past this the land is textured and empty, which
-// the fog and the horizon take care of.
+// `conifer` is the share of firs (the rest are broadleaf); `grass` is how thick
+// the near-field grass is, as a multiplier on the default.
 //
-// These two numbers are the whole cost of the forest and they were set by
-// MEASURING it: 260 m at 260 trees a hectare planted 26,193 trees, which is
-// four seconds of load and more wood than you can see. 200 m at 120 is about
-// nine thousand, and the treeline looks the same from the road.
-export const FOREST_DEPTH = 200;
+// `depth` is Adam's "depends on the area": metres from the treeline to the
+// near-black backdrop. Three rows of real trees, the two flat banners and
+// three rows of turning paper trees all fit inside it, so a deep wood is
+// roomy and a thin one is tight — and below about 25 m there is no room for
+// the paper rows or the backdrop, which is right for scrub: a few trees and
+// open land behind them. A section can override it: `depth: 60`, or
+// `depth: { left: 60, right: 30 }`.
+export const KINDS = {
+  pine:   { trees: 120, conifer: 0.88, near: 8,  grass: 0.8,  depth: 45 },
+  wood:   { trees: 70,  conifer: 0.18, near: 12, grass: 1.0,  depth: 50 },
+  mixed:  { trees: 88,  conifer: 0.5,  near: 10, grass: 1.0,  depth: 45 },
+  scrub:  { trees: 14,  conifer: 0.35, near: 16, grass: 1.15, depth: 8 },
+  meadow: { trees: 0,   conifer: 0,    near: 20, grass: 1.3,  depth: 0 },
+  bare:   { trees: 0,   conifer: 0,    near: 20, grass: 0.25, depth: 0 },
+};
 
 // ---------------------------------------------------------------------------
 // LOOSE OBJECTS — what is lying about for you to hit.

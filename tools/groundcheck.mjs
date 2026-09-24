@@ -506,6 +506,14 @@ for (const track of TRACKS) {
       if (!built) await sleep(250);
     }
     if (!built) throw new Error(`the world never built (${cdp.errors.slice(0, 3).join(' | ') || 'no console errors'})`);
+    // The woods (js/woods.js) arrive AFTER the world: they wait on the plant
+    // photographs. Checked before they land, this gate counted 0 trees and
+    // passed — so wait for them, up to 30 s. A circuit with no survey data
+    // never sets __wdcWoods; it just costs the wait.
+    for (let i = 0; i < 120; i++) {
+      if (await cdp.eval('!!window.__wdcWoods').catch(() => false)) break;
+      await sleep(250);
+    }
 
     const run = async () => cdp.eval(`(${pageCheck.toString()})(${JSON.stringify(OPT)})`);
     console.log(`\n${track.toUpperCase()}  —  ${OPT.bands} bands to ${OPT.reach} m, ${OPT.n} samples each  (${((Date.now() - t0) / 1000).toFixed(1)}s to build)`);

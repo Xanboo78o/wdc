@@ -31,6 +31,7 @@
 // ---------------------------------------------------------------------------
 import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
+import { plantWoods } from './woods.js';
 
 const NEAR = 340;            // metres: inside this a building gets detailed
 const MAX_WINDOWS = 26000;   // hard ceiling on window quads per circuit
@@ -545,11 +546,19 @@ export function buildEnv(scene, env, track, look, corridor = null, world = null)
   put(brick.glass, glassMat, { shadow: false });
   put(rendr.glass, glassMat, { shadow: false });
 
-  const { round, conifer } = scatter(env, 4200, track);
-  for (const [pts, geo] of [[round, broadleafGeometry()], [conifer, coniferGeometry()]]) {
-    const tm = treeMesh(pts, geo, world);
-    if (tm) { scene.add(tm); added.trees += tm.count; }
-  }
+  // Adam's forest (js/woods.js, 2026-09-23). It needs the plant photographs,
+  // which load asynchronously, so the wood arrives a moment after the world
+  // does; without them, the old cones and spheres go in instead.
+  const oldTrees = () => {
+    const { round, conifer } = scatter(env, 4200, track);
+    for (const [pts, geo] of [[round, broadleafGeometry()], [conifer, coniferGeometry()]]) {
+      const tm = treeMesh(pts, geo, world);
+      if (tm) { scene.add(tm); added.trees += tm.count; }
+    }
+  };
+  plantWoods(scene, env, track, look, corridor, world)
+    .then(n => { if (n == null) oldTrees(); else added.trees = n; return n; })
+    .catch(e => { console.error('woods:', e); oldTrees(); return null; });
 
   return added;
 }

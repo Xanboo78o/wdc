@@ -2,7 +2,7 @@
 // over CDP: loads the page, waits for window.__build, reports console errors,
 // saves a screenshot.
 //
-//   node tools/buildshot.mjs [--q "cam=350,60,20,15"] [--q drive=1] [--out name] [--wait 1500]
+//   node tools/buildshot.mjs [--q "cam=350,60,20,15"] [--q drive=1] [--out name] [--wait 1500] [--gpu]
 //
 // Every --q is merged (shot.mjs once dropped all but the first and nobody
 // noticed for a day — see [[silently-ignored-input]]). Unknown flags are an
@@ -16,13 +16,16 @@ import os from 'os';
 import path from 'path';
 
 const argv = process.argv.slice(2);
-const opts = { q: [], out: 'build', wait: 1500, port: 8176 };
+const opts = { q: [], out: 'build', wait: 1500, port: 8176, gpu: false };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === '--q') opts.q.push(argv[++i]);
   else if (a === '--out') opts.out = argv[++i];
   else if (a === '--wait') opts.wait = +argv[++i];
   else if (a === '--port') opts.port = +argv[++i];
+  // --gpu: shoot on the GeForce through ANGLE's Vulkan backend, as shot.mjs
+  // does (see the note there). SwiftShader draws the full forest at 0 fps.
+  else if (a === '--gpu') opts.gpu = true;
   else { console.error(`unknown flag ${a}`); process.exit(2); }
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -48,7 +51,8 @@ const CDP = 9300 + Math.floor(Math.random() * 600);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'wdc-build-'));
 const chrome = spawn('/usr/bin/chromium', [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
-  '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader',
+  ...(opts.gpu ? ['--use-angle=vulkan', '--use-gl=angle']
+    : ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader']),
   '--hide-scrollbars', '--mute-audio', '--window-size=1600,900',
   `--remote-debugging-port=${CDP}`, `--user-data-dir=${profile}`, url,
 ], { stdio: 'ignore' });
