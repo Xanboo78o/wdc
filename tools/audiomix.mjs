@@ -3,6 +3,7 @@
 //   node tools/audiomix.mjs            the shipped mix
 //   node tools/audiomix.mjs old        FX layers off (the pre-2026-09-23 mix)
 //   node tools/audiomix.mjs fx         FX layers alone, engine silent
+//   node tools/audiomix.mjs loop       the old recorded engine loop instead of the emulated one
 //
 // Renders tools/audiomix.html (an OfflineAudioContext drive: tarmac, gravel,
 // grass, kerb, wall scrape, a 25 m/s crash) in headless chromium over the
@@ -11,7 +12,7 @@
 // never run heavy browsers while Adam is playing on this machine.
 import { spawn } from 'child_process';
 const mode = process.argv[2] || '';
-for (const a of process.argv.slice(2)) if (!['', 'old', 'fx'].includes(a)) { console.error('unknown mode ' + a); process.exit(2); }
+for (const a of process.argv.slice(2)) if (!['', 'old', 'fx', 'loop'].includes(a)) { console.error('unknown mode ' + a); process.exit(2); }
 const url = 'http://localhost:8175/tools/audiomix.html' + (mode ? '#' + mode : '');
 const U = (await import('os')).tmpdir() + '/wdc-audiomix-' + process.pid;
 const ch = spawn('nice', ['-n', '19', 'chromium', '--headless=new', '--no-sandbox', '--disable-gpu', `--user-data-dir=${U}`, '--remote-debugging-port=9333', 'about:blank'], { stdio: 'ignore' });

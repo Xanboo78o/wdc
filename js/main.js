@@ -176,6 +176,7 @@ async function start() {
       // in audio.js, so raising the shipped volume did nothing at all and I
       // spent a round wondering why it was still quiet. ?vol= still wins.
       volume: qa.has('vol') ? +qa.get('vol') : undefined,
+      cls: pickCar, synth: qa.get('eng') !== 'loop',
     });
   }
   $('hud').classList.remove('hidden');

@@ -56,6 +56,8 @@ const RATE_MIN = 0.35, RATE_MAX = 2.60;
 // Bumped when a DEFAULT changes in a way a saved mix would otherwise mask: a
 // stored roadLvl of 0.45 would keep the wind on forever, and nobody would
 // guess the fix was to clear their browser storage.
+import { SynthEngine } from './enginesynth.js';
+
 export const MIX_KEY = 'wdc.sound.v2';
 
 export const MIX = {
@@ -120,12 +122,15 @@ export const FX = {
   gritAt: 2400,     // centre of the rasp band
   bark: 0.9,        // a second, lower distortion band: the bark under the rasp
   barkAt: 850,
-  tyreMin: 0.55,    // squeal is ON now, whatever an old bench saved
+  tyreMin: 0.22,    // squeal is on, but under the engine (Adam: "wheel losing grip ... too loud")
   gravel: 1.25, grass: 1.05, kerb: 0.9, stones: 0.8,
-  crash: 1.6,       // impact level
+  // Adam: "the engine should be louder than crashes". It was 1.6 against an
+  // engine that never got loud enough; the engine is the lead now.
+  crash: 0.22,      // impact level (Adam, twice: crashes too loud)
+  synth: 1.7,       // the emulated engine (js/enginesynth.js), the lead instrument
   scrape: 1.4,      // bodywork along a wall
   concuss: 0,       // the big-hit muffle. OFF: Adam, first listen: "very muddy"
-  trim: 0.95,       // into the tanh clip: hotter = more saturation = grittier. It
+  trim: 0.72,       // into the tanh clip (0.95 made the emulated engine harsh): hotter = more saturation = grittier. It
                     // bends peaks, it cannot exceed full scale (0.96 ceiling).
 };
 const CRASH_FILES = ['crash_01', 'crash_02', 'crash_03', 'crash_04', 'crash_05', 'crash_06',
@@ -150,6 +155,9 @@ export class Engine {
     this.master = opts.volume ?? this.mix.master ?? 0.5;
     this.muted = false;
     this.t0 = 0;
+    this.cls = opts.cls || 'f1';
+    // THE EMULATED ENGINE is the engine now; ?eng=loop brings the recording back.
+    this.synthOn = opts.synth !== false;
   }
 
   // MUST be called from a real user gesture — browsers will not let an
@@ -312,6 +320,10 @@ export class Engine {
       await Promise.all(['dirt_1', 'dirt_2', 'dirt_3', 'dirt_4', 'bump_1', 'bump_2', 'crash_heavy', ...CRASH_FILES]
         .map(n => this._buf(baseUrl, n).then(b => { this.bufs[n] = b; }).catch(() => {})));
       this.duck = 1;          // engine level after a big hit, recovers to 1
+      // The modelled engine goes straight to the output bus: the loop's bass
+      // shelf, octave-down and shake were weight for a LOW engine, and under a
+      // 750 Hz scream they are the mud and the "brbrbr".
+      if (this.synthOn) this.synth = new SynthEngine(this.ctx, this.cans, this.cls);
       // THE LOOPS MUST STOP WHEN THE GAME DOES. update() only runs while the
       // car is being driven, so in the pause menu, on the results screen or
       // after leaving the circuit the loops just kept playing at whatever
@@ -362,6 +374,7 @@ export class Engine {
     if (this.shakeGain) this._to(this.shakeGain.gain, 0, 0.05);
     if (this.gritGain) this._to(this.gritGain.gain, 0, 0.05);
     if (this.barkGain) this._to(this.barkGain.gain, 0, 0.05);
+    if (this.synth) this.synth.silence();
   }
 
   // Fire a recording once. `rate` a little off 1 each time so twenty hits in
@@ -387,7 +400,10 @@ export class Engine {
   hit(closing) {
     if (!this.ok || this.muted || !this.bufs) return;
     const now = this.ctx.currentTime;
-    if (now - this.lastHit < 0.09) return;       // one contact reported twice
+    // Grinding along a wall reports contact nearly every physics step; the
+    // crash is the IMPACT, and the scrape loop is the grinding. So a hit can
+    // only sound once in 0.6 s (it used to machine-gun for the whole slide).
+    if (now - this.lastHit < 0.6) return;
     this.lastHit = now;
     const k = Math.min(1, closing / 20);
     const pick = (lo, hi) => CRASH_FILES[lo + Math.floor(Math.random() * (hi - lo + 1))];
@@ -410,7 +426,7 @@ export class Engine {
       f.exponentialRampToValueAtTime(Math.max(180, 900 - 700 * k * FX.concuss), now + 0.06);
       f.setValueAtTime(Math.max(180, 900 - 700 * k * FX.concuss), now + hold);
       f.exponentialRampToValueAtTime(20000, now + hold + back);
-      this.duck = 0.25;
+      this.duck = 0.7;               // a dip under the impact, not the engine dying
     }
   }
 
@@ -519,6 +535,14 @@ export class Engine {
       this.comp.threshold.value = -6 - 30 * m.drive;
       this.cans.gain.value = 1 + 1.1 * m.drive;
       this.room.gain.value = (this.mix.roomSink ? 1 : 0) * (1 + 1.1 * m.drive);
+    }
+
+    if (this.synth) {
+      // the loop goes quiet; the modelled engine sings (with the same grass
+      // wobble and stutter, and the same duck after a big hit)
+      for (const L of [this.engine, this.sub]) if (L) this._to(L.gain.gain, 0, 0.02);
+      for (const G of [this.shakeGain, this.gritGain, this.barkGain]) if (G) this._to(G.gain, 0, 0.02);
+      this.synth.update(rpm * wob, t, this.master * FX.synth * this.duck * stut, dt);
     }
 
     const kmh = speed * 3.6;
