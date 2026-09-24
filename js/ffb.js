@@ -35,7 +35,8 @@ const SCALE = 0.45;          // front force / weight
 // in with speed so the car can still be turned at a crawl.
 const CENTRE = 0.22;
 // Weight in the rim while the car is stopped or crawling (see update()).
-const PARK = 0.2;
+// 0.2 measured 2026-09-24: 7.8% of the base at his 50% cap, "nothing".
+const PARK = 0.5;
 
 // ROAD TEXTURE, in the steering torque itself — not the base's own vibration
 // effect, which stays off since the 2026-09-23 shutdown (one effect on the
@@ -98,7 +99,7 @@ export class FFB {
     // work. So as the road forces fade out, a gentle pull back toward centre
     // fades in. Zero with the wheel straight, so nothing moves on the grid.
     const slow = Math.min(1, (car.speed || 0) / 5);
-    f = f * slow - PARK * (1 - slow) * Math.tanh(dn * 3) * (car.airborne ? 0 : 1);
+    f = f * slow - PARK * (1 - slow) * Math.tanh(dn * 4) * (car.airborne ? 0 : 1);
 
     this.jolt = Math.max(0, this.jolt - dt * 4);
 
