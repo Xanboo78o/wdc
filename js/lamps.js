@@ -134,7 +134,7 @@ export function buildCourseLights(scene, track, world = null, { spacing = 70 } =
   const out = {};
   const pm = poles.mesh(new THREE.MeshStandardMaterial({ color: 0x8a9096, roughness: 0.6, metalness: 0.5 }), { shadow: false });
   if (pm) { if (world) world.liftGround(pm.geometry); scene.add(pm); }
-  const headMat = new THREE.MeshBasicMaterial({ color: 0x9aa0a6, toneMapped: false });
+  const headMat = new THREE.MeshBasicMaterial({ color: 0x121416, toneMapped: false });
   const hm = heads.mesh(headMat, { shadow: false });
   if (hm) { if (world) world.liftGround(hm.geometry); onLampLayer(hm); scene.add(hm); }
 
@@ -169,7 +169,10 @@ export function buildCourseLights(scene, track, world = null, { spacing = 70 } =
   }
   out.count = n;
   out.setNight = on => {
-    headMat.color.setRGB(on ? 8 : 0.6, on ? 7.6 : 0.62, on ? 6.8 : 0.64);
+    // By day an UNLIT basic material is a flat colour with no shading, and a
+    // light grey one reads as a lamp that is on (the forest session saw "lit"
+    // street lamps at 14:00). So by day the head is a dark housing.
+    headMat.color.setRGB(on ? 8 : 0.07, on ? 7.6 : 0.075, on ? 6.8 : 0.08);
     poolMesh.visible = on;
     for (const e of out.emitters || []) e.gain = on ? 0.8 : 0;
   };
