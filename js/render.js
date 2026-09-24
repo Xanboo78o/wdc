@@ -480,6 +480,30 @@ export class View {
       : buildCar(look, 0xd8352a, opts.chassis ? chassisGeometry(THREE, opts.chassis) : null);
     this.car = car.group; this.wheels = car.wheels; this.steer = car.steer;
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
+    // HEADLIGHTS (Adam: "gimme headlights"). The sky runs on the real clock, so
+    // an evening session is a night race. Two spotlights from the nose, aimed a
+    // few metres down the road, plus a glowing lamp face so other cars and the
+    // mirror can see you. On by themselves once the sun is under 4 degrees,
+    // H forces them on or off. No shadows: two more shadow maps would cost more
+    // than the whole field does.
+    {
+      const box = new THREE.Box3().setFromObject(this.car);
+      const nose = box.max.x - 0.15, h = Math.max(0.35, box.min.y + 0.45);
+      this.lamps = [];
+      const face = new THREE.MeshBasicMaterial({ color: 0xfff4dc });
+      for (const side of [-1, 1]) {
+        const L = new THREE.SpotLight(0xfff2d8, 0, 260, 0.42, 0.55, 2);
+        L.position.set(nose, h, side * 0.55);
+        L.target.position.set(nose + 30, 0, side * 1.2);
+        L.castShadow = false;
+        const glow = new THREE.Mesh(new THREE.CircleGeometry(0.09, 16), face);
+        glow.position.set(nose + 0.01, h, side * 0.55); glow.rotation.y = Math.PI / 2;
+        glow.visible = false;
+        this.car.add(L, L.target, glow);
+        this.lamps.push({ L, glow });
+      }
+      this.lampsForced = null;          // null = automatic, true/false = H
+    }
     // The car's attitude now comes from four real spring deflections in
     // physics.js instead of a multiplier on a g-number. Measured over a hot
     // lap that is +-1.4 deg of roll and +-0.18 deg of pitch — which is exactly
@@ -689,6 +713,10 @@ export class View {
       });
     }
     this.sunElevation = sol.elevation;
+    if (this.lamps) {
+      const on = this.lampsForced ?? sol.elevation < 4;
+      for (const { L, glow } of this.lamps) { L.intensity = on ? 420 : 0; glow.visible = on; }
+    }
 
     // Weather, every ten minutes, and never blocking a frame.
     if (now - this._wxAt > 600 || !this._wxAt) {
@@ -943,6 +971,11 @@ export class View {
   }
 
   setMode(m) { this.mode = ((m % 4) + 4) % 4; }
+  toggleHeadlights() {
+    const now = this.lampsForced ?? (this.sunElevation ?? 90) < 4;
+    this.lampsForced = !now;
+    return this.lampsForced;
+  }
   toggleLine() { this.lineMesh.visible = !this.lineMesh.visible; return this.lineMesh.visible; }
 
   // dt here is a REAL frame time — camera smoothing is allowed to be

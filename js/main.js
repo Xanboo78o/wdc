@@ -436,6 +436,7 @@ function loop(now) {
     toast('CAMERA ' + CAMS[view.mode]);
   }
   if (hands.tapped('KeyL')) toast('IDEAL LINE ' + (view.toggleLine() ? 'ON' : 'OFF'));
+  if (hands.tapped('KeyH')) toast('HEADLIGHTS ' + (view.toggleHeadlights() ? 'ON' : 'OFF'));
   if (hands.tapped('KeyR') || hands.tapped('pad:b')) {
     // In a race there is no reset. You rejoin where you went off, with the
     // damage you earned — anything else is a different game.
