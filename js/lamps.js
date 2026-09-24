@@ -225,12 +225,15 @@ export class LightTrails {
     this._v = new THREE.Vector3();
   }
 
-  render(scene, camera, { speed = 0, night = 0, dt = 1 / 60 } = {}) {
+  // `boost` (main.js's adrenaline): 0.4 normally, 1 in a crash, a spin or
+  // wheel-to-wheel, +0.15 on the last lap. It scales how long and how bright.
+  render(scene, camera, { speed = 0, night = 0, dt = 1 / 60, boost = 1 } = {}) {
     if (night <= 0.01) return;
     const r = this.r;
     this.t += Math.min(0.1, dt);
     const sf = Math.max(0, Math.min(1, (speed - 10) / 60));
-    const life = 0.06 + 0.34 * sf;                    // seconds of trail
+    const life = (0.06 + 0.34 * sf) * boost;          // seconds of trail
+    const bright = Math.min(1.15, 0.5 + 0.5 * boost);
     const sz = r.getDrawingBufferSize(new THREE.Vector2());
     const aspect = sz.x / Math.max(1, sz.y), px = 2 / Math.max(1, sz.y);   // one pixel, in NDC y
     const cp = camera.position, v = this._v;
@@ -276,7 +279,7 @@ export class LightTrails {
       // width from how big the lamp looks, never thinner than a line you can see
       const w0 = Math.max(1.3, Math.min(7, e.size * 900 / Math.max(1, dist))) * px;
       const age = p => Math.max(0, 1 - (this.t - p.t) / life);
-      const colour = (p, k) => { const a = age(p) * age(p) * k; return [e.col[0] * a, e.col[1] * a, e.col[2] * a]; };
+      const colour = (p, k) => { const a = age(p) * age(p) * k * bright; return [e.col[0] * a, e.col[1] * a, e.col[2] * a]; };
       // Catmull-Rom through the points, 8 steps per span
       const pt = (i) => h[Math.max(0, Math.min(h.length - 1, i))];
       let prev = null;

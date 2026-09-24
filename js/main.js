@@ -480,6 +480,7 @@ function loop(now) {
         state.me.bump = null;
         hands.rumble(Math.min(1, bump.closing / 14), 0.5, 160);
         ffb.hit(bump.closing / 14);
+        state.adr = 1;                     // contact: full adrenaline
         if (state.engine) state.engine.hit(bump.closing);
         toast(bump.what === 'car'
           ? (bump.harm > 1.2 ? 'CONTACT — WHEEL TO WHEEL' : 'RUBBING')
@@ -523,6 +524,7 @@ function loop(now) {
     if (hit && hit.closing > 3.5) {
       hands.rumble(Math.min(1, hit.closing / 14), 0.5, 160);
       ffb.hit(hit.closing / 14);
+      state.adr = 1;
       if (state.engine) state.engine.hit(hit.closing);
       toast(hit.harm > 0.12 ? `HEAVY CONTACT — ${hit.part.toUpperCase()}` : 'CONTACT');
     }
@@ -560,6 +562,30 @@ function loop(now) {
     state.invalid = false;
   }
   ffb.update(car, rough, frame);   // the wheel pushes back (tools/ffb.py)
+
+  // ADRENALINE, 0..1: how much the light trails are allowed to smear. Adam:
+  // "make it less, but this amount when collisions or any SUPER high
+  // adrenaline, and turn it up a lil at the last lap". Contact sets it to 1
+  // (the two hit sites above) and it drains over about three seconds; a spin
+  // or wheel-to-wheel at speed holds it up while it lasts.
+  {
+    let a = Math.max(0, (state.adr || 0) - frame * 0.35);
+    const pk = state._peak || 0.15;
+    if (Math.abs(car.slipR || 0) > pk * 2.5 && car.speed > 12) a = Math.max(a, 0.85);
+    let last = false;
+    if (race && state.me) {
+      const me = state.me;
+      let d = Infinity;
+      for (const e of race.entries) {
+        if (e === me || e.retired) continue;
+        d = Math.min(d, Math.hypot(e.car.x - car.x, e.car.y - car.y));
+      }
+      if (d < 7 && car.speed > 30) a = Math.max(a, 0.35 + 0.4 * (1 - d / 7));
+      last = me.lap + 1 >= race.laps && !me.finished;
+    }
+    state.adr = a;
+    view.trailBoost = 0.4 + 0.6 * a + (last ? 0.15 : 0);
+  }
 
   // how far past the peak the rear tyre is — this drives the smoke AND the HUD
   const over = Math.max(0, (Math.abs(car.slipR) - state.peak) / state.peak);

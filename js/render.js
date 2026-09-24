@@ -758,7 +758,7 @@ export class View {
     if (this.trailsOn === undefined) this.trailsOn = new URLSearchParams(location.search).get('trails') !== '0';
     if (this.trailsOn && this.nightOn()) {
       if (!this.trails) this.trails = new LightTrails(this.renderer);
-      this.trails.render(this.scene, this.camera, { speed: this._spd || 0, night: 1, dt });
+      this.trails.render(this.scene, this.camera, { speed: this._spd || 0, night: 1, dt, boost: this.trailBoost ?? 1 });
     }
     this._drawMirror();
   }
