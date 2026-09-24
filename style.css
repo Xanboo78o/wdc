@@ -1,44 +1,106 @@
 :root{
   --bg:#0b0d10; --ink:#e8eaee; --dim:#8b94a3;
   --good:#35d6a0; --warn:#ffc23d; --bad:#ff4d3d; --line:#1f242c;
+  --font:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden;
-  font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-family:var(--font);
   -webkit-font-smoothing:antialiased}
 canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 .hidden{display:none !important}
 
 /* ---------------- menu ---------------- */
+/* Every full-screen page (menu, loading, results) shares this. */
 .screen{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:26px;padding:24px;
   background:radial-gradient(120% 90% at 50% 0%,#141922 0%,#0b0d10 60%)}
 .brand{text-align:center}
-.brand h1{margin:0;font-size:clamp(34px,7vw,66px);letter-spacing:.16em;font-weight:800}
+.brand h1{margin:0;font-size:clamp(34px,7vw,66px);letter-spacing:.16em;font-weight:900;font-style:italic}
 .brand h1 span{color:var(--good)}
 .brand p{margin:10px 0 0;color:var(--dim);letter-spacing:.09em;font-size:13px;text-transform:uppercase}
 
-.pickrow{display:flex;gap:28px;flex-wrap:wrap;justify-content:center;width:100%;max-width:960px}
-.pick{flex:1 1 380px;min-width:0}
-.pick h2{margin:0 0 10px;font-size:11px;letter-spacing:.24em;color:var(--dim);font-weight:700}
-.pick small{display:block;margin-top:10px;color:#6c7687;font-size:11.5px;line-height:1.5}
-.cards{display:flex;gap:8px;flex-wrap:wrap}
-.card{flex:1 1 auto;min-width:96px;cursor:pointer;text-align:left;
-  background:#12161d;border:1px solid var(--line);border-radius:9px;
-  padding:11px 13px;color:var(--ink);font:inherit;transition:.12s}
-.card:hover{border-color:#39424f;background:#161b23}
-.card.on{border-color:var(--good);background:#11201b;box-shadow:inset 0 0 0 1px rgba(53,214,160,.28)}
-.card b{display:block;font-size:14px;letter-spacing:.04em}
-.card small{display:block;color:var(--dim);font-size:10px;letter-spacing:.13em;margin-top:3px}
-
-.go{cursor:pointer;border:0;border-radius:10px;padding:15px 62px;
-  background:var(--good);color:#04130d;font:800 17px/1 inherit;letter-spacing:.2em;transition:.12s}
+.go{cursor:pointer;border:0;border-radius:3px;padding:15px 62px;
+  background:var(--good);color:#04130d;font:italic 900 17px/1 var(--font);letter-spacing:.2em;transition:.12s;
+  clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%)}
 .go:hover{filter:brightness(1.1)}
-.keys{color:#68717f;font-size:11.5px;letter-spacing:.06em;text-align:center;line-height:2}
-.keys b{color:#aab3c1;background:#151a22;border:1px solid var(--line);
-  border-radius:4px;padding:2px 6px;font-size:10.5px}
-.keys i{color:#525b69;font-style:normal}
 .loadbox{letter-spacing:.24em;font-size:12px;color:var(--dim)}
+
+/* The main menu: the circuit on the left, one list on the right. */
+#menu{flex-direction:row;align-items:stretch;justify-content:stretch;gap:0;padding:0;
+  background:radial-gradient(90% 120% at 30% 40%,#131820 0%,#0b0d10 62%)}
+#menu .hero{position:relative;flex:1 1 auto;min-width:0;display:flex;flex-direction:column;padding:34px 20px 26px 44px}
+.mark{font:italic 900 20px/1 var(--font);letter-spacing:.2em}
+.mark span{color:var(--good)}
+#map{flex:1 1 auto;min-height:0;width:100%;margin:22px 0 14px;overflow:visible}
+#map .casing{fill:none;stroke:#161b23;stroke-width:14px;stroke-linejoin:round;stroke-linecap:round}
+#map .tarmac{fill:none;stroke:#e8eaee;stroke-width:3px;stroke-linejoin:round;stroke-linecap:round;
+  stroke-dasharray:1000;animation:mapDraw 1.1s cubic-bezier(.3,.7,.2,1) both}
+/* A lone car lapping the outline, forever. Pure CSS: a short dash on a path
+   of pathLength 1000, sliding round. */
+#map .car{fill:none;stroke:var(--good);stroke-width:5px;stroke-linecap:round;
+  stroke-dasharray:14 986;animation:mapLap 9s linear infinite;filter:drop-shadow(0 0 6px rgba(53,214,160,.9))}
+#map .sf{stroke:var(--bad);stroke-width:4px;stroke-linecap:butt}
+@keyframes mapDraw{from{stroke-dashoffset:1000}to{stroke-dashoffset:0}}
+@keyframes mapLap{from{stroke-dashoffset:1000}to{stroke-dashoffset:0}}
+.heroText small{display:block;font-size:12px;letter-spacing:.34em;color:var(--good);font-weight:700}
+.heroText b{display:block;margin:4px 0 6px;font:italic 900 clamp(38px,6vw,86px)/.95 var(--font);
+  letter-spacing:-.01em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.heroText i{display:block;font-style:normal;font-size:12px;letter-spacing:.2em;color:var(--dim)}
+.drivekeys{margin-top:18px;max-width:640px;font-size:10.5px;letter-spacing:.06em;line-height:1.9;color:#4d5563}
+.drivekeys b{color:#8a93a1;font-weight:700;margin:0 2px 0 8px}
+.drivekeys b:first-child{margin-left:0}
+.drivekeys a{color:inherit}
+
+#menu .panel{flex:0 0 min(470px,44vw);display:flex;flex-direction:column;justify-content:center;
+  padding:30px 34px 26px 58px;background:linear-gradient(180deg,#0e1117,#0a0c10);
+  clip-path:polygon(34px 0,100% 0,100% 100%,0 100%);overflow:hidden}
+#rows{overflow-y:auto;min-height:0;scrollbar-width:none;padding:2px 0}
+#rows::-webkit-scrollbar{display:none}
+.mgrp{padding:16px 0 5px 18px;font-size:9.5px;letter-spacing:.34em;color:#4b5461;font-weight:700}
+.mgrp:first-child{padding-top:0}
+.mrow{position:relative;display:grid;grid-template-columns:112px 26px 1fr 26px;align-items:center;
+  min-height:42px;padding:3px 6px 3px 18px;cursor:pointer;user-select:none;border-radius:2px}
+.mrow + .mrow{box-shadow:inset 0 1px 0 #151a21}
+.mrow .mk{font-size:10.5px;letter-spacing:.22em;color:var(--dim);font-weight:700}
+.mrow .mv{text-align:center;min-width:0}
+.mrow .mv b{display:block;font:italic 800 16px/1.15 var(--font);letter-spacing:.05em;text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow .mv small{display:block;font-size:9px;letter-spacing:.2em;color:#5d6675;margin-top:1px}
+.mrow .ar{background:none;border:0;padding:0;height:100%;color:var(--ink);font:700 20px/1 var(--font);
+  cursor:pointer;opacity:0;transition:opacity .1s}
+.pips{display:none;gap:3px;justify-content:center;margin-top:5px}
+.pips i{width:9px;height:2px;background:#29303a;display:block}
+.pips i.on{background:var(--good)}
+.mrow.on{background:linear-gradient(90deg,rgba(53,214,160,.16),rgba(53,214,160,.03) 70%,transparent)}
+.mrow.on::before{content:'';position:absolute;left:2px;top:7px;bottom:7px;width:4px;
+  background:var(--good);transform:skewX(-14deg)}
+.mrow.on .mk{color:var(--ink)}
+.mrow.on .ar{opacity:1}
+.mrow.on .pips{display:flex}
+.mrow .ar:hover{color:var(--good)}
+
+/* GO is the start gantry: five lamps, then lights out. */
+#go{margin-top:20px;width:100%;display:flex;align-items:center;justify-content:space-between;
+  padding:0 26px 0 30px;height:62px;background:#151a21;color:var(--ink);flex:none}
+#go .lamps{display:flex;gap:7px}
+#go .lamps i{width:13px;height:13px;border-radius:50%;background:#2a1414;box-shadow:inset 0 0 0 2px #3a1c1c;display:block;transition:background .06s}
+#go .lamps i.on{background:#ff2a18;box-shadow:0 0 12px rgba(255,42,24,.8),inset 0 0 0 2px #ff6a58}
+#go b{font:italic 900 19px/1 var(--font);letter-spacing:.2em}
+#go.on{background:var(--good);color:#04130d}
+#go.on .lamps i:not(.on){background:#0d3a2a;box-shadow:inset 0 0 0 2px #0b2c20}
+#go.fire{background:#151a21;color:var(--ink)}
+#menu .keys{margin-top:14px;padding-left:18px;font-size:10px;letter-spacing:.14em;color:#4b5461}
+#menu .keys b{color:#8a93a1}
+
+@media (max-width:760px){
+  #menu{flex-direction:column;overflow-y:auto}
+  #menu .hero{flex:none;padding:22px 20px 8px}
+  #map{height:30vh;flex:none}
+  .drivekeys{display:none}
+  #menu .panel{flex:none;padding:14px 16px 24px;clip-path:none}
+  .mrow{grid-template-columns:92px 26px 1fr 26px}
+}
 
 /* ---------------- HUD ---------------- */
 #hud{position:fixed;inset:0;z-index:10;pointer-events:none;
@@ -93,15 +155,6 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 #msg{left:50%;top:15%;transform:translateX(-50%);
   font-size:13px;letter-spacing:.24em;color:var(--warn)}
 
-/* ---------------- race options ---------------- */
-#raceOpts{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
-#raceOpts.off{opacity:.32;pointer-events:none;filter:saturate(.3)}
-#battleOpt.off{display:none}
-#raceOpts .opt h2{margin:0 0 7px}
-.cards.tight .card{min-width:0;padding:7px 9px;text-align:center}
-.cards.tight .card b{font-size:12px;letter-spacing:.08em}
-.cards.tight .card small{font-size:8.5px;letter-spacing:.1em}
-
 /* ---------------- timing tower ---------------- */
 /* The tower is the race. Position, who is in front, and by how much — it is
    the only part of the HUD that tells you whether you are winning. */
@@ -144,5 +197,4 @@ body.mirror #startLights,body.mirror #msg{top:calc(min(34vw,560px) / 4.2 + 26px)
   .spd b{font-size:40px}
   #times{min-width:170px}
   #tower{width:186px;font-size:10px}
-  #raceOpts{grid-template-columns:1fr}
 }

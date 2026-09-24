@@ -116,42 +116,208 @@ function saveMenu() {
   } catch { /* private window: it just won't remember */ }
 }
 
-// One card list, built the same way everywhere: the value, the big label, the
-// small one under it, and what to do when it is clicked.
-function cards(el, items, current, set, tight) {
-  const box = $(el);
-  box.innerHTML = '';
-  for (const [value, big, small] of items) {
-    const b = document.createElement('button');
-    b.className = 'card' + (value === current ? ' on' : '');
-    b.innerHTML = `<b>${big}</b>${small ? `<small>${small}</small>` : ''}`;
-    b.onclick = () => { set(value); buildMenu(); };
-    box.appendChild(b);
+// THE MENU IS ONE LIST. Every setting is a row with a value you step through,
+// so a D-pad, a wheel's hat, the arrow keys and a mouse all drive the same
+// thing: up/down picks a row, left/right changes it, confirm on LIGHTS OUT
+// starts. Rows that only matter to a race do not exist until RACE is chosen —
+// a dimmed box you cannot use is still a box you have to read past.
+function menuRows() {
+  const onoff = [[false, 'OFF'], [true, 'ON']];
+  const R = [
+    { g: 'SESSION', k: 'CIRCUIT', opts: TRACKS, get: () => pickTrack, set: v => pickTrack = v },
+    { k: 'CAR', opts: ['f4', 'gt3', 'f1'].map(k => [k, CARS[k].name, CARS[k].full]), get: () => pickCar, set: v => pickCar = v },
+    { k: 'MODE', opts: [['hotlap', 'HOT LAP', 'EMPTY CIRCUIT'], ['race', 'RACE', 'WHEEL TO WHEEL']], get: () => pickMode, set: v => pickMode = v },
+  ];
+  if (pickMode === 'race') {
+    R.push(
+      { g: 'RACE', k: 'LAPS', opts: [[2, '2'], [3, '3'], [5, '5'], [10, '10']], get: () => pickLaps, set: v => pickLaps = v },
+      { k: 'GRID', opts: [[6, '6 CARS'], [12, '12 CARS'], [16, '16 CARS'], [22, '22 CARS']], get: () => pickGrid, set: v => pickGrid = v },
+      { k: 'RIVALS', opts: Object.keys(TIERS).map(k => [k, TIERS[k].name]), get: () => pickTier, set: v => pickTier = v },
+    );
+    // SUPERCASUAL's own submode — only a row while it means something.
+    if (pickTier === 'supercasual') R.push({ k: 'OVERTAKES', opts: Object.keys(BATTLE).map(k => [k, BATTLE[k].name]), get: () => pickBattle, set: v => pickBattle = v });
+    R.push(
+      { k: 'YOU START', opts: [['pole', 'POLE'], ['front', 'FRONT ROW'], ['mid', 'MIDFIELD'], ['back', 'LAST']], get: () => pickStart, set: v => pickStart = v },
+      { k: 'QUALIFYING', opts: onoff, get: () => pickQuali, set: v => pickQuali = v },
+      { k: 'RETIREMENT', opts: [[false, 'NORMAL'], [true, 'NO DNF']], get: () => pickNoDnf, set: v => pickNoDnf = v },
+    );
   }
+  R.push(
+    { g: 'CONDITIONS', k: 'TIME', opts: [['live', 'LIVE'], ...TIME_PHASES.map(k => [k, k.toUpperCase()])], get: () => pickTime, set: v => pickTime = v },
+    { k: 'WEATHER', opts: [['live', 'LIVE'], ...WEATHER_KINDS.map(k => [k, k.toUpperCase()]), ['changing', 'CHANGING']], get: () => pickWeather, set: v => pickWeather = v },
+  );
+  return R;
+}
+// Which row has focus, BY NAME — so choosing RACE (which adds rows above
+// TIME) keeps the cursor on the row you were on, not on whatever slid under it.
+let menuAt = 'CIRCUIT';
+
+function stepRow(row, d) {
+  const i = row.opts.findIndex(o => o[0] === row.get());
+  // a value the URL set that is not on the list (?laps=7) steps onto the list
+  const n = row.opts.length;
+  row.set(row.opts[i < 0 ? 0 : (i + d + n) % n][0]);
+  buildMenu();
 }
 
 function buildMenu() {
-  cards('trackList', TRACKS.map(([k, n, c]) => [k, n, c]), pickTrack, v => pickTrack = v);
-  cards('carList', ['f4', 'gt3', 'f1'].map(k => [k, CARS[k].name, CARS[k].full]), pickCar, v => pickCar = v);
-  cards('modeList', [
-    ['hotlap', 'HOT LAP', 'EMPTY CIRCUIT'],
-    ['race', 'RACE', 'WHEEL TO WHEEL'],
-  ], pickMode, v => pickMode = v);
-  cards('gridList', [[6, '6'], [12, '12'], [16, '16'], [22, '22']], pickGrid, v => pickGrid = v);
-  cards('tierList', Object.keys(TIERS).map(k => [k, TIERS[k].name]), pickTier, v => pickTier = v);
-  cards('battleList', Object.keys(BATTLE).map(k => [k, BATTLE[k].name]), pickBattle, v => pickBattle = v);
-  $('battleOpt').classList.toggle('off', pickTier !== 'supercasual');
-  cards('lapList', [[2, '2'], [3, '3'], [5, '5'], [10, '10']], pickLaps, v => pickLaps = v);
-  cards('startList', [
-    ['pole', 'POLE'], ['front', 'FRONT'], ['mid', 'MIDFIELD'], ['back', 'LAST'],
-  ], pickStart, v => pickStart = v);
-  cards('dnfList', [[false, 'NORMAL'], [true, 'NO DNF']], pickNoDnf, v => pickNoDnf = v);
-  cards('qualiList', [[false, 'OFF'], [true, 'ON']], pickQuali, v => pickQuali = v);
-  cards('timeList', [['live', 'LIVE'], ...TIME_PHASES.map(k => [k, k.toUpperCase()])], pickTime, v => pickTime = v);
-  cards('weatherList', [['live', 'LIVE'], ...WEATHER_KINDS.map(k => [k, k.toUpperCase()]), ['changing', 'CHANGING']], pickWeather, v => pickWeather = v);
+  const rows = menuRows();
+  const box = $('rows');
+  box.innerHTML = '';
+  if (menuAt !== 'GO' && !rows.some(r => r.k === menuAt)) menuAt = rows[0].k;
+  for (const row of rows) {
+    if (row.g) {
+      const h = document.createElement('div');
+      h.className = 'mgrp';
+      h.textContent = row.g;
+      box.appendChild(h);
+    }
+    const i = row.opts.findIndex(o => o[0] === row.get());
+    const [, big, small] = i < 0 ? [null, String(row.get())] : row.opts[i];
+    const el = document.createElement('div');
+    el.className = 'mrow' + (row.k === menuAt ? ' on' : '');
+    el.innerHTML = `<span class="mk">${row.k}</span><button class="ar" tabindex="-1">&lsaquo;</button>`
+      + `<span class="mv"><b>${big}</b>${small ? `<small>${small}</small>` : ''}`
+      + `<span class="pips">${row.opts.map((_, j) => `<i${j === i ? ' class="on"' : ''}></i>`).join('')}</span></span>`
+      + `<button class="ar" tabindex="-1">&rsaquo;</button>`;
+    const [l, r] = el.querySelectorAll('.ar');
+    l.onclick = e => { e.stopPropagation(); menuAt = row.k; stepRow(row, -1); };
+    r.onclick = e => { e.stopPropagation(); menuAt = row.k; stepRow(row, 1); };
+    el.onclick = () => { menuAt = row.k; stepRow(row, 1); };
+    el.onmousemove = () => { if (menuAt !== row.k) { menuAt = row.k; paintFocus(); } };
+    el.dataset.k = row.k;
+    box.appendChild(el);
+  }
+  paintFocus();
+  drawHero();
   saveMenu();
-  $('raceOpts').classList.toggle('off', pickMode !== 'race');
 }
+function paintFocus() {
+  for (const el of document.querySelectorAll('#rows .mrow')) el.classList.toggle('on', el.dataset.k === menuAt);
+  $('go').classList.toggle('on', menuAt === 'GO');
+  const on = menuAt === 'GO' ? $('go') : document.querySelector('#rows .mrow.on');
+  if (on) on.scrollIntoView({ block: 'nearest' });
+}
+function moveFocus(d) {
+  const keys = [...menuRows().map(r => r.k), 'GO'];
+  const i = keys.indexOf(menuAt);
+  menuAt = keys[Math.max(0, Math.min(keys.length - 1, i + d))];
+  paintFocus();
+}
+
+// The hero: the chosen circuit, drawn from the same surveyed centreline the
+// car drives on, with one car lapping it. Fetched once per circuit.
+const _outline = new Map();
+async function drawHero() {
+  const t = TRACKS.find(x => x[0] === pickTrack) || TRACKS[0];
+  $('heroCountry').textContent = t[2];
+  $('heroName').textContent = t[1];
+  const meta = o => [o && o.len ? (o.len / 1000).toFixed(3) + ' KM' : null, CARS[pickCar].full,
+    pickMode === 'race' ? `${pickLaps} LAPS · ${pickGrid} CARS` : 'HOT LAP'].filter(Boolean).join('  ·  ').toUpperCase();
+  const svg = $('map');
+  if (svg.dataset.key === t[0]) { $('heroMeta').textContent = meta(_outline.get(t[0])); return; }
+  svg.dataset.key = t[0];
+  $('heroMeta').textContent = meta(_outline.get(t[0]));
+  let o = _outline.get(t[0]);
+  if (o === undefined) {
+    o = null;
+    try {
+      const j = await (await fetch(`./data/tracks/${t[0]}.json`)).json();
+      const n = j.x.length, step = Math.max(1, Math.floor(n / 500));
+      const pts = [];
+      // north up: survey y grows north, SVG y grows down
+      for (let k = 0; k < n; k += step) pts.push([j.x[k], -j.y[k]]);
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      const pad = Math.max(x1 - x0, y1 - y0) * 0.05;
+      const d = 'M' + pts.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L') + 'Z';
+      // start/finish: a short bar across the track at sample 0
+      const [ax, ay] = pts[0], [bx, by] = pts[1];
+      const L = Math.hypot(bx - ax, by - ay) || 1, w = Math.max(x1 - x0, y1 - y0) * 0.018;
+      const nx = -(by - ay) / L * w, ny = (bx - ax) / L * w;
+      o = { d, len: j.length, vb: `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`,
+        sf: [ax - nx, ay - ny, ax + nx, ay + ny] };
+    } catch { /* no outline: the name still says where you are */ }
+    _outline.set(t[0], o);
+  }
+  if (svg.dataset.key !== t[0]) return;     // stepped past it while it loaded
+  $('heroMeta').textContent = meta(o);
+  if (!o) { svg.innerHTML = ''; return; }
+  svg.setAttribute('viewBox', o.vb);
+  const p = cls => `<path class="${cls}" d="${o.d}" pathLength="1000" vector-effect="non-scaling-stroke"/>`;
+  svg.innerHTML = p('casing') + p('tarmac') + p('car')
+    + `<line class="sf" x1="${o.sf[0]}" y1="${o.sf[1]}" x2="${o.sf[2]}" y2="${o.sf[3]}" vector-effect="non-scaling-stroke"/>`;
+}
+
+// LIGHTS OUT. Five reds, one by one, then all out and you are away — the only
+// animation on the page that makes you wait, and it is the one F1 made famous.
+let launching = false;
+function launch() {
+  if (launching) return;
+  launching = true;
+  menuLive = false;
+  const go = $('go'), lamps = go.querySelectorAll('.lamps i');
+  go.classList.add('fire');
+  lamps.forEach((l, i) => setTimeout(() => l.classList.add('on'), 140 * i));
+  setTimeout(() => { lamps.forEach(l => l.classList.remove('on')); setTimeout(start, 140); }, 140 * 5 + 260);
+}
+
+// Menu input. Keys arrive as events; pads and the wheel's rim are POLLED,
+// because the Gamepad API has no events for buttons. A held direction repeats
+// like a held key, so running down to the tenth circuit is one long press.
+let menuLive = true;
+function menuInput(what) {
+  if (!menuLive) return;
+  if (what === 'up') moveFocus(-1);
+  else if (what === 'down') moveFocus(1);
+  else if (what === 'go') launch();
+  else if (menuAt === 'GO') { if (what === 'ok') launch(); }
+  else {
+    const row = menuRows().find(r => r.k === menuAt);
+    if (row) stepRow(row, what === 'left' ? -1 : 1);
+  }
+}
+addEventListener('keydown', e => {
+  if (!menuLive || $('menu').classList.contains('hidden')) return;
+  const m = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok', Space: 'ok' }[e.code];
+  if (!m) return;
+  e.preventDefault();
+  // a row clicked with the mouse keeps focus; Enter would click it a 2nd time
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  menuInput(m);
+});
+function menuPoll() {
+  if (!menuLive) return;
+  requestAnimationFrame(menuPoll);
+  if ($('menu').classList.contains('hidden')) return;
+  const held = new Set();
+  // The rim (and any pad through the calibrated path): named controls.
+  hands._readPad();
+  for (const n of ['up', 'down', 'left', 'right']) if (hands.wheelHeld(n)) held.add(n);
+  if (hands.wheelHeld('confirm')) held.add('ok');
+  if (hands.wheelHeld('pause')) held.add('go');
+  // A standard pad: d-pad 12-15, left stick, A, START.
+  for (const p of (navigator.getGamepads ? navigator.getGamepads() : [])) {
+    if (!p || p.mapping !== 'standard') continue;
+    const b = i => !!(p.buttons[i] && p.buttons[i].pressed);
+    const ax = p.axes[0] || 0, ay = p.axes[1] || 0;
+    if (b(12) || ay < -0.6) held.add('up');
+    if (b(13) || ay > 0.6) held.add('down');
+    if (b(14) || ax < -0.6) held.add('left');
+    if (b(15) || ax > 0.6) held.add('right');
+    if (b(0)) held.add('ok');
+    if (b(9)) held.add('go');
+  }
+  hands.endFrame();   // the menu reads its own edges; drop the game's copies
+  const now = performance.now();
+  for (const n of held) {
+    const t = _menuHeld.get(n);
+    if (t === undefined) { _menuHeld.set(n, now + 380); menuInput(n); }
+    else if (now >= t && n !== 'ok' && n !== 'go') { _menuHeld.set(n, now + 110); menuInput(n); }
+  }
+  for (const n of [..._menuHeld.keys()]) if (!held.has(n)) _menuHeld.delete(n);
+}
+const _menuHeld = new Map();
 
 // Which slot on the grid you line up in, 1 being pole.
 function startSlot(grid) {
@@ -162,6 +328,8 @@ function startSlot(grid) {
 }
 
 async function start() {
+  menuLive = false;
+  hands.endFrame();
   $('menu').classList.add('hidden');
   // Engine audio MUST be created inside a real user gesture. A context made
   // any later starts suspended, never makes a sound, and never reports an
@@ -1234,7 +1402,10 @@ if (TIERS[Q.get('tier')]) pickTier = Q.get('tier');
 if (Q.has('laps')) pickLaps = Math.max(1, Math.min(60, +Q.get('laps') || 3));
 
 buildMenu();
-$('go').onclick = start;
+$('go').onclick = launch;
+$('go').onmousemove = () => { if (menuAt !== 'GO') { menuAt = 'GO'; paintFocus(); } };
+// the rim's buttons need their map before the menu can read them
+hands.loadProfile('./').then(() => hands.loadButtons('./')).finally(menuPoll);
 $('resBack').onclick = () => location.reload();
 
 // Test hook: ?auto=monza:f1 boots straight into a session. It exists so a
