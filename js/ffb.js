@@ -84,8 +84,13 @@ export class FFB {
     // other way, and + means LEFT to the bridge. Hence the minus.
     const sat = -(car.Fyf || 0) * (tp + MECH) / (1 + MECH) / (spec.m * 9.81);
     const dn = (car.delta || 0) / Math.max(0.02, steerLock(car.speed || 0));
-    const centre = -CENTRE * Math.tanh(dn * 6) * Math.min(1, (car.speed || 0) / 20);
-    let f = Math.tanh(sat / SCALE + centre);
+    const centre = -CENTRE * Math.tanh(dn * 6) * Math.min(1, (car.speed || 0) / 10);
+    // Adam, 2026-09-24, after a crash at 36-50 km/h: "limp". The aligning
+    // torque grows with speed squared, so at 40 km/h it was half what he had at
+    // 110 (log: 0.30 vs 0.55-0.75). Games keep a slow car's wheel alive; this
+    // lifts it up to 2.5x at a crawl, fading to nothing by 108 km/h.
+    const low = 1 + 1.5 * Math.max(0, 1 - (car.speed || 0) / 30);
+    let f = Math.tanh(sat * low / SCALE + centre);
     if (car.airborne) f = 0;                   // nothing on the ground, nothing in the hands
     // Adam, 2026-09-24: stuck against a wall after a crash, the wheel went
     // limp — this line used to fade EVERYTHING to zero below 5 m/s. A parked
