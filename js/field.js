@@ -37,6 +37,7 @@ import * as THREE from 'three';
 import { Z } from './geom.js';
 import { bankY, bankRoll } from './bank.js';
 import { buildCar, buildGT3 } from './car.js';
+import { carLamps } from './lamps.js';
 import { crushParts, applyCrush } from './render.js';
 
 // ---------------------------------------------------------------------------
@@ -145,6 +146,8 @@ export class Field {
     this.refPaints = paints;
     // The distant version, merged once and shared by the whole grid.
     this.merged = mergeByMaterial(ref.group);
+    // Where the lamps go: the reference car's own extent, shared by every clone.
+    this.refBox = new THREE.Box3().setFromObject(ref.group);
 
     for (const e of entries) {
       if (e.isPlayer) { this.rigs.push(null); continue; }
@@ -209,6 +212,8 @@ export class Field {
 
     return {
       yaw, tilt, full, lod, wheels, steer, wings,
+      // head, tail and brake lights, on the tilt group so both LODs carry them
+      lamps: carLamps(tilt, this.refBox),
       drs: src.drs ? map.get(src.drs) : null,
       crush: crushParts(full, wheels),
       R: src.R, spin: 0, crushAt: null,
@@ -310,6 +315,7 @@ export class Field {
       if (rig.steer.fr) rig.steer.fr.rotation.y = dr;
 
       rig.spin -= car.speed * dt / rig.R;
+      if (rig.lamps) rig.lamps.update(view.nightOn(), car.brake || 0);
       for (const w in rig.wheels) rig.wheels[w].rotation.z = rig.spin;
 
       if (rig.wings) {

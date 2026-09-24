@@ -19,6 +19,7 @@ import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation } fr
 import { bankTable, bankY, bankRoll } from './bank.js';
 import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
+import { carLamps, buildCourseLights, LightTrails } from './lamps.js';
 import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
@@ -503,6 +504,8 @@ export class View {
         this.lamps.push({ L, glow });
       }
       this.lampsForced = null;          // null = automatic, true/false = H
+      // tail and brake lights on your own car (the spotlights are its heads)
+      this.ownLamps = carLamps(this.car, box, { heads: false, pool: false });
     }
     // The car's attitude now comes from four real spring deflections in
     // physics.js instead of a multiplier on a g-number. Measured over a hot
@@ -717,6 +720,7 @@ export class View {
       const on = this.lampsForced ?? sol.elevation < 4;
       for (const { L, glow } of this.lamps) { L.intensity = on ? 420 : 0; glow.visible = on; }
     }
+    if (this.courseLights) this.courseLights.setNight(sol.elevation < 4);
 
     // Weather, every ten minutes, and never blocking a frame.
     if (now - this._wxAt > 600 || !this._wxAt) {
@@ -749,6 +753,12 @@ export class View {
     } else {
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.scene, this.camera);
+    }
+    // Light trails, over the finished frame, at night. ?trails=0 turns them off.
+    if (this.trailsOn === undefined) this.trailsOn = new URLSearchParams(location.search).get('trails') !== '0';
+    if (this.trailsOn && this.nightOn()) {
+      if (!this.trails) this.trails = new LightTrails(this.renderer);
+      this.trails.render(this.scene, this.camera, { speed: this._spd || 0, night: 1, dt });
     }
     this._drawMirror();
   }
@@ -863,6 +873,7 @@ export class View {
     buildBoards(S, t, this.line, look, sign, this.world);
     buildStartFinish(S, t, look, sign, this.world);
     buildMarshalPosts(S, t, look, this.world);
+    this.courseLights = buildCourseLights(S, t, this.world);
     stats.stands = buildGrandstands(S, t, env, look, this.world, sign);
     stats.pit = buildPitLane(S, t, look, sign, this.world);
     this.tvCams = this._tvCameras();
@@ -971,6 +982,9 @@ export class View {
   }
 
   setMode(m) { this.mode = ((m % 4) + 4) % 4; }
+  /** Is it dark enough for lamps? The sun, not the H key: that is yours alone. */
+  nightOn() { return (this.sunElevation ?? 90) < 4; }
+
   toggleHeadlights() {
     const now = this.lampsForced ?? (this.sunElevation ?? 90) < 4;
     this.lampsForced = !now;
@@ -986,6 +1000,8 @@ export class View {
     // 90 samples once a FRAME is free next to doing it every physics substep.
     const proj = this.track.project(car.x, car.y, this.hint);
     this.hint = proj.i;
+    if (this.ownLamps) this.ownLamps.update(this.nightOn(), car.brake || 0);
+    this._spd = car.speed || 0;
     // Where the ground is under the car: the surveyed profile along the racing
     // line, plus whatever camber the corner has. The same two numbers the road
     // geometry was built from, so the car cannot float or sink.
