@@ -192,6 +192,14 @@ export const SURFACE = { track: 1.0, kerb: 0.93, runoff: 0.58, grass: 0.42 };
 // which is most of why leaving the road felt like nothing happened.
 export const SURFACE_DRAG = { 1.0: 1, 0.93: 1.4, 0.58: 9, 0.42: 5 };
 export const dragFor = surf => SURFACE_DRAG[surf] ?? 1;
+
+// THE WET. One number for the whole world, set each frame by the game from the
+// road wetness (weather.js WeatherDirector): a soaked track on slicks is 22%
+// less grip everywhere. The autopilot reads the same number, so the bots
+// brake earlier in the rain instead of sliding off where it is dry-fast.
+let WETNESS = 0;
+export function setWetness(w) { WETNESS = Math.max(0, Math.min(1, +w || 0)); }
+export function wetGrip() { return 1 - 0.22 * WETNESS; }
 const AMBIENT = 30;
 
 // ---------------------------------------------------------------------------
@@ -623,10 +631,12 @@ export function step(car, dt, env = {}) {
   // and the car scrubs to a standstill at full throttle. Real tyre models damp
   // this the same way. The floor is mandatory, not a tuning knob.
   const vSafe = Math.max(Math.abs(car.vx), 6.0);
-  const surf = env.surface ?? 1;
+  const surfType = env.surface ?? 1;
   // Kept on the car for whoever wants to know what it is standing on — the
-  // audio and the HUD read car.surface, and nothing ever wrote it.
-  car.surface = surf;
+  // audio and the HUD read car.surface, and nothing ever wrote it. It is the
+  // surface TYPE; the wet is applied to the grip below, not to this.
+  car.surface = surfType;
+  const surf = surfType * wetGrip();
 
   // ---- aero ---------------------------------------------------------------
   const q = 0.5 * S.rho * v * v;

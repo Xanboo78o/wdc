@@ -6,12 +6,13 @@
 // time, in the order given, which is the order they appear on the tower.
 import { Track } from './track.js';
 import { buildLines } from './line.js';
-import { CARS, registerAero } from './physics.js';
+import { CARS, registerAero, setWetness } from './physics.js';
 import { makeAero } from './aero.js';
 import { qualiDriver, qualiRun } from './quali.js';
 
 self.onmessage = async ev => {
-  const { base, track: key, cls, tier, seed, drivers } = ev.data;
+  const { base, track: key, cls, tier, seed, drivers, wet = 0 } = ev.data;
+  setWetness(wet);                 // a wet qualifying is wet for the bots too
   try {
     // The aero map MUST be registered here too, before the first car is made:
     // a worker is a separate world, and a bot on the fallback constants would

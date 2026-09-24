@@ -15,7 +15,8 @@ import { Look, sunRig } from './tex.js';
 import { Post } from './post.js';
 let RIGS_NAMES = [];
 import { ProcSky } from './sky.js';
-import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation, dayPhase } from './weather.js';
+import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation, dayPhase, WeatherDirector } from './weather.js';
+import { Rain } from './rain.js';
 import { bankTable, bankY, bankRoll } from './bank.js';
 import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
@@ -686,6 +687,34 @@ export class View {
     r.autoClear = auto;
   }
 
+  /** WEATHER menu: 'live', a kind, or 'changing' (weather.js). */
+  setWeather(mode, seed = 1) { this.wxDir = new WeatherDirector(mode, seed); }
+
+  // Every frame: the sky's weather, the road's wetness, the rain in the air.
+  // The live Open-Meteo reading (fetched below, every ten minutes) is only the
+  // input in LIVE mode; a chosen or changing weather ignores it.
+  _weather(dt) {
+    if (!this.wxDir) this.wxDir = new WeatherDirector('live', 1);
+    const raw = this.wxDir.step(dt, this.weatherRaw || null);
+    const wx = readWeather(raw);
+    wx.wetness = raw.road; wx.rain = raw.rain || 0;
+    this.wx = wx;
+    const ch = this.wxDir.takeChange();
+    if (ch) this.weatherChange = ch;
+    // A wet road is darker and a mirror for the sky: less rough, more
+    // reflection. Stored dry values, so it dries back to exactly what it was.
+    const m = this.road && this.road.material;
+    if (m) {
+      const d = m.userData.dry || (m.userData.dry = { r: m.roughness, c: m.color.clone(), e: m.envMapIntensity ?? 1 });
+      const w = raw.road;
+      m.roughness = d.r * (1 - 0.6 * w);
+      m.color.copy(d.c).multiplyScalar(1 - 0.35 * w);
+      m.envMapIntensity = d.e * (1 + 1.3 * w);
+    }
+    if (wx.rain > 0.05 && !this.rain) this.rain = new Rain(this.scene);
+    if (this.rain) this.rain.update(wx.rain, this.camera, dt);
+  }
+
   _sky(now) {
     if (!this.proc) return;
     const when = this.fixedTime || new Date();
@@ -760,6 +789,7 @@ export class View {
     const now = (typeof performance !== 'undefined') ? performance.now() / 1000 : 0;
     const dt = this._lastT ? Math.min(0.1, now - this._lastT) : 0.016;
     this._lastT = now;
+    this._weather(dt);
     this._sky(now);
     if (this.post && this.post.on) {
       const d = this.proc ? this.rig.dir : this.sunDir.toArray();

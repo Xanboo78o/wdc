@@ -7,7 +7,7 @@
 // is the single most common way a browser "sim" quietly turns out not to be.
 import { Track } from './track.js';
 import { buildLines } from './line.js';
-import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor, registerAero } from './physics.js';
+import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor, registerAero, setWetness } from './physics.js';
 import { makeAero } from './aero.js';
 import { Hands, steerLock } from './input.js';
 import { FFB } from './ffb.js';
@@ -24,7 +24,7 @@ import { Field } from './field.js';
 import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
 import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
-import { TIME_PHASES, timeFor } from './weather.js';
+import { TIME_PHASES, timeFor, WEATHER_KINDS } from './weather.js';
 import { driverAt, teamOf } from './drivers.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 
@@ -80,6 +80,7 @@ let pickMode = 'hotlap', pickGrid = 22, pickTier = 'medium', pickLaps = 3, pickS
 let pickNoDnf = false;
 let pickQuali = false;
 let pickTime = 'live';   // or a phase of the day: weather.js TIME_PHASES
+let pickWeather = 'live';   // or a WEATHER_KINDS entry, or 'changing'
 // SUPERCASUAL's OVERTAKES submode: how hard the pack around you fights.
 let pickBattle = 'medium';
 
@@ -103,13 +104,14 @@ function loadMenu() {
   pickNoDnf = m.noDnf === true;
   pickQuali = m.quali === true;
   if (m.time === 'live' || TIME_PHASES.includes(m.time)) pickTime = m.time;
+  if (m.weather === 'live' || m.weather === 'changing' || WEATHER_KINDS.includes(m.weather)) pickWeather = m.weather;
   if (BATTLE[m.battle]) pickBattle = m.battle;
 }
 function saveMenu() {
   try {
     localStorage.setItem(MENU_KEY, JSON.stringify({
       track: pickTrack, car: pickCar, mode: pickMode, grid: pickGrid, tier: pickTier,
-      laps: pickLaps, start: pickStart, noDnf: pickNoDnf, quali: pickQuali, time: pickTime, battle: pickBattle,
+      laps: pickLaps, start: pickStart, noDnf: pickNoDnf, quali: pickQuali, time: pickTime, weather: pickWeather, battle: pickBattle,
     }));
   } catch { /* private window: it just won't remember */ }
 }
@@ -146,6 +148,7 @@ function buildMenu() {
   cards('dnfList', [[false, 'NORMAL'], [true, 'NO DNF']], pickNoDnf, v => pickNoDnf = v);
   cards('qualiList', [[false, 'OFF'], [true, 'ON']], pickQuali, v => pickQuali = v);
   cards('timeList', [['live', 'LIVE'], ...TIME_PHASES.map(k => [k, k.toUpperCase()])], pickTime, v => pickTime = v);
+  cards('weatherList', [['live', 'LIVE'], ...WEATHER_KINDS.map(k => [k, k.toUpperCase()]), ['changing', 'CHANGING']], pickWeather, v => pickWeather = v);
   saveMenu();
   $('raceOpts').classList.toggle('off', pickMode !== 'race');
 }
@@ -316,6 +319,12 @@ async function start() {
   }
   // TIME: LIVE is the real clock; a phase freezes the sun there, today, at
   // your own location. ?time= on the URL still wins.
+  // WEATHER: ?weather= wins, then the menu. CHANGING evolves through the session.
+  {
+    const wq = q.get('weather');
+    const mode = wq && (wq === 'live' || wq === 'changing' || WEATHER_KINDS.includes(wq)) ? wq : pickWeather;
+    state.view.setWeather(mode, 1 + Math.floor(Math.random() * 9973));
+  }
   if (pickTime !== 'live' && !q.has('time') && state.view.at) {
     const at = timeFor(pickTime, new Date(), state.view.at.lat, state.view.at.lon);
     if (at) { state.view.fixedTime = at; state.view._skyAt = -99; }
@@ -433,7 +442,9 @@ function qualiBegin() {
     };
     w.onerror = e => { const q = state.quali; if (q) { q.err = e.message || 'worker failed'; q.workerDone = true; } };
     w.postMessage({ base: new URL('../', import.meta.url).href, track: pickTrack, cls: pickCar,
-      tier: c.tier, seed: c.seed, drivers: bots });
+      tier: c.tier, seed: c.seed, drivers: bots,
+      // quali starts before the weather does; a rain or storm session starts soaked
+      wet: ['rain', 'storm'].includes(new URLSearchParams(location.search).get('weather') || pickWeather) ? 1 : 0 });
     state.qualiWorker = w;
   } catch (e) {
     state.quali.err = e.message; state.quali.workerDone = true;
@@ -747,6 +758,12 @@ function loop(now) {
   }
   ffb.update(car, rough, frame);   // the wheel pushes back (tools/ffb.py)
   if (state.quali) qualiTick(frame);
+  // The road's wetness is the physics' grip (and the bots' plan) next frame.
+  if (view.wx) setWetness(view.wx.wetness || 0);
+  if (view.weatherChange) {
+    const c = view.weatherChange; view.weatherChange = null;
+    toast({ clear: 'SKIES CLEARING', cloudy: 'CLOUD COMING IN', overcast: 'OVERCAST', rain: 'RAIN — TRACK GETTING WET', storm: 'STORM — HEAVY RAIN' }[c] || c.toUpperCase());
+  }
 
   // ADRENALINE, 0..1: how much the light trails are allowed to smear. Adam:
   // "make it less, but this amount when collisions or any SUPER high

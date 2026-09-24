@@ -23,6 +23,7 @@
 //    pedals now spend a friction-circle budget. That is trail braking, and it
 //    is the single biggest thing separating a lap time from a spin.
 import { steerLock } from './input.js';
+import { wetGrip } from './physics.js';
 
 // ---------------------------------------------------------------------------
 // Difficulty. `line: 'centre'` is the interesting one — SUPERCASUAL drivers are
@@ -237,7 +238,10 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
       // 1/400, not 1/100: neighbouring teams differ by ~0.0025 of grip, and
       // rounding to 0.01 put five teams on the same profile (gridcheck, battle
       // mode: pace-to-lap-time rho fell to 0.67).
-      if (d.gripNow != null || wingless) g = Math.round(g * 400) / 400;
+      // In the wet everyone has less tyre: plan on it (physics.wetGrip).
+      const wg = wetGrip();
+      if (wg < 1) g *= wg;
+      if (d.gripNow != null || wingless || wg < 1) g = Math.round(g * 400) / 400;
       const key = `${kind}:${g}`;
       if (key !== lineKey) { lineKey = key; line = lines.at(kind, g); }
     }

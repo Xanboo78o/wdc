@@ -311,3 +311,76 @@ export function timeFor(phase, now, lat, lon) {
   }
   return best;
 }
+
+// ---------------------------------------------------------------------------
+// CHOSEN AND CHANGING WEATHER
+//
+// Adam: "gimme weather changeability". LIVE is still the real weather from
+// Open-Meteo. The fixed kinds are what they say. CHANGING walks between
+// neighbouring states — clear, cloudy, overcast, rain, storm — dwelling
+// 45-120 s in each (leaning toward worse) and blending over thirty seconds,
+// so a five-minute race can start dry, cloud over, and rain on the last laps.
+//
+// THE ROAD IS NOT THE SKY. Wetness follows the rain with a lag: it soaks in
+// over ~20 s and dries over ~2 minutes, so a shower that has passed still
+// leaves the track slick for a while — which is the whole racing problem.
+// ---------------------------------------------------------------------------
+export const WEATHER_KINDS = ['clear', 'cloudy', 'overcast', 'rain', 'storm'];
+const PRESET = {
+  clear:    { cloud: 0.10, rain: 0 },
+  cloudy:   { cloud: 0.50, rain: 0 },
+  overcast: { cloud: 0.88, rain: 0 },
+  rain:     { cloud: 0.92, rain: 2.4 },
+  storm:    { cloud: 1.00, rain: 7.0 },
+};
+
+export class WeatherDirector {
+  /** `mode` is 'live', a WEATHER_KINDS entry, or 'changing'. */
+  constructor(mode = 'live', seed = 1) {
+    this.mode = mode;
+    this.r = (seed * 9301 + 49297) % 233280;
+    this.state = mode === 'changing' ? (this.rand() < 0.5 ? 'clear' : 'cloudy') : mode;
+    this.from = { ...(PRESET[this.state] || PRESET.clear) };
+    this.to = this.from; this.blend = 1;
+    this.dwell = 40 + this.rand() * 60;
+    this.road = (PRESET[this.state] || PRESET.clear).rain > 0 ? 1 : 0;   // a wet race starts wet
+    this.cur = { ...this.from };
+    this.changed = null;
+  }
+  rand() { this.r = (this.r * 9301 + 49297) % 233280; return this.r / 233280; }
+
+  /**
+   * Advance `dt` seconds. `live` is the real reading (raw Open-Meteo shape)
+   * used in LIVE mode. Returns the raw { cloud, rain, kind } plus `road`, the
+   * lagged road wetness 0..1.
+   */
+  step(dt, live = null) {
+    let sky;
+    if (this.mode === 'live') sky = { cloud: live?.cloud ?? 0.2, rain: live?.rain ?? 0, kind: live?.kind || 'clear' };
+    else {
+      if (this.mode === 'changing') {
+        this.dwell -= dt;
+        if (this.dwell <= 0 && this.blend >= 1) {
+          const i = WEATHER_KINDS.indexOf(this.state);
+          // one step either way; storms don't last, clear skies can
+          const j = Math.max(0, Math.min(WEATHER_KINDS.length - 1,
+            i + (this.state === 'storm' ? -1 : this.state === 'clear' ? 1 : this.rand() < 0.68 ? 1 : -1)));
+          this.from = { ...this.cur }; this.to = PRESET[WEATHER_KINDS[j]];
+          this.state = WEATHER_KINDS[j]; this.blend = 0;
+          this.dwell = 45 + this.rand() * 75;
+          this.changed = this.state;
+        }
+        this.blend = Math.min(1, this.blend + dt / 30);
+      } else { this.to = PRESET[this.mode] || PRESET.clear; this.blend = 1; this.from = this.to; }
+      const b = this.blend;
+      this.cur = { cloud: this.from.cloud + (this.to.cloud - this.from.cloud) * b, rain: this.from.rain + (this.to.rain - this.from.rain) * b };
+      sky = { ...this.cur, kind: this.cur.rain > 3.5 ? 'storm' : this.cur.rain > 0.2 ? 'rain' : this.cur.cloud > 0.7 ? 'overcast' : 'clear' };
+    }
+    const target = Math.min(1, (sky.rain || 0) / 2.0);
+    const k = target > this.road ? dt / 20 : dt / 120;
+    this.road += (target - this.road) * Math.min(1, k * 3);
+    return { ...sky, road: this.road };
+  }
+  /** The state it just changed to, once, for a toast. */
+  takeChange() { const c = this.changed; this.changed = null; return c; }
+}
