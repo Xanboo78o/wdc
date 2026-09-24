@@ -183,7 +183,9 @@ function buildMenu() {
     const [l, r] = el.querySelectorAll('.ar');
     l.onclick = e => { e.stopPropagation(); menuAt = row.k; stepRow(row, -1); };
     r.onclick = e => { e.stopPropagation(); menuAt = row.k; stepRow(row, 1); };
-    el.onclick = () => { menuAt = row.k; stepRow(row, 1); };
+    // Clicking a row SELECTS what it shows and moves on to the next row —
+    // the arrows either side are what cycle it.
+    el.onclick = () => { menuAt = row.k; moveFocus(1); };
     el.onmousemove = () => { if (menuAt !== row.k) { menuAt = row.k; paintFocus(); } };
     el.dataset.k = row.k;
     box.appendChild(el);
@@ -272,6 +274,7 @@ function menuInput(what) {
   else if (what === 'down') moveFocus(1);
   else if (what === 'go') launch();
   else if (menuAt === 'GO') { if (what === 'ok') launch(); }
+  else if (what === 'ok') moveFocus(1);   // confirm the row, drop to the next
   else {
     const row = menuRows().find(r => r.k === menuAt);
     if (row) stepRow(row, what === 'left' ? -1 : 1);
