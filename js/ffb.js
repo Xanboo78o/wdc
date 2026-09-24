@@ -34,6 +34,8 @@ const SCALE = 0.45;          // front force / weight
 // it on centre on a straight, where the aligning torque is almost zero. Fades
 // in with speed so the car can still be turned at a crawl.
 const CENTRE = 0.22;
+// Weight in the rim while the car is stopped or crawling (see update()).
+const PARK = 0.2;
 
 // ROAD TEXTURE, in the steering torque itself — not the base's own vibration
 // effect, which stays off since the 2026-09-23 shutdown (one effect on the
@@ -85,7 +87,13 @@ export class FFB {
     const centre = -CENTRE * Math.tanh(dn * 6) * Math.min(1, (car.speed || 0) / 20);
     let f = Math.tanh(sat / SCALE + centre);
     if (car.airborne) f = 0;                   // nothing on the ground, nothing in the hands
-    f *= Math.min(1, (car.speed || 0) / 5);   // nothing at all on the grid or parked
+    // Adam, 2026-09-24: stuck against a wall after a crash, the wheel went
+    // limp — this line used to fade EVERYTHING to zero below 5 m/s. A parked
+    // car's rack is not weightless: the tyres scrub, and turning the wheel is
+    // work. So as the road forces fade out, a gentle pull back toward centre
+    // fades in. Zero with the wheel straight, so nothing moves on the grid.
+    const slow = Math.min(1, (car.speed || 0) / 5);
+    f = f * slow - PARK * (1 - slow) * Math.tanh(dn * 3) * (car.airborne ? 0 : 1);
 
     this.jolt = Math.max(0, this.jolt - dt * 4);
 
@@ -105,6 +113,9 @@ export class FFB {
     // A real rack has weight even unloaded, most of it at a crawl.
     const d = 0.1 + 0.2 * Math.max(0, 1 - (car.speed || 0) / 15);
 
-    this.ws.send(JSON.stringify({ f: +f.toFixed(3), r: +r.toFixed(2), d: +d.toFixed(2) }));
+    // The inputs as well as the answer, so tools/ffb.log can say WHY a force
+    // was zero (the bridge ignores keys it does not use).
+    this.ws.send(JSON.stringify({ f: +f.toFixed(3), r: +r.toFixed(2), d: +d.toFixed(2),
+      v: +v.toFixed(1), y: +sat.toFixed(3), c: +centre.toFixed(3), a: car.airborne ? 1 : 0, j: +this.jolt.toFixed(2) }));
   }
 }

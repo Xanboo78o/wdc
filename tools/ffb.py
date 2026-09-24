@@ -245,7 +245,7 @@ async def serve(args):
         try:
             out = w.set(**kw)
             # Every force that reached the base, so the next fault has a record.
-            log.write(f'{time.time():.3f} in {kw.get("f", 0):+.3f} out {out:+6d}\n'); log.flush()
+            log.write(f'{time.time():.3f} in {kw.get("f", 0):+.3f} out {out:+6d}  {state.get("why", "")}\n'); log.flush()
         except OSError as e:
             if e.errno in (errno.ENODEV, errno.EIO):
                 drop()
@@ -310,6 +310,7 @@ async def serve(args):
                     if state['n'] % 30 == 0:
                         print(f"f {m.get('f', 0):+.3f}  r {m.get('r', 0):.2f}  d {m.get('d', 0):.2f}")
                     continue
+                state['why'] = ' '.join(f'{k} {m[k]}' for k in ('v', 'y', 'c', 'a', 'j') if k in m)
                 apply(f=float(m.get('f', 0)), r=float(m.get('r', 0)), d=float(m.get('d', 0)))
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
