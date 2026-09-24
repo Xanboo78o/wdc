@@ -23,6 +23,8 @@ import { TIERS, BATTLE, makeAutopilot, makeDriver } from './autopilot.js';
 import { Field } from './field.js';
 import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
+import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
+import { driverAt, teamOf } from './drivers.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 
 const $ = id => document.getElementById(id);
@@ -75,6 +77,7 @@ let pickTrack = 'monza', pickCar = 'f4';
 // thing and 6 is a sprint you can actually see all of.
 let pickMode = 'hotlap', pickGrid = 22, pickTier = 'medium', pickLaps = 3, pickStart = 'mid';
 let pickNoDnf = false;
+let pickQuali = false;
 // SUPERCASUAL's OVERTAKES submode: how hard the pack around you fights.
 let pickBattle = 'medium';
 
@@ -96,13 +99,14 @@ function loadMenu() {
   if ([2, 3, 5, 10].includes(m.laps)) pickLaps = m.laps;
   if (['pole', 'front', 'mid', 'back'].includes(m.start)) pickStart = m.start;
   pickNoDnf = m.noDnf === true;
+  pickQuali = m.quali === true;
   if (BATTLE[m.battle]) pickBattle = m.battle;
 }
 function saveMenu() {
   try {
     localStorage.setItem(MENU_KEY, JSON.stringify({
       track: pickTrack, car: pickCar, mode: pickMode, grid: pickGrid, tier: pickTier,
-      laps: pickLaps, start: pickStart, noDnf: pickNoDnf, battle: pickBattle,
+      laps: pickLaps, start: pickStart, noDnf: pickNoDnf, quali: pickQuali, battle: pickBattle,
     }));
   } catch { /* private window: it just won't remember */ }
 }
@@ -137,6 +141,7 @@ function buildMenu() {
     ['pole', 'POLE'], ['front', 'FRONT'], ['mid', 'MIDFIELD'], ['back', 'LAST'],
   ], pickStart, v => pickStart = v);
   cards('dnfList', [[false, 'NORMAL'], [true, 'NO DNF']], pickNoDnf, v => pickNoDnf = v);
+  cards('qualiList', [[false, 'OFF'], [true, 'ON']], pickQuali, v => pickQuali = v);
   saveMenu();
   $('raceOpts').classList.toggle('off', pickMode !== 'race');
 }
@@ -200,7 +205,23 @@ async function start() {
   // Not awaited: a missing or slow .wav must not hold up the green light.
   if (state.engine) state.engine.start('./');
 
-  if (pickMode === 'race') {
+  const qualiOn = pickMode === 'race' && (q.has('quali') ? q.get('quali') === '1' : pickQuali);
+  if (qualiOn) {
+    // Qualifying first: the race is built from its result (startQualiRace).
+    const grid = Math.max(2, Math.min(22, +q.get('grid') || pickGrid));
+    const tier = TIERS[q.get('tier')] ? q.get('tier') : pickTier;
+    state.qcfg = {
+      grid, tier,
+      laps: Math.max(1, Math.min(60, +q.get('laps') || pickLaps)),
+      battle: tier !== 'supercasual' ? null
+        : q.has('battle') ? (BATTLE[q.get('battle')] ? q.get('battle') : null) : pickBattle,
+      noDnf: q.has('nodnf') ? q.get('nodnf') === '1' : pickNoDnf,
+      seed: +q.get('seed') || (1 + Math.floor(Math.random() * 9973)),
+    };
+    state.car = makeCar({ cls: pickCar });
+    resetCar();
+    qualiBegin();
+  } else if (pickMode === 'race') {
     // Everything here can also come off the URL, so a headless check can boot
     // a full grid without a human clicking four card lists:
     //   ?auto=monza:f1&race=1&grid=22&tier=hard&laps=2&start=10&seed=7
@@ -351,6 +372,157 @@ async function start() {
   requestAnimationFrame(loop);
 }
 
+// ---------------------------------------------------------------------------
+// QUALIFYING (Adam: "just the f1 qualis, everyone goes out 1 at a time,
+// completes 2 laps and the fastest of the 2 is used for placement").
+//
+// You go out first and drive your run live. The bots' runs are simulated for
+// real in js/qualiworker.js, on another core, and come back to the tower one at
+// a time — one every few seconds while you are on track, so it reads as cars
+// going out in turn rather than a spreadsheet appearing. When your two laps
+// are in and every bot has a time, the grid is set by best valid lap and the
+// race starts from it (Enter, or the wheel's confirm button).
+// ---------------------------------------------------------------------------
+function qualiPlace() {
+  const { track, line, car } = state;
+  const s0 = track.length - RUN_UP, i = track.idx(s0);
+  const p = track.point(s0, line.off[i]);
+  car.x = p.x; car.y = p.y; car.hdg = line.hdg[i];
+  car.vx = 0.001; car.vy = 0; car.r = 0;
+  state.hint = i; state.sPrev = s0; state.lap = 0; state.lapT = 0;
+  state.invalid = false; state.offT = 0; state.last = null; state.best = null;
+  if (state.view) state.view.hint = null;
+  if (state.quali) { state.quali.laps = []; const me = state.quali.rows.get(-1); me.best = null; me.status = 'ON TRACK'; }
+}
+
+function qualiBegin() {
+  const c = state.qcfg, n = c.grid;
+  // The field: the first n-1 drivers of the table, going out in a shuffled
+  // order (seeded, so a replay of the same seed runs in the same order).
+  const bots = [];
+  for (let i = 0; i < n - 1; i++) bots.push(i);
+  let r = c.seed * 9301 + 49297;
+  const rnd = () => ((r = (r * 233280 + 49297) % 2147483647) / 2147483647);
+  for (let i = bots.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [bots[i], bots[j]] = [bots[j], bots[i]]; }
+  const rows = new Map();
+  rows.set(-1, { idx: -1, name: 'YOU', col: '#ffffff', best: null, status: 'ON TRACK' });
+  for (const idx of bots) {
+    const prof = driverAt(idx);
+    rows.set(idx, { idx, name: prof.n, col: teamOf(prof).col, best: null, status: 'WAITING' });
+  }
+  state.quali = { rows, order: bots, laps: [], done: false, queue: [], workerDone: false, revealT: 4, over: false, err: null };
+  qualiPlace();
+  try {
+    const w = new Worker(new URL('./qualiworker.js', import.meta.url), { type: 'module' });
+    w.onmessage = e => {
+      const m = e.data, q = state.quali;
+      if (!q) return;
+      if (m.type === 'time') q.queue.push(m);
+      else if (m.type === 'done') q.workerDone = true;
+      else if (m.type === 'error') { q.err = m.message; q.workerDone = true; console.error('quali worker:', m.message); }
+    };
+    w.onerror = e => { const q = state.quali; if (q) { q.err = e.message || 'worker failed'; q.workerDone = true; } };
+    w.postMessage({ base: new URL('../', import.meta.url).href, track: pickTrack, cls: pickCar,
+      tier: c.tier, seed: c.seed, drivers: bots });
+    state.qualiWorker = w;
+  } catch (e) {
+    state.quali.err = e.message; state.quali.workerDone = true;
+  }
+  let el = $('qualiBoard');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'qualiBoard';
+    el.style.cssText = 'position:fixed;left:16px;top:64px;z-index:20;min-width:250px;padding:10px 12px;' +
+      'background:rgba(10,14,20,.78);border-radius:8px;font:600 12px/1.55 system-ui,sans-serif;color:#e8edf2;' +
+      'letter-spacing:.04em;pointer-events:none';
+    document.body.appendChild(el);
+  }
+  el.style.display = '';
+  qualiDraw();
+}
+
+function qualiLap(t, invalid) {
+  const q = state.quali;
+  if (!q || q.done) return;
+  q.laps.push({ t, valid: !invalid });
+  const me = q.rows.get(-1);
+  const ok = q.laps.filter(l => l.valid).map(l => l.t);
+  me.best = ok.length ? Math.min(...ok) : null;
+  if (q.laps.length >= QUALI_LAPS) {
+    q.done = true; me.status = me.best == null ? 'NO TIME' : 'DONE';
+    toast(me.best == null ? 'NO VALID LAP — BACK OF THE GRID' : `QUALIFYING DONE — ${fmt(me.best)}`);
+  }
+  qualiDraw();
+}
+
+function qualiTick(dt) {
+  const q = state.quali;
+  if (!q) return;
+  // One bot back from its run at a time: every 6 s while you are out there,
+  // quickly once you are done so nobody waits on a spreadsheet.
+  q.revealT -= dt;
+  if (q.revealT <= 0 && q.queue.length) {
+    const m = q.queue.shift(), row = q.rows.get(m.idx);
+    if (row) { row.best = m.best; row.status = m.best == null ? 'NO TIME' : 'DONE'; }
+    q.revealT = q.done ? 0.6 : 6;
+    const next = q.order.find(i => q.rows.get(i).status === 'WAITING');
+    if (next != null) q.rows.get(next).status = 'ON TRACK';
+    qualiDraw();
+  } else if (q.revealT <= 0 && !q.order.some(i => q.rows.get(i).status === 'ON TRACK')) {
+    const next = q.order.find(i => q.rows.get(i).status === 'WAITING');
+    if (next != null) { q.rows.get(next).status = 'ON TRACK'; qualiDraw(); }
+  }
+  const allIn = q.order.every(i => q.rows.get(i).status !== 'WAITING' && q.rows.get(i).status !== 'ON TRACK');
+  if (q.done && (allIn || (q.workerDone && !q.queue.length && q.err)) && !q.over) {
+    q.over = true; qualiDraw();
+  }
+  if (q.over && (hands.tapped('Enter') || hands.tapped('w:confirm'))) startQualiRace();
+}
+
+function qualiDraw() {
+  const q = state.quali, el = $('qualiBoard');
+  if (!q || !el) return;
+  const rows = [...q.rows.values()].sort((a, b) =>
+    (a.best == null) - (b.best == null) || (a.best ?? 0) - (b.best ?? 0));
+  const pole = rows[0] && rows[0].best;
+  let h = `<div style="font-size:11px;opacity:.7;margin-bottom:4px">QUALIFYING · ${QUALI_LAPS} LAPS · BEST COUNTS</div>`;
+  rows.forEach((r, k) => {
+    const t = r.best != null ? (k && pole ? '+' + (r.best - pole).toFixed(3) : fmt(r.best))
+      : r.status === 'ON TRACK' ? '<span style="color:#7fe3a0">ON TRACK</span>'
+      : r.status === 'NO TIME' ? 'NO TIME' : '<span style="opacity:.45">—</span>';
+    h += `<div style="display:flex;gap:8px;${r.idx === -1 ? 'background:rgba(255,255,255,.12);border-radius:4px;' : ''}">` +
+      `<span style="width:20px;text-align:right;opacity:.7">${r.best != null ? k + 1 : ''}</span>` +
+      `<span style="width:3px;background:${r.col}"></span>` +
+      `<span style="flex:1">${r.name}</span><span style="font-variant-numeric:tabular-nums">${t}</span></div>`;
+  });
+  if (q.laps.length) h += `<div style="margin-top:6px;opacity:.8">YOUR LAPS: ${q.laps.map(l => l.valid ? fmt(l.t) : 'DELETED').join(' · ')}</div>`;
+  if (q.err) h += `<div style="color:#ff8a7a;margin-top:4px">bots could not run: ${q.err}</div>`;
+  if (q.over) h += `<div style="margin-top:8px;color:#ffd166">GRID SET — PRESS ENTER / CONFIRM TO RACE</div>`;
+  el.innerHTML = h;
+}
+
+function startQualiRace() {
+  const c = state.qcfg, q = state.quali;
+  if (!q) return;
+  const order = gridOrder([...q.rows.values()].map(r => ({ idx: r.idx, best: r.best })));
+  const t = state.track, spec = CARS[pickCar];
+  const aids = state.car.aids;
+  state.race = new Race({
+    track: t, lines: state.lines, spec, slots: gridSlots(t, order.length), laps: c.laps,
+    grid: order.length, playerGrid: order.indexOf(-1) + 1, tier: c.tier, player: true,
+    battle: c.battle, noDnf: c.noDnf, seed: c.seed, order,
+  });
+  state.me = state.race.entries.find(e => e.isPlayer);
+  state.car = state.me.car; state.car.aids = aids;
+  if (state.view) state.view.hint = null;
+  state.field = new Field(state.view, state.race.entries, spec.key);
+  for (const id of ['tower', 'startLights']) $(id).classList.remove('hidden');
+  $('posRow').classList.remove('hidden');
+  if (state.qualiWorker) { state.qualiWorker.terminate(); state.qualiWorker = null; }
+  const el = $('qualiBoard'); if (el) el.style.display = 'none';
+  state.quali = null;
+  toast(`P${order.indexOf(-1) + 1} ON THE GRID`);
+}
+
 function resetCar() {
   const { track, line, car } = state;
   const i = track.idx(0);
@@ -370,6 +542,7 @@ function resetCar() {
   car.wheelZ = [0, 0, 0, 0]; car.gripF = 1; car.gripR = 1;
   state.hint = i; state.sPrev = 0;
   state.lapT = 0; state.invalid = false; state.offT = 0;
+  if (state.quali && !state.quali.done) qualiPlace();   // R restarts your run
   hands.wheel = 0;
 }
 
@@ -534,6 +707,7 @@ function loop(now) {
     if (state.sPrev > track.length * 0.8 && s < track.length * 0.2) {
       if (state.lap > 0) {
         state.last = state.lapT;
+        if (state.quali) qualiLap(state.lapT, state.invalid);
         if (!state.invalid && (state.best == null || state.lapT < state.best)) {
           state.best = state.lapT;
           toast('PERSONAL BEST');
@@ -562,6 +736,7 @@ function loop(now) {
     state.invalid = false;
   }
   ffb.update(car, rough, frame);   // the wheel pushes back (tools/ffb.py)
+  if (state.quali) qualiTick(frame);
 
   // ADRENALINE, 0..1: how much the light trails are allowed to smear. Adam:
   // "make it less, but this amount when collisions or any SUPER high

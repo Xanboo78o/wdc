@@ -37,7 +37,7 @@ const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
 
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
-                tier = 'medium', seed = 1, player = true, pits = true, noDnf = false,
+                tier = 'medium', seed = 1, player = true, pits = true, noDnf = false, order = null,
                 battle = null }) {
     this.track = track; this.lines = lines; this.spec = spec;
     // NO DNF (Adam): YOUR car cannot retire. The bots still can.
@@ -62,15 +62,18 @@ export class Race {
     this.entries = [];
     for (let k = 0; k < n; k++) {
       const slot = slots[k];
-      const isPlayer = player && k === Math.min(playerGrid, n) - 1;
+      // QUALIFYING (js/quali.js) hands over `order`: grid slot -> driver index,
+      // -1 for you. Without it the grid is the driver table in order, as ever.
+      const isPlayer = order ? order[k] === -1 : player && k === Math.min(playerGrid, n) - 1;
+      const who = order ? Math.max(0, order[k]) : k;
       const car = makeCar({ cls: spec.key });
       const p = track.point(slot.s, slot.lat);
       car.x = p.x; car.y = p.y; car.hdg = slot.hdg; car.vx = 0.001;
       // WHO this is, WHAT they drive, and HOW they drive it — one table.
-      const prof = driverAt(k);
+      const prof = driverAt(who);
       const team = teamOf(prof);
       const driver = isPlayer ? null
-        : applyProfile(makeDriver(seed * 131 + k, tier, track.corners.length || 24), prof, team);
+        : applyProfile(makeDriver(seed * 131 + who, tier, track.corners.length || 24), prof, team);
       this.entries.push({
         car, driver, isPlayer, idx: k, box: k,
         name: isPlayer ? 'YOU' : prof.n,
