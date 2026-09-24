@@ -185,6 +185,12 @@ export class Hands {
   // Xbox-style rumble, where the browser exposes it. Not every pad, not every
   // browser — hence the try/catch rather than a capability check.
   rumble(strong = 0.4, weak = 0.2, ms = 90) {
+    // NEVER on a wheel. Chrome sends the rumble to the wheel base itself, and
+    // on the R3 that knocked out tools/ffb.py's steering force: Adam,
+    // 2026-09-24, "only on crashes i get feedback" — the crash rumble got
+    // through, and the steering weight went dead after it. The bridge already
+    // plays the crash jolt.
+    if (this.onWheel) return;
     const p = this.pad;
     const act = p && (p.vibrationActuator || (p.hapticActuators && p.hapticActuators[0]));
     if (!act) return;
@@ -312,7 +318,8 @@ export class Hands {
       // Xbox pad has four, so a profile needing axis 5 correctly declines it,
       // and a wheel that has them is a wheel whatever it calls itself.
       const needs = Math.max(prof ? prof.steer.ax : 0, prof ? prof.throttle.ax : 0, prof ? prof.brake.ax : 0);
-      if (prof && p.axes.length > needs) {
+      this.onWheel = !!(prof && p.axes.length > needs);
+      if (this.onWheel) {
         const now = {};
         for (const [name, idx] of Object.entries(PAD_BUTTONS)) now[name] = !!(p.buttons[idx] && p.buttons[idx].pressed);
         for (const name in now) if (now[name] && !this._padPrev[name]) this.pressed.add('pad:' + name);
