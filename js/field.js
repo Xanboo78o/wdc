@@ -37,6 +37,7 @@ import * as THREE from 'three';
 import { Z } from './geom.js';
 import { bankY, bankRoll } from './bank.js';
 import { buildCar, buildGT3, liveryAtlas, numberTexture } from './car.js';
+import { liveryFor, applyLivery } from './livery.js';
 import { carLamps } from './lamps.js';
 import { crushParts, applyCrush } from './render.js';
 
@@ -182,10 +183,25 @@ export class Field {
     // Repaint. One new material per car, cloned from the reference so it keeps
     // the clearcoat settings, the environment intensity and the texture maps.
     // Both versions of the car share it, so a rival cannot be two colours.
+    // A team's livery (js/livery.js) is painted in zones by the paint's own
+    // shader, and its second colour goes on paint2 — both cached per team, so
+    // team-mates share them and the grid compiles one program.
+    const liv = team && src.paint2 ? liveryFor(team.key, team) : null;
+    this._livMats = this._livMats || new Map();
     const repainted = new Map();
     const swap = mat => {
       if (livery.has(mat)) return livery.get(mat);
+      if (liv && mat === src.paint2) {
+        const k = team.key + ':2';
+        if (!this._livMats.has(k)) { const m2 = mat.clone(); m2.color = new THREE.Color(liv.second); this._livMats.set(k, m2); }
+        return this._livMats.get(k);
+      }
       if (!this.refPaints.has(mat)) return mat;
+      if (liv) {
+        const k = team.key + ':1';
+        if (!this._livMats.has(k)) this._livMats.set(k, applyLivery(mat.clone(), liv));
+        return this._livMats.get(k);
+      }
       let got = repainted.get(mat);
       if (!got) { got = mat.clone(); got.color = new THREE.Color(colour); repainted.set(mat, got); }
       return got;

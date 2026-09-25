@@ -26,6 +26,7 @@ import { Engine } from './audio.js';
 import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
 import { TIME_PHASES, timeFor, WEATHER_KINDS } from './weather.js';
 import { driverAt, teamOf, TEAMS, FIELDS, setField, LEAGUES, teamsIn, driversOf, teamUI } from './drivers.js';
+import { liveryFor } from './livery.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 
 const $ = id => document.getElementById(id);
@@ -587,6 +588,9 @@ async function start() {
   if (!state.view) {
     state.view = await View.create($('cv'), t, line, {
       shadows: !q.has('lo'), env, textures: !q.has('notex'), cls: pickCar,
+      // Your car in your team's livery, for the league you are driving.
+      livery: liveryFor(pickTeams[pickCar], TEAMS[pickTeams[pickCar]]),
+      team: TEAMS[pickTeams[pickCar]] || null,
     });
   } else {
     location.reload(); return;          // changing circuit rebuilds the world

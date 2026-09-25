@@ -236,6 +236,10 @@ for (const [k, ui] of Object.entries(F1_UI)) {
   if (!TEAMS[k].era) TEAMS[k].era = '2026';
 }
 
+// Each team knows its own key, so a livery can be looked up from the team a
+// car carries (js/livery.js).
+for (const k in TEAMS) TEAMS[k].key = k;
+
 export const LEAGUES = { f1: 'F1', gt3: 'GT3', f4: 'F4' };
 /** The teams of one league, in table order. */
 export const teamsIn = league => Object.keys(TEAMS).filter(k => TEAMS[k].league === league);

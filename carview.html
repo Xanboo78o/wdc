@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Car Showroom</title>
+<!--
+  carview.html — the car, and nothing else, so its look can be judged and
+  compared. Same builders, same photographed materials and the same measured
+  sky as the game; no track, no HUD, no physics.
+
+    carview.html?car=f1&yaw=35&pitch=12&dist=7&team=ferrari
+      car    f1 | f4 | gt3
+      yaw    degrees round the car, 0 = dead ahead, 90 = its right side
+      pitch  degrees above the ground
+      dist   metres from the car's middle
+      team   a drivers.js team key: its livery and number, like a rival
+      spin   1 = turntable (for looking), off for photographs
+
+  window.__carview = true once the first frame is drawn, for screenshots.
+-->
+<style>
+  html,body{margin:0;height:100%;background:#1a1d22;overflow:hidden}
+  canvas{display:block;width:100%;height:100%}
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { Look } from './js/tex.js';
+import { buildCar, buildGT3, liveryAtlas, numberTexture } from './js/car.js';
+import { TEAMS, DRIVERS, FANTASY_DRIVERS } from './js/drivers.js';
+import { liveryFor } from './js/livery.js';
+
+const q = new URLSearchParams(location.search);
+const cls = q.get('car') || 'f1';
+const yaw = (+q.get('yaw') || 35) * Math.PI / 180;
+const pitch = (+(q.get('pitch') ?? 12)) * Math.PI / 180;
+const dist = +q.get('dist') || 7;
+const teamKey = q.get('team');
+const team = TEAMS[teamKey] || null;
+
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('cv'), antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+const scene = new THREE.Scene();
+const look = await Look.load(renderer, 'monza');
+look.install(scene);
+scene.backgroundBlurriness = 0.35;
+
+// A studio floor that takes the car's shadow, so it sits ON something.
+const floor = new THREE.Mesh(new THREE.CircleGeometry(14, 64),
+  look.mat('tarmac', { size: 3, roughness: 0.9 }) || new THREE.MeshStandardMaterial({ color: 0x3a3d42 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+const sun = new THREE.DirectionalLight(0xfff4e6, 2.4);
+sun.position.set(6, 12, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 1, far: 40 });
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+
+const colour = team ? new THREE.Color(team.col).getHex() : (cls === 'gt3' ? 0x2f6fe0 : 0xd8352a);
+const car = cls === 'gt3' ? buildGT3(look, colour) : buildCar(look, colour, null, { livery: liveryFor(teamKey, team) });
+if (team && car.decalMat) {
+  car.decalMat.map = liveryAtlas(team.col, team).texture;
+  const d = [...DRIVERS, ...FANTASY_DRIVERS].find(x => TEAMS[x.t] === team);
+  if (car.numMat) car.numMat.map = numberTexture(d ? d.num : 1, team.col, team.fg);
+}
+car.group.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+scene.add(car.group);
+
+const box = new THREE.Box3().setFromObject(car.group);
+const mid = box.getCenter(new THREE.Vector3());
+const camera = new THREE.PerspectiveCamera(34, 1, 0.05, 200);
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+// The car's nose points +X and its right is +Z (js/geom.js).
+let a = yaw;
+const spin = q.get('spin') === '1';
+function frame() {
+  if (spin) a += 0.004;
+  camera.position.set(
+    mid.x + Math.cos(a) * Math.cos(pitch) * dist,
+    mid.y + Math.sin(pitch) * dist,
+    mid.z + Math.sin(a) * Math.cos(pitch) * dist);
+  camera.lookAt(mid);
+  renderer.render(scene, camera);
+  window.__carview = true;
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

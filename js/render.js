@@ -24,7 +24,7 @@ import { carLamps, buildCourseLights, LightTrails } from './lamps.js';
 import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
-import { buildCar, buildGT3 } from './car.js';
+import { buildCar, buildGT3, liveryAtlas } from './car.js';
 import { makeDeformer } from './dent.js';
 import { loadChassis, chassisGeometry } from './mesh.js';
 import { World, loadElev } from './world.js';
@@ -517,8 +517,17 @@ export class View {
     // A GT3 is a different car, not a repainted single-seater.
     const car = opts.cls === 'gt3'
       ? buildGT3(look, 0x2f6fe0)
-      : buildCar(look, 0xd8352a, opts.chassis ? chassisGeometry(THREE, opts.chassis) : null);
+      : buildCar(look, 0xd8352a, opts.chassis ? chassisGeometry(THREE, opts.chassis) : null, { livery: opts.livery });
+    // Your team's sponsors on your car, the way a rival wears theirs.
+    if (opts.team && car.decalMat) car.decalMat.map = liveryAtlas(opts.team.col, opts.team).texture;
     this.car = car.group; this.wheels = car.wheels; this.steer = car.steer;
+    // The driver's own eyes, for ONBOARD, on a car that has a cockpit to sit
+    // in. The GT3 body is a shell with no interior, so it keeps the roof cam.
+    this.carEye = car.mirrors && car.mirrors.length ? car.eye : null;
+    this.carMirrorGlass = car.mirrors || [];
+    // What first person hides: your own head, and the cockpit rim that read
+    // as a steering wheel in front of Adam's real one.
+    this.fpHide = [...(car.head || []), ...(car.cockpitRim ? [car.cockpitRim] : [])];
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
     // HEADLIGHTS (Adam: "gimme headlights"). The sky runs on the real clock, so
     // an evening session is a night race. Two spotlights from the nose, aimed a
@@ -632,6 +641,7 @@ export class View {
     this.camTarget = new THREE.Object3D();
     this.car.add(this.camMount, this.camTarget);
     this._mirror();
+    this._carMirrors();
     // Scratch, so a 400 Hz-adjacent loop allocates nothing.
     this._v0 = new THREE.Vector3(); this._v1 = new THREE.Vector3(); this._v2 = new THREE.Vector3();
     this._q = new THREE.Quaternion(); this._up = new THREE.Vector3(0, 1, 0);
@@ -650,6 +660,70 @@ export class View {
    * rebuilds its cube when the sun has actually moved, and the weather is
    * fetched every ten minutes rather than every sixteen milliseconds.
    */
+  // ---- the car's own mirrors ----------------------------------------------
+  // Adam, 2026-09-25: "my mirrors should be actual parts of the car ... on
+  // either side ... they reflect, i can see my car in them too".
+  //
+  // Each glass gets its own small camera, placed at the glass and aimed along
+  // the REFLECTION of the line from the driver's eye to it — which is what a
+  // mirror shows, so looking at it from the cockpit you see behind and a
+  // little outboard, and the edge of your own sidepod and rear tyre. Drawn
+  // into a small target, flipped left for right, on the glass.
+  //
+  // Cost is the thing: each is a whole extra render of the scene. So they are
+  // small (320x120), they take turns (each updates at half the frame rate),
+  // shadows are not redrawn for them, and they are only drawn when you can
+  // see them — onboard and on the nose cam. ?carmirrors=0 turns them off.
+  _carMirrors() {
+    this.carMirrors = [];
+    if (new URLSearchParams(location.search).get('carmirrors') === '0') return;
+    for (const glass of this.carMirrorGlass || []) {
+      const rt = new THREE.WebGLRenderTarget(320, 120, { samples: 2 });
+      rt.texture.wrapS = THREE.RepeatWrapping;
+      rt.texture.repeat.set(-1, 1);
+      rt.texture.offset.set(1, 0);
+      glass.material = new THREE.MeshBasicMaterial({ map: rt.texture, color: new THREE.Color(1.5, 1.5, 1.5) });
+      // the glass geometry is baked in car space: find its centre and normal once
+      const geo = glass.geometry;
+      geo.computeBoundingBox();
+      const c = geo.boundingBox.getCenter(new THREE.Vector3());
+      const n = new THREE.Vector3().fromBufferAttribute(geo.attributes.normal, 0).normalize();
+      const cam = new THREE.PerspectiveCamera(16, 320 / 120, 0.05, 600);
+      this.carMirrors.push({ glass, rt, cam, c, n });
+    }
+    this._mi = 0;
+    this._mE = new THREE.Vector3(); this._mM = new THREE.Vector3(); this._mN = new THREE.Vector3();
+  }
+
+  _drawCarMirrors() {
+    if (!this.carMirrors || !this.carMirrors.length || this.photo) return;
+    const rig = RIGS_NAMES[this.mode];
+    if (rig !== 'ONBOARD' && rig !== 'NOSE') return;
+    const m = this.carMirrors[this._mi++ % this.carMirrors.length];
+    const car = this.car;
+    car.updateWorldMatrix(true, false);
+    const eye = this.carEye || [-0.2, 0.65, 0];
+    const E = this._mE.set(eye[0], eye[1], eye[2]).applyMatrix4(car.matrixWorld);
+    const M = this._mM.copy(m.c).applyMatrix4(car.matrixWorld);
+    const N = this._mN.copy(m.n).transformDirection(car.matrixWorld);
+    // the reflected sight line: V - 2(V.N)N
+    const V = M.clone().sub(E).normalize();
+    const R = V.sub(N.clone().multiplyScalar(2 * V.dot(N)));
+    m.cam.position.copy(M).addScaledVector(N, 0.015);
+    m.cam.up.set(0, 1, 0).applyQuaternion(car.getWorldQuaternion(this._q));
+    m.cam.lookAt(M.clone().add(R));
+    const r = this.renderer;
+    const sm = r.shadowMap.autoUpdate;
+    r.shadowMap.autoUpdate = false;
+    m.glass.visible = false;
+    r.setRenderTarget(m.rt);
+    r.clear();
+    r.render(this.scene, m.cam);
+    r.setRenderTarget(null);
+    m.glass.visible = true;
+    r.shadowMap.autoUpdate = sm;
+  }
+
   // ---- the mirror ---------------------------------------------------------
   // Adam: "also add mirrors". A race you cannot see behind is a race where the
   // car that passes you arrives from nowhere — which is exactly how a field of
@@ -829,6 +903,7 @@ export class View {
     this._lastT = now;
     this._weather(dt);
     this._sky(now);
+    this._drawCarMirrors();
     if (this.built) {
       this.built.look.tick(now);
       if (this.built.plants) this.built.plants.update(this.camera);
@@ -1281,7 +1356,12 @@ export class View {
     // footage read as televised rather than as a game replay.
     RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV'];
     const RIGS = [
-      { name: 'ONBOARD', kind: 'bolted', at: [-0.34, 1.19, 0], aim: 24, fov: 56, kick: 0.55, roll: 0.55 },
+      // ONBOARD is the DRIVER'S EYES (Adam, 2026-09-25: "first person is like on
+      // top of my halo"). It sat at 1.19 m, T-cam height above the airbox. Then
+      // "i need to sit higher bc thats how my rig is": his rig seats him
+      // upright with the wheel in front of him, so the eye is at the halo's
+      // height (car.js eye), not slumped under it.
+      { name: 'ONBOARD', kind: 'bolted', at: this.carEye || [-0.34, 1.19, 0], aim: 24, fov: 62, kick: 0.55, roll: 0.55 },
       { name: 'CHASE', kind: 'chase', dist: 5.6, height: 1.66, lead: 13, fov: 55, kick: 1 },
       { name: 'NOSE', kind: 'bolted', at: [1.62, 0.46, 0], aim: 26, fov: 62, kick: 0.8, roll: 0.85 },
       { name: 'TV', kind: 'tv', fov: 40, kick: 0 },
@@ -1316,6 +1396,8 @@ export class View {
     const amp = this.shake + buzz;
 
     let fov = rig.fov;
+    const fp = rig.name === 'ONBOARD' && !!this.carEye;
+    if (this.fpHide) for (const m of this.fpHide) m.visible = !fp;
     if (rig.kind === 'bolted') {
       // Read the camera's world placement off the car itself, so it inherits
       // yaw, pitch, roll and the banked height for free.

@@ -36,6 +36,7 @@
 import * as THREE from 'three';
 import { Atlas, fitText } from './geom.js';
 import { drawBrand, brandNamed } from './brands.js';
+import { applyLivery } from './livery.js';
 
 // A superellipse: exponent 2 is an ellipse, 4 is a rounded rectangle, and the
 // stations below walk from one to the other as the nose becomes a chassis.
@@ -78,9 +79,17 @@ function loft(stations, segs = 24, close = true) {
   // than reverse ten call sites and hope nobody adds an eleventh the other way
   // round, derive it.
   const rev = stations[stations.length - 1].x < stations[0].x;
+  // UVs in METRES — u along the car, v round the section — so a carbon weave
+  // is the same size on the nose as on the sidepod.
+  const uv = [];
   for (let k = 0; k < stations.length; k++) {
     const s = stations[k];
-    for (const [z, y] of rings[k]) pos.push(s.x, s.y + y, (s.z || 0) + z);
+    let arc = 0;
+    rings[k].forEach(([z, y], i) => {
+      if (i) { const [pz, py] = rings[k][i - 1]; arc += Math.hypot(z - pz, y - py); }
+      pos.push(s.x, s.y + y, (s.z || 0) + z);
+      uv.push(s.x, arc);
+    });
   }
   for (let k = 0; k < stations.length - 1; k++) {
     const a = k * segs, b = (k + 1) * segs;
@@ -97,6 +106,7 @@ function loft(stations, segs = 24, close = true) {
       const s = stations[k];
       const c = pos.length / 3;
       pos.push(s.x, s.y, s.z || 0);
+      uv.push(s.x, 0);
       for (let i = 0; i < segs; i++) {
         const a = k * segs + i, b = k * segs + ((i + 1) % segs);
         if (flip) idx.push(c, b, a); else idx.push(c, a, b);
@@ -105,6 +115,7 @@ function loft(stations, segs = 24, close = true) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.setIndex(idx);
   g.computeVertexNormals();
   return g;
@@ -114,7 +125,7 @@ function loft(stations, segs = 24, close = true) {
 // curled up the way a real front wing is. Chord and angle vary across the span
 // because a flat plank is the thing that makes a wing look like a placeholder.
 function wing(span, chord, thick, camber, twistTip, rise, segs = 18) {
-  const pos = [], idx = [];
+  const pos = [], idx = [], wuv = [];
   const sec = 10;
   for (let i = 0; i <= segs; i++) {
     const t = i / segs, u = t * 2 - 1;           // -1..1 across the span
@@ -132,6 +143,7 @@ function wing(span, chord, thick, camber, twistTip, rise, segs = 18) {
         cx * Math.cos(ang) - cy * Math.sin(ang),
         y + cx * Math.sin(ang) + cy * Math.cos(ang),
         z);
+      wuv.push(z, (j / sec) * c * 2);
     }
   }
   for (let i = 0; i < segs; i++) {
@@ -145,6 +157,7 @@ function wing(span, chord, thick, camber, twistTip, rise, segs = 18) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(wuv, 2));
   g.setIndex(idx);
   g.computeVertexNormals();
   return g;
@@ -153,8 +166,8 @@ function wing(span, chord, thick, camber, twistTip, rise, segs = 18) {
 // A tyre, turned from a real cross-section: tread, shoulder, sidewall bulge,
 // bead. A plain cylinder is the single most obvious thing about a toy car —
 // real tyres are fatter in the middle of the sidewall than at the rim.
-function tyre(radius, width) {
-  const r = radius, hw = width / 2, rim = radius * 0.58;
+function tyre(radius, width, rimK = 0.58) {
+  const r = radius, hw = width / 2, rim = radius * rimK;
   const profile = [
     [rim, hw * 0.55], [r * 0.80, hw * 0.92], [r * 0.93, hw * 1.0],
     [r * 0.995, hw * 0.93], [r, hw * 0.58], [r, 0],
@@ -266,38 +279,164 @@ function decal(livery, cell, at, size, normal, along, flip) {
 }
 
 // ---------------------------------------------------------------------------
-export function buildCar(look, colour = 0xd8352a, chassis = null) {
+// SURFACE DETAIL, drawn rather than photographed.
+//
+// Carbon: `look.mat('carbon')` asked the game's texture set for a photograph
+// that was never in it (tex.js MATERIALS has no carbon), so every carbon part
+// was flat blue-grey. A 2x2 twill is a regular weave, so it is drawn here —
+// alternating tows, each shaded across its width the way a real tow catches
+// light — and used as colour and bump. One canvas, shared by every car.
+// ---------------------------------------------------------------------------
+let _carbon = null;
+function carbonTexture() {
+  if (_carbon) return _carbon;
+  const N = 256, T = 8, c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  const s = N / T;
+  for (let i = 0; i < T; i++) for (let j = 0; j < T; j++) {
+    // 2x2 twill: the over/under pattern steps one tow per row.
+    const warp = ((i + j) >> 1) % 2 === 0;
+    const grd = warp ? g.createLinearGradient(i * s, 0, (i + 1) * s, 0) : g.createLinearGradient(0, j * s, 0, (j + 1) * s);
+    grd.addColorStop(0, '#15161a'); grd.addColorStop(0.5, warp ? '#3a3d44' : '#2c2f35'); grd.addColorStop(1, '#15161a');
+    g.fillStyle = grd;
+    g.fillRect(i * s, j * s, s, s);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  // UVs are metres: one tile of eight tows is 3 cm, near a real 3K twill.
+  t.repeat.set(1 / 0.03, 1 / 0.03);
+  _carbon = t;
+  return t;
+}
+
+// The tyre wall. The Lathe's v runs across the profile (0 = the rim on one
+// side, 1 = the rim on the other, the tread in the middle) and u runs round
+// the wheel, so text drawn left-to-right is lettering round the sidewall. The
+// coloured band is the compound, which is the first thing anyone reads on an
+// F1 tyre from the grandstand. GRIPMAX is one of js/brands.js's invented names.
+const COMPOUND = { soft: '#e3261c', medium: '#ffd21f', hard: '#f1f1f1', inter: '#2fb34a', wet: '#2a6fe0' };
+const _tyreTex = new Map();
+function tyreTexture(compound = 'medium') {
+  if (_tyreTex.has(compound)) return _tyreTex.get(compound);
+  const W = 2048, H = 128, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1a1b1e'; g.fillRect(0, 0, W, H);
+  // tread: slightly lighter and smoother-looking, scrubbed
+  g.fillStyle = '#26272b'; g.fillRect(0, H * 0.36, W, H * 0.28);
+  const col = COMPOUND[compound] || COMPOUND.medium;
+  // v=0 is the BOTTOM of the canvas (flipY). Each wall: stripe, then lettering.
+  for (const [band, flip] of [[[0.14, 0.20], false], [[0.80, 0.86], true]]) {
+    const y0 = H * (1 - band[1]), y1 = H * (1 - band[0]);
+    g.fillStyle = col; g.fillRect(0, y0, W, y1 - y0);
+    const ty = flip ? H * (1 - 0.73) : H * (1 - 0.27);
+    g.save();
+    g.translate(0, ty);
+    if (flip) g.scale(-1, -1);
+    g.font = 'italic 900 13px sans-serif'; g.textBaseline = 'middle';
+    g.fillStyle = '#e9e9e9';
+    for (let k = 0; k < 4; k++) {
+      const x = (flip ? -1 : 1) * (k * W / 4 + 60);
+      g.fillText('GRIPMAX', x, 0);
+      g.fillStyle = col; g.fillText('P  RACE', x + 110 * (flip ? 1 : 1), 0); g.fillStyle = '#e9e9e9';
+    }
+    g.restore();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  _tyreTex.set(compound, t);
+  return t;
+}
+
+// A rod between two points: a flattened cylinder, which is what a carbon
+// wishbone is — an aerofoil section, thin edge-on.
+function rod(a, b, r = 0.018, flat = 0.45) {
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+  const len = A.distanceTo(B);
+  const g = new THREE.CylinderGeometry(r, r, len, 10);
+  g.scale(1, 1, flat);
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+  g.applyQuaternion(q);
+  g.translate((A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2);
+  return g;
+}
+// A tube through points (the halo).
+function tube(points, r, closed = false) {
+  const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)), closed, 'centripetal');
+  return new THREE.TubeGeometry(curve, 64, r, 10, closed);
+}
+// A flat plate cut to an outline in the car's side view (x, y), `thick` wide,
+// centred on z. Endplates are shaped, not rectangles.
+function plate(pts, thick, z) {
+  const sh = new THREE.Shape();
+  sh.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: thick, bevelEnabled: true, bevelThickness: thick * 0.3, bevelSize: thick * 0.3, bevelSegments: 2, curveSegments: 6 });
+  g.translate(0, 0, z - thick / 2);
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// THE SINGLE-SEATER (F1, and F4 on the same body).
+//
+// Adam, 2026-09-25: "make cars look so much better". The shapes below are a
+// 2022-regulation car at real size: a nose that runs down onto a four-element
+// wing whose flaps sweep up into shaped endplates, letterbox sidepod inlets
+// with an undercut beneath and a ramp down the top, a proper halo, wishbones
+// that actually join the chassis to the hubs, 18-inch wheels with covers, a
+// swoop-top rear wing with a beam wing under it, and a rain light.
+//
+// `opts.livery` (js/livery.js) paints the team's colours in zones; its
+// `second` colour is the helmet, a wing flap, the T-cam and the wheel-cover
+// rings, handed back as `paint2` so js/field.js can repaint both per team.
+// `opts.compound` colours the tyre walls.
+// ---------------------------------------------------------------------------
+export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
   const g = new THREE.Group();
   const primary = '#' + new THREE.Color(colour).getHexString();
 
-  // Materials. Carbon is a real photographed weave rather than a dark grey,
-  // and the paint is a clearcoat — low roughness and a strong environment, so
-  // it picks up the sky the way a polished panel does.
-  const carbon = look.mat('carbon', {
-    size: 0.26, tint: 0x2c2e33, roughness: 0.34, metalness: 0.22, env: 1.35,
-  });
-  const carbonMatt = look.mat('carbon', {
-    size: 0.22, tint: 0x1c1e22, roughness: 0.62, metalness: 0.12, env: 0.8,
-  });
-  const paint = new THREE.MeshStandardMaterial({
-    color: colour, roughness: 0.16, metalness: 0.22, envMapIntensity: 1.5,
-  });
-  const rubber = look.mat('carbon', {
-    size: 0.5, tint: 0x15161a, roughness: 0.93, metalness: 0.0, env: 0.35,
-  });
-  const rimMat = new THREE.MeshStandardMaterial({
-    color: 0x6e7278, roughness: 0.38, metalness: 0.9, envMapIntensity: 1.1,
-  });
-  const hubMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2d33, roughness: 0.42, metalness: 0.7, envMapIntensity: 1.0,
+  const weave = carbonTexture();
+  const carbon = new THREE.MeshPhysicalMaterial({
+    map: weave, bumpMap: weave, bumpScale: 0.6, color: 0x70747c,
+    roughness: 0.32, metalness: 0.1, clearcoat: 0.9, clearcoatRoughness: 0.12, envMapIntensity: 0.75,
     side: THREE.DoubleSide,
   });
-  const visor = new THREE.MeshStandardMaterial({
-    color: 0x0a0c10, roughness: 0.05, metalness: 0.7, envMapIntensity: 1.8,
+  const carbonMatt = new THREE.MeshStandardMaterial({
+    map: weave, color: 0x676b72, roughness: 0.6, metalness: 0.1, envMapIntensity: 0.55,
+    side: THREE.DoubleSide,
   });
-  const helmetMat = new THREE.MeshStandardMaterial({
-    color: 0xe8eaee, roughness: 0.14, metalness: 0.08, envMapIntensity: 1.3,
+  // DoubleSide, all the bodywork: from the driver's eyes you are INSIDE the
+  // tub looking at the back of its skin, and a one-sided skin seen from
+  // behind is a window (Adam: "i can see through the car").
+  const paint = new THREE.MeshPhysicalMaterial({
+    color: colour, roughness: 0.3, metalness: 0.2, clearcoat: 1.0, clearcoatRoughness: 0.06, envMapIntensity: 1.35,
+    side: THREE.DoubleSide,
   });
+  const paint2 = new THREE.MeshPhysicalMaterial({
+    color: (opts.livery && opts.livery.second) || 0xf2f2f2, roughness: 0.3, metalness: 0.2, clearcoat: 1.0, clearcoatRoughness: 0.06, envMapIntensity: 1.35,
+  });
+  if (opts.livery) applyLivery(paint, opts.livery);
+  // DoubleSide: from the cockpit you look DOWN the inside of the front tyres,
+  // and a single-sided wall there is a window (Adam: "i can see through my
+  // tires").
+  const rubber = new THREE.MeshStandardMaterial({
+    map: tyreTexture(opts.compound), roughness: 0.82, metalness: 0.0, envMapIntensity: 0.45,
+    side: THREE.DoubleSide,
+  });
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0x1d1e22, roughness: 0.34, metalness: 0.75, envMapIntensity: 1.1 });
+  const hubMat = new THREE.MeshStandardMaterial({
+    color: 0x15161a, roughness: 0.45, metalness: 0.5, envMapIntensity: 0.9, side: THREE.DoubleSide,
+  });
+  const nutMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.25, metalness: 0.95 });
+  const black = new THREE.MeshStandardMaterial({ color: 0x050607, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+  const visor = new THREE.MeshStandardMaterial({ color: 0x0a0c10, roughness: 0.05, metalness: 0.7, envMapIntensity: 1.8 });
+  const rainLight = new THREE.MeshStandardMaterial({ color: 0x2a0000, emissive: 0xff1a0a, emissiveIntensity: 1.4 });
+  const mirrorMat = new THREE.MeshStandardMaterial({ color: 0xb8c4d0, roughness: 0.02, metalness: 1, envMapIntensity: 2 });
 
   const add = (geo, mat, cast = true) => {
     const m = new THREE.Mesh(geo, mat);
@@ -305,176 +444,184 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
     g.add(m);
     return m;
   };
+  const at = (geo, x, y, z) => { geo.translate(x, y, z); return geo; };
+  const mirrors = [];
 
   // --- the body ------------------------------------------------------------
-  // Nose tip to tail in one skin: 7 cm round at the front, squared off through
-  // the monocoque, swelling over the engine and tapering to the exhaust.
-  const bodyRear = loft([
-    { x: -0.80, y: 0.378, w: 0.332, h: 0.292, n: 3.4 },
-    { x: -1.30, y: 0.378, w: 0.290, h: 0.274, n: 3.2 },
-    { x: -1.92, y: 0.358, w: 0.192, h: 0.192, n: 3.0 },
-    { x: -2.30, y: 0.330, w: 0.094, h: 0.094, n: 2.5 },
-  ], 26);
+  // The nose now runs all the way down to the wing (2022 rules), low and wide.
   const body = loft([
-    { x: 2.30, y: 0.190, w: 0.070, h: 0.052, n: 2.4 },
-    { x: 2.02, y: 0.200, w: 0.105, h: 0.078, n: 2.7 },
-    { x: 1.62, y: 0.225, w: 0.150, h: 0.115, n: 3.0 },
-    { x: 1.15, y: 0.265, w: 0.205, h: 0.160, n: 3.2 },
-    { x: 0.62, y: 0.305, w: 0.270, h: 0.205, n: 3.4 },
-    { x: 0.18, y: 0.330, w: 0.320, h: 0.232, n: 3.6 },
-    { x: -0.32, y: 0.342, w: 0.338, h: 0.245, n: 3.6 },
-    { x: -0.80, y: 0.378, w: 0.330, h: 0.290, n: 3.4 },
-  ], 26);
+    { x: 2.66, y: 0.165, w: 0.090, h: 0.048, n: 2.6 },
+    { x: 2.30, y: 0.190, w: 0.118, h: 0.068, n: 2.8 },
+    { x: 1.90, y: 0.215, w: 0.145, h: 0.098, n: 3.0 },
+    { x: 1.45, y: 0.250, w: 0.185, h: 0.140, n: 3.3 },
+    { x: 0.90, y: 0.295, w: 0.250, h: 0.190, n: 3.5 },
+    { x: 0.30, y: 0.330, w: 0.310, h: 0.228, n: 3.7 },
+    { x: -0.32, y: 0.342, w: 0.330, h: 0.245, n: 3.7 },
+    { x: -0.80, y: 0.378, w: 0.320, h: 0.290, n: 3.4 },
+  ], 32);
   add(body, paint);
-  // Behind the driver it is bare carbon, the way a real engine cover is under
-  // the livery. One gloss colour from nose to exhaust is what makes a model
-  // read as a toy.
-  add(bodyRear, carbon);
+  // Engine cover: livery on top, the shape dropping away hard behind the pods.
+  const bodyRear = loft([
+    { x: -0.80, y: 0.378, w: 0.322, h: 0.292, n: 3.4 },
+    { x: -1.30, y: 0.370, w: 0.270, h: 0.262, n: 3.2 },
+    { x: -1.85, y: 0.345, w: 0.170, h: 0.180, n: 3.0 },
+    { x: -2.30, y: 0.325, w: 0.080, h: 0.085, n: 2.5 },
+  ], 32);
+  add(bodyRear, paint);
 
-  // The airbox over the driver's head, and the fin behind it.
+  // Airbox over the driver's head, its intake a black hole rather than paint,
+  // the shark fin behind it, and the T-cam on top in the second colour.
   add(loft([
-    { x: -0.52, y: 0.60, w: 0.150, h: 0.125, n: 2.6 },
-    { x: -0.78, y: 0.64, w: 0.175, h: 0.150, n: 2.8 },
-    { x: -1.10, y: 0.60, w: 0.150, h: 0.120, n: 2.8 },
-    { x: -1.55, y: 0.52, w: 0.080, h: 0.065, n: 2.6 },
-  ], 18), paint);
-  const finGeo = new THREE.BoxGeometry(0.90, 0.30, 0.018);
-  finGeo.translate(-1.72, 0.50, 0);
-  add(finGeo, carbon);
+    { x: -0.50, y: 0.62, w: 0.140, h: 0.120, n: 2.8 },
+    { x: -0.78, y: 0.65, w: 0.170, h: 0.145, n: 3.0 },
+    { x: -1.12, y: 0.60, w: 0.145, h: 0.115, n: 2.9 },
+    { x: -1.60, y: 0.50, w: 0.070, h: 0.060, n: 2.6 },
+  ], 24), paint);
+  const intake = new THREE.CircleGeometry(1, 20);
+  intake.rotateY(Math.PI / 2); intake.scale(1, 0.095, 0.105);
+  add(at(intake, -0.495, 0.625, 0), black, false);
+  add(plate([[-0.95, 0.66], [-1.20, 0.80], [-1.95, 0.78], [-2.20, 0.52], [-1.60, 0.46]], 0.012, 0), carbon);
+  add(at(new THREE.BoxGeometry(0.10, 0.05, 0.075), -0.62, 0.795, 0), paint2);
 
-  // Sidepods: wide at the inlet, drawn in hard at the back. The "coke bottle"
-  // is the most recognisable curve on the car.
+  // SIDEPODS. Letterbox inlet high up, flat top ramping down to the floor at
+  // the back, and daylight under the front of it — the undercut, which is the
+  // shape every 2022+ car is recognised by.
   for (const side of [1, -1]) {
     add(loft([
-      { x: 0.52, y: 0.300, z: side * 0.60, w: 0.085, h: 0.170, n: 2.8 },
-      { x: 0.20, y: 0.315, z: side * 0.70, w: 0.190, h: 0.225, n: 3.2 },
-      { x: -0.30, y: 0.325, z: side * 0.735, w: 0.235, h: 0.250, n: 3.4 },
-      { x: -0.85, y: 0.315, z: side * 0.680, w: 0.205, h: 0.230, n: 3.2 },
-      { x: -1.35, y: 0.295, z: side * 0.520, w: 0.120, h: 0.165, n: 3.0 },
-      { x: -1.78, y: 0.280, z: side * 0.390, w: 0.045, h: 0.085, n: 2.6 },
-    ], 20), paint);
-    // The inlet itself, dark and recessed.
-    const inletGeo = new THREE.CylinderGeometry(0.115, 0.115, 0.05, 14);
-    inletGeo.rotateZ(Math.PI / 2);
-    inletGeo.translate(0.54, 0.305, side * 0.60);
-    add(inletGeo, carbonMatt);
+      { x: 0.64, y: 0.455, z: side * 0.585, w: 0.150, h: 0.090, n: 5.0 },
+      { x: 0.35, y: 0.420, z: side * 0.660, w: 0.225, h: 0.140, n: 4.6 },
+      { x: -0.15, y: 0.405, z: side * 0.680, w: 0.235, h: 0.155, n: 4.2 },
+      { x: -0.65, y: 0.360, z: side * 0.610, w: 0.205, h: 0.140, n: 3.8 },
+      { x: -1.15, y: 0.300, z: side * 0.470, w: 0.125, h: 0.105, n: 3.2 },
+      { x: -1.62, y: 0.255, z: side * 0.335, w: 0.050, h: 0.060, n: 2.6 },
+    ], 28), paint);
+    // the inlet mouth
+    add(at(new THREE.BoxGeometry(0.012, 0.15, 0.27), 0.640, 0.455, side * 0.585), black, false);
+    // MIRRORS, where a driver can see them: either side of the cockpit, just
+    // inside the field of view from the driver's eyes. The glass is its own
+    // mesh, facing back at the driver, so the renderer can put a real
+    // reflection in it (render.js, _carMirrors).
+    add(rod([0.46, 0.55, side * 0.28], [0.36, 0.625, side * 0.41], 0.010, 0.6), carbon);
+    add(at(new THREE.BoxGeometry(0.06, 0.065, 0.15), 0.37, 0.635, side * 0.44), paint);
+    const glass = new THREE.PlaneGeometry(0.13, 0.05);
+    glass.rotateY(-Math.PI / 2 - side * 0.28);   // faces back, turned in toward the driver
+    const gm = add(at(glass, 0.338, 0.635, side * 0.44), mirrorMat, false);
+    gm.name = side > 0 ? 'mirror.R' : 'mirror.L';
+    gm.userData.mirror = side;
+    mirrors.push(gm);
   }
 
-  // Floor and the edge wing along it.
+  // Floor: the whole underside, with its edge wing and a fence line.
   const floor = new THREE.Shape();
-  floor.moveTo(1.55, 0.30); floor.lineTo(0.55, 0.78); floor.lineTo(-1.10, 0.86);
-  floor.lineTo(-1.95, 0.62); floor.lineTo(-2.10, 0.0);
-  floor.lineTo(-1.95, -0.62); floor.lineTo(-1.10, -0.86); floor.lineTo(0.55, -0.78);
+  floor.moveTo(1.55, 0.30); floor.lineTo(0.55, 0.80); floor.lineTo(-1.10, 0.88);
+  floor.lineTo(-1.95, 0.64); floor.lineTo(-2.10, 0.0);
+  floor.lineTo(-1.95, -0.64); floor.lineTo(-1.10, -0.88); floor.lineTo(0.55, -0.80);
   floor.lineTo(1.55, -0.30); floor.lineTo(1.55, 0.30);
-  const floorGeo = new THREE.ExtrudeGeometry(floor, { depth: 0.035, bevelEnabled: false });
+  const floorGeo = new THREE.ExtrudeGeometry(floor, { depth: 0.03, bevelEnabled: false });
   floorGeo.rotateX(-Math.PI / 2);
-  floorGeo.translate(0, 0.055, 0);
+  floorGeo.translate(0, 0.05, 0);
   add(floorGeo, carbon);
+  for (const side of [1, -1]) {
+    // the edge wing curling up at the floor's outer lip
+    add(rod([0.40, 0.10, side * 0.80], [-1.05, 0.10, side * 0.88], 0.022, 0.35), carbon);
+  }
 
   // --- wings ---------------------------------------------------------------
-  // Front: two elements, tips curled up, on endplates.
-  const at = (geo, x, y, z) => { geo.translate(x, y, z); return geo; };
-  // Collected so the renderer can stop drawing a wing the car has lost.
   const wings = { front: [], rear: [] };
-  // Four elements, stacked and stepped back, which is what a modern front wing
-  // is. Two thin blades read as a placeholder from any angle that matters.
+  // Four elements. The flaps rise outboard and meet the endplate high; that
+  // sweep is the one line on a modern front wing everyone recognises.
   wings.front.push(
-    add(at(wing(0.96, 0.40, 0.055, 0.060, -0.16, 0.080), 2.50, 0.100, 0), carbon),
-    add(at(wing(0.95, 0.30, 0.048, 0.055, -0.22, 0.082), 2.34, 0.160, 0), carbon),
-    add(at(wing(0.93, 0.24, 0.042, 0.050, -0.28, 0.080), 2.22, 0.215, 0), paint),
-    add(at(wing(0.90, 0.18, 0.036, 0.045, -0.34, 0.076), 2.12, 0.262, 0), carbon));
-  // the two pylons hanging the nose off the wing
+    add(at(wing(0.99, 0.46, 0.034, 0.030, -0.10, 0.030), 2.53, 0.085, 0), carbon),
+    add(at(wing(0.97, 0.26, 0.030, 0.030, -0.30, 0.100), 2.40, 0.140, 0), paint),
+    add(at(wing(0.95, 0.20, 0.026, 0.025, -0.40, 0.150), 2.31, 0.185, 0), carbon),
+    add(at(wing(0.92, 0.15, 0.022, 0.020, -0.50, 0.185), 2.23, 0.225, 0), paint2));
   for (const side of [1, -1]) {
-    add(at(new THREE.BoxGeometry(0.34, 0.20, 0.030), 2.18, 0.20, side * 0.11), carbon);
-  }
-  for (const side of [1, -1]) {
-    // Aligned with the wing it is bolted to, not floating behind it.
-    wings.front.push(
-      add(at(new THREE.BoxGeometry(0.68, 0.34, 0.024), 2.34, 0.185, side * 0.975), paint),
-      add(at(new THREE.BoxGeometry(0.26, 0.11, 0.02), 2.56, 0.335, side * 0.935), carbon));
+    wings.front.push(add(plate([[2.82, 0.05], [2.22, 0.05], [2.16, 0.16], [2.24, 0.40],
+      [2.44, 0.44], [2.64, 0.31], [2.80, 0.18]], 0.014, side * 0.985), paint));
   }
 
-  // Rear: main plane and a DRS flap that really opens, on a swan neck.
+  // Rear: main plane and a DRS flap that really opens, endplates that roll
+  // over into the wing tips, a beam wing below, swan necks, a rain light.
   const drs = add(at(wing(0.50, 0.19, 0.028, 0.045, 0, 0), -2.60, 0.945, 0), carbon);
-  wings.rear.push(add(at(wing(0.52, 0.30, 0.036, 0.05, 0, 0), -2.44, 0.845, 0), carbon), drs);
+  wings.rear.push(add(at(wing(0.52, 0.30, 0.036, 0.05, 0, 0), -2.44, 0.845, 0), paint), drs);
   for (const side of [1, -1]) {
-    wings.rear.push(add(at(new THREE.BoxGeometry(0.58, 0.44, 0.02), -2.50, 0.83, side * 0.53), paint));
+    wings.rear.push(add(plate([[-2.22, 0.58], [-2.25, 0.92], [-2.34, 1.01], [-2.62, 1.03],
+      [-2.77, 0.97], [-2.81, 0.70], [-2.70, 0.56]], 0.018, side * 0.53), paint));
+    add(rod([-2.10, 0.40, side * 0.07], [-2.40, 0.80, side * 0.07], 0.016, 0.5), carbon);
   }
-  add(loft([
-    { x: -1.95, y: 0.44, w: 0.045, h: 0.085, n: 2.6 },
-    { x: -2.25, y: 0.66, w: 0.040, h: 0.075, n: 2.6 },
-    { x: -2.44, y: 0.80, w: 0.035, h: 0.060, n: 2.6 },
-  ], 12), carbon);
-  add(at(wing(0.42, 0.20, 0.03, 0.04, 0, 0), -2.30, 0.38, 0), carbon);
+  add(at(wing(0.42, 0.18, 0.028, 0.035, 0, 0.02), -2.30, 0.380, 0), carbon);
+  add(at(wing(0.40, 0.13, 0.022, 0.030, 0, 0.02), -2.42, 0.445, 0), carbon);
+  add(at(new THREE.BoxGeometry(0.03, 0.05, 0.12), -2.335, 0.33, 0), rainLight, false);
 
   // --- halo, cockpit, driver ----------------------------------------------
-  const halo = new THREE.TorusGeometry(0.40, 0.032, 10, 26, Math.PI * 1.08);
-  halo.rotateY(Math.PI / 2);
-  halo.rotateZ(-Math.PI / 2 - 0.54);
-  add(at(halo, -0.22, 0.60, 0), carbonMatt);
-  add(at(new THREE.CylinderGeometry(0.030, 0.038, 0.30, 8), 0.36, 0.50, 0), carbonMatt);
-  // roll hoop behind the airbox intake
-  add(at(new THREE.TorusGeometry(0.16, 0.028, 8, 16, Math.PI), -0.56, 0.60, 0), carbonMatt);
+  add(tube([[-0.58, 0.56, 0.26], [-0.40, 0.72, 0.30], [-0.05, 0.765, 0.26], [0.20, 0.77, 0.10],
+    [0.23, 0.77, 0], [0.20, 0.77, -0.10], [-0.05, 0.765, -0.26], [-0.40, 0.72, -0.30], [-0.58, 0.56, -0.26]], 0.026), carbon);
+  add(tube([[0.23, 0.77, 0], [0.32, 0.66, 0], [0.42, 0.53, 0]], 0.028), carbon);
+  // cockpit opening: a black rim so it reads as a hole with a driver in it
+  const rimGeo2 = new THREE.TorusGeometry(1, 0.03, 6, 24);
+  rimGeo2.rotateX(Math.PI / 2); rimGeo2.scale(0.34, 1, 0.24);
+  // Hidden in first person (render.js): from the driver's eyes this ring sat
+  // right in front of you like a steering wheel, and Adam drives with a real
+  // one in exactly that place.
+  const cockpitRim = add(at(rimGeo2, -0.26, 0.585, 0), black, false);
 
-  const headGeo = new THREE.SphereGeometry(0.135, 16, 12);
+  const headGeo = new THREE.SphereGeometry(0.135, 20, 14);
   headGeo.scale(1.12, 1, 0.94);
-  add(at(headGeo, -0.30, 0.575, 0), helmetMat);
+  const head = [add(at(headGeo, -0.30, 0.595, 0), paint2)];
   const visGeo = new THREE.SphereGeometry(0.137, 16, 10, -0.6, 1.2, 0.9, 0.7);
   visGeo.rotateY(Math.PI / 2);
   visGeo.scale(1.12, 1, 0.94);
-  add(at(visGeo, -0.30, 0.575, 0), visor);
+  head.push(add(at(visGeo, -0.30, 0.595, 0), visor));
 
   // --- suspension ----------------------------------------------------------
-  // Aerofoil-section wishbones, which is what they really are.
-  const armGeo = new THREE.BoxGeometry(0.78, 0.022, 0.055);
+  // Real geometry: each wishbone runs from two pick-ups on the chassis to one
+  // on the upright, plus a pushrod. They used to be free-floating sticks.
+  const R = 0.36;
   for (const side of [1, -1]) {
-    for (const [ax, zo] of [[1.80, 0.85], [-1.80, 0.80]]) {
-      for (const [dy, tilt] of [[0.12, 0.10], [0.30, -0.08]]) {
-        const arm = armGeo.clone();
-        arm.rotateZ(tilt);
-        arm.rotateY(side * 0.30);
-        add(at(arm, ax - 0.42, 0.20 + dy, side * (zo - 0.30)), carbonMatt);
-      }
+    for (const [ax, hubZ, chZ, chY0] of [[1.80, 0.80, 0.16, 0.20], [-1.80, 0.72, 0.26, 0.20]]) {
+      const hz = side * (hubZ - 0.08);
+      // lower wishbone (two legs), upper wishbone (two legs), pushrod
+      add(rod([ax + 0.24, chY0, side * chZ], [ax, R - 0.10, hz]), carbonMatt);
+      add(rod([ax - 0.24, chY0, side * chZ], [ax, R - 0.10, hz]), carbonMatt);
+      add(rod([ax + 0.20, chY0 + 0.15, side * (chZ + 0.02)], [ax - 0.02, R + 0.10, hz]), carbonMatt);
+      add(rod([ax - 0.22, chY0 + 0.15, side * (chZ + 0.02)], [ax - 0.02, R + 0.10, hz]), carbonMatt);
+      add(rod([ax - 0.05, R - 0.08, hz], [ax - 0.40 * Math.sign(ax), chY0 + 0.26, side * (chZ - 0.04)], 0.014, 0.9), carbonMatt);
     }
   }
 
   // --- wheels --------------------------------------------------------------
-  // EACH FRONT WHEEL GETS ITS OWN PIVOT, at its own hub. See the note at the
-  // top: one shared group rotating about the car's centre is what made the
-  // whole axle appear to swing.
-  const R = 0.36;
-  const tyreF = tyre(R, 0.305), tyreR = tyre(R, 0.405);
-  // The rim has to fit inside the tyre's BEAD, not inside its tread. The tyre
-  // profile pinches to 55% of its width at the bore, so a rim as wide as the
-  // tread pokes straight out through the sidewall — which is what the first
-  // render showed, a bright cylinder sticking out of each wheel.
-  // R * 0.585, not R * 0.545. The tyre's bore is at R * 0.58, so a rim any
-  // narrower leaves a 13 mm annular gap all the way round the bead — and you
-  // can see straight through the wheel. It has to overlap the bead, not meet
-  // it.
-  const BORE = R * 0.585;
+  // 18-inch rims since 2022: the tyre wall is far shallower than it was. A
+  // wheel COVER on the outside, a ring of paint on it, and the wheel nut.
+  const RIMK = 0.64;
+  const tyreF = tyre(R, 0.305, RIMK), tyreR = tyre(R, 0.405, RIMK);
+  const BORE = R * (RIMK + 0.005);
   const rimGeo = (width) => {
-    const w = width * 0.55;
-    const g = new THREE.CylinderGeometry(BORE, BORE, w, 22);
-    g.rotateX(Math.PI / 2);
-    return g;
+    const gg = new THREE.CylinderGeometry(BORE, BORE, width * 0.55, 28, 1, true);
+    gg.rotateX(Math.PI / 2);
+    return gg;
   };
   const faceGeo = (width, side) => {
-    const g = new THREE.CircleGeometry(BORE, 22);
-    g.rotateY(side > 0 ? 0 : Math.PI);
-    g.translate(0, 0, side * width * 0.275);
-    return g;
+    const gg = new THREE.CircleGeometry(BORE, 28);
+    gg.rotateY(side > 0 ? 0 : Math.PI);
+    gg.translate(0, 0, side * width * 0.275);
+    return gg;
+  };
+  const ringGeo = (width, side) => {
+    const gg = new THREE.RingGeometry(BORE * 0.70, BORE * 0.80, 28);
+    gg.rotateY(side > 0 ? 0 : Math.PI);
+    gg.translate(0, 0, side * (width * 0.275 + 0.002));
+    return gg;
+  };
+  const nutGeo = (width, side) => {
+    const gg = new THREE.CylinderGeometry(0.035, 0.04, 0.03, 12);
+    gg.rotateX(Math.PI / 2);
+    gg.translate(0, 0, side * (width * 0.275 + 0.012));
+    return gg;
   };
   const rimF = rimGeo(0.305), rimR = rimGeo(0.405);
 
-  // `hubs` is every wheel's own pivot, exported so the renderer can move each
-  // one in its arch: physics.js gives 60 mm of real suspension travel per
-  // corner and a wheel that does not move in its arch is the giveaway that a
-  // car is a rigid prop.
   const wheels = {}, steer = {}, hubs = {};
-  // +Z is the car's RIGHT — see the handedness note in geom.js. The old model
-  // called the wheel at +Z "fl", which was harmless while they were identical
-  // cylinders and is not once they steer by different amounts.
+  // +Z is the car's RIGHT — see the handedness note in geom.js.
   for (const [key, ax, zo, tg, rg] of [
     ['fr', 1.80, 0.85, tyreF, rimF], ['fl', 1.80, -0.85, tyreF, rimF],
     ['rr', -1.80, 0.80, tyreR, rimR], ['rl', -1.80, -0.80, tyreR, rimR],
@@ -484,9 +631,12 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
     const w = new THREE.Mesh(tg, rubber);
     w.castShadow = true;
     w.add(new THREE.Mesh(rg, rimMat));
-    // A wheel face each side, or you look straight through the hub.
     const width = key[0] === 'f' ? 0.305 : 0.405;
-    for (const sd of [1, -1]) w.add(new THREE.Mesh(faceGeo(width, sd), hubMat));
+    for (const sd of [1, -1]) {
+      w.add(new THREE.Mesh(faceGeo(width, sd), hubMat));
+      w.add(new THREE.Mesh(ringGeo(width, sd), paint2));
+      w.add(new THREE.Mesh(nutGeo(width, sd), nutMat));
+    }
     hub.add(w);
     g.add(hub);
     wheels[key] = w; hubs[key] = hub;
@@ -520,8 +670,8 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
   });
   const stickers = [
     // sidepod flanks — the biggest flat panel on the car
-    [livery.cells.podL, [-0.30, 0.36, 0.985], [0.95, 0.20], [0, 0.12, 1], [1, 0, 0]],
-    [livery.cells.podR, [-0.30, 0.36, -0.985], [0.95, 0.20], [0, 0.12, -1], [-1, 0, 0]],
+    [livery.cells.podL, [-0.18, 0.40, 0.915], [0.80, 0.16], [0, 0.10, 1], [1, 0, 0]],
+    [livery.cells.podR, [-0.18, 0.40, -0.915], [0.80, 0.16], [0, 0.10, -1], [-1, 0, 0]],
     // engine cover, read from behind
     [livery.cells.cover, [-1.05, 0.655, 0], [0.80, 0.17], [0, 1, 0], [0, 0, 1]],
     // rear wing, also read from behind
@@ -577,7 +727,7 @@ export function buildCar(look, colour = 0xd8352a, chassis = null) {
 
   // Where the driver's eyes are, for the first-person camera. A single-seater
   // sits low and far back, behind the halo.
-  return { group: g, wheels, steer, hubs, drs, R, wings, eye: [-0.22, 0.95, 0], decalMat, numMat };
+  return { group: g, wheels, steer, hubs, drs, R, wings, eye: [-0.20, 0.80, 0], decalMat, numMat, paint2, paint, mirrors, head, cockpitRim };
 }
 
 // ---------------------------------------------------------------------------
