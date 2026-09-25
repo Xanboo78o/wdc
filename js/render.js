@@ -528,7 +528,6 @@ export class View {
     // What first person hides: your own head, and the cockpit rim that read
     // as a steering wheel in front of Adam's real one.
     this.fpHide = [...(car.head || []), ...(car.cockpitRim ? [car.cockpitRim] : [])];
-    this.haloMat = car.haloMat || null;
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
     // HEADLIGHTS (Adam: "gimme headlights"). The sky runs on the real clock, so
     // an evening session is a night race. Two spotlights from the nose, aimed a
@@ -1362,7 +1361,7 @@ export class View {
       // "i need to sit higher bc thats how my rig is": his rig seats him
       // upright with the wheel in front of him, so the eye is at the halo's
       // height (car.js eye), not slumped under it.
-      { name: 'ONBOARD', kind: 'bolted', at: this.carEye || [-0.34, 1.19, 0], aim: 24, fov: 62, kick: 0.55, roll: 0.55 },
+      { name: 'ONBOARD', kind: 'bolted', at: this.carEye || [-0.34, 1.19, 0], aim: 24, drop: this.carEye ? 1.1 : 0.22, fov: 62, kick: 0.55, roll: 0.55 },
       { name: 'CHASE', kind: 'chase', dist: 5.6, height: 1.66, lead: 13, fov: 55, kick: 1 },
       { name: 'NOSE', kind: 'bolted', at: [1.62, 0.46, 0], aim: 26, fov: 62, kick: 0.8, roll: 0.85 },
       { name: 'TV', kind: 'tv', fov: 40, kick: 0 },
@@ -1399,20 +1398,11 @@ export class View {
     let fov = rig.fov;
     const fp = rig.name === 'ONBOARD' && !!this.carEye;
     if (this.fpHide) for (const m of this.fpHide) m.visible = !fp;
-    // The halo, seen through from the cockpit: a faint ghost of itself, so
-    // you know it is there and the road behind it is not hidden.
-    if (this.haloMat && this.haloMat.userData.fp !== fp) {
-      this.haloMat.userData.fp = fp;
-      this.haloMat.transparent = fp;
-      this.haloMat.opacity = fp ? 0.18 : 1;
-      this.haloMat.depthWrite = !fp;
-      this.haloMat.needsUpdate = true;
-    }
     if (rig.kind === 'bolted') {
       // Read the camera's world placement off the car itself, so it inherits
       // yaw, pitch, roll and the banked height for free.
       this.camMount.position.set(rig.at[0], rig.at[1], rig.at[2]);
-      this.camTarget.position.set(rig.at[0] + rig.aim, rig.at[1] - 0.22, 0);
+      this.camTarget.position.set(rig.at[0] + rig.aim, rig.at[1] - (rig.drop ?? 0.22), 0);
       this.car.updateWorldMatrix(true, false);
       this.camMount.getWorldPosition(this._v0);
       this.camTarget.getWorldPosition(this._v1);
