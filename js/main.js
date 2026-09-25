@@ -11,6 +11,8 @@ import { CARS, makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor, registerAero
 import { makeAero } from './aero.js';
 import { Hands, steerLock } from './input.js';
 import { FFB } from './ffb.js';
+import { Engineer } from './engineer.js';
+import { startRadio, ptt, say } from './radio.js';
 import { View } from './render.js';
 import { loadEnv } from './env.js';
 import { resolveBarrier } from './collide.js';
@@ -47,6 +49,8 @@ const state = {
 };
 const hands = new Hands();
 const ffb = new FFB();
+// The pit wall (js/engineer.js) and the radio it talks through (js/radio.js).
+const engineer = new Engineer({ say });
 // the phone steers while it is live; keys and pedals are untouched
 // (the phone used to steer here; a real wheel comes in through input.js)
 
@@ -434,6 +438,7 @@ function startSlot(grid) {
 
 async function start() {
   menuLive = false;
+  startRadio({ engineer });
   setField(fieldFor());
   hands.endFrame();
   $('menu').classList.add('hidden');
@@ -1047,6 +1052,13 @@ function loop(now) {
     state.invalid = false;
   }
   ffb.update(car, rough, frame);   // the wheel pushes back (tools/ffb.py)
+  // Team radio: hold the rim's RADIO button (or T) to talk; the engineer
+  // watches the race every frame and calls what the strategy calls.
+  ptt(hands.wheelHeld('radio'));
+  if (state.race) {
+    if (engineer.race !== state.race) engineer.begin(state.race);
+    engineer.tick(frame);
+  }
   if (state.quali) qualiTick(frame);
   // The road's wetness is the physics' grip (and the bots' plan) next frame.
   if (view.wx) setWetness(view.wx.wetness || 0);

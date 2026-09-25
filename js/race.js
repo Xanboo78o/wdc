@@ -577,7 +577,11 @@ export class Race {
       // the one line of it the session owns, and it owns it only because
       // nothing else iterates the field.
       if (racing && !e.finished && this.pits) {
-        if (!e.isPlayer && !e.pitRequest && e.pitPhase !== 'service' && shouldPit(car)) {
+        // Their engineers call it on TYRES too, not only damage: past 0.8 wear
+        // with two or more laps left to use a fresh set (Adam, 2026-09-25:
+        // "bots also have a simulated radio engineer, like they strategize pits").
+        const worn = car.tyre && Math.max(car.tyre.wf, car.tyre.wr) > 0.8 && this.laps - e.lap >= 2;
+        if (!e.isPlayer && !e.pitRequest && e.pitPhase !== 'service' && (shouldPit(car) || worn)) {
           e.pitRequest = true;
           this.log('flag', `${e.name} WILL PIT`, e);
         }
