@@ -1163,6 +1163,25 @@ function hud(over, rough) {
   const { car, peak } = state;
   $('spd').textContent = Math.round(car.speed * 3.6);
   $('gLat').textContent = Math.abs(car.gLat).toFixed(1);
+  // The dash: gear and fifteen rev lights — five green, five red, five blue —
+  // lighting over the top half of the rev range and flashing blue at the
+  // shift point, the way a real wheel's LEDs do.
+  const box = state.box;
+  $('gear').textContent = car.selector < 0 ? 'R' : box ? box.gear + 1 : 'N';
+  const revs = $('revs');
+  if (!revs.childElementCount) revs.innerHTML = '<i></i>'.repeat(15);
+  if (box && box.box) {
+    const { idle, shiftUp } = box.box;
+    const f = (box.rpm - (idle + (shiftUp - idle) * 0.45)) / ((shiftUp - idle) * 0.55);
+    const lit = Math.max(0, Math.min(15, Math.round(f * 15)));
+    const over = box.rpm >= shiftUp - 60;
+    const blink = over && (performance.now() % 160) < 80;
+    if (revs._lit !== lit || revs._blink !== blink) {
+      revs._lit = lit; revs._blink = blink;
+      revs.classList.toggle('flash', blink);
+      [...revs.children].forEach((el, i) => { el.className = i < lit && !over ? (i < 5 ? 'g' : i < 10 ? 'r' : 'b') : ''; });
+    }
+  }
   $('pedT').style.width = (car.throttle * 100).toFixed(0) + '%';
   $('pedB').style.width = (car.brake * 100).toFixed(0) + '%';
 
@@ -1232,10 +1251,7 @@ function setPaused(on) {
   if (on) state.menuAt = 0;
   if (!_menuBox) {
     _menuBox = document.createElement('div');
-    _menuBox.id = 'pauseMenu';
-    _menuBox.style.cssText = 'position:fixed;inset:0;z-index:120;display:flex;align-items:center;'
-      + 'justify-content:center;background:color-mix(in srgb,var(--bg) 72%,transparent);backdrop-filter:blur(3px);'
-      + 'font:16px/2.1 ui-monospace,monospace;color:var(--ink)';
+    _menuBox.id = 'pauseMenu';     // styled in style.css, like the main menu
     document.body.appendChild(_menuBox);
   }
   _menuBox.style.display = on ? 'flex' : 'none';
@@ -1244,13 +1260,9 @@ function setPaused(on) {
 function drawMenu() {
   if (!_menuBox) return;
   const items = MENU_ITEMS();
-  _menuBox.innerHTML = '<div style="min-width:320px;padding:22px 26px;border:1px solid var(--line);'
-    + 'border-radius:10px;background:color-mix(in srgb,var(--bg) 92%,transparent)">'
-    + '<div style="letter-spacing:.2em;color:var(--dim);font-size:12px;margin-bottom:14px">PAUSED</div>'
-    + items.map(([label], i) => `<div style="padding:2px 10px;border-radius:5px;${i === state.menuAt
-        ? 'background:var(--pri);color:var(--onpri);font-weight:700' : ''}">${i === state.menuAt ? '\u203a ' : '\u00a0\u00a0'}${label}</div>`).join('')
-    + '<div style="margin-top:16px;color:var(--dim);font-size:11px;letter-spacing:.1em">'
-    + 'D-PAD MOVE &middot; START SELECT &middot; HOME CLOSE</div></div>';
+  _menuBox.innerHTML = '<div class="pbox"><div class="ph">PAUSED</div>'
+    + items.map(([label], i) => `<div class="pi${i === state.menuAt ? ' on' : ''}">${label}</div>`).join('')
+    + '<div class="pk">D-PAD MOVE &middot; START SELECT &middot; HOME CLOSE</div></div>';
 }
 function moveMenu(d) {
   const n = MENU_ITEMS().length;

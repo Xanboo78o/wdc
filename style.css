@@ -104,98 +104,134 @@ canvas#cv{position:fixed;inset:0;width:100%;height:100%;display:block}
 }
 
 /* ---------------- HUD ---------------- */
+/* Broadcast graphics, not boxes: slanted plates, tabular numbers, the team's
+   colour as the accent. Everything is readable against a sunlit hoarding,
+   which is why the plates are near-opaque. */
 #hud{position:fixed;inset:0;z-index:10;pointer-events:none;
-  font-variant-numeric:tabular-nums;text-shadow:0 1px 3px rgba(0,0,0,.65)}
+  font-variant-numeric:tabular-nums;--plate:color-mix(in srgb,var(--bg) 86%,transparent)}
 #hud > div{position:absolute}
+.plate{background:var(--plate)}
 
-#topleft{top:18px;left:20px}
-.circuit{font-size:15px;letter-spacing:.12em;font-weight:700}
-.carline{font-size:11px;letter-spacing:.1em;color:var(--dim);margin-top:3px}
+/* circuit + car: a title card that fades once the session is under way */
+#topleft{top:18px;left:22px;padding:8px 18px 8px 14px;background:var(--plate);
+  clip-path:polygon(0 0,100% 0,calc(100% - 10px) 100%,0 100%);border-left:4px solid var(--pri);
+  animation:hudFade 1s 6s forwards}
+@keyframes hudFade{to{opacity:0}}
+.circuit{font:italic 900 15px/1.1 var(--font);letter-spacing:.1em;text-transform:uppercase}
+.carline{font-size:10px;letter-spacing:.14em;color:var(--dim);margin-top:3px}
 
-#times{top:18px;right:20px;min-width:212px;
-  background:color-mix(in srgb,var(--bg) 62%,transparent);border:1px solid var(--line);border-radius:9px;padding:10px 13px}
+/* the lap timer, top right */
+#times{top:18px;right:22px;min-width:220px;padding:10px 16px 10px 22px;background:var(--plate);
+  clip-path:polygon(10px 0,100% 0,100% 100%,0 100%);border-top:3px solid var(--pri)}
 #times .row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
-  font-size:11px;letter-spacing:.14em;color:var(--dim);padding:2px 0}
-#times .row em{font-style:normal;font-size:14px;color:var(--ink);letter-spacing:.02em}
-#times .big em{font-size:21px;font-weight:700}
+  font-size:10px;letter-spacing:.2em;color:var(--dim);font-weight:700;padding:1px 0}
+#times .row em{font-style:normal;font-size:14px;color:var(--ink);letter-spacing:.02em;font-weight:600}
+#times .lapline span b{color:var(--ink)}
+#times .big em{font:italic 800 30px/1.05 var(--font);letter-spacing:0;color:var(--ink)}
 #times .big em.bad{color:var(--bad)}
 #times .best em{color:var(--sec)}
+#times .row.pos{margin-bottom:4px}
+#times .row.pos em{font:italic 900 30px/1 var(--font);color:var(--pri)}
 
-#slip{left:20px;bottom:20px;width:298px;
-  background:color-mix(in srgb,var(--bg) 62%,transparent);border:1px solid var(--line);border-radius:9px;padding:11px 13px}
-.sliphead{font-size:10px;letter-spacing:.22em;color:var(--dim);margin-bottom:9px}
-.sliphead i{float:right;font-style:normal;color:#5d6675;letter-spacing:.08em}
+/* tyres, bottom left */
+#slip{left:22px;bottom:22px;width:250px;padding:10px 18px 10px 14px;background:var(--plate);
+  clip-path:polygon(0 0,100% 0,calc(100% - 12px) 100%,0 100%)}
+.sliphead{font-size:10px;letter-spacing:.24em;color:var(--dim);font-weight:700;margin-bottom:7px}
+.sliphead i{float:right;font-style:normal;letter-spacing:.08em;font-weight:400}
 .sliprow{display:flex;align-items:center;gap:9px;margin:5px 0}
-.sliprow span{width:42px;font-size:9.5px;letter-spacing:.16em;color:var(--dim)}
-.sliprow em{width:42px;text-align:right;font-style:normal;font-size:12px}
-.sliprow .track{position:relative;flex:1;height:9px;background:#191e26;border-radius:5px;overflow:hidden}
-.sliprow .track i{position:absolute;inset:0 auto 0 0;width:0;background:var(--good);
-  border-radius:5px;transition:background .1s}
+.sliprow span{width:12px;font-size:10px;font-weight:800;color:var(--dim)}
+.sliprow em{width:40px;text-align:right;font-style:normal;font-size:12px}
+.sliprow .track{position:relative;flex:1;height:8px;background:color-mix(in srgb,var(--ink) 10%,transparent);overflow:hidden;
+  transform:skewX(-14deg)}
+.sliprow .track i{position:absolute;inset:0 auto 0 0;width:0;background:var(--good);transition:background .1s}
 /* The peak marker sits at 1/1.4 of the bar, matching the HUD scale in main.js.
    These two numbers MUST move together — when the marker sat at 41.6% the bar
    read as half-full at the exact moment the tyre was at its limit. */
-.sliprow .track u{position:absolute;top:-2px;bottom:-2px;left:71.4%;width:2px;background:#e8eaee;opacity:.75}
-.tyretemp{margin-top:9px;font-size:10px;letter-spacing:.14em;color:var(--dim)}
+.sliprow .track u{position:absolute;top:0;bottom:0;left:71.4%;width:2px;background:var(--ink);opacity:.8}
+.tyretemp{margin-top:7px;font-size:10px;letter-spacing:.12em;color:var(--dim)}
 .tyretemp b{color:var(--ink)}
 
-#bottomright{right:20px;bottom:20px;text-align:right}
-.spd b{font-size:56px;font-weight:800;line-height:.92;letter-spacing:-.02em}
-.spd small,.glat small{font-size:10px;letter-spacing:.2em;color:var(--dim);margin-left:7px}
-.glat{margin-top:2px}
-.glat b{font-size:21px;font-weight:700}
-.pedals{margin-top:10px;width:172px;margin-left:auto}
-.ped{height:7px;background:#191e26;border-radius:4px;margin-top:4px;overflow:hidden}
-.ped i{display:block;height:100%;width:0;border-radius:4px}
+/* the dash, bottom centre: what is on a real wheel's screen */
+#dash{left:50%;bottom:20px;transform:translateX(-50%);width:340px;padding:10px 26px 10px;background:var(--plate);
+  clip-path:polygon(16px 0,calc(100% - 16px) 0,100% 100%,0 100%);text-align:center}
+.revs{display:flex;gap:4px;justify-content:center;margin-bottom:6px}
+.revs i{width:14px;height:6px;display:block;background:color-mix(in srgb,var(--ink) 12%,transparent);transform:skewX(-14deg)}
+.revs i.g{background:#3ddc6a;box-shadow:0 0 8px #3ddc6a}
+.revs i.r{background:#ff3b2f;box-shadow:0 0 8px #ff3b2f}
+.revs i.b{background:#4a8cff;box-shadow:0 0 8px #4a8cff}
+.revs.flash i{background:#4a8cff;box-shadow:0 0 10px #4a8cff}
+.dashrow{display:grid;grid-template-columns:1fr 70px 1fr;align-items:end}
+.spd{text-align:right}
+.spd b{font:italic 900 34px/0.95 var(--font);letter-spacing:-.02em}
+.spd small,.glat small{display:block;font-size:9px;letter-spacing:.24em;color:var(--dim);margin-top:2px}
+.gear{font:italic 900 52px/0.9 var(--font);color:var(--pri)}
+.glat{text-align:left}
+.glat b{font:italic 800 22px/1 var(--font)}
+.pedals{display:flex;gap:8px;margin-top:8px}
+.ped{flex:1;height:5px;background:color-mix(in srgb,var(--ink) 10%,transparent);overflow:hidden;transform:skewX(-14deg)}
+.ped i{display:block;height:100%;width:0}
+.ped.brake{direction:rtl}
 .ped.throttle i{background:var(--good)}
 .ped.brake i{background:var(--bad)}
-.lights{margin-top:9px;display:flex;gap:6px;justify-content:flex-end}
-.lights span{font-size:9.5px;letter-spacing:.16em;padding:3px 8px;border-radius:4px;
-  border:1px solid var(--line);color:var(--dim);background:color-mix(in srgb,var(--bg) 60%,transparent)}
-.lights span.on{color:var(--onpri);background:var(--pri);border-color:var(--pri)}
+.lights{margin-top:7px;display:flex;gap:6px;justify-content:center;min-height:16px}
+.lights span{font-size:9px;letter-spacing:.2em;font-weight:800;padding:2px 9px;
+  color:var(--dim);background:color-mix(in srgb,var(--ink) 8%,transparent);transform:skewX(-14deg)}
+.lights span.on{color:var(--onpri);background:var(--pri)}
 
 #msg{left:50%;top:15%;transform:translateX(-50%);
-  font-size:13px;letter-spacing:.24em;color:var(--warn)}
+  font:italic 900 15px/1 var(--font);letter-spacing:.24em;color:var(--warn);text-shadow:0 1px 6px rgba(0,0,0,.6)}
 
 /* ---------------- timing tower ---------------- */
 /* The tower is the race. Position, who is in front, and by how much — it is
-   the only part of the HUD that tells you whether you are winning. */
-/* Opaque enough to read a DNF against a bright trackside hoarding. At 60% the
-   grey of a retired row and the red of its DNF both washed out completely
-   wherever a sponsor board happened to be behind them. */
-#tower{top:64px;left:20px;width:242px;
-  background:color-mix(in srgb,var(--bg) 82%,transparent);border:1px solid var(--line);border-radius:9px;
-  padding:6px 7px;font-size:11px;letter-spacing:.06em}
-.trow{display:flex;align-items:center;gap:6px;padding:2px 3px;border-radius:4px;line-height:1.5}
-.trow.me{background:color-mix(in srgb,var(--pri) 20%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pri) 45%,transparent)}
+   the only part of the HUD that tells you whether you are winning. Opaque
+   enough to read a DNF against a bright trackside hoarding. */
+#tower{top:80px;left:22px;width:236px;padding:5px 0;background:var(--plate);
+  font-size:11px;letter-spacing:.06em;border-top:3px solid var(--pri)}
+.trow{display:flex;align-items:center;gap:7px;padding:1px 10px 1px 8px;line-height:1.55}
+.trow + .trow{box-shadow:inset 0 1px 0 color-mix(in srgb,var(--ink) 6%,transparent)}
+.trow.me{background:var(--pri);color:var(--onpri)}
+.trow.me b,.trow.me em{color:var(--onpri)}
 .trow.out{opacity:.5}
-.trow b{width:19px;text-align:right;color:var(--dim);font-weight:700;font-size:10.5px}
-.trow i{width:3px;height:12px;border-radius:2px;flex:none;display:block}
-.trow span{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:600}
-.trow em{font-style:normal;color:var(--dim);font-size:10px;min-width:44px;text-align:right}
+.trow b{width:18px;text-align:right;color:var(--dim);font:italic 800 11px/1 var(--font)}
+.trow i{width:4px;height:13px;flex:none;display:block;transform:skewX(-14deg)}
+.trow span{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:700}
+.trow em{font-style:normal;color:var(--dim);font-size:10px;min-width:48px;text-align:right}
 .trow em.pit{color:var(--warn)}
 .trow em.dnf{color:var(--bad)}
-
 
 /* ---------------- start lights ---------------- */
 body.mirror #startLights,body.mirror #msg{top:calc(min(34vw,560px) / 4.2 + 26px)}
 #startLights{left:50%;top:13%;transform:translateX(-50%);display:flex;gap:12px;
-  padding:12px 16px;background:rgba(6,8,11,.66);border:1px solid #23282f;border-radius:12px}
+  padding:12px 20px;background:var(--plate);clip-path:polygon(12px 0,calc(100% - 12px) 0,100% 100%,0 100%)}
 #startLights i{width:30px;height:30px;border-radius:50%;background:#1b1f26;
   box-shadow:inset 0 0 0 2px #262c34;display:block}
 #startLights i.on{background:#ff2a18;box-shadow:0 0 22px rgba(255,42,24,.75),inset 0 0 0 2px #ff6a58}
 
 /* ---------------- results ---------------- */
 #results{gap:18px}
-#resTable{width:100%;max-width:560px;max-height:52vh;overflow:auto;
-  background:color-mix(in srgb,var(--ink) 5%,var(--bg));border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-#resTable .trow{font-size:12.5px;padding:3px 4px}
-#resTable .trow em{min-width:78px}
+#resTable{width:100%;max-width:600px;max-height:56vh;overflow:auto;padding:6px 0;
+  background:color-mix(in srgb,var(--ink) 4%,var(--bg));border-top:4px solid var(--pri)}
+#resTable .trow{font-size:13px;padding:4px 14px 4px 10px}
+#resTable .trow em{min-width:84px}
 
-#times .row.pos em{font-size:26px;font-weight:800;color:var(--pri)}
+/* ---------------- pause menu ---------------- */
+/* Same language as the main menu: one list, the chosen row in team colour. */
+#pauseMenu{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;
+  background:color-mix(in srgb,var(--bg) 70%,transparent);backdrop-filter:blur(4px);color:var(--ink)}
+#pauseMenu .pbox{min-width:340px;padding:24px 0 18px;background:var(--bg);border-top:4px solid var(--pri);
+  clip-path:polygon(0 0,100% 0,calc(100% - 18px) 100%,0 100%)}
+#pauseMenu .ph{padding:0 28px 12px;font:italic 900 22px/1 var(--font);letter-spacing:.18em}
+#pauseMenu .ph span{color:var(--pri)}
+#pauseMenu .pi{position:relative;padding:9px 28px;font:italic 800 16px/1 var(--font);letter-spacing:.1em;color:var(--dim)}
+#pauseMenu .pi.on{color:var(--ink);background:linear-gradient(90deg,color-mix(in srgb,var(--pri) 24%,transparent),transparent 80%)}
+#pauseMenu .pi.on::before{content:'';position:absolute;left:10px;top:7px;bottom:7px;width:4px;background:var(--pri);transform:skewX(-14deg)}
+#pauseMenu .pk{margin-top:14px;padding:0 28px;font-size:10px;letter-spacing:.16em;color:var(--dim)}
 
 @media (max-width:640px){
-  #slip{width:calc(100% - 40px)}
-  .spd b{font-size:40px}
+  #slip{width:200px}
+  #dash{width:280px}
+  .spd b{font-size:28px}
+  .gear{font-size:40px}
   #times{min-width:170px}
   #tower{width:186px;font-size:10px}
 }
