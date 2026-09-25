@@ -21,10 +21,10 @@
 //   THE LIVERY `col` is the team's, so you can tell who is who at 300 m, which
 //              is the entire job of a racing livery.
 //
-// TEAM NAMES ARE INVENTED and the colours are not, which is the same line
-// js/brands.js draws: a colour is not a trademark, a name is. Papaya orange
-// says McLaren to anybody who watches, and nothing in this repo claims to be
-// McLaren.
+// TEAM NAMES ARE REAL (2026-09-24, Adam: "make them their real name"). They
+// were invented until then, on the line js/brands.js still draws for
+// SPONSORS: a colour is not a trademark, a name is. That trade-off was put to
+// him and the call is his. Sponsors stay invented.
 
 // The pace spread went from 3.8% to 5.6%. Measured, not guessed: at 3.8% the
 // car finished behind the personality and the slowest team was not last.
@@ -43,55 +43,41 @@
 // printed in — and `sp` its sponsors, title sponsor first. All of them are the
 // invented brands in js/brands.js: team COLOURS are real, names never are.
 export const TEAMS = {
-  silver:   { name: 'SILVER',    col: '#27f4d2', pace: 1.000, fg: '#0b0d10',
+  silver:   { name: 'MERCEDES',  col: '#27f4d2', pace: 1.000, fg: '#0b0d10',
               sp: ['HALDANE', 'NOVACORE', 'CHRONA', 'BITWAVE'] },   // Mercedes
-  scarlet:  { name: 'SCARLET',   col: '#e8002d', pace: 0.993, fg: '#ffffff',
+  scarlet:  { name: 'FERRARI',   col: '#e8002d', pace: 0.993, fg: '#ffffff',
               sp: ['VELOCITA', 'RUSH', 'ARGENT', 'SKYLARK'] },   // Ferrari
-  papaya:   { name: 'PAPAYA',    col: '#ff8000', pace: 0.990, fg: '#101014',
+  papaya:   { name: 'MCLAREN',   col: '#ff8000', pace: 0.990, fg: '#101014',
               sp: ['VROOM', 'GRIPMAX', 'NORTHWAY', 'CARGOLINE'] },   // McLaren
-  navy:     { name: 'NAVY',      col: '#1e41ff', pace: 0.984, fg: '#ffffff',
+  navy:     { name: 'RED BULL',  col: '#1e41ff', pace: 0.984, fg: '#ffffff',
               sp: ['VOLTSURGE', 'KESTREL', 'ORBIX', 'ATLAS FREIGHT'] },   // Red Bull
-  graphite: { name: 'GRAPHITE',  col: '#b6babd', pace: 0.973, fg: '#b5121b',
+  graphite: { name: 'HAAS',      col: '#b6babd', pace: 0.973, fg: '#b5121b',
               sp: ['MOLT', 'BRAKEWELL', 'SIGNALIS', 'CHRONA'] },   // Haas
-  rose:     { name: 'ROSE',      col: '#ff87bc', pace: 0.971, fg: '#1b4fd8',
+  rose:     { name: 'ALPINE',    col: '#ff87bc', pace: 0.971, fg: '#1b4fd8',
               sp: ['NORTHFLOW', 'FOGLAST', 'HALCYON', 'GRIPMAX'] },   // Alpine
-  cobalt:   { name: 'COBALT',    col: '#6692ff', pace: 0.968, fg: '#ffffff',
+  cobalt:   { name: 'RACING BULLS',col: '#6692ff', pace: 0.968, fg: '#ffffff',
               sp: ['XANBOO78O', 'TERMINAL TYCOON', 'ZEST', 'RUSH'] },   // Racing Bulls
-  titan:    { name: 'TITAN',     col: '#5c6166', pace: 0.963, fg: '#e8eaee',
+  titan:    { name: 'AUDI',      col: '#5c6166', pace: 0.963, fg: '#e8eaee',
               sp: ['MERIDIAN', 'DEEPWALK', 'EVERYDEATH', 'HALDANE'] },   // Audi
-  azure:    { name: 'AZURE',     col: '#00a0de', pace: 0.960, fg: '#ffffff',
+  azure:    { name: 'WILLIAMS',  col: '#00a0de', pace: 0.960, fg: '#ffffff',
               sp: ['PYRA', 'CRITTERS', 'NORTHWAY', 'BITWAVE'] },   // Williams
-  emerald:  { name: 'EMERALD',   col: '#229971', pace: 0.951, fg: '#cedc00',
+  emerald:  { name: 'ASTON MARTIN',col: '#229971', pace: 0.951, fg: '#cedc00',
               sp: ['KESTREL', 'ARGENT', 'SIGNALIS', 'SKYLARK'] },   // Aston Martin
-  ivory:    { name: 'IVORY',     col: '#e9e9e9', pace: 0.944, fg: '#101014',
+  ivory:    { name: 'CADILLAC',  col: '#e9e9e9', pace: 0.944, fg: '#101014',
               sp: ['CRITTERS', 'ORBIX', 'CARGOLINE', 'NOVACORE'] },   // Cadillac, the new team
 
-  // THE MARQUES (2026-09-24, Adam: "we're adding fantasy teams, bugatti,
-  // mazda, ford etc ... also on the grid", then "like jeep!"). Same rule as
-  // above: the colours are the maker's own, the NAMES are invented — each is
-  // the town the car comes from or a name tied to it, never the badge.
-  molsheim:  { name: 'MOLSHEIM',  col: '#1f5eff', pace: 0.989, fg: '#0a0f1f', marque: true,
-               sp: ['HALCYON', 'ARGENT', 'CHRONA', 'NOVACORE'] },    // Bugatti
-  weissach:  { name: 'WEISSACH',  col: '#d5001c', pace: 0.987, fg: '#f7c600', marque: true,
-               sp: ['MERIDIAN', 'GRIPMAX', 'SKYLARK', 'KESTREL'] },  // Porsche
-  santagata: { name: "SANT'AGATA", col: '#ffc000', pace: 0.982, fg: '#111111', marque: true,
-               sp: ['VELOCITA', 'ZEST', 'BITWAVE', 'RUSH'] },        // Lamborghini
-  angelholm: { name: 'ÄNGELHOLM', col: '#006aa7', pace: 0.985, fg: '#fecc02', marque: true,
-               sp: ['NORTHWAY', 'SIGNALIS', 'PYRA', 'HALDANE'] },    // Koenigsegg
-  dearborn:  { name: 'DEARBORN',  col: '#e21b23', pace: 0.972, fg: '#ffffff', marque: true,
-               sp: ['ATLAS FREIGHT', 'CARGOLINE', 'BRAKEWELL', 'ORBIX'] },   // Ford
-  hiroshima: { name: 'HIROSHIMA', col: '#00a651', pace: 0.966, fg: '#ff6f00', marque: true,
-               sp: ['FOGLAST', 'CRITTERS', 'DEEPWALK', 'ZEST'] },    // Mazda, the 787B's colours
-  koromo:    { name: 'KOROMO',    col: '#eb0a1e', pace: 0.978, fg: '#ffffff', marque: true,
-               sp: ['VOLTSURGE', 'MOLT', 'NOVACORE', 'GRIPMAX'] },   // Toyota
-  toledo:    { name: 'TOLEDO',    col: '#9aae3c', pace: 0.948, fg: '#1b1d12', marque: true,
-               sp: ['DEEPWALK', 'ATLAS FREIGHT', 'NORTHFLOW', 'PYRA'] },   // Jeep
-  portello:  { name: 'PORTELLO',  col: '#c8102e', pace: 0.962, fg: '#00843d', marque: true,
-               sp: ['VELOCITA', 'HALCYON', 'EVERYDEATH', 'SKYLARK'] },   // Alfa Romeo
-  pleiades:  { name: 'PLEIADES',  col: '#2b5bd7', pace: 0.958, fg: '#f5c400', marque: true,
-               sp: ['KESTREL', 'TERMINAL TYCOON', 'BITWAVE', 'MERIDIAN'] },   // Subaru
-  garching:  { name: 'GARCHING',  col: '#6bb3e8', pace: 0.975, fg: '#e22718', marque: true,
-               sp: ['CHRONA', 'SIGNALIS', 'XANBOO78O', 'HALDANE'] },   // BMW M
+  // FANTASY F1 TEAMS — carmakers that never ran (or never ran like this) in
+  // F1, in their own colours. Invented drivers, like everyone's sponsors.
+  bugatti: { name: 'BUGATTI', col: '#1f5eff', pace: 0.985, fg: '#0a0f1f', era: 'fantasy',
+             sp: ['HALCYON', 'ARGENT', 'CHRONA', 'NOVACORE'] },
+  mazda:   { name: 'MAZDA',   col: '#00a651', pace: 0.966, fg: '#ff6f00', era: 'fantasy',
+             sp: ['FOGLAST', 'CRITTERS', 'DEEPWALK', 'ZEST'] },   // the 787B's colours
+  jeep:    { name: 'JEEP',    col: '#9aae3c', pace: 0.948, fg: '#1b1d12', era: 'fantasy',
+             sp: ['DEEPWALK', 'ATLAS FREIGHT', 'NORTHFLOW', 'PYRA'] },
+  subaru:  { name: 'SUBARU',  col: '#2b5bd7', pace: 0.958, fg: '#f5c400', era: 'fantasy',
+             sp: ['KESTREL', 'TERMINAL TYCOON', 'BITWAVE', 'MERIDIAN'] },
+  bmwm:    { name: 'BMW M',   col: '#6bb3e8', pace: 0.975, fg: '#e22718', era: 'fantasy',
+             sp: ['CHRONA', 'SIGNALIS', 'XANBOO78O', 'HALDANE'] },
 };
 
 // agg  — how willing to commit to a move that might not be there
@@ -131,78 +117,177 @@ export const DRIVERS = [
   { n: 'BOTTAS',     t: 'ivory',    num: 77, agg: 0.62, def: 0.80, err: 0.90, sk: 0.999 },
 ];
 
-// The marques' drivers. Invented people, like the team names.
-export const MARQUE_DRIVERS = [
-  { n: 'DELACROIX',  t: 'molsheim',  num: 9,  agg: 0.70, def: 0.84, err: 0.85, sk: 1.004 },
-  { n: 'FONTAINE',   t: 'molsheim',  num: 29, agg: 0.62, def: 0.70, err: 1.05, sk: 1.000 },
-  { n: 'KELLER',     t: 'weissach',  num: 91, agg: 0.66, def: 0.90, err: 0.80, sk: 1.004 },
-  { n: 'BRANDT',     t: 'weissach',  num: 19, agg: 0.74, def: 0.72, err: 1.00, sk: 1.001 },
-  { n: 'ROSSETTI',   t: 'santagata', num: 64, agg: 0.92, def: 0.70, err: 1.30, sk: 1.003 },
-  { n: 'BIANCHI',    t: 'santagata', num: 7,  agg: 0.80, def: 0.76, err: 1.10, sk: 1.000 },
-  { n: 'LINDQVIST',  t: 'angelholm', num: 21, agg: 0.86, def: 0.78, err: 1.10, sk: 1.005 },
-  { n: 'EKBERG',     t: 'angelholm', num: 2,  agg: 0.68, def: 0.74, err: 0.95, sk: 1.000 },
-  { n: 'CALLAHAN',   t: 'dearborn',  num: 66, agg: 0.84, def: 0.88, err: 1.00, sk: 1.002 },
-  { n: 'MERCER',     t: 'dearborn',  num: 50, agg: 0.64, def: 0.70, err: 1.05, sk: 0.999 },
-  { n: 'TAKEDA',     t: 'hiroshima', num: 86,  agg: 0.72, def: 0.80, err: 0.85, sk: 1.004 },
-  { n: 'MORIMOTO',   t: 'hiroshima', num: 17, agg: 0.60, def: 0.66, err: 1.00, sk: 0.999 },
-  { n: 'HAYASHI',    t: 'koromo',    num: 8,  agg: 0.70, def: 0.86, err: 0.80, sk: 1.003 },
-  { n: 'OGAWA',      t: 'koromo',    num: 37, agg: 0.76, def: 0.68, err: 1.15, sk: 1.000 },
-  { n: 'DALTON',     t: 'toledo',    num: 4,  agg: 0.95, def: 0.90, err: 1.40, sk: 1.002 },
-  { n: 'REYES',      t: 'toledo',    num: 99, agg: 0.82, def: 0.64, err: 1.25, sk: 0.998 },
-  { n: 'CASTELLI',   t: 'portello',  num: 33, agg: 0.88, def: 0.72, err: 1.15, sk: 1.003 },
-  { n: 'VALENTI',    t: 'portello',  num: 46, agg: 0.66, def: 0.78, err: 0.95, sk: 1.000 },
-  { n: 'HALONEN',    t: 'pleiades',  num: 22, agg: 0.80, def: 0.70, err: 1.00, sk: 1.002 },
-  { n: 'AALTO',      t: 'pleiades',  num: 28, agg: 0.74, def: 0.76, err: 1.05, sk: 1.000 },
-  { n: 'VOGEL',      t: 'garching',  num: 13, agg: 0.72, def: 0.92, err: 0.85, sk: 1.003 },
-  { n: 'HARTMANN',   t: 'garching',  num: 24, agg: 0.68, def: 0.74, err: 1.00, sk: 1.000 },
+// The fantasy teams' drivers. Invented people.
+export const FANTASY_DRIVERS = [
+  { n: 'DELACROIX',  t: 'bugatti', num: 9,  agg: 0.70, def: 0.84, err: 0.85, sk: 1.004 },
+  { n: 'FONTAINE',   t: 'bugatti', num: 29, agg: 0.62, def: 0.70, err: 1.05, sk: 1.000 },
+  { n: 'TAKEDA',     t: 'mazda',   num: 86, agg: 0.72, def: 0.80, err: 0.85, sk: 1.004 },
+  { n: 'MORIMOTO',   t: 'mazda',   num: 17, agg: 0.60, def: 0.66, err: 1.00, sk: 0.999 },
+  { n: 'DALTON',     t: 'jeep',    num: 4,  agg: 0.95, def: 0.90, err: 1.40, sk: 1.002 },
+  { n: 'REYES',      t: 'jeep',    num: 99, agg: 0.82, def: 0.64, err: 1.25, sk: 0.998 },
+  { n: 'HALONEN',    t: 'subaru',  num: 22, agg: 0.80, def: 0.70, err: 1.00, sk: 1.002 },
+  { n: 'AALTO',      t: 'subaru',  num: 28, agg: 0.74, def: 0.76, err: 1.05, sk: 1.000 },
+  { n: 'VOGEL',      t: 'bmwm',    num: 13, agg: 0.72, def: 0.92, err: 0.85, sk: 1.003 },
+  { n: 'HARTMANN',   t: 'bmwm',    num: 24, agg: 0.68, def: 0.74, err: 1.00, sk: 1.000 },
 ];
 
-// WHO IS ON THE GRID. `DRIVERS` stays the F1 grid on its own (the tools
-// measure it), and the menu's FIELD row picks which table driverAt() reads:
-// the F1 grid, the marques, or both — MIXED takes a team from each in turn,
-// so a 12-car race is still half and half rather than the first six rows.
-function mixed() {
-  const byTeam = list => { const m = new Map(); for (const d of list) { if (!m.has(d.t)) m.set(d.t, []); m.get(d.t).push(d); } return [...m.values()]; };
-  const a = byTeam(DRIVERS), b = byTeam(MARQUE_DRIVERS), out = [];
-  for (let i = 0; i < Math.max(a.length, b.length); i++) { if (a[i]) out.push(...a[i]); if (b[i]) out.push(...b[i]); }
+// ---------------------------------------------------------------------------
+// THE OTHER LEAGUES, and F1's old teams (Adam: "add OLD teams ... gt3 has all
+// the gt3 teams and f4 has all the f4 teams").
+//
+// One line a team: [key, NAME, primary, secondary, pace, car numbers, sub].
+// primary/secondary are the livery's two loudest colours and ALSO the UI's
+// (see teamUI). These cars carry no invented people: a classic Lotus or a
+// WRT BMW is labelled by team and number, because a made-up name in a real
+// team's car would be worse than no name.
+//
+// COLOURS ARE FROM MEMORY of each team's best-known livery and should be
+// checked against photographs; change them here and everything follows.
+// ---------------------------------------------------------------------------
+const OTHER = {
+  // F1, the classic teams
+  f1: [
+    ['lotus',      'LOTUS',        '#d4af37', '#2f7d3a', 0.978, [11, 12], 'JPS BLACK & GOLD'],
+    ['brabham',    'BRABHAM',      '#2a62d4', '#e10600', 0.972, [7, 8],   'CLASSIC'],
+    ['tyrrell',    'TYRRELL',      '#2a5fcf', '#8fc8ff', 0.966, [3, 4],   'CLASSIC'],
+    ['jordan',     'JORDAN',       '#f8d000', '#1bb04a', 0.968, [32, 33], 'CLASSIC'],
+    ['benetton',   'BENETTON',     '#1fa3e0', '#3cb043', 0.980, [5, 6],   'CLASSIC'],
+    ['minardi',    'MINARDI',      '#ffd100', '#1d5bd8', 0.946, [20, 21], 'CLASSIC'],
+    ['brawn',      'BRAWN GP',     '#cfff1a', '#e8e8e8', 0.990, [22, 23], 'CLASSIC'],
+    ['bar',        'BAR',          '#e3001b', '#f2f2f2', 0.970, [9, 10],  'CLASSIC'],
+    ['jaguar',     'JAGUAR',       '#1a7a4c', '#d9d9d9', 0.955, [14, 15], 'CLASSIC'],
+    ['toyota',     'TOYOTA',       '#eb0a1e', '#f2f2f2', 0.962, [16, 17], 'CLASSIC'],
+    ['leyton',     'LEYTON HOUSE', '#19b4b4', '#f2f2f2', 0.952, [15, 16], 'CLASSIC'],
+    ['ligier',     'LIGIER',       '#1f5eff', '#f2f2f2', 0.958, [25, 26], 'CLASSIC'],
+  ],
+  gt3: [
+    ['wrt',        'TEAM WRT',      '#ffe600', '#1c69d4', 0.995, [46, 32], 'BMW M4 GT3'],
+    ['manthey',    'MANTHEY',       '#1faa4b', '#ffd200', 0.996, [91, 911],'PORSCHE 911 GT3 R'],
+    ['afcorse',    'AF CORSE',      '#d40000', '#ffd600', 0.993, [51, 71], 'FERRARI 296 GT3'],
+    ['emilfrey',   'EMIL FREY',     '#f3c300', '#d40000', 0.990, [14, 69], 'FERRARI 296 GT3'],
+    ['irondames',  'IRON DAMES',    '#ff4fa3', '#ffc2e0', 0.984, [83, 85], 'PORSCHE 911 GT3 R'],
+    ['ironlynx',   'IRON LYNX',     '#d6152f', '#9aa0a6', 0.986, [60, 63], 'LAMBORGHINI HURACAN GT3'],
+    ['garage59',   'GARAGE 59',     '#ff7a00', '#1f4fbf', 0.989, [58, 59], 'MCLAREN 720S GT3'],
+    ['akkodis',    'AKKODIS ASP',   '#1d63ff', '#9ad1ff', 0.991, [87, 88], 'MERCEDES-AMG GT3'],
+    ['getspeed',   'GETSPEED',      '#00b5e2', '#f2f2f2', 0.988, [2, 3],   'MERCEDES-AMG GT3'],
+    ['mannfilter', 'MANN-FILTER',   '#009f3c', '#ffe100', 0.992, [48, 4],  'MERCEDES-AMG GT3'],
+    ['boutsen',    'BOUTSEN VDS',   '#2e5bd6', '#e10600', 0.985, [9, 10],  'MERCEDES-AMG GT3'],
+    ['attempto',   'TRESOR ATTEMPTO','#ff6b00', '#cfcfcf', 0.983, [99, 66], 'AUDI R8 LMS GT3'],
+    ['comtoyou',   'COMTOYOU',      '#00665e', '#c8e600', 0.982, [7, 11],  'ASTON MARTIN VANTAGE GT3'],
+    ['rowe',       'ROWE RACING',   '#2754c5', '#f5c400', 0.991, [98, 998],'BMW M4 GT3'],
+    ['rutronik',   'RUTRONIK',      '#e2001a', '#cfcfcf', 0.987, [96, 97], 'PORSCHE 911 GT3 R'],
+    ['grasser',    'GRT GRASSER',   '#95c11f', '#f2f2f2', 0.981, [19, 63], 'LAMBORGHINI HURACAN GT3'],
+    ['corvette',   'CORVETTE RACING','#ffd100', '#c8c8c8', 0.990, [3, 4],  'CORVETTE Z06 GT3.R'],
+    ['multimatic', 'FORD MULTIMATIC','#1f4fbf', '#e21b23', 0.986, [64, 65], 'FORD MUSTANG GT3'],
+    ['vasser',     'VASSER SULLIVAN','#ff5a00', '#d0d0d0', 0.984, [12, 14], 'LEXUS RC F GT3'],
+    ['proton',     'PROTON',        '#0b5fff', '#f2f2f2', 0.980, [77, 88], 'PORSCHE 911 GT3 R'],
+  ],
+  f4: [
+    ['prema',      'PREMA',         '#e2001a', '#ffd1d6', 0.995, [2, 3, 4],   'ITALIAN F4'],
+    ['var',        'VAN AMERSFOORT','#ff6a00', '#1d5bd8', 0.993, [5, 6, 7],   'ITALIAN F4'],
+    ['usracing',   'US RACING',     '#1a3dff', '#e3001b', 0.992, [8, 9, 10],  'ITALIAN F4'],
+    ['race',       'R-ACE GP',      '#1f63c9', '#ff3b3b', 0.990, [11, 12],    'ITALIAN F4'],
+    ['mumbai',     'MUMBAI FALCONS','#f39200', '#1a4fa0', 0.988, [14, 15],    'ITALIAN F4'],
+    ['jenzer',     'JENZER',        '#ffcc00', '#8a8f94', 0.984, [16, 17],    'ITALIAN F4'],
+    ['hitech',     'HITECH',        '#e10600', '#cfcfcf', 0.991, [21, 22],    'BRITISH F4'],
+    ['rodin',      'RODIN',         '#00c2a8', '#f2f2f2', 0.989, [23, 24],    'BRITISH F4'],
+    ['carlin',     'CARLIN',        '#1c3faa', '#ff4d00', 0.987, [25, 26],    'BRITISH F4'],
+    ['jhr',        'JHR',           '#2b56d6', '#f5c400', 0.985, [27, 28],    'BRITISH F4'],
+    ['mp',         'MP MOTORSPORT', '#ff6200', '#6aa9ff', 0.990, [31, 32],    'SPANISH F4'],
+    ['campos',     'CAMPOS',        '#e3001b', '#ffc400', 0.988, [33, 34],    'SPANISH F4'],
+    ['motopark',   'MOTOPARK',      '#1f5fbf', '#f2f2f2', 0.986, [35, 36],    'SPANISH F4'],
+    ['phm',        'PHM RACING',    '#d3ff00', '#9aa0a6', 0.983, [37, 38],    'SPANISH F4'],
+  ],
+};
+// Sponsors for these, dealt from js/brands.js's invented pool so every car is
+// still dressed. Deterministic per team, so a car looks the same every race.
+const POOL = ['HALDANE', 'NOVACORE', 'CHRONA', 'BITWAVE', 'VELOCITA', 'RUSH', 'ARGENT', 'SKYLARK',
+  'VROOM', 'GRIPMAX', 'NORTHWAY', 'CARGOLINE', 'VOLTSURGE', 'KESTREL', 'ORBIX', 'ATLAS FREIGHT',
+  'MOLT', 'BRAKEWELL', 'SIGNALIS', 'NORTHFLOW', 'FOGLAST', 'HALCYON', 'ZEST', 'MERIDIAN', 'PYRA'];
+const inkFor = hex => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#101014' : '#ffffff';
+};
+const LEAGUE_DRIVERS = { f1classic: [], gt3: [], f4: [] };
+for (const [league, rows] of Object.entries(OTHER)) {
+  rows.forEach(([key, name, pri, sec, pace, nums, sub], i) => {
+    TEAMS[key] = {
+      name, col: pri, fg: inkFor(pri), pace, sub, league, ui: [pri, sec],
+      era: league === 'f1' ? 'classic' : undefined,
+      sp: [0, 1, 2, 3].map(k => POOL[(i * 7 + k * 5 + league.length) % POOL.length]),
+    };
+    for (const num of nums) {
+      (LEAGUE_DRIVERS[league === 'f1' ? 'f1classic' : league]).push(
+        { n: `${name} #${num}`, t: key, num, agg: 0.72, def: 0.74, err: 1.0, sk: 1.0 });
+    }
+  });
+}
+// The UI colours of the 2026 grid and the fantasy teams, same [primary, secondary].
+const F1_UI = {
+  silver: ['#27f4d2', '#c0c6cc'], scarlet: ['#e8002d', '#ffd400'], papaya: ['#ff8000', '#47c7fc'],
+  navy: ['#3a5bff', '#ff1e2d'], graphite: ['#d8dadc', '#e10600'], rose: ['#ff87bc', '#3a6cff'],
+  cobalt: ['#6692ff', '#ff2d55'], titan: ['#c9ccd1', '#f50537'], azure: ['#00a0de', '#ffd000'],
+  emerald: ['#229971', '#cedc00'], ivory: ['#ececec', '#c9a449'],
+  bugatti: ['#1f5eff', '#8fb4ff'], mazda: ['#00a651', '#ff6f00'], jeep: ['#9aae3c', '#e0a84a'],
+  subaru: ['#3a6bf0', '#f5c400'], bmwm: ['#6bb3e8', '#e22718'],
+};
+for (const [k, ui] of Object.entries(F1_UI)) {
+  TEAMS[k].ui = ui; TEAMS[k].league = 'f1';
+  if (!TEAMS[k].era) TEAMS[k].era = '2026';
+}
+
+export const LEAGUES = { f1: 'F1', gt3: 'GT3', f4: 'F4' };
+/** The teams of one league, in table order. */
+export const teamsIn = league => Object.keys(TEAMS).filter(k => TEAMS[k].league === league);
+
+// WHO IS ON THE GRID. `DRIVERS` stays the 2026 F1 grid on its own (the tools
+// measure it). F1 has a FIELD choice; GT3 and F4 race their own league.
+// Mixed tables go a team at a time, so a 12-car race is still a mixture
+// rather than the first six rows of one list.
+function byTeam(list) {
+  const m = new Map();
+  for (const d of list) { if (!m.has(d.t)) m.set(d.t, []); m.get(d.t).push(d); }
+  return [...m.values()];
+}
+function interleave(...lists) {
+  const groups = lists.map(byTeam), out = [];
+  for (let i = 0; i < Math.max(...groups.map(g => g.length)); i++) for (const g of groups) if (g[i]) out.push(...g[i]);
   return out;
 }
-export const FIELDS = { f1: 'F1 GRID', marques: 'MARQUES', mixed: 'MIXED' };
+// One car per team first, then the second cars: a 22-car GT3 race is every
+// team, not the first eleven twice.
+function roundRobin(list) {
+  const groups = byTeam(list), out = [];
+  for (let r = 0; r < Math.max(...groups.map(g => g.length)); r++) for (const g of groups) if (g[r]) out.push(g[r]);
+  return out;
+}
+export const FIELDS = { f1: '2026 GRID', classic: 'CLASSIC', fantasy: 'FANTASY', all: 'ALL ERAS' };
 let ACTIVE = DRIVERS;
 export function setField(kind) {
-  ACTIVE = kind === 'marques' ? MARQUE_DRIVERS : kind === 'mixed' ? mixed() : DRIVERS;
+  ACTIVE = kind === 'classic' ? roundRobin(LEAGUE_DRIVERS.f1classic)
+    : kind === 'fantasy' ? FANTASY_DRIVERS
+    : kind === 'all' ? interleave(DRIVERS, roundRobin(LEAGUE_DRIVERS.f1classic), FANTASY_DRIVERS)
+    : kind === 'gt3' ? roundRobin(LEAGUE_DRIVERS.gt3)
+    : kind === 'f4' ? roundRobin(LEAGUE_DRIVERS.f4)
+    : DRIVERS;
 }
 export function driverAt(i) { return ACTIVE[((i % ACTIVE.length) + ACTIVE.length) % ACTIVE.length]; }
+/** Everyone who drives for a team, for the team screen. */
+export const driversOf = key => [...DRIVERS, ...FANTASY_DRIVERS, ...LEAGUE_DRIVERS.f1classic, ...LEAGUE_DRIVERS.gt3, ...LEAGUE_DRIVERS.f4]
+  .filter(d => d.t === key);
 
-// The UI in a team's colours: [background, ink, primary, secondary]. The
-// background is always a near-black tinted toward the team, because the HUD
-// sits over a sunlit circuit and the menu over nothing — a pale page would
-// fight both. Primary is what YOU are (focus, your row, lights out); the
-// secondary is the car lapping the map and your best lap.
-export const TEAM_UI = {
-  silver:    ['#080b0c', '#e9eef0', '#27f4d2', '#c0c6cc'],
-  scarlet:   ['#100607', '#f6ecea', '#e8002d', '#ffd400'],
-  papaya:    ['#0d0a07', '#f7efe7', '#ff8000', '#47c7fc'],
-  navy:      ['#060918', '#eef0fa', '#3a5bff', '#ff1e2d'],
-  graphite:  ['#0c0c0d', '#eeeeee', '#d8dadc', '#e10600'],
-  rose:      ['#070b18', '#f3f3fb', '#ff87bc', '#3a6cff'],
-  cobalt:    ['#080b17', '#eef1ff', '#6692ff', '#ff2d55'],
-  titan:     ['#0b0b0c', '#efefef', '#c9ccd1', '#f50537'],
-  azure:     ['#050c16', '#eaf5fc', '#00a0de', '#ffd000'],
-  emerald:   ['#06100c', '#eef5f1', '#229971', '#cedc00'],
-  ivory:     ['#0a0a0a', '#f2f2f2', '#ececec', '#c9a449'],
-  molsheim:  ['#050a18', '#eef2ff', '#1f5eff', '#8fb4ff'],
-  weissach:  ['#0f0707', '#f5efe9', '#d5001c', '#f7c600'],
-  santagata: ['#0d0c05', '#f6f3e6', '#ffc000', '#7bd400'],
-  angelholm: ['#050b12', '#eef4f8', '#1a86d0', '#fecc02'],
-  dearborn:  ['#0f0708', '#f4f1f1', '#e21b23', '#3d7bff'],
-  hiroshima: ['#04100a', '#eef6f1', '#00a651', '#ff6f00'],
-  koromo:    ['#0e0808', '#f3eeee', '#eb0a1e', '#c5c9cc'],
-  toledo:    ['#0b0c07', '#f1efe4', '#9aae3c', '#e0a84a'],
-  portello:  ['#10070a', '#f6eef0', '#d0142f', '#1fae5b'],
-  pleiades:  ['#060a18', '#eef1fb', '#3a6bf0', '#f5c400'],
-  garching:  ['#070a12', '#eef3f9', '#6bb3e8', '#e22718'],
-};
+// The UI in a team's colours: [background, ink, primary, secondary]. Only the
+// two livery colours are stored; the background is a near-black leaning
+// toward the primary and the ink a white leaning toward it, because the HUD
+// sits over a sunlit circuit and a pale page would fight it.
+const mix = (a, b, t) => '#' + [1, 3, 5].map(i => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - t)
+  + parseInt(b.slice(i, i + 2), 16) * t).toString(16).padStart(2, '0')).join('');
+export function teamUI(key) {
+  const t = TEAMS[key];
+  if (!t || !t.ui) return null;
+  const [pri, sec] = t.ui;
+  return [mix('#070707', pri, 0.08), mix('#f2f2f2', pri, 0.06), pri, sec];
+}
 
 export function teamOf(d) { return TEAMS[d.t] || TEAMS.ivory; }
 

@@ -25,7 +25,7 @@ import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
 import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
 import { TIME_PHASES, timeFor, WEATHER_KINDS } from './weather.js';
-import { driverAt, teamOf, TEAMS, TEAM_UI, FIELDS, setField, DRIVERS, MARQUE_DRIVERS } from './drivers.js';
+import { driverAt, teamOf, TEAMS, FIELDS, setField, LEAGUES, teamsIn, driversOf, teamUI } from './drivers.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 
 const $ = id => document.getElementById(id);
@@ -83,10 +83,11 @@ let pickTime = 'live';   // or a phase of the day: weather.js TIME_PHASES
 let pickWeather = 'live';   // or a WEATHER_KINDS entry, or 'changing'
 // SUPERCASUAL's OVERTAKES submode: how hard the pack around you fights.
 let pickBattle = 'medium';
-// The team you drive for. It paints the whole interface (applyTheme), and it
-// is null until you have chosen one — which is what opens the team screen.
-let pickTeam = null;
-let pickField = 'f1';   // who else is on the grid: drivers.js FIELDS
+// The team you drive for, ONE PER LEAGUE (F1, GT3, F4 — the league is the car
+// class). You need only one to start; the rest stay empty until you join.
+// The team of the league you are driving paints the interface (applyTheme).
+const pickTeams = { f1: null, gt3: null, f4: null };
+let pickField = 'f1';   // F1's field: drivers.js FIELDS. GT3 and F4 race their own.
 
 // The menu remembers what you last picked (Adam: "save my previous race
 // settings"). Every value is checked against what exists NOW, so a circuit
@@ -110,7 +111,8 @@ function loadMenu() {
   if (m.time === 'live' || TIME_PHASES.includes(m.time)) pickTime = m.time;
   if (m.weather === 'live' || m.weather === 'changing' || WEATHER_KINDS.includes(m.weather)) pickWeather = m.weather;
   if (BATTLE[m.battle]) pickBattle = m.battle;
-  if (TEAMS[m.team]) pickTeam = m.team;
+  if (m.teams) for (const L in pickTeams) if (TEAMS[m.teams[L]] && TEAMS[m.teams[L]].league === L) pickTeams[L] = m.teams[L];
+  if (TEAMS[m.team] && TEAMS[m.team].league === 'f1' && !pickTeams.f1) pickTeams.f1 = m.team;   // the one-team save
   if (FIELDS[m.field]) pickField = m.field;
 }
 function saveMenu() {
@@ -118,7 +120,7 @@ function saveMenu() {
     localStorage.setItem(MENU_KEY, JSON.stringify({
       track: pickTrack, car: pickCar, mode: pickMode, grid: pickGrid, tier: pickTier,
       laps: pickLaps, start: pickStart, noDnf: pickNoDnf, quali: pickQuali, time: pickTime, weather: pickWeather, battle: pickBattle,
-      team: pickTeam, field: pickField,
+      teams: pickTeams, field: pickField,
     }));
   } catch { /* private window: it just won't remember */ }
 }
@@ -131,15 +133,15 @@ function saveMenu() {
 function menuRows() {
   const onoff = [[false, 'OFF'], [true, 'ON']];
   const R = [
-    { g: 'SESSION', k: 'TEAM', opts: TEAM_OPTS, get: () => pickTeam, set: v => { pickTeam = v; applyTheme(v); } },
+    { g: 'SESSION', k: 'TEAM', opts: teamOpts(pickCar), get: () => pickTeams[pickCar], set: v => { pickTeams[pickCar] = v; } },
     { k: 'CIRCUIT', opts: TRACKS, get: () => pickTrack, set: v => pickTrack = v },
     { k: 'CAR', opts: ['f4', 'gt3', 'f1'].map(k => [k, CARS[k].name, CARS[k].full]), get: () => pickCar, set: v => pickCar = v },
     { k: 'MODE', opts: [['hotlap', 'HOT LAP', 'EMPTY CIRCUIT'], ['race', 'RACE', 'WHEEL TO WHEEL']], get: () => pickMode, set: v => pickMode = v },
   ];
   if (pickMode === 'race') {
     R.push(
-      { g: 'RACE', k: 'FIELD', opts: Object.entries(FIELDS).map(([k, n]) => [k, n, k === 'f1' ? 'THE ELEVEN TEAMS' : k === 'marques' ? 'THE CARMAKERS' : 'BOTH, TEAM BY TEAM']), get: () => pickField, set: v => pickField = v },
-      { k: 'LAPS', opts: [[2, '2'], [3, '3'], [5, '5'], [10, '10']], get: () => pickLaps, set: v => pickLaps = v },
+      ...(pickCar === 'f1' ? [{ g: 'RACE', k: 'FIELD', opts: Object.entries(FIELDS).map(([k, n]) => [k, n, FIELD_SUB[k]]), get: () => pickField, set: v => pickField = v }] : []),
+      { g: pickCar === 'f1' ? undefined : 'RACE', k: 'LAPS', opts: [[2, '2'], [3, '3'], [5, '5'], [10, '10']], get: () => pickLaps, set: v => pickLaps = v },
       { k: 'GRID', opts: [[6, '6 CARS'], [12, '12 CARS'], [16, '16 CARS'], [22, '22 CARS']], get: () => pickGrid, set: v => pickGrid = v },
       { k: 'RIVALS', opts: Object.keys(TIERS).map(k => [k, TIERS[k].name]), get: () => pickTier, set: v => pickTier = v },
     );
@@ -170,6 +172,7 @@ function stepRow(row, d) {
 }
 
 function buildMenu() {
+  applyTheme(themeKey());
   const rows = menuRows();
   const box = $('rows');
   box.innerHTML = '';
@@ -194,7 +197,7 @@ function buildMenu() {
     r.onclick = e => { e.stopPropagation(); menuAt = row.k; stepRow(row, 1); };
     // Clicking a row SELECTS what it shows and moves on to the next row —
     // the arrows either side are what cycle it.
-    el.onclick = () => { menuAt = row.k; moveFocus(1); };
+    el.onclick = () => { menuAt = row.k; if (row.k === 'TEAM' && !pickTeams[pickCar]) openTeamPick(pickCar); else moveFocus(1); };
     el.onmousemove = () => { if (menuAt !== row.k) { menuAt = row.k; paintFocus(); } };
     el.dataset.k = row.k;
     box.appendChild(el);
@@ -279,18 +282,27 @@ function launch() {
 }
 
 // ---------------------------------------------------------------------------
-// THE TEAM. Eleven F1 teams and eleven marques; the one you join paints the
-// interface in its four colours. First visit: a screen with nothing on it but
-// the team, repainting itself as you step through them. After that it is the
-// TEAM row at the top of the menu.
+// THE TEAM. Three leagues — F1, GT3, F4 — each with its own teams, and you
+// can hold one team in each. The team of the league you are driving paints
+// the interface in its four colours. First visit: a screen with nothing on it
+// but the team, repainting itself as you step through them, with the leagues
+// as tabs. After that it is the TEAM row at the top of the menu.
 // ---------------------------------------------------------------------------
-const TEAM_KEYS = Object.keys(TEAMS);
-const teamDrivers = k => [...DRIVERS, ...MARQUE_DRIVERS].filter(d => d.t === k).map(d => d.n);
-const TEAM_OPTS = TEAM_KEYS.map(k => [k, TEAMS[k].name, TEAMS[k].marque ? 'MARQUE' : 'F1']);
+const FIELD_SUB = { f1: 'THE ELEVEN TEAMS', classic: 'THE OLD TEAMS', fantasy: 'THE CARMAKERS', all: 'EVERYONE, TEAM BY TEAM' };
+const ERA = { '2026': '2026', classic: 'CLASSIC', fantasy: 'FANTASY' };
+const teamSub = k => { const t = TEAMS[k]; return t.league === 'f1' ? ERA[t.era] : t.sub; };
+function teamOpts(league) {
+  const o = teamsIn(league).map(k => [k, TEAMS[k].name, teamSub(k)]);
+  return pickTeams[league] ? o : [[null, 'NO TEAM YET', 'PRESS ENTER / A TO CHOOSE'], ...o];
+}
+// Which team's colours are on screen: this league's, else any you hold.
+const themeKey = () => pickTeams[pickCar] || Object.values(pickTeams).find(Boolean);
+// The field on the grid: F1 has a choice, the others are their league.
+const fieldFor = () => pickCar === 'f1' ? pickField : pickCar;
 
 // Black or white, whichever reads on a colour. Relative luminance, the WCAG
-// formula: a yellow (Sant'Agata) needs black text and a navy needs white,
-// and guessing per team is how one of 22 ends up unreadable.
+// formula: a yellow (Jordan) needs black text and a navy needs white, and
+// guessing per team is how one of sixty ends up unreadable.
 function inkOn(hex) {
   const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
     .map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
@@ -298,7 +310,7 @@ function inkOn(hex) {
   return L > 0.3 ? '#0a0a0a' : '#ffffff';
 }
 function applyTheme(key) {
-  const ui = TEAM_UI[key];
+  const ui = teamUI(key);
   if (!ui) return;
   const [bg, ink, pri, sec] = ui, r = document.documentElement.style;
   r.setProperty('--bg', bg);
@@ -306,29 +318,37 @@ function applyTheme(key) {
   r.setProperty('--pri', pri);
   r.setProperty('--sec', sec);
   r.setProperty('--onpri', inkOn(pri));
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = bg;
 }
 
-let picking = false, pickAt = 0;
+let picking = false, pickLeague = 'f1', pickAt = 0;
 function drawTeamPick() {
-  const k = TEAM_KEYS[pickAt], t = TEAMS[k];
+  const keys = teamsIn(pickLeague), k = keys[pickAt], t = TEAMS[k], ui = teamUI(k);
   applyTheme(k);
-  $('tpKind').textContent = t.marque ? 'MARQUE' : 'FORMULA 1';
+  $('tpTabs').innerHTML = Object.entries(LEAGUES).map(([L, n]) =>
+    `<button data-l="${L}" class="${L === pickLeague ? 'on' : ''}">${n}${pickTeams[L] ? `<small>${TEAMS[pickTeams[L]].name}</small>` : ''}</button>`).join('');
+  for (const b of $('tpTabs').querySelectorAll('button')) b.onclick = () => setLeague(b.dataset.l);
+  $('tpKind').textContent = `${LEAGUES[pickLeague]}  ·  ${teamSub(k)}`;
   $('tpName').textContent = t.name;
-  $('tpDrivers').textContent = teamDrivers(k).join('  ·  ');
-  $('tpSwatch').innerHTML = [2, 3, 1].map(i => TEAM_UI[k][i]).map(c => `<i style="background:${c}"></i>`).join('');
-  $('tpPips').innerHTML = TEAM_KEYS.map((x, i) => `<i class="${i === pickAt ? 'on' : ''}" style="background:${TEAM_UI[x][2]}"></i>`).join('');
+  $('tpDrivers').textContent = driversOf(k).map(d => t.league === 'f1' && t.era !== 'classic' ? d.n : '#' + d.num).join('  ·  ');
+  $('tpSwatch').innerHTML = [2, 3, 1].map(i => `<i style="background:${ui[i]}"></i>`).join('');
+  $('tpPips').innerHTML = keys.map((x, i) => `<i class="${i === pickAt ? 'on' : ''}" style="background:${TEAMS[x].ui[0]}"></i>`).join('');
+  $('tpJoin').textContent = pickTeams[pickLeague] === k ? 'YOUR TEAM' : 'JOIN TEAM';
 }
-function openTeamPick() {
-  picking = true;
-  pickAt = Math.max(0, TEAM_KEYS.indexOf(pickTeam));
-  $('teamPick').classList.remove('hidden');
+function setLeague(L) {
+  pickLeague = L;
+  pickAt = Math.max(0, teamsIn(L).indexOf(pickTeams[L]));
   drawTeamPick();
 }
-function stepTeam(d) { pickAt = (pickAt + d + TEAM_KEYS.length) % TEAM_KEYS.length; drawTeamPick(); }
+function openTeamPick(league = pickCar) {
+  picking = true;
+  $('teamPick').classList.remove('hidden');
+  setLeague(league);
+}
+function stepTeam(d) { const n = teamsIn(pickLeague).length; pickAt = (pickAt + d + n) % n; drawTeamPick(); }
+function stepLeague(d) { const L = Object.keys(LEAGUES); setLeague(L[(L.indexOf(pickLeague) + d + L.length) % L.length]); }
 function joinTeam() {
-  pickTeam = TEAM_KEYS[pickAt];
+  pickTeams[pickLeague] = teamsIn(pickLeague)[pickAt];
+  pickCar = pickLeague;          // joining a GT3 team means you drive GT3
   picking = false;
   $('teamPick').classList.add('hidden');
   menuAt = 'CIRCUIT';
@@ -343,11 +363,14 @@ function menuInput(what) {
   if (!menuLive) return;
   if (picking) {
     if (what === 'left' || what === 'right') stepTeam(what === 'left' ? -1 : 1);
+    else if (what === 'up' || what === 'down') stepLeague(what === 'up' ? -1 : 1);
     else if (what === 'ok' || what === 'go') joinTeam();
     return;
   }
   if (what === 'up') moveFocus(-1);
   else if (what === 'down') moveFocus(1);
+  // no team in this league yet: anything but up/down opens the team screen
+  else if (menuAt === 'TEAM' && !pickTeams[pickCar] && what !== 'go') openTeamPick(pickCar);
   else if (what === 'go') launch();
   else if (menuAt === 'GO') { if (what === 'ok') launch(); }
   else if (what === 'ok') moveFocus(1);   // confirm the row, drop to the next
@@ -358,6 +381,8 @@ function menuInput(what) {
 }
 addEventListener('keydown', e => {
   if (!menuLive || $('menu').classList.contains('hidden')) return;
+  // Escape backs out of the team screen, once there is a team to go back to
+  if (e.code === 'Escape' && picking && themeKey()) { picking = false; $('teamPick').classList.add('hidden'); buildMenu(); return; }
   const m = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok', Space: 'ok' }[e.code];
   if (!m) return;
   e.preventDefault();
@@ -408,7 +433,7 @@ function startSlot(grid) {
 
 async function start() {
   menuLive = false;
-  setField(pickField);
+  setField(fieldFor());
   hands.endFrame();
   $('menu').classList.add('hidden');
   // Engine audio MUST be created inside a real user gesture. A context made
@@ -691,7 +716,7 @@ function qualiBegin() {
     };
     w.onerror = e => { const q = state.quali; if (q) { q.err = e.message || 'worker failed'; q.workerDone = true; } };
     w.postMessage({ base: new URL('../', import.meta.url).href, track: pickTrack, cls: pickCar,
-      tier: c.tier, seed: c.seed, drivers: bots, field: pickField,
+      tier: c.tier, seed: c.seed, drivers: bots, field: fieldFor(),
       // quali starts before the weather does; a rain or storm session starts soaked
       wet: ['rain', 'storm'].includes(new URLSearchParams(location.search).get('weather') || pickWeather) ? 1 : 0 });
     state.qualiWorker = w;
@@ -1481,9 +1506,8 @@ if (Q.has('grid')) pickGrid = Math.max(2, Math.min(22, +Q.get('grid') || 22));
 if (TIERS[Q.get('tier')]) pickTier = Q.get('tier');
 if (Q.has('laps')) pickLaps = Math.max(1, Math.min(60, +Q.get('laps') || 3));
 
-if (pickTeam) applyTheme(pickTeam);
 buildMenu();
-if (!pickTeam && !Q.has('auto')) openTeamPick();
+if (!themeKey() && !Q.has('auto')) openTeamPick('f1');
 $('tpPrev').onclick = () => stepTeam(-1);
 $('tpNext').onclick = () => stepTeam(1);
 $('tpJoin').onclick = joinTeam;
