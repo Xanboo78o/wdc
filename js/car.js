@@ -455,8 +455,13 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
     { x: 1.90, y: 0.215, w: 0.145, h: 0.098, n: 3.0 },
     { x: 1.45, y: 0.250, w: 0.185, h: 0.140, n: 3.3 },
     { x: 0.90, y: 0.295, w: 0.250, h: 0.190, n: 3.5 },
-    { x: 0.30, y: 0.330, w: 0.310, h: 0.228, n: 3.7 },
-    { x: -0.32, y: 0.342, w: 0.330, h: 0.245, n: 3.7 },
+    // THE COCKPIT DIP. The tub's skin drops to 0.44 m between the dash and the
+    // seat back, so from the driver's eyes you look DOWN INTO a cockpit rather
+    // than across the top of a closed tube (Adam: "make the car deeper so i
+    // see the inside"). The walls, floor, dash and seat inside are below.
+    { x: 0.42, y: 0.320, w: 0.300, h: 0.220, n: 3.7 },
+    { x: 0.22, y: 0.270, w: 0.310, h: 0.170, n: 3.8 },
+    { x: -0.60, y: 0.270, w: 0.330, h: 0.170, n: 3.8 },
     { x: -0.80, y: 0.378, w: 0.320, h: 0.290, n: 3.4 },
   ], 32);
   add(body, paint);
@@ -554,24 +559,40 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
   add(at(new THREE.BoxGeometry(0.03, 0.05, 0.12), -2.335, 0.33, 0), rainLight, false);
 
   // --- halo, cockpit, driver ----------------------------------------------
-  add(tube([[-0.58, 0.56, 0.26], [-0.40, 0.72, 0.30], [-0.05, 0.765, 0.26], [0.20, 0.77, 0.10],
-    [0.23, 0.77, 0], [0.20, 0.77, -0.10], [-0.05, 0.765, -0.26], [-0.40, 0.72, -0.30], [-0.58, 0.56, -0.26]], 0.026), carbon);
-  add(tube([[0.23, 0.77, 0], [0.32, 0.66, 0], [0.42, 0.53, 0]], 0.028), carbon);
-  // cockpit opening: a black rim so it reads as a hole with a driver in it
-  const rimGeo2 = new THREE.TorusGeometry(1, 0.03, 6, 24);
-  rimGeo2.rotateX(Math.PI / 2); rimGeo2.scale(0.34, 1, 0.24);
-  // Hidden in first person (render.js): from the driver's eyes this ring sat
-  // right in front of you like a steering wheel, and Adam drives with a real
-  // one in exactly that place.
-  const cockpitRim = add(at(rimGeo2, -0.26, 0.585, 0), black, false);
+  // Seven centimetres lower than it was: from the driver's eyes the top of the
+  // loop sat exactly on the horizon (Adam: "the halo is DIRECTLY in my way").
+  add(tube([[-0.58, 0.53, 0.26], [-0.40, 0.65, 0.30], [-0.05, 0.695, 0.26], [0.20, 0.70, 0.10],
+    [0.23, 0.70, 0], [0.20, 0.70, -0.10], [-0.05, 0.695, -0.26], [-0.40, 0.65, -0.30], [-0.58, 0.53, -0.26]], 0.026), carbon);
+  add(tube([[0.23, 0.70, 0], [0.32, 0.60, 0], [0.42, 0.50, 0]], 0.028), carbon);
+
+  // THE TUB, inside. Carbon walls with painted outer skins, a carbon floor,
+  // the dash bulkhead in front of the driver, and a seat. "just make like a
+  // seat and the rest js carbon".
+  const fabric = new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.95, metalness: 0 });
+  for (const side of [1, -1]) {
+    const wall = [[0.24, 0.40], [0.24, 0.58], [-0.10, 0.60], [-0.62, 0.62], [-0.62, 0.40]];
+    add(plate(wall, 0.012, side * 0.305), paint);
+    add(plate(wall, 0.012, side * 0.285), carbon);
+  }
+  add(at(new THREE.BoxGeometry(0.86, 0.012, 0.58), -0.19, 0.445, 0), carbon, false);        // floor
+  add(at(new THREE.BoxGeometry(0.03, 0.15, 0.58), 0.225, 0.515, 0), carbon);               // dash
+  add(at(new THREE.BoxGeometry(0.03, 0.22, 0.58), -0.625, 0.51, 0), carbon);               // rear bulkhead
+  add(at(new THREE.BoxGeometry(0.30, 0.05, 0.44), -0.42, 0.475, 0), fabric, false);          // seat base
+  const back = new THREE.BoxGeometry(0.06, 0.24, 0.44);
+  back.rotateZ(-0.25);
+  add(at(back, -0.56, 0.60, 0), fabric, false);                                               // seat back
+  // (A black ring round the cockpit opening used to sit here. From the
+  // driver's eyes it read as a steering wheel in front of Adam's real one, and
+  // the tub walls are the cockpit's edge now.)
+  const cockpitRim = null;
 
   const headGeo = new THREE.SphereGeometry(0.135, 20, 14);
   headGeo.scale(1.12, 1, 0.94);
-  const head = [add(at(headGeo, -0.30, 0.595, 0), paint2)];
+  const head = [add(at(headGeo, -0.30, 0.56, 0), paint2)];
   const visGeo = new THREE.SphereGeometry(0.137, 16, 10, -0.6, 1.2, 0.9, 0.7);
   visGeo.rotateY(Math.PI / 2);
   visGeo.scale(1.12, 1, 0.94);
-  head.push(add(at(visGeo, -0.30, 0.595, 0), visor));
+  head.push(add(at(visGeo, -0.30, 0.56, 0), visor));
 
   // --- suspension ----------------------------------------------------------
   // Real geometry: each wishbone runs from two pick-ups on the chassis to one
