@@ -33,11 +33,13 @@
 // downhill braking zone, the picture is the one that is lying.
 // ---------------------------------------------------------------------------
 import { Z } from './geom.js';
+import { bankTable, bankGround } from './bank.js';
 
 const NEAR = 55;       // inside this, the racing line's own profile wins
 const FAR = 240;       // beyond this, the terrain grid wins
 const CELL = 90;       // metres per bucket in the lookup grid
 const SINK_MAX = 0.35; // how far the visible ground is pushed under the circuit
+const BLEND = 20;      // metres either side of the line between two legs that are blended
 
 export async function loadElev(key) {
   try {
@@ -70,6 +72,8 @@ export class World {
       if (c > corridor) corridor = c;
     }
     this.sinkTo = corridor + 14;
+    // Banked corners stand on an embankment, and the ground has to know.
+    this.bank = track.bank && track.bank.some(v => v) ? bankTable(track) : null;
 
     // A bucket grid over the centreline, so finding the nearest sample is O(1)
     // rather than a scan. `lift` runs over a few hundred thousand vertices at
@@ -126,6 +130,32 @@ export class World {
     return { i: best, d: Math.sqrt(bd) };
   }
 
+  /**
+   * The nearest sample on ANOTHER part of the lap — a sample more than 80 m of
+   * lap away from `i` — within `reach` metres, or null. Used to blend across
+   * the line halfway between two legs of the circuit (see heightAt).
+   */
+  otherLeg(x, z, i, reach) {
+    const n = this.track.n, gap = Math.ceil(80 / this.track.ds);
+    const cx = Math.floor((x - this.gx0) / CELL), cz = Math.floor((z - this.gz0) / CELL);
+    const r = Math.ceil(reach / CELL);
+    let best = -1, bd = reach * reach;
+    for (let j = cz - r; j <= cz + r; j++) {
+      if (j < 0 || j >= this.gnz) continue;
+      for (let q = cx - r; q <= cx + r; q++) {
+        if (q < 0 || q >= this.gnx) continue;
+        for (const k of this.buckets[j * this.gnx + q]) {
+          const dk = Math.abs(k - i);
+          if (Math.min(dk, n - dk) <= gap) continue;
+          const dx = this.track.x[k] - x, dz = Z(this.track.y[k]) - z;
+          const d = dx * dx + dz * dz;
+          if (d < bd) { bd = d; best = k; }
+        }
+      }
+    }
+    return best < 0 ? null : { i: best, d: Math.sqrt(bd) };
+  }
+
   /** Bilinear sample of the terrain grid, in sim x / three z. */
   gridAt(x, z) {
     const g = this.elev.grid;
@@ -178,7 +208,30 @@ export class World {
     const frac = ((x - t.x[i]) * Math.cos(h) + (Z(z) - t.y[i]) * Math.sin(h)) / t.ds;
     const k = Math.max(-1, Math.min(1, frac));
     const j = ((i + (k >= 0 ? 1 : -1)) % t.n + t.n) % t.n;
-    const onTrack = this.elev.s[i] + (this.elev.s[j] - this.elev.s[i]) * Math.abs(k);
+    let onTrack = this.elev.s[i] + (this.elev.s[j] - this.elev.s[i]) * Math.abs(k);
+    // HALFWAY BETWEEN TWO LEGS the nearest sample flips from one to the other,
+    // and if the legs sit at different heights the ground stepped there — a
+    // cliff down the middle of the infield with houses cut in half by it
+    // (Street, 2026-09-24: steps of several metres wherever two parts of the
+    // lap ran within a few hundred metres). Blend toward the other leg as the
+    // point nears the bisector: half-and-half ON it, none at all once the
+    // other leg is BLEND metres further away — which is always true on the
+    // road itself, so the racing surface is exactly what it was.
+    // Never on the circuit, nor within one grass-grid cell of it: tarmac and
+    // run-off keep their own leg's height however close another leg runs
+    // (Monaco's are metres apart), and so does the grass that meets them.
+    if (d < FAR && d > t.w[i] + Math.max(t.runL[i], t.runR[i]) + 26) {
+      const o = this.otherLeg(x, z, i, d + BLEND);
+      if (o) {
+        // Clamped at 0 as well: `nearest` stops at the first ring of buckets
+        // that has anything in it, so the "other" leg can come back closer
+        // than the nearest one, and an unclamped smoothstep of a negative
+        // number is not a weight — it threw the ground 57 m in the air.
+        const f = Math.max(0, Math.min(1, (o.d - d) / BLEND));
+        const wgt = 0.5 * (1 - f * f * (3 - 2 * f));
+        onTrack += (this.elev.s[o.i] - onTrack) * wgt;
+      }
+    }
     if (d <= NEAR) return onTrack;
     const grid = this.gridAt(x, z);
     if (d >= FAR) return grid;
@@ -206,8 +259,14 @@ export class World {
    * because the grass was sunk under them and they were not.
    */
   groundY(x, z) {
-    const sink = this.sinkAt(this.nearest(x, z).d);
-    return (this.on ? this.heightAt(x, z) : 0) - sink;
+    const { i, d } = this.nearest(x, z);
+    let y = (this.on ? this.heightAt(x, z) : 0) - this.sinkAt(d);
+    if (this.bank && this.bank[i]) {
+      const t = this.track, h = t.hdg[i];
+      const lat = -Math.sin(h) * (x - t.x[i]) + Math.cos(h) * (Z(z) - t.y[i]);
+      y += bankGround(this.bank, t, i, lat);
+    }
+    return y;
   }
 
   /** `lift`, onto the visible ground rather than onto the height field. */

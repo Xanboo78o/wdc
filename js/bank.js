@@ -85,10 +85,47 @@ export function bankY(table, track, i, lat) {
   // than linear: the top of this embankment is the bit you can see from the
   // road, and a linear ramp puts a hard crease along the outside of the corner
   // exactly where the eye is.
+  //
+  // The fall is at least an EMBANKMENT's length, not just the run-off's. At
+  // Zandvoort's 18 degrees over 12 m the outer edge is 3.9 m up and its run-off
+  // can take that. Adam's street circuit put 18 degrees on a 30 m road with a
+  // metre of run-off: a 9.7 m cliff down to a wall left standing at grade, and
+  // the whole corner read as terrain clipping. Real banking is built on a bank
+  // of earth, so the ground falls away at a slope a bank can stand at, and
+  // everything past the edge — run-off, barrier, grass — stands on that same
+  // bank (World.groundY adds `bankGround` below).
   const runOut = (s > 0 ? track.runR[i] : track.runL[i]) || 1;
-  const f = (u + w + runOut) / runOut;
+  const fall = Math.max(runOut, 2 * w * rise / EMBANK);
+  const f = (u + w + fall) / fall;
   if (f <= 0) return 0;
   return 2 * w * rise * (f * f * (3 - 2 * f));
+}
+
+// The steepest an earth bank is allowed to fall, rise over run (about 17 deg;
+// 0.4 measured 96% at the steepest point of the smoothstep).
+const EMBANK = 0.3;
+
+/**
+ * How far the GROUND is raised by banking at this point: the embankment
+ * beyond the barrier on the high side of a banked corner, nothing anywhere
+ * else. (Following the camber under the road was tried and measured worse:
+ * the grass grid's chords came up through the tarmac, 222 -> 657 points at
+ * Zandvoort.)
+ */
+export function bankGround(table, track, i, lat) {
+  const k = table[i];
+  if (!k) return 0;
+  // Only PAST THE BARRIER. Between the road edge and the barrier the run-off
+  // mesh is the surface you see and the grass underneath is covered; raising
+  // it there too let the grass grid's chords up through the road at
+  // Zandvoort (222 -> 594 points). Past the barrier the grass IS the surface,
+  // and it has to carry on down the embankment from where the run-off ends.
+  const w = track.w[i], s = k > 0 ? 1 : -1, u = s * lat;
+  const runOut = (s > 0 ? track.runR[i] : track.runL[i]) || 1;
+  // Half a metre inside, because the barrier stands EXACTLY on that line and
+  // rounding put some of it on the wrong side — a wall 9.9 m below the end of
+  // the run-off it was meant to be standing on.
+  return u <= -(w + runOut) + 0.5 ? bankY(table, track, i, lat) : 0;
 }
 
 /**

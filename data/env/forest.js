@@ -29,6 +29,8 @@ export const FOREST = {
   monaco:      { kinds: ['forest', 'park'], conifer: 0.4, depth: 30, density: 0.8, scrub: true },
   // Seaside boulevard planting: broadleaf, and not deep.
   baku:        { kinds: ['forest', 'park'], conifer: 0.06, depth: 30, density: 0.8, scrub: false },
+  // Pembroke, NH (Adam's street circuit): white pine, red oak and maple.
+  street:      { kinds: ['forest'], conifer: 0.45, depth: 60, density: 1, scrub: true },
   // Anything not named above.
   _:           { kinds: ['forest'], conifer: 0.5, depth: 45, density: 1, scrub: true },
 };

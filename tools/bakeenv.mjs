@@ -67,6 +67,8 @@ const ROAD_W = {
 };
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// A stable pseudo-random in [0,1) from a position (the same idea as env.js's).
+const seededN = (x, y, salt) => { const v = Math.sin(x * 12.9898 + y * 78.233 + salt * 43.7585) * 43758.5453; return v - Math.floor(v); };
 
 // ---------------------------------------------------------------------------
 // Overpass, politely. A bare 406 means no User-Agent; 429/504 means slow down.
@@ -339,8 +341,11 @@ async function bake(key, force) {
   const counts = {};
   for (const el of lJson.elements || []) {
     if (!el.geometry || el.geometry.length < 4) continue;
-    const kind = classify(el.tags);
+    let kind = classify(el.tags);
     if (!kind) continue;
+    // A New England town's residential land is LAWN, not concrete: "urban"
+    // painted Pembroke's golf-course neighbourhood as a car park.
+    if (fit && kind === 'urban' && el.tags.landuse === 'residential') kind = 'park';
     const pts = simplify(el.geometry.map(g => toXY(g.lat, g.lon)), 3.0);
     if (pts.length < 3 || area2(pts) < 150) continue;
     areas.push({ k: kind, p: pts });
@@ -431,6 +436,62 @@ async function bake(key, force) {
       flush();
     }
     for (const r of roads) r.p = simplify(r.p, 3.5);
+
+    // THE WOODS. Pembroke is New England: trees everywhere that is not a
+    // yard, a field, the golf course or water — and OpenStreetMap has almost
+    // none of them mapped (the tree query came back empty). Left out, the town
+    // stood on bare grass and read as desolate. So the survey still decides
+    // everything that IS mapped, and the woods fill what is left: every 30 m
+    // cell whose centre is well clear of houses, streets, the circuit and any
+    // mapped open land. Runs along a row are merged into one rectangle.
+    const pip = (x, y, poly) => {
+      let inside = false;
+      for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
+        const [xa, ya] = poly[a], [xb, yb] = poly[b];
+        if ((ya > y) !== (yb > y) && x < (xb - xa) * (y - ya) / (yb - ya) + xa) inside = !inside;
+      }
+      return inside;
+    };
+    const open = areas.filter(a => a.k !== 'forest');
+    const cent = buildings.map(b => [b.p.reduce((t, q) => t + q[0], 0) / b.p.length, b.p.reduce((t, q) => t + q[1], 0) / b.p.length]);
+    const streetPts = [];
+    for (const r of roads) for (let k = 0; k < r.p.length - 1; k++) {
+      const [a, b] = [r.p[k], r.p[k + 1]], m = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 10));
+      for (let j = 0; j <= m; j++) streetPts.push([a[0] + (b[0] - a[0]) * j / m, a[1] + (b[1] - a[1]) * j / m]);
+    }
+    const far = (x, y, pts, r) => pts.every(q => (q[0] - x) ** 2 + (q[1] - y) ** 2 > r * r);
+    const C = 30, wx0 = bb.x0 - PAD, wy0 = bb.y0 - PAD;
+    const nxC = Math.ceil((bb.x1 - bb.x0 + 2 * PAD) / C), nyC = Math.ceil((bb.y1 - bb.y0 + 2 * PAD) / C);
+    let woodCells = 0;
+    for (let j = 0; j < nyC; j++) {
+      let run = -1;
+      const flushRun = i => {
+        if (run < 0) return;
+        const xa = wx0 + run * C, xb = wx0 + i * C, ya = wy0 + j * C, yb = ya + C;
+        areas.push({ k: 'forest', p: [[xa, ya], [xb, ya], [xb, yb], [xa, yb]] });
+        run = -1;
+      };
+      for (let i = 0; i <= nxC; i++) {
+        const x = wx0 + (i + 0.5) * C, y = wy0 + (j + 0.5) * C;
+        const wood = i < nxC && clearOf(x, y, 25) && far(x, y, cent, 38) && far(x, y, streetPts, 22)
+          && !open.some(a => pip(x, y, a.p));
+        if (wood) { if (run < 0) run = i; woodCells++; } else flushRun(i);
+      }
+    }
+    // Yard trees: a New England house stands among big old maples and pines.
+    // Three per house, 11-20 m out, never on a street, the circuit or a
+    // neighbour.
+    let yard = 0;
+    for (const [cx, cy] of cent) {
+      for (let k = 0; k < 3; k++) {
+        const a = seededN(cx, cy, k) * Math.PI * 2, d = 11 + seededN(cy, cx, k + 5) * 9;
+        const x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d;
+        if (!clearOf(x, y, 4) || !far(x, y, streetPts, 7) || !far(x, y, cent, 9)) continue;
+        trees.push([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+        yard++;
+      }
+    }
+    console.log(`  woods: ${woodCells} cells of 30 m; ${yard} yard trees`);
   }
 
   const out = {

@@ -382,7 +382,11 @@ console.log(`  written       ${dest}  (${(fs.statSync(dest).size / 1024).toFixed
 // about ten metres and the chord error falls with the square of the cell.
 if (!out) {
   const span = Math.max(track.bbox.x1 - track.bbox.x0, track.bbox.y1 - track.bbox.y0);
-  const pad = 220;
+  // Past the grid the game drops the land away toward its lowest point, so
+  // the grid has to reach past everything built around the circuit — the
+  // bakeenv town reaches 600 m out. At 220 that drop was a straight line of
+  // cliffs through Pembroke.
+  const pad = 800;
   const N = Math.max(48, Math.min(200, Math.round((span + 2 * pad) / 10)));
   const gx0 = track.bbox.x0 - pad, gy0 = track.bbox.y0 - pad;
   const dx = (track.bbox.x1 - track.bbox.x0 + 2 * pad) / (N - 1);
@@ -397,7 +401,7 @@ if (!out) {
   // sample does not take that one sample's height alone and pock the land.
   // Weight dies off past ~300 m, which is beyond world.js's FAR of 240 — so by
   // the time the grid is the only thing being read, it is already the mean.
-  const CORE2 = 60 * 60, REACH2 = 330 * 330;
+  const CORE2 = 60 * 60;
   const stride = Math.max(1, Math.round(n / 900));   // ~900 samples is plenty
   const h = [];
   for (let j = 0; j < N; j++) {
@@ -407,11 +411,16 @@ if (!out) {
       let wsum = 0, hsum = 0;
       for (let k = 0; k < n; k += stride) {
         const d2 = (X[k] - gx) ** 2 + (Y[k] - gy) ** 2;
-        if (d2 > REACH2) continue;
+        // NO CUT-OFF. A hard reach made every sample switch on at full
+        // weight as a node crossed 330 m of it, and inverse distance is a
+        // RATIO — one faint sample alone still gives its full height — so the
+        // land fell 15 m in 40 m in a ring round the whole circuit (Street,
+        // 2026-09-24). Every sample, every node: smooth everywhere, and far
+        // out it settles on the mean of the road by itself.
         const w = 1 / (d2 + CORE2);
         wsum += w; hsum += w * (Z[k] - mean);
       }
-      h.push(wsum ? +(hsum / wsum).toFixed(2) : 0);
+      h.push(+(hsum / wsum).toFixed(2));
     }
   }
 

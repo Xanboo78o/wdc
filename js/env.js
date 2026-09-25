@@ -88,6 +88,18 @@ const ROOFS = {
   _:          ['#8d8a82', '#7f7c75'],
 };
 
+// A town with its own look, over the generic palettes. Pembroke, NH is
+// painted clapboard colonials: mostly white and cream, some grey, navy, sage
+// and barn red, under dark asphalt shingle. The generic palette made it read
+// as a grey estate — Adam: "I DONT LIVE IN THE HOOD".
+const LOCAL = {
+  street: {
+    walls: ['#f4f1ea', '#efe9dc', '#f7f4ee', '#e9e1cf', '#f1ead6', '#d9dcd8', '#c9ccc7',
+            '#3d4f66', '#56697a', '#8e9a86', '#9a3a2e', '#e8dcc0', '#f5f2ea', '#eee6d2'],
+    roofs: ['#3b3d40', '#45474a', '#2f3134', '#524f4b', '#5a4a40'],
+  },
+};
+
 // How likely a building is to be brick rather than painted render, per
 // circuit. Zandvoort is a Dutch seaside town and is mostly brick; Monaco is a
 // Mediterranean city and is almost entirely render. This one number per track
@@ -161,8 +173,9 @@ function building(wall, glass, roofB, b, detail, trackKey, y0 = 0) {
   const h = b.h;
   const r1 = seeded(p[0][0], p[0][1], 1);
   const r2 = seeded(p[0][0], p[0][1], 2);
-  const base = safeColour(b.c) || pick(PALETTE[kind] || PALETTE._, r1);
-  const roofCol = safeColour(b.rc) || pick(ROOFS[kind] || ROOFS._, r2);
+  const local = LOCAL[trackKey];
+  const base = safeColour(b.c) || pick((local && local.walls) || PALETTE[kind] || PALETTE._, r1);
+  const roofCol = safeColour(b.rc) || pick((local && local.roofs) || ROOFS[kind] || ROOFS._, r2);
 
   // Three-space ring. `y0` is ONE height for the whole building, taken at its
   // footprint — a building is rigid, and letting each vertex follow the
@@ -479,7 +492,17 @@ function flatMesh(polys, look, spec, world) {
 function roadMesh(roads, look, world) {
   const b = new Builder();
   for (const r of roads) {
-    const p = r.p, hw = r.w / 2;
+    // Re-densified to 4 m: the bake simplifies a straight street down to its
+    // two ends, and a 60 m quad lifted only at its corners chords straight
+    // through every rise in between.
+    const p = [];
+    for (let i = 0; i < r.p.length - 1; i++) {
+      const [ax, ay] = r.p[i], [bx, by] = r.p[i + 1];
+      const k = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 4));
+      for (let j = 0; j < k; j++) p.push([ax + (bx - ax) * j / k, ay + (by - ay) * j / k]);
+    }
+    p.push(r.p[r.p.length - 1]);
+    const hw = r.w / 2;
     for (let i = 0; i < p.length - 1; i++) {
       const [ax, ay] = p[i], [bx, by] = p[i + 1];
       const dx = bx - ax, dy = by - ay, m = Math.hypot(dx, dy);
@@ -560,7 +583,11 @@ export function buildEnv(scene, env, track, look, corridor = null, world = null)
     const isBrick = seeded(b.p[0][0], b.p[0][1], 7) < brickP && b.k !== 'office' && b.k !== 'stadium';
     const pile = isBrick ? brick : rendr;
     const detail = d < NEAR && windows < MAX_WINDOWS;
-    const y0 = world ? world.groundY(b.p[0][0], Z(b.p[0][1])) : 0;
+    // The LOWEST corner, not the first: on a slope, the first corner could be
+    // the high one and the house floated off the hill by metres (measured on
+    // Street: up to 8 m). Sat on its lowest corner it is dug in on the uphill
+    // side, which is what a house on a hill is.
+    const y0 = world ? Math.min(...b.p.map(q => world.groundY(q[0], Z(q[1])))) : 0;
     windows += building(pile.wall, pile.glass, pile.roof, b, detail, env.key, y0);
     if (detail) detailed++;
     added.buildings++;

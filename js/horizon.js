@@ -48,6 +48,8 @@ const LAND = {
   // The Nürburgring sits at ~620 m on the Eifel plateau: rolling wooded hills,
   // spruce forest right up to the fences, Hohe Acht (747 m) on the skyline.
   nurburgring: { lo: 40, hi: 150, col: 0x4b5a3a, rough: 0.7, sea: null,     trees: 0x2f4128 },
+  // Pembroke, NH: watered lawns and a golf course, wooded hills beyond.
+  street:    { lo: 20, hi: 60,  col: 0x4f6d34, rough: 0.6,  sea: null,     trees: 0x2f4a26 },
   _:         { lo: 20, hi: 70,  col: 0x5a6340, rough: 0.6,  sea: null,     trees: 0x3d4d2c },
 };
 
