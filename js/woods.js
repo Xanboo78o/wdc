@@ -170,7 +170,7 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
   let single = 0;
   // Loose surveyed trees, standing where they stand: Monza's avenue of planes.
   for (const t of env.trees || []) {
-    if (single >= 2100) break;
+    if (single >= (spec.singles || 2100)) break;
     if (!clear(t[0], Z(t[1]))) continue;
     forest.tree(t[0], Z(t[1]), { conifer: 0, scale: 0.62 + r() * 0.24 });
     single++;
@@ -183,7 +183,7 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
     if (reached.has(k)) return;
     const b = a.box, area = (b[1] - b[0]) * (b[3] - b[2]);
     const want = Math.min(400, Math.round(area / 90));
-    for (let n = 0; n < want && far < 7000; n++) {
+    for (let n = 0; n < want && far < (spec.papers || 7000); n++) {
       const x = b[0] + r() * (b[1] - b[0]), y = b[2] + r() * (b[3] - b[2]);
       // Well away from every road: a paper tree is a 15 m card, and beside
       // the run-off it fills the screen. Measured: 1.5 m was enough to put

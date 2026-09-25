@@ -55,6 +55,18 @@ const FITTED = {
       { lat: 43.1662829, lon: -71.4762809, s: 236, what: 'Pembroke St x Whittemore Rd = Turn 2' },
       { lat: 43.1585268, lon: -71.4688370, s: 6426, what: 'Pembroke St x Bow Lane = the top corner' },
     ],
+    // Buildings Adam placed himself, where the fit is too far "a lil off".
+    // "u pass the clubhouse like RIGHT on that first straight even before the
+    // hairpin": Pembroke Pines' clubhouse, set beside the straight between
+    // Turn 4 and the Turn 6 hairpin, long side to the track, on the golf
+    // course's side, `gap` metres past the barrier.
+    place: [
+      { osm: 1239127617, s: 540, side: -1, gap: 8, what: 'Pembroke Pines Country Club clubhouse' },
+    ],
+    // Long buildings are condos: "most of the houses (in the first section)
+    // are condos but 4 houses thats why theyre so long". Anything this long
+    // and this narrow is built as a two-and-a-half-storey condo block.
+    condo: { long: 24, aspect: 2 },
   },
 };
 // What a street is, as a full width in metres. Footpaths, driveways and
@@ -286,6 +298,37 @@ async function bake(key, force) {
     }
     return true;
   };
+  // Length and width of a footprint along its own longest edge.
+  const footprintSize = pts => {
+    let ux = 1, uy = 0, best = 0;
+    for (let k = 0; k < pts.length; k++) {
+      const a = pts[k], b = pts[(k + 1) % pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L > best) { best = L; ux = (b[0] - a[0]) / L; uy = (b[1] - a[1]) / L; }
+    }
+    const al = pts.map(p => p[0] * ux + p[1] * uy), ac = pts.map(p => -p[0] * uy + p[1] * ux);
+    return [Math.max(...al) - Math.min(...al), Math.max(...ac) - Math.min(...ac)].sort((a, b) => b - a);
+  };
+  // Move a footprint beside the lap at `s`: long side to the track, on
+  // `side` (+1 = left of travel, -1 = right), `gap`
+  // metres past the barrier. Its real shape and size are kept.
+  const placeBeside = (pts, q) => {
+    const i = Math.round(q.s / track.ds) % n, j = (i + 1) % n;
+    const hx = track.x[j] - track.x[i], hy = track.y[j] - track.y[i], hl = Math.hypot(hx, hy);
+    const fx = hx / hl, fy = hy / hl, lx = -fy, ly = fx;           // forward, left
+    let ux = 1, uy = 0, best = 0;
+    for (let k = 0; k < pts.length; k++) {
+      const a = pts[k], b = pts[(k + 1) % pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L > best) { best = L; ux = (b[0] - a[0]) / L; uy = (b[1] - a[1]) / L; }
+    }
+    const cx = pts.reduce((t, p) => t + p[0], 0) / pts.length, cy = pts.reduce((t, p) => t + p[1], 0) / pts.length;
+    // local frame: along the long edge, across it
+    const loc = pts.map(p => [(p[0] - cx) * ux + (p[1] - cy) * uy, -(p[0] - cx) * uy + (p[1] - cy) * ux]);
+    const half = Math.max(...loc.map(p => Math.abs(p[1])));
+    const side = q.side;
+    const off = track.w[i] + (side > 0 ? track.runL[i] : track.runR[i]) + q.gap + half;
+    const X = track.x[i] + lx * off * side, Y = track.y[i] + ly * off * side;
+    return loc.map(([a, c]) => [Math.round((X + fx * a + lx * c) * 10) / 10, Math.round((Y + fy * a + ly * c) * 10) / 10]);
+  };
 
   const raw = ROOT + 'data/env/raw/';
   console.log('  buildings…');
@@ -328,12 +371,20 @@ async function bake(key, force) {
       : (el.geometry ? [el.geometry] : []);
     const tg = el.tags || {};
     const extra = buildingExtras(tg);
+    const placed = fit && (fit.place || []).find(q => q.osm === el.id);
     for (const ring of rings) {
       if (ring.length < 4) continue;
-      const pts = simplify(fit ? shapeXY(ring) : ring.map(g => toXY(g.lat, g.lon)));
+      let pts = simplify(fit ? shapeXY(ring) : ring.map(g => toXY(g.lat, g.lon)));
       if (pts.length < 3 || area2(pts) < 18) continue;
-      if (fit && !pts.every(p => clearOf(p[0], p[1], 4))) continue;
-      buildings.push({ h: Math.round(heightOf(tg) * 10) / 10, p: pts, ...extra });
+      if (placed) pts = placeBeside(pts, placed);
+      else if (fit && !pts.every(p => clearOf(p[0], p[1], 4))) continue;
+      const b = { h: Math.round(heightOf(tg) * 10) / 10, p: pts, ...extra };
+      if (placed) { b.h = 8; b.k = 'retail'; }
+      else if (fit && fit.condo && !b.k) {
+        const [len, wid] = footprintSize(pts);
+        if (len >= fit.condo.long && len / wid >= fit.condo.aspect) { b.k = 'apartments'; b.h = 9.5; b.lv = 2; }
+      }
+      buildings.push(b);
     }
   }
 
@@ -454,6 +505,14 @@ async function bake(key, force) {
     };
     const open = areas.filter(a => a.k !== 'forest');
     const cent = buildings.map(b => [b.p.reduce((t, q) => t + q[0], 0) / b.p.length, b.p.reduce((t, q) => t + q[1], 0) / b.p.length]);
+    // Clearance is measured from the WALLS, not the middle: a 66 m clubhouse
+    // or a condo block measured from its centre had trees growing inside it.
+    const walls = [];
+    for (const b of buildings) for (let k = 0; k < b.p.length; k++) {
+      const [a0, a1] = [b.p[k], b.p[(k + 1) % b.p.length]], m = Math.max(1, Math.ceil(Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) / 5));
+      for (let j = 0; j < m; j++) walls.push([a0[0] + (a1[0] - a0[0]) * j / m, a0[1] + (a1[1] - a0[1]) * j / m]);
+    }
+    const inside = (x, y) => buildings.some(b => pip(x, y, b.p));
     const streetPts = [];
     for (const r of roads) for (let k = 0; k < r.p.length - 1; k++) {
       const [a, b] = [r.p[k], r.p[k + 1]], m = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 10));
@@ -473,20 +532,22 @@ async function bake(key, force) {
       };
       for (let i = 0; i <= nxC; i++) {
         const x = wx0 + (i + 0.5) * C, y = wy0 + (j + 0.5) * C;
-        const wood = i < nxC && clearOf(x, y, 25) && far(x, y, cent, 38) && far(x, y, streetPts, 22)
+        // Adam: "add LOTS of forest". Right up to the yards, the streets and
+        // the barriers — a street circuit through the New England woods.
+        const wood = i < nxC && clearOf(x, y, 8) && far(x, y, walls, 18) && far(x, y, streetPts, 13)
           && !open.some(a => pip(x, y, a.p));
         if (wood) { if (run < 0) run = i; woodCells++; } else flushRun(i);
       }
     }
     // Yard trees: a New England house stands among big old maples and pines.
-    // Three per house, 11-20 m out, never on a street, the circuit or a
+    // Six per house, 11-20 m out, never on a street, the circuit or a
     // neighbour.
     let yard = 0;
     for (const [cx, cy] of cent) {
-      for (let k = 0; k < 3; k++) {
+      for (let k = 0; k < 6; k++) {
         const a = seededN(cx, cy, k) * Math.PI * 2, d = 11 + seededN(cy, cx, k + 5) * 9;
         const x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d;
-        if (!clearOf(x, y, 4) || !far(x, y, streetPts, 7) || !far(x, y, cent, 9)) continue;
+        if (!clearOf(x, y, 4) || !far(x, y, streetPts, 7) || !far(x, y, walls, 5) || inside(x, y)) continue;
         trees.push([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
         yard++;
       }

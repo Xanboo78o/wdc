@@ -13,6 +13,8 @@
 //             stays 14 m deep ("depends on the area")
 //   density   1 = the recipe; 0.6 = sparser rows
 //   scrub     true = scrub polygons get a scatter of small real trees
+//   singles   most loose trees planted (default 2100); papers: most far paper
+//             trees (default 7000)
 //
 // Loose `natural=tree` points in the survey (Monza's avenue of planes) are
 // always planted as single real trees, standing where they stand.
@@ -30,7 +32,9 @@ export const FOREST = {
   // Seaside boulevard planting: broadleaf, and not deep.
   baku:        { kinds: ['forest', 'park'], conifer: 0.06, depth: 30, density: 0.8, scrub: false },
   // Pembroke, NH (Adam's street circuit): white pine, red oak and maple.
-  street:      { kinds: ['forest'], conifer: 0.45, depth: 60, density: 1, scrub: true },
+  // Adam: "add LOTS of forest" — deep, dense woods.
+  street:      { kinds: ['forest'], conifer: 0.45, depth: 140, density: 1.3, scrub: true,
+                 singles: 4000, papers: 12000 },
   // Anything not named above.
   _:           { kinds: ['forest'], conifer: 0.5, depth: 45, density: 1, scrub: true },
 };
