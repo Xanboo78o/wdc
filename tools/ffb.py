@@ -235,6 +235,73 @@ async def serve(args):
             state['wheel'] = None
             print('wheel gone — waiting for it (power button?)')
 
+    # ---- THE RIM BUTTONS, past Chrome ------------------------------------
+    # Chrome gives a web page only the first 32 of a gamepad's buttons, and
+    # the R3 declares 128: MENU is 37 and confirm is 35, so no map could ever
+    # make them work in the game (Adam, 2026-09-25: "my buttons still dont
+    # work"; pad.html showed 32 buttons). This bridge already holds the wheel
+    # and a socket to the game, so it reads every key straight off the event
+    # device (read-only, its own descriptor) and forwards {"b": n, "v": 0|1}.
+    # `n` is the JOYDEV number — the order of the declared keys, BTN_JOYSTICK
+    # upward — which is the number pad.html and data/wheelbtn.json use.
+    btn = {'fd': None, 'path': None, 'index': {}, 'writers': set()}
+
+    def key_index(path):
+        caps = open(f'/sys/class/input/{os.path.basename(path)}/device/capabilities/key').read().split()
+        bits = 0
+        for word in caps:
+            bits = (bits << 64) | int(word, 16)
+        codes = [k for k in range(bits.bit_length()) if bits >> k & 1]
+        # joydev numbers BTN_JOYSTICK (0x120) and above first, then BTN_MISC.
+        order = [k for k in codes if k >= 0x120] + [k for k in codes if 0x100 <= k < 0x120]
+        return {k: i for i, k in enumerate(order)}
+
+    def buttons_close():
+        if btn['fd'] is not None:
+            try:
+                asyncio.get_running_loop().remove_reader(btn['fd'])
+            except Exception:
+                pass
+            os.close(btn['fd'])
+        btn['fd'] = None
+
+    def buttons_open():
+        if btn['fd'] is not None:
+            return
+        path, name = find_wheel(args.device)
+        if not path:
+            return
+        try:
+            btn['index'] = key_index(path)
+            btn['fd'] = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+            btn['path'] = path
+            asyncio.get_running_loop().add_reader(btn['fd'], buttons_read)
+            print(f'reading {len(btn["index"])} rim buttons from {path}')
+        except OSError as e:
+            print(f'could not read the rim buttons at {path}: {e}')
+            buttons_close()
+
+    def buttons_read():
+        try:
+            data = os.read(btn['fd'], 24 * 64)
+        except BlockingIOError:
+            return
+        except OSError:
+            buttons_close()
+            return
+        for k in range(0, len(data) - 23, 24):
+            _, _, typ, code, val = struct.unpack_from('<qqHHi', data, k)
+            if typ != 1 or code not in btn['index'] or val == 2:
+                continue
+            n = btn['index'][code]
+            log.write(f'{time.time():.3f} button {n} {"down" if val else "up"}\n'); log.flush()
+            msg = json.dumps({'b': n, 'v': 1 if val else 0}).encode()
+            for wr in list(btn['writers']):
+                try:
+                    wr.write(bytes([0x81, len(msg)]) + msg)
+                except Exception:
+                    btn['writers'].discard(wr)
+
     log = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ffb.log'), 'a')
     log.write(f'--- {time.strftime("%F %T")} max {args.max} extras {args.extras}\n')
 
@@ -258,6 +325,8 @@ async def serve(args):
             if state['wheel'] and time.time() - state['last'] > 0.25:
                 apply(f=0, r=0, d=0)
                 state['last'] = float('inf')  # zeroed; don't re-send until a message
+            if btn['fd'] is None:
+                buttons_open()
             if not state['wheel']:
                 wheel()
                 await asyncio.sleep(1.0)
@@ -284,6 +353,7 @@ async def serve(args):
         w = wheel()
         hello = json.dumps({'wheel': w.name if w else None})
         writer.write(bytes([0x81, len(hello)]) + hello.encode() if len(hello) < 126 else b'')
+        btn['writers'].add(writer)
         try:
             while True:
                 b0, b1 = await reader.readexactly(2)
@@ -316,6 +386,7 @@ async def serve(args):
             pass
         finally:
             state['clients'] -= 1
+            btn['writers'].discard(writer)
             apply(f=0, r=0, d=0)
             print('game disconnected — forces zeroed')
             writer.close()
@@ -324,6 +395,7 @@ async def serve(args):
         print('DRY RUN — printing the forces, the wheel is never touched')
     elif not wheel():
         print('no force-feedback wheel yet — switch it on (power button); I will keep looking')
+    buttons_open()
     srv = await asyncio.start_server(client, '127.0.0.1', args.port)
     print(f'ffb bridge on ws://127.0.0.1:{args.port}   Ctrl+C to stop')
     asyncio.create_task(watchdog())
@@ -331,6 +403,7 @@ async def serve(args):
         async with srv:
             await srv.serve_forever()
     finally:
+        buttons_close()
         drop()
 
 

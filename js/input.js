@@ -9,6 +9,7 @@
 //
 // A gamepad, when one is connected, bypasses the wind-on entirely: an analogue
 // stick already IS a wheel position, so shaping it again would double up.
+import { bridgeButtons } from './bridgebtn.js';
 
 export const KEYMAP = {
   left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
@@ -77,7 +78,9 @@ function controlDown(p, c) {
   // the guess was wrong, at the cost of a spare button doing the same job.
   // One press into pad.html replaces the whole guess with the truth.
   if (Array.isArray(c)) return c.some(x => controlDown(p, x));
-  if (c.b != null) return !!(p.buttons[c.b] && p.buttons[c.b].pressed);
+  // Or held according to tools/ffb.py, which reads the buttons Chrome cuts
+  // off (it passes only the first 32; MENU is 37). See js/bridgebtn.js.
+  if (c.b != null) return !!(p.buttons[c.b] && p.buttons[c.b].pressed) || bridgeButtons.has(c.b);
   if (c.ax != null) {
     const v = p.axes[c.ax];
     return v != null && Math.abs(v) > 0.5 && Math.sign(v) === c.dir;

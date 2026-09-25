@@ -869,6 +869,9 @@ function loop(now) {
   // ate the Escape whenever the menu was open, because && evaluates the call
   // first and then throws the result away, so the branch that closes the menu
   // never saw it. The menu opened and would not shut.
+  // Paused, no physics step runs, and the physics step is what reads the pad —
+  // so the rim could open this menu but never move through it or shut it.
+  if (state.paused) hands._readPad();
   const tapPause = hands.tapped('w:pause');
   const tapBack = hands.tapped('w:back');
   const tapEsc = hands.tapped('Escape');

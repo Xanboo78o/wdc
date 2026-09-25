@@ -21,6 +21,7 @@
 
 import { peakSlip } from './physics.js';
 import { steerLock } from './input.js';
+import { bridgeButtons } from './bridgebtn.js';
 
 const URL_ = 'ws://127.0.0.1:8179';
 const MECH = 0.3;            // caster's share of the trail, relative to pneumatic
@@ -55,6 +56,12 @@ export class FFB {
     this.jolt = 0; this.dist = 0; this.kick = 1;
     this._retry = 0;
     this.off = new URLSearchParams(location.search).get('ffb') === '0';
+    // Connect from the moment the page loads, not from the first frame of
+    // driving: the bridge also carries the rim buttons (js/bridgebtn.js), and
+    // MENU and confirm are needed on the menu and the pause screen, where no
+    // driving frame runs — so they went nowhere (2026-09-25).
+    this._connect(performance.now());
+    this._keep = setInterval(() => this._connect(performance.now()), 3000);
   }
 
   _connect(now) {
@@ -64,8 +71,14 @@ export class FFB {
     try { ws = new WebSocket(URL_); } catch { return; }
     this.ws = ws;
     ws.onopen = () => { this.live = true; };
-    ws.onmessage = e => { try { this.wheel = JSON.parse(e.data).wheel; } catch { } };
-    ws.onclose = () => { this.ws = null; this.live = false; };
+    ws.onmessage = e => {
+      let m;
+      try { m = JSON.parse(e.data); } catch { return; }
+      // A rim button, read by the bridge past Chrome's 32-button limit.
+      if (m.b != null) { if (m.v) bridgeButtons.add(m.b); else bridgeButtons.delete(m.b); return; }
+      if ('wheel' in m) this.wheel = m.wheel;
+    };
+    ws.onclose = () => { this.ws = null; this.live = false; bridgeButtons.clear(); };
     ws.onerror = () => { };
   }
 
