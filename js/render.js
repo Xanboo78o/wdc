@@ -29,6 +29,23 @@ import { makeDeformer } from './dent.js';
 import { loadChassis, chassisGeometry } from './mesh.js';
 import { World, loadElev } from './world.js';
 import { loadSurface, defaultSurface, KERB_SHAPE } from './surface.js';
+import { buildPath } from './build/path.js';
+import { Ground } from './build/ground.js';
+import { buildRoad, buildRunoff, buildLandmarks, buildGround as buildBuiltGround } from './build/meshes.js';
+import { brandTexture, buildWalls, buildDetails, buildTunnels, buildViaducts, gantryBanner } from './build/dressing.js';
+import { BuildLook, loadFlora, foldTerrainUVs } from './build/look.js';
+import { buildFlora } from './build/flora.js';
+
+// HAND-BUILT CIRCUITS ARE DRAWN BY THE BUILDER (Adam, 2026-09-24: "make the
+// hand-built mega track the version from the builder"). The game's own world
+// is made for surveyed circuits — a flat plate, a city from OpenStreetMap,
+// barriers on the survey line — and the test map came out of it as a road on
+// a plate, with no tunnel, no bridge over the hairpins and none of the land
+// shaped to the road. So for a track made in build.html the world is built by
+// the SAME functions build.html uses, from the same pieces file. The car
+// still rides the baked track (same path, same numbers), so what you see and
+// what you drive cannot drift apart.
+const BUILT = { test: '../data/build/pieces.js' };
 
 const ROAD_STRIPS = 11;      // lateral divisions of the racing surface
 
@@ -320,13 +337,26 @@ export class View {
     // tools/chassis.mjs. It loads here, with the rest of the network work,
     // because buildCar is synchronous and the geometry has to exist first.
     const want = new URLSearchParams(location.search).get('chassis');
-    const [look, elev, surf, chassis] = await Promise.all([
+    const builtP = BUILT[track.key] && !new URLSearchParams(location.search).has('notbuilt')
+      ? import(BUILT[track.key]).then(m => {
+        const path = buildPath(m.PIECES, { closed: !!m.TRACK.closed });
+        return { path, ground: new Ground(path) };
+      }).catch(e => { console.error('built world:', e); return null; })
+      : null;
+    const [look, elev, surf, chassis, built] = await Promise.all([
       Look.load(renderer, track.key, { textures: opts.textures !== false }),
       opts.flat ? null : loadElev(track.key),
       loadSurface(track.key),
       want ? loadChassis(want) : null,
+      builtP,
     ]);
-    return new View(renderer, look, track, line, { ...opts, elev, surf, chassis });
+    if (built) {
+      // The baked elevation is relative to the mean height of the path; the
+      // builder's land is absolute. One offset puts them on the same datum.
+      built.mean = (elev && elev.mean) || 0;
+      built.flora = await loadFlora(renderer).catch(() => null);
+    }
+    return new View(renderer, look, track, line, { ...opts, elev, surf, chassis, built });
   }
 
   constructor(renderer, look, track, line, opts = {}) {
@@ -359,6 +389,14 @@ export class View {
     // Real surveyed elevation, from NASA SRTM. Null on a fresh clone that has
     // not run tools/getelev.mjs, and the world is simply flat then.
     this.world = new World(track, opts.elev);
+    // A hand-built circuit's ground is the builder's, exactly — so anything
+    // the game stands on the ground (trees, objects, the camera floor) stands
+    // on the land you can see. The ROAD height stays the baked profile.
+    this.built = opts.built || null;
+    if (this.built) {
+      const { ground, mean } = this.built;
+      this.world.groundY = (x, z) => ground.height(x, -z) - mean;
+    }
     // What every metre of the circuit is made of — baked by tools/baksurf.mjs.
     // The fallback reproduces exactly what the renderer did before there were
     // tags, so a fresh clone still draws a circuit.
@@ -418,7 +456,7 @@ export class View {
     if (typeof window !== 'undefined') window.__wdcPost = this.post;
     this._lastT = 0;
     const t0 = (typeof performance !== 'undefined') ? performance.now() : 0;
-    this.stats = this._world(opts.env);
+    this.stats = this.built ? this._builtWorld() : this._world(opts.env);
     if (typeof window !== 'undefined') window.__wdcBuildMs = Math.round(performance.now() - t0);
     // Publish what actually got built. `tools/shot.mjs` polls for this rather
     // than sleeping for a guessed number of seconds, and a screenshot of a
@@ -791,6 +829,10 @@ export class View {
     this._lastT = now;
     this._weather(dt);
     this._sky(now);
+    if (this.built) {
+      this.built.look.tick(now);
+      if (this.built.plants) this.built.plants.update(this.camera);
+    }
     if (this.post && this.post.on) {
       const d = this.proc ? this.rig.dir : this.sunDir.toArray();
       this.post.setSun(
@@ -816,6 +858,59 @@ export class View {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     if (this.post) this.post.setSize(w, h);
+  }
+
+  // The builder's world, for a hand-built circuit. Same calls, same order,
+  // as js/build/app.js; what is left out is what the game already has — its
+  // own sky, sun and weather — and the builder's cones (off there too).
+  _builtWorld() {
+    const t = this.track, S = this.scene, { path, ground, mean, flora } = this.built;
+    const stats = { built: true };
+    this.bank = bankTable(t);
+    const look = new BuildLook(this.renderer, this.look, flora, {});
+    this.built.look = look;
+    const G = new THREE.Group();
+    G.name = 'built';
+    G.position.y = -mean;
+    const land = buildBuiltGround(ground.chunks(), look.terrain({ land: 'simple' }));
+    foldTerrainUVs(land);
+    land.name = 'ground.plate';
+    G.add(land);
+    const mats = look.road();
+    const road = buildRoad(path, mats);
+    G.add(road);
+    G.add(buildRunoff(path, mats?.apron));
+    const brand = brandTexture(this.renderer.capabilities.getMaxAnisotropy());
+    G.add(buildWalls(path, ground, brand));
+    G.add(buildDetails(path, ground, brand));
+    G.add(buildTunnels(path));
+    G.add(buildViaducts(path, ground));
+    const landmarks = buildLandmarks(path, ground);
+    G.add(landmarks);
+    if (landmarks.userData.beam) G.add(gantryBanner(brand, landmarks.userData.beam));
+    G.updateMatrixWorld(true);
+    S.add(G);
+    // The rain darkens whatever `this.road` is.
+    this.road = road.children.find(m => m.isMesh) || null;
+    // Grass and the forest from data/build/scenery.js arrive when they are
+    // ready; the circuit is drivable before the last tree is planted.
+    if (flora) {
+      buildFlora(this.renderer, path, ground, look, { trees: 0.8, fringe: true, shadows: this.shadows })
+        .then(f => { if (f && f.group) { f.group.position.y = -mean; S.add(f.group); this.built.plants = f; } })
+        .catch(e => console.error('built flora:', e));
+    }
+    this.courseLights = buildCourseLights(S, t, this.world);
+    this.tvCams = this._tvCameras();
+    stats.tvCams = this.tvCams.length;
+    const lg = this.world.lift(
+      ribbon(t, i => this.line.off[i] - 0.10, i => this.line.off[i] + 0.10, 0.02, this.bank).geometry());
+    this.lineMesh = new THREE.Mesh(lg, new THREE.MeshBasicMaterial({
+      color: 0x35d6a0, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+      depthWrite: false,
+    }));
+    this.lineMesh.visible = false;
+    S.add(this.lineMesh);
+    return stats;
   }
 
   _world(env) {

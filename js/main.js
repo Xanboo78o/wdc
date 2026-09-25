@@ -640,7 +640,11 @@ async function start() {
       const layout = await import('../data/build/objects.js');
       if (layout.TRACK === pickTrack && layout.OBJECTS.length) {
         const world = state.view.world;
-        const high = (x, y) => (world ? world.heightAt(x, Z(y)) : 0);
+        // On a hand-built circuit the builder's own land, which is where
+        // build.html stood these objects in the first place.
+        const bw = state.view.built;
+        const high = bw ? (x, y) => bw.ground.height(x, y) - bw.mean
+          : (x, y) => (world ? world.heightAt(x, Z(y)) : 0);
         const props = new PropWorld({ seed: 7, groundY: high });
         const things = new Objects(state.view.scene, high, props);
         await things.build();
