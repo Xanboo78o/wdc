@@ -12,6 +12,15 @@
 //   ALONGSIDE    s per race with a rival overlapping you (nose past your rear axle)
 //   YOUR HITS    contacts involving your car
 //   RETIRED      the counter-metric: a field that fights by crashing is no good
+//   LEAD GAP     worst time gap from you to the LEADER while you are behind
+//   NEXT GAP     worst time gap to the car directly ahead of you
+//   >5s %        % of green-flag time the leader is more than 5 s up the road
+//
+// --blunder N makes your stand-in miss a braking point once a lap: at 40% of
+// the lap it stands on the brakes with no throttle for N seconds. Adam,
+// 2026-09-24: "it feels like missing a brake point and auto losing" — so the
+// question is whether the field is still there to fight after one.
+// Gaps are in seconds at the circuit's mean racing-line speed.
 //
 // Your seat is driven by a stand-in: the same autopilot at `--you` tier, with
 // the same racecraft the rivals get, because a stand-in that never defends or
@@ -26,7 +35,7 @@ import { FIXED_DT } from '../js/physics.js';
 import { makeAutopilot, makeDriver } from '../js/autopilot.js';
 
 const args = process.argv.slice(2);
-const KNOWN = new Set(['tracks', 'seeds', 'laps', 'grid', 'tier', 'battle', 'car', 'you', 'start']);
+const KNOWN = new Set(['tracks', 'seeds', 'laps', 'grid', 'tier', 'battle', 'car', 'you', 'start', 'blunder']);
 for (const a of args) {
   if (!a.startsWith('--')) continue;
   if (!KNOWN.has(a.slice(2))) {
@@ -45,6 +54,7 @@ const BATTLE = flag('battle', 'none');
 const CLS = flag('car', 'f4');
 const YOU = flag('you', 'medium');
 const START = +flag('start', 7);
+const BLUNDER = +flag('blunder', 0);
 
 function one(track, lines, spec, seed) {
   const race = new Race({
@@ -59,9 +69,15 @@ function one(track, lines, spec, seed) {
   let passedYou = 0, youPassed = 0, close = 0, green = 0, along = 0;
   const maxT = LAPS * 200 + 90;
   let t = 0, n = 0;
+  const vRef = lines.race.v.reduce((a, b) => a + b, 0) / lines.race.v.length;
+  let leadGap = 0, nextGap = 0, blunderLap = -1, blunderT = 0, over5 = 0, timed = 0;
   while (race.state !== 'over' && t < maxT && !me.finished) {
     if (n++ % 4 === 0) race.racecraft(me);
     drive(me.car, me.proj, FIXED_DT, me.ctx);
+    if (BLUNDER > 0 && race.state === 'green') {
+      if (me.lap !== blunderLap && me.proj.s > track.length * 0.4 && me.proj.s < track.length * 0.5) { blunderLap = me.lap; blunderT = BLUNDER; }
+      if (blunderT > 0) { blunderT -= FIXED_DT; me.car.throttle = 0; me.car.brake = 1; }
+    }
     race.tick(FIXED_DT, { throttle: me.car.throttle, brake: me.car.brake, delta: me.car.delta });
     t += FIXED_DT;
     if (race.state !== 'green' || me.retired) continue;
@@ -83,10 +99,19 @@ function one(track, lines, spec, seed) {
       wasAhead.set(o, ahead);
     }
     if (near) close += FIXED_DT;
+    if (race.time > 20) {
+      timed += FIXED_DT;
+      const ahead = race.entries.filter(o => o !== me && !o.retired).map(o => race.progress(o) - pMe).filter(d => d > 0);
+      if (ahead.length) {
+        leadGap = Math.max(leadGap, Math.max(...ahead) / vRef);
+        if (Math.max(...ahead) / vRef > 5) over5 += FIXED_DT;
+        nextGap = Math.max(nextGap, Math.min(...ahead) / vRef);
+      }
+    }
   }
   return {
     passedYou, youPassed, close: green ? close / green * 100 : 0, along,
-    hits: me.contacts, pos: me.pos,
+    hits: me.contacts, pos: me.pos, leadGap, nextGap, over5: timed ? over5 / timed * 100 : 0,
     retired: race.entries.filter(e => e.retired && !e.isPlayer).length,
     youOut: me.retired ? 1 : 0,
   };
@@ -100,8 +125,8 @@ const se = a => {
 };
 const all = [];
 const t0 = Date.now();
-console.log(`${GRID} cars · ${LAPS} laps · rivals ${TIER}${BATTLE !== 'none' ? ' / overtakes ' + BATTLE : ''} · you drive like ${YOU} from P${START} · ${CLS} · ${SEEDS} seeds\n`);
-console.log('CIRCUIT      PASSED YOU  YOU PASSED  CLOSE %  ALONGSIDE s  YOUR HITS  FINISH P  RIVALS OUT  YOU OUT');
+console.log(`${GRID} cars · ${LAPS} laps · rivals ${TIER}${BATTLE !== 'none' ? ' / overtakes ' + BATTLE : ''} · you drive like ${YOU} from P${START}${BLUNDER ? ` · ${BLUNDER}s blunder a lap` : ''} · ${CLS} · ${SEEDS} seeds\n`);
+console.log('CIRCUIT      PASSED YOU  YOU PASSED  CLOSE %  ALONGSIDE s  YOUR HITS  FINISH P  RIVALS OUT  YOU OUT  LEAD GAP  NEXT GAP  >5s %');
 for (const key of TRACKS) {
   const { track, lines, spec } = loadTrack(key, CLS);
   const runs = [];
@@ -110,9 +135,10 @@ for (const key of TRACKS) {
   const m = k => mean(runs.map(r => r[k]));
   console.log([key.padEnd(12), m('passedYou').toFixed(2).padStart(10), m('youPassed').toFixed(2).padStart(11),
     m('close').toFixed(0).padStart(8), m('along').toFixed(1).padStart(12), m('hits').toFixed(2).padStart(10),
-    m('pos').toFixed(1).padStart(9), m('retired').toFixed(2).padStart(11), m('youOut').toFixed(2).padStart(8)].join(' '));
+    m('pos').toFixed(1).padStart(9), m('retired').toFixed(2).padStart(11), m('youOut').toFixed(2).padStart(8),
+    (m('leadGap').toFixed(1) + 's').padStart(9), (m('nextGap').toFixed(1) + 's').padStart(9), m('over5').toFixed(0).padStart(7)].join(' '));
 }
 const k = n => `${mean(all.map(r => r[n])).toFixed(2)} ± ${se(all.map(r => r[n])).toFixed(2)}`;
 console.log(`\nall: passed you ${k('passedYou')} · you passed ${k('youPassed')} · close ${k('close')}% · alongside ${k('along')} s` +
-  ` · your hits ${k('hits')} · rivals out ${k('retired')} · you out ${k('youOut')}`);
+  ` · your hits ${k('hits')} · rivals out ${k('retired')} · you out ${k('youOut')}\n     worst gap to leader ${k('leadGap')} s · worst gap to next car ${k('nextGap')} s · leader >5 s away ${k('over5')}% of the time`);
 console.log(`${all.length} races in ${((Date.now() - t0) / 1000).toFixed(0)}s — ± is the standard error; under ~2x it is not a result.`);

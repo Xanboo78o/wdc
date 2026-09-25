@@ -34,6 +34,10 @@ const SAFETY_TIME = 30;       // s the car stays out once it is called
 const SAFETY_SPEED = 80 / 3.6;
 const PUSH_TIME = 8;          // s for a crew to heave a car back to the tarmac
 const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
+// SUPERCASUAL's leash, in seconds at the circuit's mean racing-line speed: a
+// rival further ahead of you than LEASH_FROM gives up LEASH_SLOPE of its target
+// speed per extra second, never more than down to LEASH_MIN.
+const LEASH_FROM = 2.5, LEASH_SLOPE = 0.15, LEASH_MIN = 0.62;
 const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
 
 export class Race {
@@ -58,6 +62,7 @@ export class Race {
     // SUPERCASUAL's OVERTAKES submode — see BATTLE in js/autopilot.js.
     this.battle = BATTLE[battle] || null;
     this.bandAt = 0;
+    this.vRef = lines.race.v.reduce((a, b) => a + b, 0) / lines.race.v.length;
 
     const n = Math.min(grid, slots.length);
     this.entries = [];
@@ -139,6 +144,18 @@ export class Race {
       // The band sets WHERE in the window; the car and the driver still set
       // the order inside it. Without paceMul the band erased the teams.
       d.gripNow = d.ceiling * (B.lo + (B.hi - B.lo) * f) * (d.paceMul ?? 1);
+      // THE LEASH (Adam, 2026-09-24: "you're never more than 5 secs behind
+      // everyone ... it feels like missing a brake point and auto losing").
+      // Grip alone cannot keep a field near you: it only acts in corners, and
+      // a car 20 s up the road on a straight is drag-limited whatever its
+      // tyres. So a rival more than LEASH_FROM seconds ahead of you drives to
+      // a lower target speed everywhere — gently, in proportion to how far
+      // out it is — until it is back inside. The front of the field waits,
+      // the back of it keeps racing, and the whole thing closes into a train.
+      // Measured before: worst gap to the leader after a 4 s blunder a lap
+      // was 40 s (tools/battlecheck.mjs --blunder 4).
+      const aheadT = pMe == null ? 0 : -behindYou / this.vRef;
+      e.hold = aheadT > LEASH_FROM ? Math.max(LEASH_MIN, 1 - (aheadT - LEASH_FROM) * LEASH_SLOPE) : 1;
     }
   }
 
@@ -503,7 +520,7 @@ export class Race {
     // What the slew starts from next time is where the car was ALLOWED to go,
     // pit bias excluded (it is re-added fresh each pass).
     e.biasS = bias - (pitting && this.lane ? (Math.sign(this.lane.off) || 1) * lim * 1.5 : 0);
-    e.ctx = { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure };
+    e.ctx = { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: e.hold ?? 1 };
   }
 
   // ---- one substep --------------------------------------------------------

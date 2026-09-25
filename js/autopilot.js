@@ -335,6 +335,8 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     // Nothing guarantees the car makes the apex after that — the tyres decide,
     // and sometimes they say no. That miss is the point.
     if (ctx?.lunge) need *= 1 + ctx.lunge;
+    // SUPERCASUAL's leash (race.js band): a rival too far ahead of you waits.
+    if (ctx?.hold != null && ctx.hold < 1) need *= ctx.hold;
     if (ctx?.speedCap != null) need = Math.min(need, ctx.speedCap);
 
     // ---- pedals: like a driver, not a thermostat ---------------------------
