@@ -25,6 +25,13 @@ const FIRST = {
   esteban: 'OCON', ollie: 'BEARMAN', oliver: 'BEARMAN', liam: 'LAWSON', isack: 'HADJAR',
   arvid: 'LINDBLAD', checo: 'PEREZ', sergio: 'PEREZ', valtteri: 'BOTTAS', yuki: 'TSUNODA',
 };
+function edits(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
 const nice = n => n ? n[0] + n.slice(1).toLowerCase() : n;
 const tenths = v => {
   // "one point four" is what an engineer says; "1.4" is what a speech engine
@@ -374,7 +381,23 @@ export class Engineer {
     for (const [first, last] of Object.entries(FIRST)) {
       if (new RegExp(`\\b${first}\\b`).test(text)) { const e = this.race.entries.find(x => x.name === last); if (e) return e; }
     }
-    return this.race.entries.find(e => !e.isPlayer && new RegExp(`\\b${e.name.toLowerCase()}\\b`).test(text)) || null;
+    const exact = this.race.entries.find(e => !e.isPlayer && new RegExp(`\\b${e.name.toLowerCase()}\\b`).test(text));
+    if (exact) return exact;
+    // Loosely: speech recognition spells "Piastri" as "piastry" or "pia streets".
+    // A word within two edits of a surname (of five letters or more) counts.
+    const words = text.replace(/\s+/g, ' ').split(' ');
+    const joined = words.map((w, k) => w + (words[k + 1] || ''));
+    let best = null, bd = 3;
+    for (const e of this.race.entries) {
+      if (e.isPlayer || e.name.length < 5) continue;
+      const n = e.name.toLowerCase();
+      for (const w of words.concat(joined)) {
+        if (Math.abs(w.length - n.length) > 2) continue;
+        const d = edits(w, n);
+        if (d < bd) { bd = d; best = e; }
+      }
+    }
+    return best;
   }
 
   gapLine() {

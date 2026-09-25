@@ -38,12 +38,11 @@ try:
 except Exception as e:
     print('no voice:', e, file=sys.stderr)
 
-# Racing words Whisper would otherwise spell like a dictionary. It is only a
-# hint — it biases, it does not force.
-PROMPT = ('Radio check. Box box. What is the gap? How is my fuel? Tyres. Hammer time. '
-          'Verstappen, Norris, Piastri, Leclerc, Hamilton, Russell, Antonelli, Alonso, Stroll, '
-          'Gasly, Colapinto, Albon, Sainz, Hulkenberg, Bortoleto, Ocon, Bearman, Lawson, Hadjar, '
-          'Lindblad, Perez, Bottas, Oscar, Lando, Max, Charles, Lewis, George, Kimi.')
+# NO PROMPT. A list of driver names here made Whisper invent them: Adam's
+# transmission came back "Ok, Antonelli." and "what's the gap" as "Box the
+# gap" (2026-09-25, "im not kimi"). Names are matched loosely in
+# js/engineer.js instead, so a misheard surname still finds its driver.
+PROMPT = None
 
 
 class H(BaseHTTPRequestHandler):
