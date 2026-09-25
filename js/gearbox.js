@@ -25,11 +25,12 @@
 
 export const BOXES = {
   f1: {
-    idle: 4000,
-    limit: 15000,
+    // The 2005 V10 Adam chose (2026-09-25): idles high, screams to 19,000.
+    idle: 4500,
+    limit: 19000,
     // Shift up a little before the limiter, the way a real seamless box does —
     // sitting on the limiter is slower and it sounds like a mistake.
-    shiftUp: 14700,
+    shiftUp: 18600,
     // Drop a gear when the lower one would still be under this. Hysteresis:
     // without a gap between the up-point and the down-point the box hunts
     // between two gears forever on a constant-speed corner.

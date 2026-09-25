@@ -542,7 +542,7 @@ export class Engine {
       // wobble and stutter, and the same duck after a big hit)
       for (const L of [this.engine, this.sub]) if (L) this._to(L.gain.gain, 0, 0.02);
       for (const G of [this.shakeGain, this.gritGain, this.barkGain]) if (G) this._to(G.gain, 0, 0.02);
-      this.synth.update(rpm * wob, t, this.master * FX.synth * this.duck * stut, dt);
+      this.synth.update(rpm * wob, t, this.master * FX.synth * this.duck * stut, dt, speed);
     }
 
     const kmh = speed * 3.6;
