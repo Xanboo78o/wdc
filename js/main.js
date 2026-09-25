@@ -869,9 +869,14 @@ function loop(now) {
   // ate the Escape whenever the menu was open, because && evaluates the call
   // first and then throws the result away, so the branch that closes the menu
   // never saw it. The menu opened and would not shut.
-  // Paused, no physics step runs, and the physics step is what reads the pad —
-  // so the rim could open this menu but never move through it or shut it.
-  if (state.paused) hands._readPad();
+  // READ THE RIM HERE, every frame, before any tap below is read. The pad
+  // used to be read only inside the physics step, and hands.endFrame() at the
+  // bottom of this function wiped its edges before the next frame came back
+  // up here to look — so MENU, back and camera were detected and thrown away
+  // every time, and paused (no physics step) the rim was not read at all.
+  // Only DRS, read inside the step, ever worked. Reading twice a frame is
+  // safe: the second read finds no new edge.
+  hands._readPad();
   const tapPause = hands.tapped('w:pause');
   const tapBack = hands.tapped('w:back');
   const tapEsc = hands.tapped('Escape');
