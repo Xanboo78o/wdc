@@ -94,6 +94,18 @@ class H(BaseHTTPRequestHandler):
             self._head(404)
 
 
+def warm():
+    # The first call pays for loading everything: 12.3 s measured, against
+    # 1.6 s warm. Pay it here, at startup, not on the first call of a race.
+    if stt:
+        import numpy as np
+        list(stt.transcribe(np.zeros(16000, dtype=np.float32), language='en', beam_size=1)[0])
+    if tts:
+        with wave.open(io.BytesIO(), 'wb') as w:
+            tts.synthesize_wav('Radio check.', w)
+
+
 if __name__ == '__main__':
+    warm()
     print(f'voice on http://127.0.0.1:{PORT}  stt={stt is not None} tts={tts is not None}', flush=True)
     ThreadingHTTPServer(('127.0.0.1', PORT), H).serve_forever()
