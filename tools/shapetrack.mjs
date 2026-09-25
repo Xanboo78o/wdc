@@ -9,13 +9,16 @@
 // --width M:N,N,...    those corners M metres wide (full width), blended in
 //                      and out over BLEND metres with a smoothstep so the
 //                      barrier never steps.
+// --wall KIND          the barrier: armco | barrier | gravel | wall (wall =
+//                      concrete blocks and a debris fence, the street look)
 // Run tools/bakeline.mjs afterwards: the racing line depends on both.
 import fs from 'fs';
 
 const ROOT = new URL('../', import.meta.url).pathname;
 const LEAD = 30, BLEND = 40;
 const argv = process.argv.slice(2);
-let key = null;
+let key = null, wall = null;
+const WALLS = ['armco', 'barrier', 'gravel', 'wall'];
 const banks = [], widths = [];
 const spec = (flag, v) => {
   const m = /^([\d.]+):(\d+(?:,\d+)*)$/.exec(v || '');
@@ -26,11 +29,15 @@ for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === '--bank') banks.push(spec(a, argv[++i]));
   else if (a === '--width') widths.push(spec(a, argv[++i]));
+  else if (a === '--wall') {
+    wall = argv[++i];
+    if (!WALLS.includes(wall)) { console.error(`shapetrack: --wall is one of ${WALLS.join(' ')}`); process.exit(2); }
+  }
   else if (a.startsWith('--')) { console.error(`shapetrack: unknown flag ${a}`); process.exit(2); }
   else if (!key) key = a;
   else { console.error('shapetrack: one track at a time'); process.exit(2); }
 }
-if (!key || (!banks.length && !widths.length)) { console.error('shapetrack: <key> --bank DEG:N,.. and/or --width M:N,..'); process.exit(2); }
+if (!key || (!banks.length && !widths.length && !wall)) { console.error('shapetrack: <key> --bank DEG:N,.. and/or --width M:N,..'); process.exit(2); }
 
 const file = `${ROOT}data/tracks/${key}.json`;
 const t = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -57,5 +64,6 @@ for (const { v, nums } of widths) for (const num of nums) {
   }
   console.log(`  width  T${num} ${v} m  (s ${c.s0}..${c.s1}, blended over ${BLEND} m each end)`);
 }
+if (wall) { console.log(`  wall   ${t.wall} -> ${wall}`); t.wall = wall; }
 fs.writeFileSync(file, JSON.stringify(t));
 console.log(`  written ${file} — now run: node tools/bakeline.mjs ${key}`);

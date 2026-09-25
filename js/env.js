@@ -92,7 +92,9 @@ const ROOFS = {
 // circuit. Zandvoort is a Dutch seaside town and is mostly brick; Monaco is a
 // Mediterranean city and is almost entirely render. This one number per track
 // does more for "it actually looks like the area" than any amount of geometry.
-const BRICKINESS = { zandvoort: 0.78, monza: 0.42, suzuka: 0.2, monaco: 0.1, baku: 0.16, nurburgring: 0.25 };
+const BRICKINESS = { zandvoort: 0.78, monza: 0.42, suzuka: 0.2, monaco: 0.1, baku: 0.16, nurburgring: 0.25,
+  // Pembroke, NH: painted clapboard houses, the odd brick mill building.
+  street: 0.12 };
 
 // A stable pseudo-random in [0,1) from a position, so a building looks the
 // same every time the page loads instead of re-rolling its colour on reload.
@@ -469,6 +471,40 @@ function flatMesh(polys, look, spec, world) {
 }
 
 // ---------------------------------------------------------------------------
+// The town's streets, on a circuit that has them (tools/bakeenv.mjs FITTED —
+// Adam's street circuit in Pembroke). A quad per segment, the real width,
+// tarmac at true scale, draped on the land like the ground cover. It sits
+// above every cover layer and below the run-off (-0.03), so a street that
+// reaches the circuit's edge meets it without either painting over the other.
+function roadMesh(roads, look, world) {
+  const b = new Builder();
+  for (const r of roads) {
+    const p = r.p, hw = r.w / 2;
+    for (let i = 0; i < p.length - 1; i++) {
+      const [ax, ay] = p[i], [bx, by] = p[i + 1];
+      const dx = bx - ax, dy = by - ay, m = Math.hypot(dx, dy);
+      if (m < 0.01) continue;
+      // Half a width of overlap at each end fills the wedge at every bend.
+      const ux = dx / m, uy = dy / m, nx = -uy * hw, ny = ux * hw;
+      const ex = ux * Math.min(hw, m / 2) * (i ? 1 : 0), ey = uy * Math.min(hw, m / 2) * (i ? 1 : 0);
+      b.quadUp([
+        [ax - ex + nx, Z(ay - ey + ny)], [bx + nx, Z(by + ny)],
+        [bx - nx, Z(by - ny)], [ax - ex - nx, Z(ay - ey - ny)],
+      ], -0.032, null);
+    }
+  }
+  const g = b.geometry();
+  if (!g) return null;
+  if (world) world.liftGround(g);
+  const m = new THREE.Mesh(g, look.mat('tarmac', {
+    size: 6, tint: 0x8a8a88, roughness: 0.92, metalness: 0, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
+  }));
+  m.receiveShadow = true;
+  return m;
+}
+
+// ---------------------------------------------------------------------------
 // True if a footprint sits inside the corridor the pit complex occupies.
 // Monza tags 81 real buildings `garage` along its pit straight and Zandvoort
 // 50 more; built as well as the synthetic garages they interpenetrate, and you
@@ -501,6 +537,10 @@ export function buildEnv(scene, env, track, look, corridor = null, world = null)
     if (!spec) continue;
     const m = flatMesh(byKind[kind], look, spec, world);
     if (m) { scene.add(m); added.areas += byKind[kind].length; }
+  }
+  if (env.roads && env.roads.length) {
+    const m = roadMesh(env.roads, look, world);
+    if (m) { scene.add(m); added.roads = env.roads.length; }
   }
 
   // --- buildings ------------------------------------------------------------
