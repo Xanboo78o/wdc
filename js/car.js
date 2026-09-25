@@ -561,9 +561,15 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
   // --- halo, cockpit, driver ----------------------------------------------
   // Seven centimetres lower than it was: from the driver's eyes the top of the
   // loop sat exactly on the horizon (Adam: "the halo is DIRECTLY in my way").
-  add(tube([[-0.58, 0.53, 0.26], [-0.40, 0.65, 0.30], [-0.05, 0.695, 0.26], [0.20, 0.70, 0.10],
-    [0.23, 0.70, 0], [0.20, 0.70, -0.10], [-0.05, 0.695, -0.26], [-0.40, 0.65, -0.30], [-0.58, 0.53, -0.26]], 0.026), carbon);
-  add(tube([[0.23, 0.70, 0], [0.32, 0.60, 0], [0.42, 0.50, 0]], 0.028), carbon);
+  // Its own material, so first person can turn it into a ghost (render.js):
+  // Adam wants to "see through the halo but like yk" — it is there, and it
+  // does not block the road.
+  const haloMat = carbon.clone();
+  const halo = [
+    add(tube([[-0.58, 0.53, 0.26], [-0.40, 0.65, 0.30], [-0.05, 0.695, 0.26], [0.20, 0.70, 0.10],
+      [0.23, 0.70, 0], [0.20, 0.70, -0.10], [-0.05, 0.695, -0.26], [-0.40, 0.65, -0.30], [-0.58, 0.53, -0.26]], 0.026), haloMat),
+    add(tube([[0.23, 0.70, 0], [0.32, 0.60, 0], [0.42, 0.50, 0]], 0.028), haloMat),
+  ];
 
   // THE TUB, inside. Carbon walls with painted outer skins, a carbon floor,
   // the dash bulkhead in front of the driver, and a seat. "just make like a
@@ -748,7 +754,7 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
 
   // Where the driver's eyes are, for the first-person camera. A single-seater
   // sits low and far back, behind the halo.
-  return { group: g, wheels, steer, hubs, drs, R, wings, eye: [-0.20, 0.80, 0], decalMat, numMat, paint2, paint, mirrors, head, cockpitRim };
+  return { group: g, wheels, steer, hubs, drs, R, wings, eye: [-0.20, 0.80, 0], decalMat, numMat, paint2, paint, mirrors, head, cockpitRim, haloMat };
 }
 
 // ---------------------------------------------------------------------------

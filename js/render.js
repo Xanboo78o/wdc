@@ -528,6 +528,7 @@ export class View {
     // What first person hides: your own head, and the cockpit rim that read
     // as a steering wheel in front of Adam's real one.
     this.fpHide = [...(car.head || []), ...(car.cockpitRim ? [car.cockpitRim] : [])];
+    this.haloMat = car.haloMat || null;
     this.drs = car.drs; this.wheelR = car.R; this.spin = 0;
     // HEADLIGHTS (Adam: "gimme headlights"). The sky runs on the real clock, so
     // an evening session is a night race. Two spotlights from the nose, aimed a
@@ -1398,6 +1399,15 @@ export class View {
     let fov = rig.fov;
     const fp = rig.name === 'ONBOARD' && !!this.carEye;
     if (this.fpHide) for (const m of this.fpHide) m.visible = !fp;
+    // The halo, seen through from the cockpit: a faint ghost of itself, so
+    // you know it is there and the road behind it is not hidden.
+    if (this.haloMat && this.haloMat.userData.fp !== fp) {
+      this.haloMat.userData.fp = fp;
+      this.haloMat.transparent = fp;
+      this.haloMat.opacity = fp ? 0.18 : 1;
+      this.haloMat.depthWrite = !fp;
+      this.haloMat.needsUpdate = true;
+    }
     if (rig.kind === 'bolted') {
       // Read the camera's world placement off the car itself, so it inherits
       // yaw, pitch, roll and the banked height for free.
