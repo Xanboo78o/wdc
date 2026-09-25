@@ -1,20 +1,79 @@
 {
-  "note": "MEASURED 2026-09-24 on Adam's R3: he pressed each control in a given order while /dev/input/js0 was logged (Chrome's gamepad buttons are the joydev numbers). The shipped guess before this matched NONE of them, which is why no rim button worked. The d-pad is the hat on axes 8/9, measured 2026-09-22. A map saved later by pad.html's SET UP BUTTONS still wins; an OLDER saved map loses to this file (see Hands.loadButtons).",
+  "note": "MEASURED on Adam's R3. 2026-09-25: re-measured through tools/ffb.py's button log (every key off the event device; Chrome only passes the first 32 buttons, so MENU 37 and confirm 35 arrive through the bridge). The d-pad is BUTTONS 4-7 on this rim, not the hat on axes 8/9 (kept as a fallback); back is 1, which the 2026-09-24 map had as DRS. DRS is unassigned until Adam picks a button. A map saved later by pad.html still wins (see Hands.loadButtons).",
   "id": "Gudsen R3 Racing Wheel and Pedals (Vendor: 346e Product: 0005)",
-  "saved": "2026-09-24T06:30",
+  "saved": "2026-09-25T15:22",
   "measured": true,
   "map": {
-    "pause":   [{ "b": 37 }],
-    "back":    [{ "b": 3 }],
-    "confirm": [{ "b": 35 }],
-    "up":      { "ax": 9, "dir": -1 },
-    "down":    { "ax": 9, "dir": 1 },
-    "left":    { "ax": 8, "dir": -1 },
-    "right":   { "ax": 8, "dir": 1 },
-    "shiftUp": [{ "b": 13 }],
-    "shiftDn": [{ "b": 12 }],
-    "drs":     [{ "b": 1 }],
-    "cam":     [{ "b": 21 }],
-    "radio":   [{ "b": 22 }]
+    "pause": [
+      {
+        "b": 37
+      }
+    ],
+    "back": [
+      {
+        "b": 1
+      }
+    ],
+    "confirm": [
+      {
+        "b": 35
+      }
+    ],
+    "up": [
+      {
+        "b": 4
+      },
+      {
+        "ax": 9,
+        "dir": -1
+      }
+    ],
+    "down": [
+      {
+        "b": 6
+      },
+      {
+        "ax": 9,
+        "dir": 1
+      }
+    ],
+    "left": [
+      {
+        "b": 7
+      },
+      {
+        "ax": 8,
+        "dir": -1
+      }
+    ],
+    "right": [
+      {
+        "b": 5
+      },
+      {
+        "ax": 8,
+        "dir": 1
+      }
+    ],
+    "shiftUp": [
+      {
+        "b": 13
+      }
+    ],
+    "shiftDn": [
+      {
+        "b": 12
+      }
+    ],
+    "cam": [
+      {
+        "b": 21
+      }
+    ],
+    "radio": [
+      {
+        "b": 22
+      }
+    ]
   }
 }
