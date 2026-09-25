@@ -5,6 +5,7 @@
 //   node tools/importtrack.mjs <file.obj> --group track --run 12
 //   node tools/importtrack.mjs <file.obj> --list          what groups are in it
 //   node tools/importtrack.mjs <file.glb> --out -         measure, write nothing
+//   node tools/importtrack.mjs <file.obj> --scale 2 --width 22   plan x2, road 22 m wide
 //
 // WHAT IT EXPECTS: a ROAD RIBBON — a strip of quads two vertices wide, the way
 // a bevelled curve, a solidified plane, or a track generator's road surface
@@ -33,8 +34,8 @@
 import fs from 'fs';
 
 const argv = process.argv.slice(2);
-const KNOWN = new Set(['--key', '--name', '--out', '--ds', '--run', '--group', '--list', '--mirror', '--help']);
-let file = null, key = null, name = null, out = null, DS = 2, RUN = 12, group = null, list = false, mirror = false;
+const KNOWN = new Set(['--key', '--name', '--out', '--ds', '--run', '--group', '--list', '--mirror', '--scale', '--width', '--help']);
+let file = null, key = null, name = null, out = null, DS = 2, RUN = 12, group = null, list = false, mirror = false, SCALE = 1, WIDTH = null;
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a.startsWith('--')) {
@@ -48,10 +49,13 @@ for (let i = 0; i < argv.length; i++) {
     else if (a === '--group') group = argv[++i];
     else if (a === '--list') list = true;
     else if (a === '--mirror') mirror = true;
+    else if (a === '--scale') SCALE = +argv[++i];
+    else if (a === '--width') WIDTH = +argv[++i];
   } else if (!file) file = a;
   else { console.error('importtrack: more than one file given'); process.exit(2); }
 }
 if (!file) { console.error('importtrack: no model given'); process.exit(2); }
+if (!(SCALE > 0) || (WIDTH !== null && !(WIDTH > 0))) { console.error('importtrack: --scale and --width need a positive number'); process.exit(2); }
 
 // ---------------------------------------------------------------------------
 // readers — each returns { verts: [[x,y,z]...], groups: Map(name -> [i0, i1]) }
@@ -150,7 +154,9 @@ const SIDE = mirror ? -1 : 1;
 const raw = [];
 for (let k = 0; k < pairs; k++) {
   const a = P[2 * k], b = P[2 * k + 1];
-  raw.push({ x: (a[0] + b[0]) / 2, y: SIDE * -(a[2] + b[2]) / 2, z: (a[1] + b[1]) / 2, w: widths[k] });
+  // --scale multiplies the PLAN only: a bigger circuit on the same hills, so
+  // the gradients ease rather than every climb doubling in height.
+  raw.push({ x: SCALE * (a[0] + b[0]) / 2, y: SCALE * SIDE * -(a[2] + b[2]) / 2, z: (a[1] + b[1]) / 2, w: SCALE * widths[k] });
 }
 
 // A generator often repeats a cross-section at every segment join — this file
@@ -219,7 +225,7 @@ if (runGroups.length) {
   for (const [, [a, b]] of runGroups) {
     for (let v = a; v <= b; v++) {
       const p = model.verts[v];
-      const px = p[0], py = SIDE * -p[2];
+      const px = SCALE * p[0], py = SCALE * SIDE * -p[2];
       // nearest sample, brute force: a few thousand points against a few
       // thousand samples is nothing next to being wrong about which corner
       // a piece of gravel belongs to.
@@ -249,6 +255,11 @@ if (runGroups.length) {
   }
   runFrom = `${runGroups.length} run-off group(s) in the model`;
 }
+
+// --- --width: the road made wider than the model drew it ------------------
+// Run-off above was measured from the MODEL's kerb and stays as a distance
+// beyond the kerb, so it moves out with the new edge.
+if (WIDTH) half.fill(WIDTH / 2);
 
 // --- corners, derived ------------------------------------------------------
 // The game reads track.corners.length to size a driver's mistake ladder, and
