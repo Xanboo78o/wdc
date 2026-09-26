@@ -57,6 +57,7 @@ const RATE_MIN = 0.35, RATE_MAX = 2.60;
 // stored roadLvl of 0.45 would keep the wind on forever, and nobody would
 // guess the fix was to clear their browser storage.
 import { SynthEngine } from './enginesynth.js';
+import { Spatial } from './spatial.js';
 
 export const MIX_KEY = 'wdc.sound.v2';
 
@@ -323,7 +324,10 @@ export class Engine {
       // The modelled engine goes straight to the output bus: the loop's bass
       // shelf, octave-down and shake were weight for a LOW engine, and under a
       // 750 Hz scream they are the mud and the "brbrbr".
-      if (this.synthOn) this.synth = new SynthEngine(this.ctx, this.cans, this.cls);
+      // 360-degree sound (js/spatial.js): your engine comes from its exhaust
+      // and its airbox, the rivals from where they are, through HRTF.
+      this.spatial = new Spatial(this.ctx, this.cans);
+      if (this.synthOn) this.synth = new SynthEngine(this.ctx, this.cans, this.cls, this.spatial);
       // THE LOOPS MUST STOP WHEN THE GAME DOES. update() only runs while the
       // car is being driven, so in the pause menu, on the results screen or
       // after leaving the circuit the loops just kept playing at whatever
@@ -634,6 +638,15 @@ export class Engine {
 
   setVolume(v) { this.master = Math.max(0, Math.min(1, v)); }
   toggleMute() { this.muted = !this.muted; return this.muted; }
+
+  /**
+   * Once a frame from the game: where your head is (the camera), your car,
+   * and the race (null in practice), for the 360-degree sound.
+   */
+  place(camera, car, race, dt = 1 / 60) {
+    if (!this.spatial || !this.ctx) return;
+    this.spatial.update(camera, car, race, this.muted ? 0 : this.master * FX.synth * 0.8, dt);
+  }
   stop() { clearInterval(this.watch); try { this.src?.stop(); this.ctx?.close(); } catch { /* going away anyway */ } this.ok = false; }
 }
 
