@@ -1059,6 +1059,9 @@ function loop(now) {
     if (engineer.race !== state.race) engineer.begin(state.race);
     engineer.tick(frame);
   }
+  // 360-degree sound (js/spatial.js, the audio session's): every engine where
+  // it is, heard from where the camera is.
+  if (state.engine && state.engine.place) state.engine.place(view.camera, car, state.race, frame);
   if (state.quali) qualiTick(frame);
   // The road's wetness is the physics' grip (and the bots' plan) next frame.
   if (view.wx) setWetness(view.wx.wetness || 0);
