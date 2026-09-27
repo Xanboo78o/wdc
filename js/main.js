@@ -1164,7 +1164,7 @@ const fmt = s => s == null ? '--:--.---'
 
 function hud(over, rough) {
   const { car, peak } = state;
-  $('spd').textContent = Math.round(car.speed * 3.6);
+  $('spd').textContent = Math.round(car.speed * 2.23694);
   $('gLat').textContent = Math.abs(car.gLat).toFixed(1);
   // The dash: gear and fifteen rev lights — five green, five red, five blue —
   // lighting over the top half of the rev range and flashing blue at the
@@ -1491,7 +1491,7 @@ function dashTelemetry() {
   if (!car) return null;
   const race = state.race, me = state.me, box = state.box;
   const t = {
-    spd: car.speed * 3.6,
+    spd: car.speed * 2.23694,   // mph
     gLat: car.gLat,
     thr: car.throttle,
     brk: car.brake,
