@@ -400,7 +400,10 @@ async function pageCheck(opt) {
     trees += o.count;
     for (let i = 0; i < o.count; i++) {
       o.getMatrixAt(i, m4);
-      v3.setFromMatrixPosition(m4);
+      // Through the mesh's own world matrix: the builder's map sits in a
+      // group lowered by its mean height, and an instance's matrix is local
+      // to that — read raw, every tree on the test map was "14 m under".
+      v3.setFromMatrixPosition(m4).applyMatrix4(o.matrixWorld);
       const n = W.nearest(v3.x, v3.z);
       // Deliberately the corridor WITHOUT the extra metre env.js allows
       // itself, so a tree just outside the run-off — the Monza avenue, which
@@ -427,7 +430,7 @@ async function pageCheck(opt) {
 
   return {
     meshes: ground.map(o => o.name),
-    tris: ground.map(o => `${o.name} ${Math.round((o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3)} tris` +
+    tris: ground.map(o => `${o.name} ${!o.geometry ? '(group)' : Math.round((o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3) + ' tris'}` +
       (o.userData.stats ? ' ' + JSON.stringify(o.userData.stats) : '')),
     total, miss, inverted, bands, holes, drift,
     agree: { skirt: stat(agree['ground.skirt']), plate: stat(agree['ground.plate']) },
