@@ -135,6 +135,14 @@ const SOURCES = {
 // both portals and falls back.
 const TUNNELS = { monaco: [[1440, 1860]] };
 
+// BRIDGES: the stretch of a road carried over another, [s0, s1]. A bare-earth
+// survey has the deck taken out, so the road reads as dipping to the road
+// beneath (Suzuka's back straight: 49.6 m on both embankments, 43.3 m at the
+// crossing — which is the Degner exit's own height). Across the span the road
+// is laid straight between the two abutments, as for a tunnel, and the lap's
+// crossover is NOT levelled there: the deck really is 6 m up.
+const BRIDGES = { suzuka: [[4656, 4720]] };
+
 // The water line, metres above mean sea level. The Caspian is 28 m below it.
 const SEA_ASL = { baku: -28 };
 
@@ -342,6 +350,7 @@ function planeFit(xs, ys, hs) {
 }
 
 async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
+  const key0 = key;
   fs.mkdirSync(`${ROOT}data/elev/raw`, { recursive: true });
   const cache = `${ROOT}data/elev/raw/${key}-${srcKey}.json`;
   const n = track.x.length, ds = track.ds;
@@ -355,11 +364,11 @@ async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
   // a running median of five posts (40 m) removes it and leaves a crest alone.
   const m = idx.length;
   const clean = centre.map((_, k) => median([-2, -1, 0, 1, 2].map(o => centre[(k + o + m) % m])));
-  for (const [s0, s1] of TUNNELS[key] || []) {
+  for (const [s0, s1] of [...(TUNNELS[key] || []), ...(BRIDGES[key] || [])]) {
     const k0 = idx.findIndex(i => i * ds >= s0), k1 = idx.findIndex(i => i * ds >= s1);
     if (k0 < 0 || k1 <= k0) continue;
     for (let k = k0 + 1; k < k1; k++) clean[k] = clean[k0] + (clean[k1] - clean[k0]) * (k - k0) / (k1 - k0);
-    console.log(`\n  tunnel s=${s0}-${s1}: road laid straight between its portals, ${clean[k0].toFixed(1)} to ${clean[k1].toFixed(1)} m`);
+    console.log(`\n  span s=${s0}-${s1}: road laid straight between its ends, ${clean[k0].toFixed(1)} to ${clean[k1].toFixed(1)} m`);
   }
   // Spread LINEARLY over every 2 m sample (smoothstep between posts makes a
   // flat step at every post), then a true Gaussian of 10 m: a road is graded,
@@ -392,6 +401,8 @@ async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
   for (const [i, j] of crossings) {
     const key = Math.round(i / 40) + ':' + Math.round(j / 40);
     if (seen.has(key)) continue;
+    const onBridge = k => (BRIDGES[key0] || []).some(([s0, s1]) => k * ds >= s0 - 20 && k * ds <= s1 + 20);
+    if (onBridge(i) || onBridge(j)) { seen.add(key); console.log(`\n  crossover at s=${i * ds} / s=${j * ds}: a bridge, legs ${Math.abs(prof[i] - prof[j]).toFixed(1)} m apart`); continue; }
     seen.add(key);
     const avg = (prof[i] + prof[j]) / 2, di = avg - prof[i], dj = avg - prof[j];
     const sig = 60 / ds, R = Math.ceil(sig * 3);
@@ -476,6 +487,8 @@ async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
     // Where the water is, on the same datum as everything else: the sea's
     // height above sea level (0, or the Caspian's -28) less the mean.
     sea: coastal ? +(seaASL - mean).toFixed(2) : null,
+    // Decks the ground must NOT follow where another road passes under.
+    bridges: (BRIDGES[key] || []).map(([s0, s1]) => ({ s0, s1 })),
     plane,
   }));
   const kb = Math.round(fs.statSync(out).size / 1024);

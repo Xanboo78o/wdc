@@ -107,6 +107,7 @@ export class World {
     // an older SRTM bake did not, and its lowest post is the best guess.
     this.seaY = elev.sea != null ? elev.sea : this.gridLo;
     this.plane = elev.outside === 'plane' && elev.plane ? elev.plane : null;
+    this.bridges = elev.bridges && elev.bridges.length ? elev.bridges : null;
     // A bare-earth survey (tools/getelev.mjs): its grid can be trusted near
     // the circuit, so heightAt leans on it off the corridor (see there).
     // Per sample, how far the road's profile sits from the survey's grid.
@@ -114,6 +115,12 @@ export class World {
       this.resid = new Float32Array(track.n);
       for (let k = 0; k < track.n; k++) this.resid[k] = elev.s[k] - this.gridAt(track.x[k], Z(track.y[k]));
     }
+  }
+
+  /** Is sample i on (or within 15 m of) a bridge deck? */
+  onBridge(i) {
+    const s = i * this.track.ds;
+    return this.bridges.some(b => s >= b.s0 - 15 && s <= b.s1 + 15);
   }
 
   /** Nearest centreline sample to a point, and how far away it is. */
@@ -416,10 +423,26 @@ export class World {
    * posts and the trees at the track edge all hovered over their own shadows
    * because the grass was sunk under them and they were not.
    */
-  groundY(x, z, near = null) {
+  groundY(x, z, near = null, own = false) {
     near = near || this.near(x, z);
     const { i, d } = near;
     let y = (this.on ? this.heightAt(x, z, near) : 0) - this.sinkAt(d);
+    // UNDER A BRIDGE the ground is the road beneath, not the deck. The
+    // nearest leg to a point on the Degner exit where the back straight
+    // crosses it is the back straight, 6.2 m up, and its embankment would
+    // fill the underpass. Inside the lower road's own corridor, the lower
+    // road wins; the embankment stops at that corridor's edge (the abutment).
+    // `own`: the caller has said which leg this stands beside (a barrier on
+    // the deck, lifted by its sHint), and it stays on that leg's ground.
+    if (this.bridges && !own && i >= 0 && this.onBridge(i)) {
+      const o = this.otherLeg(x, z, i, 40);
+      if (o) {
+        const t = this.track;
+        const room = t.w[o.i] + Math.max(t.runL[o.i], t.runR[o.i]) + 2;
+        const low = this.trackY(o.i) - this.sinkAt(o.d);
+        if (o.d <= room && low < y - 1) return low;
+      }
+    }
     if (this.bank && i >= 0 && this.bank[i]) {
       const t = this.track, h = t.hdg[i];
       const lat = -Math.sin(h) * (x - t.x[i]) + Math.cos(h) * (Z(z) - t.y[i]);
@@ -433,6 +456,28 @@ export class World {
     if (!geo) return geo;
     const p = geo.attributes.position;
     const a = p.array;
+    // Tagged with its own leg (Builder.setHint), as in lift(): a barrier on
+    // Suzuka's bridge deck stays on the deck instead of dropping to the road
+    // underneath with the ground.
+    const hint = this.on && geo.attributes.sHint;
+    if (hint) {
+      const t = this.track, n = t.n, h = hint.array;
+      for (let v = 0, k = 0; k < a.length; v++, k += 3) {
+        const c = h[v];
+        if (!(c >= 0)) { a[k + 1] += this.groundY(a[k], a[k + 2]); continue; }
+        let best = -1, bd = Infinity;
+        const x = a[k], y = Z(a[k + 2]);
+        for (let o = -6; o <= 7; o++) {
+          const q = ((c + o) % n + n) % n;
+          const dx = x - t.x[q], dy = y - t.y[q], dd = dx * dx + dy * dy;
+          if (dd < bd) { bd = dd; best = q; }
+        }
+        a[k + 1] += this.groundY(a[k], a[k + 2], { i: best, d: Math.sqrt(bd) }, true);
+      }
+      p.needsUpdate = true;
+      geo.computeBoundingSphere();
+      return geo;
+    }
     for (let k = 0; k < a.length; k += 3) a[k + 1] += this.groundY(a[k], a[k + 2]);
     p.needsUpdate = true;
     geo.computeBoundingSphere();
