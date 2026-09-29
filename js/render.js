@@ -13,8 +13,9 @@ import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { Look, sunRig } from './tex.js';
 import { Post } from './post.js';
-let RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
+let RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM', 'DASHCAM'];
 import { SpeedShake, SpeedBlur, SFX } from './speedfx.js';
+import { Dashcam, DASH_FOV } from './dashcam.js';
 import { ProcSky } from './sky.js';
 import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation, dayPhase, WeatherDirector } from './weather.js';
 import { Rain } from './rain.js';
@@ -933,7 +934,7 @@ export class View {
   }
 
   _drawMirror() {
-    if (!this.mirrorOn || this.photo || RIGS_NAMES[this.mode] === 'TV') return;
+    if (!this.mirrorOn || this.photo || RIGS_NAMES[this.mode] === 'TV' || RIGS_NAMES[this.mode] === 'DASHCAM') return;
     const r = this.renderer;
     // Redraw the reflection on even frames only (see _drawCarMirrors); the
     // quad is still composited EVERY frame from the last reflection, so the
@@ -1301,6 +1302,8 @@ export class View {
     const corridor = pitCorridor(t);
     stats.landmarks = placeLandmarks(this, env);   // js/landmarks.js: before the city, which it may clear over a tunnel
     stats.env = buildEnv(S, env, t, look, corridor, this.world);
+    // the survey's origin, so the DASHCAM stamp can print real GPS
+    this.geo = env && env.lat0 != null ? { lat0: env.lat0, lon0: env.lon0 } : null;
     this.corridor = corridor;
 
     const sign = signAtlas(t);
@@ -1614,7 +1617,7 @@ export class View {
     //   - T-CAM, the real one: on the stalk above the airbox, behind the
     //     driver's head, looking over the halo.
     // ?fovkick=0 takes the speed-widening lens away for an A/B.
-    RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
+    RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM', 'DASHCAM'];
     if (typeof window !== 'undefined') window.__wdcRigs = RIGS_NAMES;
     const RIGS = [
       // ONBOARD is the DRIVER'S EYES (Adam, 2026-09-25: "first person is like on
@@ -1634,6 +1637,11 @@ export class View {
       // road. A longer lens than the eye (50 vs 62 deg) and the chassis's
       // full roll — it is a camera bolted to a car, not a person's head.
       { name: 'T-CAM', kind: 'bolted', at: [-0.62, 0.93, 0], aim: 24, drop: 1.0, fov: 50, kick: 0.3, roll: 0.92, mount: 'tcam' },
+      // DASHCAM (js/dashcam.js): an action camera suckered to the airbox. A
+      // fixed wide lens (no fov kick), the horizon tipping fully with the
+      // chassis (roll 1), and the rigid mount's shake. The barrel pass bends
+      // it into the look every piece of real speed footage online has.
+      { name: 'DASHCAM', kind: 'bolted', at: [-0.66, 1.0, 0], aim: 24, drop: 1.12, fov: DASH_FOV, kick: 0, roll: 1.0, mount: 'dashcam' },
     ];
     if (this.photo) {
       const t = this.track;
@@ -1781,7 +1789,7 @@ export class View {
     // Motion blur at the edges (speedfx.js SpeedBlur), after the frame is on
     // the canvas. Fades in from 110 to 260 km/h; never on the broadcast rig,
     // whose long lens pans rather than travels. ?blur=0 / ?speedfx=0.
-    if (SFX.on && SFX.blur > 0 && rig.kind !== 'tv' && car.speed > 30) {
+    if (SFX.on && SFX.blur > 0 && rig.kind !== 'tv' && rig.name !== 'DASHCAM' && car.speed > 30) {
       if (!this.speedBlur) { this.speedBlur = new SpeedBlur(this.renderer); this._sfxVel = new THREE.Vector3(); }
       const kmh = car.speed * 3.6;
       const amt = Math.min(1, Math.max(0, (kmh - 110) / 150));
@@ -1800,6 +1808,16 @@ export class View {
         this.camera.position.y - surfaceY, hole, amt,
         this.post && this.post.on && this.post.sceneRT ? this.post.sceneRT.depthTexture : null);
     }
+
+    // DASHCAM: the lens, the shutter, the encoder and the stamp, over the
+    // finished frame. A dashcam shoots at a fast shutter — no motion blur —
+    // so the blur above is skipped for it and the encoder's breakup does
+    // that job instead.
+    if (rig.name === 'DASHCAM') {
+      if (!this.dashcam) this.dashcam = new Dashcam(this.renderer);
+      this.dashcam.render(car, dt, sk, this.geo,
+        this.post && this.post.on && this.post.sceneRT ? this.post.sceneRT.depthTexture : null, this.camera);
+    } else if (this.dashcam) this.dashcam.hide();
 
     // Publish the real cost of a frame once, after there is one to measure.
     // Guessing at triangle counts from source is how a scene quietly ends up

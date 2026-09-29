@@ -34,7 +34,7 @@ import { liveryFor } from './livery.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 
 const $ = id => document.getElementById(id);
-const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
+const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM', 'DASHCAM'];
 
 const state = {
   track: null, line: null, lines: null, car: null, view: null,
@@ -589,6 +589,9 @@ async function start() {
   // Debug: throw the car in the air on load, so a flight can be photographed
   // without having to arrange a 260 km/h spin first.  ?launch=6  (metres/second
   // of vertical kick)  ?launch=6,2.5  (and a nose-up pitch rate)
+  // Debug: start the hot lap already moving, so a camera can be photographed
+  // at speed without a bot at the wheel.  ?v0=330 (km/h)
+  if (q.has('v0') && !state.race) { state.car.vx = Math.max(0, +q.get('v0') || 0) / 3.6; state.car.speed = state.car.vx; }
   if (q.has('launch')) {
     const [vz, pr] = q.get('launch').split(',').map(parseFloat);
     state.car.airborne = true;

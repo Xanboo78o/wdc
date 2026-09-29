@@ -62,6 +62,8 @@ const MOUNTS = {
   onboard: { buzzP: 0.075, buzzY: 0.035, buzzR: 0.03, roadP: 0.16, roadR: 0.10, heave: 0.004, kerb: 0.9, dive: 0.18, squat: 0.08, sink: 0.02 },
   tcam:    { buzzP: 0.16, buzzY: 0.045, buzzR: 0.05, roadP: 0.14, roadR: 0.12, heave: 0.005, kerb: 1.1, dive: 0.12, squat: 0.05, sink: 0.015 },
   nose:    { buzzP: 0.12, buzzY: 0.05, buzzR: 0.04, roadP: 0.20, roadR: 0.08, heave: 0.006, kerb: 1.2, sink: 0.006 },
+  // a suction cup on the airbox: no neck, no damping, everything arrives
+  dashcam: { buzzP: 0.22, buzzY: 0.09, buzzR: 0.07, roadP: 0.22, roadR: 0.16, heave: 0.007, kerb: 1.5, dive: 0.1, squat: 0.04, sink: 0.012 },
   chase:   { buzzP: 0.025, buzzY: 0.015, buzzR: 0.0, roadP: 0.06, roadR: 0.03, heave: 0.012, kerb: 0.35, sink: 0.03 },
 };
 const D2R = Math.PI / 180;
