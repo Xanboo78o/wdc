@@ -1768,7 +1768,8 @@ export class View {
         hole = [(x - 4) * pr, (y - 4) * pr, (x + w + 4) * pr, (y + h + 4) * pr];
       }
       this.speedBlur.render(this.scene, this.camera, this.car, this._sfxVel,
-        this.camera.position.y - surfaceY, hole, amt);
+        this.camera.position.y - surfaceY, hole, amt,
+        this.post && this.post.on && this.post.sceneRT ? this.post.sceneRT.depthTexture : null);
     }
 
     // Publish the real cost of a frame once, after there is one to measure.

@@ -104,6 +104,7 @@ export class Post {
     // material before distance) decides what is in front: the woods, whose
     // materials are made last, painted a band of hedge over the car's tyres.
     this.sceneRT.depthBuffer = true;
+    this.sceneRT.depthTexture = new THREE.DepthTexture(1, 1);   // read by speedfx.js (true-depth motion blur)
 
     // ---- luminance pyramid ----------------------------------------------
     // Log-average, not mean: a few blinding pixels should not decide the

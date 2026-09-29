@@ -38,6 +38,7 @@ export const SFX = {
   on: Q.get('speedfx') !== '0',
   blur: num('blur', 1),
   shake: num('shake', 1),
+  depth: Q.get('blurdepth') !== '0',       // ?blurdepth=0: the assumed-depth path, for A/B
 };
 
 // ---------------------------------------------------------------------------
@@ -111,12 +112,12 @@ export class SpeedShake {
 // ---------------------------------------------------------------------------
 // BLUR
 //
-// Camera motion blur with the camera's motion KNOWN rather than guessed, and
-// the scene's depth ASSUMED rather than read — there is no depth texture in
-// the post chain, and rendering one would be a second pass of the whole
-// world. For each pixel below the horizon the depth is the ground plane, which
-// on a race track is very nearly exact; above it, a corridor of barriers and
-// boards ~11 m either side. Reproject that point with the camera moved on by
+// Camera motion blur with the camera's motion KNOWN rather than guessed.
+// Depth is READ where there is one: post.js's scene target carries a depth
+// texture, so every pixel's real distance — a wall a metre away, a board, a
+// tree — is reprojected exactly. Without the post chain (Intel, SwiftShader)
+// depth is ASSUMED: the ground plane below the horizon, which on a race track
+// is very nearly exact, and above it a corridor of barriers ~11 m either side. Reproject that point with the camera moved on by
 // one shutter interval and you have the pixel's streak: zero at the point you
 // are driving towards, longest in the lower corners, following the real
 // perspective of the road instead of a generic zoom.
@@ -124,7 +125,11 @@ export class SpeedShake {
 // Your own car is masked out (it moves WITH the camera, so a real lens does
 // not smear it), by drawing just the car, white, into a quarter-size target.
 // Taps that land on the car are dropped, so red paint never bleeds into the
-// tarmac beside the sidepod. A mirror strip, when there is one, is left alone.
+// tarmac beside the sidepod. RIVALS are masked the same way for the same
+// reason — a car beside you at your speed is sharp in a real lens — but not
+// by drawing them (57 meshes each): the nearest four get a screen RECTANGLE
+// from their bounding box, and with depth only the pixels inside it at the
+// car's own distance count, which is its silhouette for free. A mirror strip, when there is one, is left alone.
 // And a radial mask keeps the centre of the frame — where you are looking —
 // sharp whatever the numbers say.
 const MASK_LAYER = 7;
@@ -137,8 +142,17 @@ uniform sampler2D tCol; uniform sampler2D tMask;
 uniform mat4 uProj; uniform mat4 uInvProj; uniform mat3 uRot;
 uniform vec3 uVel; uniform float uH; uniform float uShutter; uniform float uAspect;
 uniform float uMax; uniform float uAmt; uniform vec4 uHole; uniform vec2 uRes;
+uniform sampler2D tDepth; uniform float uHasDepth;
+uniform vec4 uCar[4]; uniform vec2 uCarZ[4]; uniform float uCarN;
 varying vec2 vUv;
-vec2 streak(vec2 uv) {
+// view-space position of the pixel: from the depth buffer, or assumed
+vec3 where(vec2 uv) {
+  if (uHasDepth > 0.5) {
+    float d = texture2D(tDepth, uv).r;
+    vec4 c = uInvProj * vec4(uv * 2.0 - 1.0, min(d, 0.99999) * 2.0 - 1.0, 1.0);
+    vec3 P = c.xyz / c.w;
+    return d >= 0.99999 ? normalize(P) * 2000.0 : P;   // sky: far away
+  }
   vec4 v = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
   vec3 ray = normalize(v.xyz / v.w);            // view space
   vec3 rw = uRot * ray;                          // world space direction
@@ -149,7 +163,21 @@ vec2 streak(vec2 uv) {
     vec3 perp = ray - dot(ray, vd) * vd;
     t = min(400.0, 11.0 / max(0.03, length(perp)));
   }
-  vec3 P = ray * t - uVel * uShutter;            // the camera moved on
+  return ray * t;
+}
+bool rival(vec2 uv, float dist) {
+  for (int i = 0; i < 4; i++) {
+    vec4 r = uCar[i];
+    if (uv.x > r.x && uv.x < r.z && uv.y > r.y && uv.y < r.w && dist > uCarZ[i].x && dist < uCarZ[i].y) return true;
+  }
+  return false;
+}
+bool inRect(vec2 uv) {
+  for (int i = 0; i < 4; i++) { vec4 r = uCar[i]; if (uv.x > r.x && uv.x < r.z && uv.y > r.y && uv.y < r.w) return true; }
+  return false;
+}
+vec2 streak(vec2 uv, vec3 P0) {
+  vec3 P = P0 - uVel * uShutter;                 // the camera moved on
   vec4 c = uProj * vec4(P, 1.0);
   if (c.w <= 0.05) return vec2(0.0);
   vec2 uv2 = c.xy / c.w * 0.5 + 0.5;
@@ -167,7 +195,10 @@ void main() {
   float r = length(q) / length(vec2(uAspect, 1.0) * 0.5);
   float edge = smoothstep(0.22, 0.78, r) * uAmt;
   if (hole || me > 0.5 || edge < 0.01) { gl_FragColor = base; return; }
-  vec2 d = streak(vUv) * edge;
+  vec3 P0 = where(vUv);
+  float dist = length(P0);
+  if (uCarN > 0.5 && rival(vUv, dist)) { gl_FragColor = base; return; }
+  vec2 d = streak(vUv, P0) * edge;
   if (length(d * uRes) < 1.2) { gl_FragColor = base; return; }
   vec3 acc = base.rgb; float wsum = 1.0;
   for (int i = 0; i < ${TAPS}; i++) {
@@ -175,6 +206,7 @@ void main() {
     vec2 u = vUv + d * f;
     if (u.x < 0.0 || u.y < 0.0 || u.x > 1.0 || u.y > 1.0) continue;
     if (texture2D(tMask, u).r > 0.5) continue;   // do not smear the car in
+    if (uCarN > 0.5 && inRect(u)) continue;   // rect only: cheap, and errs toward not smearing
     acc += texture2D(tCol, u).rgb; wsum += 1.0;
   }
   gl_FragColor = vec4(acc / wsum, 1.0);
@@ -197,6 +229,9 @@ export class SpeedBlur {
         uH: { value: 1 }, uShutter: { value: 1 / 100 }, uAspect: { value: 1 },
         uMax: { value: 0.07 }, uAmt: { value: 1 }, uHole: { value: new THREE.Vector4(-1, -1, -1, -1) },
         uRes: { value: new THREE.Vector2(1, 1) },
+        tDepth: { value: null }, uHasDepth: { value: 0 },
+        uCar: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(2, 2, 2, 2)) },
+        uCarZ: { value: [0, 1, 2, 3].map(() => new THREE.Vector2(0, 0)) }, uCarN: { value: 0 },
       },
     });
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
@@ -205,6 +240,44 @@ export class SpeedBlur {
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this._tagged = 0; this._frame = 0;
     this._m4 = new THREE.Matrix4(); this._v = new THREE.Vector3();
+    this._rivals = []; this._p = new THREE.Vector3(); this._c = new THREE.Vector3();
+  }
+
+  // The nearest four rivals as screen rectangles (uv) plus the distance band
+  // they occupy. A box around the car in its own frame, projected.
+  _rivalRects(scene, camera, withDepth) {
+    const u = this.mat.uniforms;
+    if ((this._frame % 120) === 1 || !this._rivals.length) this._rivals = scene.children.filter(o => o.name === 'rival');
+    const cp = camera.position, near = [];
+    for (const g of this._rivals) {
+      if (!g.visible) continue;
+      const d = g.position.distanceTo(cp);
+      if (d < 45) near.push([d, g]);
+    }
+    near.sort((a, b) => a[0] - b[0]);
+    u.uCarN.value = 0;
+    for (let i = 0; i < 4; i++) {
+      const R = u.uCar.value[i], Zb = u.uCarZ.value[i];
+      R.set(2, 2, 2, 2); Zb.set(0, 0);
+      const g = near[i] && near[i][1];
+      if (!g) continue;
+      g.updateMatrixWorld();
+      let x0 = 9, y0 = 9, x1 = -9, y1 = -9, z0 = 1e9, z1 = 0, behind = false;
+      for (let k = 0; k < 8; k++) {
+        this._p.set(k & 1 ? 3.1 : -2.9, k & 2 ? 1.25 : -0.05, k & 4 ? 1.1 : -1.1).applyMatrix4(g.matrixWorld);
+        const dd = this._p.distanceTo(cp);
+        z0 = Math.min(z0, dd); z1 = Math.max(z1, dd);
+        this._c.copy(this._p).applyMatrix4(camera.matrixWorldInverse);
+        if (this._c.z > -0.2) { behind = true; continue; }
+        this._p.project(camera);
+        x0 = Math.min(x0, this._p.x); x1 = Math.max(x1, this._p.x); y0 = Math.min(y0, this._p.y); y1 = Math.max(y1, this._p.y);
+      }
+      // partly behind the lens: it is beside you, so take the whole side it is on
+      if (behind) { if (x1 < -9 + 1) continue; if (x0 < 0) x0 = -1.2; else x1 = 1.2; y0 = -1.2; }
+      R.set(x0 * 0.5 + 0.5, y0 * 0.5 + 0.5, x1 * 0.5 + 0.5, y1 * 0.5 + 0.5);
+      u.uCarN.value++;
+      if (withDepth) Zb.set(Math.max(0, z0 - 0.8), z1 + 0.8); else Zb.set(0, 1e9);
+    }
   }
 
   _tag(car) {
@@ -221,7 +294,7 @@ export class SpeedBlur {
    *   hole     [x0, y0, x1, y1] drawing-buffer pixels to leave alone, or null
    *   amt      0..1 strength multiplier (render.js ramps it in with speed)
    */
-  render(scene, camera, car, vel, height, hole = null, amt = 1) {
+  render(scene, camera, car, vel, height, hole = null, amt = 1, depth = null) {
     if (!SFX.on || SFX.blur <= 0 || amt <= 0.01) return;
     const r = this.r;
     r.getDrawingBufferSize(this.size);
@@ -266,6 +339,10 @@ export class SpeedBlur {
     u.uAmt.value = Math.min(1.5, amt * SFX.blur);
     u.uMax.value = 0.07 * Math.min(1.5, SFX.blur);
     if (hole) u.uHole.value.set(hole[0], hole[1], hole[2], hole[3]); else u.uHole.value.set(-1, -1, -1, -1);
+    // real depth only when it is the same size as the frame it describes
+    const dOk = !!(depth && depth.image && depth.image.width === W && depth.image.height === H) && SFX.depth;
+    u.tDepth.value = dOk ? depth : null; u.uHasDepth.value = dOk ? 1 : 0;
+    this._rivalRects(scene, camera, dOk);
     r.autoClear = false;
     r.render(this.flat, this.cam);
     r.autoClear = ac; r.toneMapping = tm;
