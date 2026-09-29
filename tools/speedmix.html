@@ -7,7 +7,7 @@
        #speed   engine silent — the speed layers alone -->
 <script type="importmap">{ "imports": { "three": "/js/vendor/three.module.min.js" } }</script>
 <script type="module">
-const SR = 44100, LEN = 13;
+const SR = 44100, LEN = 16;
 const off = new OfflineAudioContext(2, SR * LEN, SR);
 window.AudioContext = function () { return off; };
 const mode = (location.hash || '#all').slice(1);
@@ -16,16 +16,22 @@ const { SPEEDSOUND } = await import('/js/speedsound.js');
 const { Track } = await import('/js/track.js');
 if (mode === 'engine') SPEEDSOUND.on = false;
 if (mode.startsWith('speed')) Object.assign(FX, { engBoost: 0, grit: 0, synth: 0 });
+// speed:kerb — the kerb synth alone (no wind/hiss/walls, no recorded bump grains)
+if (mode === 'speed:kerb') { FX.kerb = 0; for (const k of ['wind', 'hiss', 'walls', 'posts', 'rivals']) SPEEDSOUND[k] = 0; }
+if (mode === 'speed:bumps') { for (const k of ['wind', 'hiss', 'walls', 'posts', 'rivals', 'kerb']) SPEEDSOUND[k] = 0; }
 // speed:wind, speed:hiss, speed:walls, speed:rivals — one layer alone
-if (mode.includes(':')) { const only = mode.split(':')[1]; for (const k of ['wind', 'hiss', 'walls', 'posts', 'rivals']) if (k !== only && !(only === 'walls' && k === 'posts')) SPEEDSOUND[k] = 0; }
+if (mode.includes(':') && !['speed:kerb', 'speed:bumps'].includes(mode)) { const only = mode.split(':')[1]; for (const k of ['wind', 'hiss', 'walls', 'posts', 'rivals']) if (k !== only && !(only === 'walls' && k === 'posts')) SPEEDSOUND[k] = 0; }
 localStorage.clear();
 const e = new Engine({ pick: 1, cls: 'f1', synth: true });
 await e.start('/');
-const t = await Track.load('monza');
+const TRACK = new URLSearchParams(location.search).get('track') || 'monza';
+const t = await Track.load(TRACK);
+t.key = t.key || TRACK;
 e.setTrack(t);
 // [t0, t1, km/h, label]
 const seg = [[0, 3, 150, '150 km/h'], [3, 6, 250, '250 km/h'], [6, 9, 350, '350 km/h'],
-  [9, 11, 350, '350 + rival passing +70 km/h at 2.5 m'], [11, 13, 350, '350 a car length off the LEFT barrier', 'wall']];
+  [9, 11, 350, '350 + rival passing +70 km/h at 2.5 m'], [11, 13, 350, '350 a car length off the LEFT barrier', 'wall'],
+  [13, 14.5, 250, '250 on a FLAT kerb', 'kerb1'], [14.5, 16, 250, '250 onto a HIGH kerb', 'kerb3']];
 let s = 60, rs = 0;
 const car = { x: 0, y: 0, hdg: 0, speed: 0 };
 const riv = { idx: 1, isPlayer: false, car: { x: 0, y: 0, hdg: 0, speed: 0, throttle: 1 } };
@@ -39,7 +45,9 @@ for (let tt = 0.02; tt < LEN; tt += 1 / 60) {
     const pr = t.project(t.point(s, 0).x, t.point(s, 0).y);
     const lat = q[4] === 'wall' ? pr.w + pr.runL - 1.6 : 0;
     const p = t.point(s, lat), p2 = t.point(s + 2, lat);
-    Object.assign(car, { x: p.x, y: p.y, hdg: Math.atan2(p2.y - p.y, p2.x - p.x), speed: v, vx: v, vy: 0 });
+    const kt = q[4] === 'kerb1' ? 1 : q[4] === 'kerb3' ? 3 : 0;
+    Object.assign(car, { x: p.x, y: p.y, hdg: Math.atan2(p2.y - p.y, p2.x - p.x), speed: v, vx: v, vy: 0, surface: kt ? 0.93 : 1 });
+    if (kt && e.speedSound) e.speedSound.surf = { kerb: new Uint8Array(t.n).fill(kt) };
     const withRival = tt >= 9 && tt < 11;
     if (withRival) {
       if (!rs) rs = s - 18;
@@ -53,7 +61,7 @@ for (let tt = 0.02; tt < LEN; tt += 1 / 60) {
     M[4] = 0; M[5] = 1; M[6] = 0;
     M[8] = -Math.cos(h); M[9] = 0; M[10] = Math.sin(h);
     M[12] = car.x; M[13] = 1.0; M[14] = -car.y;
-    e.update(12000, 1, { speed: v, slip: 0, peak: 0.12, off: 0, surf: 1, dt: 1 / 60 });
+    e.update(12000, 1, { speed: v, slip: 0, peak: 0.12, off: 0, surf: car.surface, dt: 1 / 60 });
     e.place(cam, car, race, 1 / 60);
     off.resume();
   });
@@ -82,6 +90,7 @@ for (const [a, b, , name] of seg) {
 }
 // L/R during the rival pass: it is on your LEFT (lat +2.5)
 { let l = 0, r = 0; for (let i = 9.6 * SR | 0; i < 10.4 * SR; i++) { l += L[i] * L[i]; r += R[i] * R[i]; } out.push(`rival pass L/R balance ${db(Math.sqrt(l / r))} dB (+ = louder on the left)`); }
+out.push(`track ${TRACK} (wall type ${t.wall})`);
 out.push(`clipped samples (>=1.0): ${L.reduce((n, x) => n + (Math.abs(x) >= 0.999), 0) + R.reduce((n, x) => n + (Math.abs(x) >= 0.999), 0)}`);
 document.body.innerText = out.join('\n'); document.title = 'done';
 </script>

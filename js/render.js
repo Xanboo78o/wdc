@@ -1669,12 +1669,19 @@ export class View {
     const jx = (Math.random() - 0.5), jy = (Math.random() - 0.5), jz = (Math.random() - 0.5);
     const amp = this.shake * (sfxOn ? 0.35 : 1) + buzz;
     if (!this.speedShake) this.speedShake = new SpeedShake();
-    const sk = this.speedShake.step(dt, car.speed || 0, rig.mount,
-      hud.rough || 0, car.surface > 0.9 && car.surface < 1);
     // Acceleration, smoothed, from the speed alone (a replay sets only that).
     const acc = dt > 0 && this._lastSpd != null ? ((car.speed || 0) - this._lastSpd) / dt : 0;
     this._lastSpd = car.speed || 0;
     this._acc = (this._acc || 0) + (Math.max(-60, Math.min(60, acc)) - (this._acc || 0)) * Math.min(1, dt * 4);
+    // Which kerb the wheels are on (surface.js KERB: 1 flat, 2 standard,
+    // 3 high), and the extra load of a banked corner: |lateral g| times the
+    // sine of the bank, which is how hard the banking presses you down.
+    const onKerb = car.surface > 0.9 && car.surface < 1;
+    const kType = onKerb ? ((this.surf && this.surf.kerb && this.surf.kerb[proj.i]) || 1) : 0;
+    const bankA = Math.abs(bankRoll(this.bank, this.track, proj.i, 0) || 0);
+    const sk = this.speedShake.step(dt, car.speed || 0, rig.mount, {
+      rough: hud.rough || 0, kerb: kType, gLong: this._acc / 9.81,
+      gVert: Math.abs(latG) * Math.sin(bankA) });
     // The lens widens with SPEED (measured to help, see above); ?fovkick=0 A/B.
     if (this._fovKick === undefined) {
       const fq = new URLSearchParams(location.search).get('fovkick');

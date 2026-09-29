@@ -27,7 +27,7 @@ const ROOT = new URL('../', import.meta.url).pathname;
 const PORT = 8175;
 const CDP = 9500 + Math.floor(Math.random() * 400);
 const args = process.argv.slice(2);
-const KNOWN = new Set(['kmh', 's', 'cams', 'q', 'shot', 'wait', 'out', 'base']);
+const KNOWN = new Set(['decel', 'kmh', 's', 'cams', 'q', 'shot', 'wait', 'out', 'base']);
 for (const a of args) if (a.startsWith('--') && !KNOWN.has(a.slice(2))) {
   console.error(`unknown flag ${a} (known: ${[...KNOWN].join(', ')})`); process.exit(2);
 }
@@ -168,6 +168,7 @@ const MEASURE = `(async () => {
   for (let x = -0.95; x <= 0.95; x += 0.1) for (let y = -0.95; y <= 0; y += 0.1) {
     rc.setFromCamera(new T.Vector2(x, y), cam); const h = first(); all2++; if (h && own.has(h.object)) own2++;
   }
+  const ss = window.__wdcView.speedShake; out.load = ss ? +(ss._gv || 0).toFixed(2) : null;
   out.carLowerHalf = Math.round(100 * own2 / all2) + '%';
   return out;
 })()`;
@@ -187,15 +188,23 @@ try {
   for (let i = 0; i < 200; i++) { if (await cdp.eval('!!(window.__wdc && window.__wdcView && window.__wdc.car)')) break; await sleep(400); }
   // Pin the car on the straight at S0, at speed, every frame.
   await cdp.eval(`(() => {
-    const v = window.__wdcView, t = v.track, car = window.__wdc.car, V = ${KMH} / 3.6;
+    const v = window.__wdcView, t = v.track, car = window.__wdc.car, V0 = ${KMH} / 3.6, DEC = ${+flag('decel', 0)} * 9.81;
+    let V = V0, sAcc = 0, last = performance.now();
     // The car really MOVES at V (so a camera that lags, lags as it would in
     // the game), looping over the same 400 m so every rig sees the same spot.
     const t0 = performance.now();
     const pin = () => {
-      const s = ${S0} + ((performance.now() - t0) / 1000 * V) % 400;
+      // --decel g: brake at that many g from the set speed down to 80 km/h, over and over
+      const nowT = performance.now(), dts = Math.min(0.1, (nowT - last) / 1000); last = nowT;
+      if (DEC > 0) { V -= DEC * dts; if (V < 22) V = V0; }
+      sAcc = (sAcc + V * dts) % 400;
+      const s = ${S0} + sAcc;
       const a = t.point(s, 0), b = t.point(s + 2, 0);
       car.x = a.x; car.y = a.y; car.hdg = Math.atan2(b.y - a.y, b.x - a.x);
-      car.vx = V; car.vy = 0; car.r = 0; car.speed = V;
+      // yaw rate from the road's own curvature, so a banked corner is driven as one
+      car.vx = V; car.vy = 0; car.r = V * (t.curv ? t.curv[t.idx(s)] : 0); car.speed = V;
+      // keep it on the ground: the sim sees a teleported car and may launch it
+      car.airborne = false; car.z = 0; car.vz = 0; car.roll = 0; car.pitch = 0; car.pRate = 0; car.rRate = 0;
       requestAnimationFrame(pin);
     };
     pin();
@@ -218,7 +227,7 @@ try {
   const fmt = o => o ? `${String(o.ang).padStart(4)}°/s ${String(o.scr).padStart(5)} scr/s @${String(o.dist).padStart(5)}m v=${o.v} ${o.what}` : '—';
   console.log(`\n${target} at ${KMH} km/h, s=${S0}`);
   for (const r of rows) {
-    console.log(`\n  ${String(r.cam).padEnd(8)} fov ${r.fov}°  eye ${r.eyeY} m  pitch ${r.pitch}°  ${r.behind} m from car  car fills ${r.carLowerHalf} of lower half  (${r.kmh} km/h, ${r.fps} fps, shake ${r.jit}°/frame, blur ${r.blurMs} ms)`);
+    console.log(`\n  ${String(r.cam).padEnd(8)} fov ${r.fov}°  eye ${r.eyeY} m  pitch ${r.pitch}°  ${r.behind} m from car  car fills ${r.carLowerHalf} of lower half  (${r.kmh} km/h, ${r.fps} fps, shake ${r.jit}°/frame, blur ${r.blurMs} ms, load ${r.load} g)`);
     console.log(`    nearest ground, bottom centre : ${fmt(r.bottom)}`);
     console.log(`    nearest ground, bottom left   : ${fmt(r.botL)}`);
     console.log(`    nearest ground, bottom right  : ${fmt(r.botR)}`);

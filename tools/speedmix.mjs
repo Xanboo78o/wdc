@@ -10,8 +10,9 @@
 // Audio only (no WebGL) and niced, but still: not while Adam is driving.
 import { spawn } from 'child_process';
 import os from 'os';
-const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!['all', 'engine', 'speed', 'speed:wind', 'speed:hiss', 'speed:walls', 'speed:rivals'].includes(a)) { console.error('unknown mode ' + a + ' (all|engine|speed)'); process.exit(2); }
+const TRACK = (process.argv.find(a => a.startsWith('--track=')) || '--track=monza').slice(8);
+const ARGS = process.argv.slice(2).filter(a => !a.startsWith('--track='));
+for (const a of ARGS) if (!['all', 'engine', 'speed', 'speed:wind', 'speed:hiss', 'speed:walls', 'speed:rivals', 'speed:kerb', 'speed:bumps'].includes(a)) { console.error('unknown mode ' + a + ' (all|engine|speed)'); process.exit(2); }
 const modes = ARGS.length ? ARGS : ['engine', 'speed', 'all'];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const PORT = 9300 + Math.floor(Math.random() * 150);
@@ -25,7 +26,7 @@ for (const mode of modes) {
   ws.onmessage = m => { const d = JSON.parse(m.data); if (d.id && pend[d.id]) { pend[d.id](d); delete pend[d.id]; } if (d.method === 'Runtime.exceptionThrown') logs.push('EXC ' + JSON.stringify(d.params.exceptionDetails).slice(0, 400)); };
   const call = (method, params = {}) => new Promise(r => { const i = ++id; pend[i] = r; ws.send(JSON.stringify({ id: i, method, params })); });
   await call('Runtime.enable'); await call('Page.enable');
-  await call('Page.navigate', { url: `http://localhost:8175/tools/speedmix.html#${mode}` });
+  await call('Page.navigate', { url: `http://localhost:8175/tools/speedmix.html?track=${TRACK}#${mode}` });
   let txt = '';
   for (let i = 0; i < 300; i++) { await sleep(500); const r = await call('Runtime.evaluate', { expression: "document.title==='done'?document.body.innerText:''" }); txt = r.result?.result?.value || ''; if (txt) break; }
   console.log((txt || 'TIMEOUT ' + mode) + '\n'); for (const l of logs) console.log(l);

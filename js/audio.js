@@ -125,7 +125,11 @@ export const FX = {
   bark: 0.9,        // a second, lower distortion band: the bark under the rasp
   barkAt: 850,
   tyreMin: 0.22,    // squeal is on, but under the engine (Adam: "wheel losing grip ... too loud")
-  gravel: 1.25, grass: 1.05, kerb: 0.9, stones: 0.8,
+  // kerb 0.9 -> 0.45 (2026-09-29): the recorded bump every 2 m measured as
+  // loud as the engine on its own (-8.6 vs -7.8 dBFS, tools/speedmix.mjs);
+  // the kerb's rumble and hit are now synthesised by type in speedsound.js,
+  // so the bumps are the grain under it, not the whole sound.
+  gravel: 1.25, grass: 1.05, kerb: 0.45, stones: 0.8,
   // Adam: "the engine should be louder than crashes". It was 1.6 against an
   // engine that never got loud enough; the engine is the lead now.
   crash: 0.22,      // impact level (Adam, twice: crashes too loud)

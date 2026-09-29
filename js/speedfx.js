@@ -57,10 +57,12 @@ export const SFX = {
 // The driver's head is damped by a neck, so less buzz, more road. The chase
 // camera is not bolted to anything — a whisper of it, or it reads as fake.
 const MOUNTS = {
-  onboard: { buzzP: 0.075, buzzY: 0.035, buzzR: 0.03, roadP: 0.16, roadR: 0.10, heave: 0.004, kerb: 0.9 },
-  tcam:    { buzzP: 0.16, buzzY: 0.045, buzzR: 0.05, roadP: 0.14, roadR: 0.12, heave: 0.005, kerb: 1.1 },
-  nose:    { buzzP: 0.12, buzzY: 0.05, buzzR: 0.04, roadP: 0.20, roadR: 0.08, heave: 0.006, kerb: 1.2 },
-  chase:   { buzzP: 0.025, buzzY: 0.015, buzzR: 0.0, roadP: 0.06, roadR: 0.03, heave: 0.012, kerb: 0.35 },
+  // dive/squat: degrees of pitch per g braking/accelerating; sink: metres of
+  // heave per g of load (and per 4 g of braking, the head going forward).
+  onboard: { buzzP: 0.075, buzzY: 0.035, buzzR: 0.03, roadP: 0.16, roadR: 0.10, heave: 0.004, kerb: 0.9, dive: 0.18, squat: 0.08, sink: 0.02 },
+  tcam:    { buzzP: 0.16, buzzY: 0.045, buzzR: 0.05, roadP: 0.14, roadR: 0.12, heave: 0.005, kerb: 1.1, dive: 0.12, squat: 0.05, sink: 0.015 },
+  nose:    { buzzP: 0.12, buzzY: 0.05, buzzR: 0.04, roadP: 0.20, roadR: 0.08, heave: 0.006, kerb: 1.2, sink: 0.006 },
+  chase:   { buzzP: 0.025, buzzY: 0.015, buzzR: 0.0, roadP: 0.06, roadR: 0.03, heave: 0.012, kerb: 0.35, sink: 0.03 },
 };
 const D2R = Math.PI / 180;
 
@@ -72,39 +74,69 @@ export class SpeedShake {
     this._hf = { p: 0, y: 0, r: 0 };
   }
   /**
-   * dt real seconds; speed m/s; mount key; rough 0..0.45 (render.js hud);
-   * kerb true on a kerb. Returns radians (p pitch, y yaw, r roll) and metres (h).
+   * dt real seconds; speed m/s; mount key; f = {
+   *   rough  0..0.45 (render.js hud: kerb 0.22, grass 0.45)
+   *   kerb   0 none, 1 flat, 2 standard, 3 high (surface.js KERB), when a
+   *          wheel is on one
+   *   gLong  longitudinal g, + accelerating (render.js derives it from the
+   *          speed alone, so a replay dives exactly as the lap did)
+   *   gVert  extra vertical load in g, e.g. a banked corner pressing you down
+   * }. Returns radians (p pitch, y yaw, r roll) and metres (h heave).
    */
-  step(dt, speed, mount, rough = 0, kerb = false) {
+  step(dt, speed, mount, f = {}) {
     const o = this.out;
     const M = MOUNTS[mount];
     if (!SFX.on || !M || SFX.shake <= 0) { o.p = o.y = o.r = o.h = 0; return o; }
+    const { rough = 0, kerb = 0, gLong = 0, gVert = 0 } = f;
     dt = Math.min(0.1, Math.max(0, dt));
     const v = Math.max(0, speed);
     const k = v / 97.2;                                 // 1.0 at 350 km/h
     this.dist += v * dt;
-    // Kerbs arrive as hits: every stripe is a fresh kick, not a steady hum.
-    if (kerb && v > 8) this.kick = Math.max(this.kick, 0.55 + 0.45 * Math.min(1, k));
-    this.kick = Math.max(this.kick, Math.min(1, rough * 1.6));
+    const rnd = () => Math.random() * 2 - 1;
+    // KERBS, by type. The HIT is on the way onto the kerb — a high kerb is
+    // one big blow, a standard one a firm knock — and then, while you are on
+    // it, the ridges: a buzz that is all frequency (a flat kerb, two wheels
+    // on it every lap) or a hammering (a high one).
+    const kerbK = [0, 0.35, 0.7, 1.25][kerb] || 0, rideK = [0, 1.0, 0.55, 0.9][kerb] || 0;
+    if (kerb && !this._kerbWas && v > 8) this.kick = Math.max(this.kick, kerbK * (0.6 + 0.4 * Math.min(1, k)));
+    this._kerbWas = kerb;
+    this.kick = Math.max(this.kick, Math.min(1, rough * (kerb ? 0.5 : 1.6)));
     this.kick *= Math.exp(-dt * 7);
     // buzz: rises faster than speed (aero load and tyre frequency both climb)
     const b = Math.pow(k, 1.6) * SFX.shake;
-    const rnd = () => Math.random() * 2 - 1;
     // Lightly low-passed so it is judder rather than static at 144 Hz.
     const a = Math.min(1, dt * 55);
     this._hf.p += (rnd() - this._hf.p) * a;
     this._hf.y += (rnd() - this._hf.y) * a;
     this._hf.r += (rnd() - this._hf.r) * a;
+    // on the kerb: the ridges, as extra high-frequency amplitude
+    const ride = kerb && v > 8 ? rideK * Math.min(1, 0.4 + k) * M.kerb * 0.35 * SFX.shake : 0;
     // road: three incommensurate spatial wavelengths (m)
     const d = this.dist;
     const w1 = Math.sin(d / 9.1 * 6.283), w2 = Math.sin(d / 3.7 * 6.283 + 1.3), w3 = Math.sin(d / 14.3 * 6.283 + 2.1);
     const road = (0.5 * w2 + 0.3 * w1 + 0.2 * w3) * Math.min(1, k) * SFX.shake;
     const roll = (0.6 * Math.sin(d / 5.3 * 6.283 + 0.4) + 0.4 * w3) * Math.min(1, k) * SFX.shake;
     const kk = this.kick * M.kerb * SFX.shake;
-    o.p = (M.buzzP * b * this._hf.p + M.roadP * road + kk * rnd() * 0.9) * D2R;
-    o.y = (M.buzzY * b * this._hf.y + kk * rnd() * 0.25) * D2R;
-    o.r = (M.buzzR * b * this._hf.r + M.roadR * roll + kk * rnd() * 0.5) * D2R;
-    o.h = M.heave * (road + 0.5 * b * this._hf.p) + 0.01 * kk * rnd();
+
+    // THE DIVE. Braking at 5-6 g an F1 car's nose goes down and so does your
+    // head, and a stiff car does it with a bounce as the brakes come off.
+    // A spring (w 13 rad/s, damping 0.45) chasing the longitudinal g, so the
+    // release overshoots a touch the way a chassis does. Throttle squats the
+    // other way, more gently. Only mounts with a `dive` feel it.
+    const tgt = Math.max(-6.5, Math.min(2.5, gLong));
+    const w = 13, z = 0.45;
+    this._dv = (this._dv || 0) + (w * w * (tgt - (this._dx || 0)) - 2 * z * w * (this._dv || 0)) * dt;
+    this._dx = (this._dx || 0) + this._dv * dt;
+    const g = this._dx;
+    const dive = (g < 0 ? g * (M.dive || 0) : g * (M.squat || 0)) * SFX.shake;
+    // LOAD: a banked corner or a compression presses you into the seat.
+    this._gv = (this._gv || 0) + (Math.max(0, Math.min(3, gVert)) - (this._gv || 0)) * Math.min(1, dt * 5);
+
+    o.p = (M.buzzP * (b + ride * 2.2) * this._hf.p + M.roadP * road + kk * rnd() * 0.9 + dive - 0.25 * this._gv) * D2R;
+    o.y = (M.buzzY * (b + ride) * this._hf.y + kk * rnd() * 0.25) * D2R;
+    o.r = (M.buzzR * (b + ride * 2.5) * this._hf.r + M.roadR * roll + kk * rnd() * 0.5) * D2R;
+    o.h = M.heave * (road + 0.5 * (b + ride) * this._hf.p) + 0.01 * kk * rnd()
+      - (M.sink || 0) * (this._gv + Math.max(0, -g) * 0.25);
     return o;
   }
 }

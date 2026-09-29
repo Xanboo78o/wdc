@@ -17,6 +17,12 @@
 //           a "fft" each, so the posts become a flutter whose RATE is your
 //           speed — 16 a second at 350. Each one is scheduled at the exact
 //           moment you pass it, sweeping down in pitch as it goes by.
+//   KERBS   the ridges under the tyres at the rate you cross them: a flat
+//           kerb BUZZES (a sawtooth at two edges per metre of stripe), a
+//           standard one growls, a high one THUMPS as you hit it — a low,
+//           heavy sine blow — then hammers. Kerb type is the circuit's own
+//           (surface.js KERB, per sample), so Monza's flat sweepers and a
+//           hairpin's high kerb sound as different as they drive.
 //   RIVALS  a car passing close is a shove of air: a whoosh that rises as it
 //           closes and drops in pitch as it goes away.
 //
@@ -27,6 +33,8 @@
 //
 // Knobs: ?speedsound=0 (all off), ?wind= ?hiss= ?walls= (level multipliers).
 
+import { loadSurface, defaultSurface } from './surface.js';
+
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 const num = (k, d) => (Q.has(k) && Q.get(k) !== '' && Number.isFinite(+Q.get(k)) ? +Q.get(k) : d);
 export const SPEEDSOUND = {
@@ -36,6 +44,7 @@ export const SPEEDSOUND = {
   walls: 0.30 * num('walls', 1),
   posts: 0.55 * num('walls', 1),
   rivals: 0.8,
+  kerb: 0.14 * num('kerbs', 1),
 };
 const VREF = 97.2;                 // 350 km/h, where every level below is set
 const POST_EVERY = 3;              // furniture.js: a rail post every third sample
@@ -95,6 +104,21 @@ export class SpeedSound {
       return w;
     });
 
+    // KERBS: a tone at the ridge rate, and a thump for the hit.
+    this.kOsc = ctx.createOscillator(); this.kOsc.type = 'sawtooth'; this.kOsc.frequency.value = 80;
+    this.kLP = biq('lowpass', 700, 1.2);
+    this.kGain = gain();
+    chain(this.kOsc, this.kLP, this.kGain, out);
+    this.kOsc.start();
+    this.kNoiseBP = biq('bandpass', 300, 1.0);
+    this.kNoise = gain();
+    chain(src(2.2), this.kNoiseBP, this.kNoise, out);
+    this.thOsc = ctx.createOscillator(); this.thOsc.type = 'sine'; this.thOsc.frequency.value = 58;
+    this.thGain = gain();
+    chain(this.thOsc, this.thGain, out);
+    this.thOsc.start();
+    this.kerbWas = 0;
+
     // RIVALS: two air voices.
     this.air = [0, 1].map(k => {
       const a = { idx: -1 };
@@ -106,7 +130,10 @@ export class SpeedSound {
     });
   }
 
-  setTrack(t) { this.track = t; this.hint = null; for (const w of this.side) { w.lastPost = -1; w.until = 0; } }
+  setTrack(t) {
+    this.surf = null;
+    if (t && t.key) loadSurface(t.key).then(sf => { if (this.track === t) this.surf = sf || defaultSurface(t); }).catch(() => {});
+    this.track = t; this.hint = null; for (const w of this.side) { w.lastPost = -1; w.until = 0; } }
 
   _to(p, v, tc = 0.04) { p.setTargetAtTime(v, this.ctx.currentTime, tc); }
 
@@ -119,6 +146,7 @@ export class SpeedSound {
       w.until = 0; w.lastPost = -1;
     }
     for (const a of this.air) this._to(a.g.gain, 0, 0.05);
+    this._to(this.kGain.gain, 0, 0.03); this._to(this.kNoise.gain, 0, 0.03);
   }
 
   /** Wind and hiss: speed and surface only. `master` is the game's volume. */
@@ -151,13 +179,47 @@ export class SpeedSound {
     const p = t.project(car.x, car.y, this.hint, this.hint == null ? undefined : 12);
     this.hint = p.i;
     const street = t.wall === 'wall';
+
+    // KERBS
+    const onK = car.surface > 0.9 && car.surface < 1 && v > 4;
+    const kt = onK ? ((this.surf && this.surf.kerb && this.surf.kerb[p.i]) || 1) : 0;
+    const kl = SPEEDSOUND.kerb * master * Math.min(1, 0.3 + v / 60);
+    if (kt) {
+      // ridge rate: two edges per 1 m stripe (surface.js KERB_SHAPE block)
+      const f = Math.max(20, Math.min(900, v * (kt === 1 ? 2 : 1)));
+      this.kOsc.frequency.setTargetAtTime(f, now, 0.01);
+      this.kLP.frequency.value = kt === 1 ? 1400 : kt === 2 ? 800 : 500;
+      this._to(this.kGain.gain, kl * (kt === 1 ? 0.55 : kt === 2 ? 0.8 : 1.0), 0.015);
+      this.kNoiseBP.frequency.value = kt === 3 ? 180 : 320;
+      this._to(this.kNoise.gain, kl * (kt === 1 ? 0.3 : 0.7), 0.015);
+      if (!this.kerbWas && kt >= 2) {
+        // the hit: a heavy low blow, bigger for a high kerb and a fast car
+        const A = kl * (kt === 3 ? 2.2 : 1.1), th = this.thGain.gain;
+        th.cancelScheduledValues(now);
+        th.setValueAtTime(th.value, now);
+        th.linearRampToValueAtTime(A, now + 0.008);
+        th.exponentialRampToValueAtTime(0.0005, now + (kt === 3 ? 0.28 : 0.16));
+        th.setValueAtTime(0, now + (kt === 3 ? 0.29 : 0.17));
+        this.thOsc.frequency.setValueAtTime(kt === 3 ? 52 : 70, now);
+        this.thOsc.frequency.exponentialRampToValueAtTime(kt === 3 ? 36 : 50, now + 0.2);
+      }
+    } else {
+      this._to(this.kGain.gain, 0, 0.03); this._to(this.kNoise.gain, 0, 0.03);
+    }
+    this.kerbWas = kt;
     for (const w of this.side) {
       // distance from you to that side's barrier (sim lat: + is left)
       const bl = w.sd > 0 ? p.w + p.runL : -(p.w + p.runR);
       const d = Math.max(0.6, Math.abs(bl - p.lat));
       const near = Math.min(1, 3.0 / d);            // 1 within 3 m, 0.1 at 30 m
-      // the steady reflection: louder and brighter the nearer
-      this._to(w.g.gain, SPEEDSOUND.walls * master * Math.pow(k, 1.5) * near * near * (street ? 1.3 : 0.8), 0.05);
+      // The steady reflection: louder and brighter the nearer. Measured on
+      // Monaco's centreline (walls ~5 m off) the first law, near squared
+      // times k^1.5, put it at -55 dBFS at 150 km/h — the tunnel you drive
+      // through at Monaco was silent. Now it falls off linearly with
+      // distance and rises more gently with speed, and a street circuit's
+      // concrete, being a wall on both sides, reflects more than armco.
+      const lv = near * Math.pow(Math.min(1.2, k), 1.1);
+      this._to(w.g.gain, SPEEDSOUND.walls * master * lv * (street ? 1.6 : 0.8), 0.05);
       w.bp.frequency.value = 700 + 2600 * near * Math.min(1, k);
 
       // THE POSTS. Only rails have posts (a street circuit is concrete).
