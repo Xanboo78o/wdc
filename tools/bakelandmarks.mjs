@@ -396,6 +396,15 @@ SPEC.baku = (C, E) => {
   items.push({ type: 'flames', name: 'Flame Towers', src: `OSM buildings with height>100 inside the Flame Towers site (way ${fz ? fz.id : '?'}): ` + flames.map(f => `${f.id} h=${f.tags.height || '-'} levels=${f.tags['building:levels'] || '-'}`).join(', '),
     towers: flames.map(f => ({ ring: f.geom.map(g => C.loc(g.lat, g.lon)).slice(0, -1), h: +f.tags.height || 3.2 * +f.tags['building:levels'], lv: +f.tags['building:levels'] || null })),
     site: fz ? fz.geom.map(g => C.loc(g.lat, g.lon)) : null });
+  const gov = E.get('w152809510');
+  if (gov) {
+    const ring = gov.geom.map(g => C.loc(g.lat, g.lon)).slice(0, -1);
+    // The horseshoe's base is its longest edge: the central tower stands at
+    // its middle, over the courtyard that opens toward the start straight.
+    let best = 0, a = null, b = null;
+    for (let k = 0; k < ring.length; k++) { const p = ring[k], q = ring[(k + 1) % ring.length]; const L = Math.hypot(q[0] - p[0], q[1] - p[1]); if (L > best) { best = L; a = p; b = q; } }
+    items.push({ type: 'govhouse', name: 'Hökumət Evi (Government House)', src: 'OSM way 152809510 (amenity=townhall, building:levels=10): tower at the midpoint of the horseshoe\'s longest (base) edge', ring, a, b, h: 33 });
+  }
   return items;
 };
 

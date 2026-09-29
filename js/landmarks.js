@@ -980,3 +980,36 @@ BUILD.ribbon = (it, ctx) => {
   if (m) m.name = 'landmark.nordschleife';
   put(ctx, rail, mats(ctx).metal, { shadow: false });
 };
+
+// ---- BAKU: Government House --------------------------------------------------------------
+// The env bake has its ten storeys; what makes it Hökumət Evi from the start
+// straight is the stepped central tower rising out of the horseshoe's base.
+BUILD.govhouse = (it, ctx) => {
+  const [ax, ay] = it.a, [bx, by] = it.b;
+  const L = Math.hypot(bx - ax, by - ay), fx = (bx - ax) / L, fy = (by - ay) / L;
+  const hd = Math.atan2(fy, fx);
+  // Inward, toward the footprint's centre.
+  const c = it.ring.reduce((a, p) => [a[0] + p[0] / it.ring.length, a[1] + p[1] / it.ring.length], [0, 0]);
+  let nx = -fy, ny = fx;
+  const m = [(ax + bx) / 2, (ay + by) / 2];
+  if ((c[0] - m[0]) * nx + (c[1] - m[1]) * ny < 0) { nx = -nx; ny = -ny; }
+  const p = [m[0] + nx * 8, m[1] + ny * 8];
+  const g = lowest(ctx, it.ring), H = it.h;
+  const b = new Builder({ color: true });
+  const sand = [0.9, 0.8, 0.62], trim = [0.95, 0.88, 0.72];
+  b.box(p[0], g + H + 5, Z(p[1]), 26, 10, 14, hd, sand);
+  b.box(p[0], g + H + 10.4, Z(p[1]), 27, 0.8, 15, hd, trim);
+  b.box(p[0], g + H + 14.5, Z(p[1]), 17, 8, 10, hd, sand);
+  b.box(p[0], g + H + 18.9, Z(p[1]), 18, 0.8, 11, hd, trim);
+  b.box(p[0], g + H + 22, Z(p[1]), 9, 6, 7, hd, sand);
+  b.box(p[0], g + H + 27, Z(p[1]), 1.2, 6, 1.2, hd, [0.85, 0.75, 0.4]);
+  // Dark window bays up the tower's faces.
+  for (const [w, y0, y1] of [[22, H + 1.5, H + 9], [13, H + 11.5, H + 18]]) {
+    for (const s of [1, -1]) {
+      const q = [p[0] + nx * s * (w === 22 ? 7.05 : 5.05), p[1] + ny * s * (w === 22 ? 7.05 : 5.05)];
+      b.box(q[0], g + (y0 + y1) / 2, Z(q[1]), w, y1 - y0, 0.1, hd, [0.18, 0.2, 0.24]);
+    }
+  }
+  const mm = put(ctx, b, mats(ctx).plaster);
+  if (mm) mm.name = 'landmark.govhouse';
+};
