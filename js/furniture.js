@@ -20,6 +20,9 @@ import { Z, Builder, Atlas, fitText } from './geom.js';
 // The grid lives in a module that imports NOTHING, so the headless race gate
 // can call the same function this file paints from. See js/grid.js.
 import { gridSlots } from './grid.js';
+// Circular with crowd.js (which takes printMat from here); both sides only use
+// the other's function declarations at build time, so it resolves.
+import { peopleMesh } from './crowd.js';
 
 // Real-world dimensions, because guessing them is what makes a scene read as a
 // video game. A W-beam guard rail is 310 mm deep with its top edge at 750 mm;
@@ -612,9 +615,12 @@ export function buildMarshalPosts(scene, track, look, world = null) {
   const hut = new Builder();
   const roof = new Builder();
   const flag = new Builder();
+  const crew = [];
   let placed = 0;
 
-  for (let s = 40; s < t.length; s += 300) {
+  // Every 200 m, not 300: a Grade 1 circuit is manned at roughly that
+  // spacing, so that every metre of the lap is in sight of a flag.
+  for (let s = 40; s < t.length; s += 200) {
     const i = t.idx(s);
     // Put it on whichever side has room for it to stand.
     const side = t.runL[i] > t.runR[i] ? 1 : -1;
@@ -632,6 +638,14 @@ export function buildMarshalPosts(scene, track, look, world = null) {
     const e = [p[0] + inw[0] * 1.0 + fx * 0.5, p[1] + inw[2] * 1.0 + fz * 0.5];
     flag.quadN([a[0], 1.3, a[1]], [e[0], 1.3, e[1]], [e[0], 2.1, e[1]], [a[0], 2.1, a[1]],
       [[0, 0], [1, 0], [1, 1], [0, 1]]);
+    // THE MARSHALS. A post is two people in orange overalls standing at the
+    // front of it, facing the track, one of them with a flag ready — that is
+    // what tells you a circuit is staffed, far more than the hut does.
+    const face = Math.atan2(inw[0], inw[2]);
+    for (const k of [-0.7, 0.7]) {
+      const q = [p[0] + inw[0] * 1.35 + fx * k, p[1] + inw[2] * 1.35 + fz * k];
+      crew.push({ x: q[0], z: q[1], y: world ? world.groundY(q[0], q[1]) : 0, ry: face + (Math.random() - 0.5) * 0.4, seated: false });
+    }
     placed++;
   }
   if (!placed) return null;
@@ -644,5 +658,9 @@ export function buildMarshalPosts(scene, track, look, world = null) {
   add(hut, look.mat('concrete', { size: 2.4, tint: 0xd6d9dd, roughness: 0.92 }));
   add(roof, look.mat('metal', { size: 2.0, tint: 0xd8352a, roughness: 0.55, metalness: 0.4 }));
   add(flag, new THREE.MeshStandardMaterial({ color: 0xf5c518, roughness: 0.6, side: THREE.DoubleSide }), { shadow: false });
+  // Overalls orange; the flags they hold are the working set — yellow, blue,
+  // green, white — so a post reads as a post from 300 m.
+  const pm = peopleMesh(crew, { palette: [0xf26a1b, 0xe85d10, 0xff7a24], flags: [0xf5c518, 0xf5c518, 0x1b4fd8, 0x1d8f3c, 0xeeeeea], flagRate: 0.5 });
+  if (pm) { pm.name = 'marshals'; scene.add(pm); out.push(pm); }
   return out;
 }

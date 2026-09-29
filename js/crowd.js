@@ -142,16 +142,16 @@ function sway(mat, amp, speed) {
 // A crowd is a list of { x, z, y, ry, scale, seated }. This turns it into one
 // mesh with a per-instance colour. `fans` (a key into FANS) picks the
 // circuit's colours and turns flags on.
-export function peopleMesh(spots, { palette = SHIRTS, fans = null } = {}) {
+export function peopleMesh(spots, { palette = SHIRTS, fans = null, flags: flagCols = null, flagRate = 0.07 } = {}) {
   if (!spots.length) return null;
-  const F = fans ? (FANS[fans] || FANS.default) : null;
+  const F = fans ? (FANS[fans] || FANS.default) : flagCols ? { flags: flagCols } : null;
   // flatShading keeps the figures crisp rather than soft blobs once there are
   // thousands of them overlapping.
   const bodyMat = sway(new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, flatShading: true }), 0.035, 1.3);
   const headMat = sway(new THREE.MeshStandardMaterial({ roughness: 0.78, metalness: 0, flatShading: true }), 0.035, 1.3);
   const body = new THREE.InstancedMesh(personGeometry(), bodyMat, spots.length);
   const head = new THREE.InstancedMesh(headGeometry(), headMat, spots.length);
-  const flagSpots = F ? spots.filter(() => Math.random() < 0.07) : [];
+  const flagSpots = F ? spots.filter(() => Math.random() < flagRate) : [];
   const flags = flagSpots.length ? new THREE.InstancedMesh(flagGeometry(),
     sway(new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0, side: THREE.DoubleSide }), 0.16, 2.6),
     flagSpots.length) : null;
@@ -172,7 +172,7 @@ export function peopleMesh(spots, { palette = SHIRTS, fans = null } = {}) {
   for (let i = 0; i < spots.length; i++) {
     const sp = spots[i];
     place(body, i, sp); place(head, i, sp);
-    c.setHex(F ? pickW(F.shirts) : palette[(Math.random() * palette.length) | 0]);
+    c.setHex(F && F.shirts ? pickW(F.shirts) : palette[(Math.random() * palette.length) | 0]);
     // no two shirts in a crowd are quite the same colour after a day in the sun
     c.multiplyScalar(0.82 + Math.random() * 0.3);
     body.setColorAt(i, c);
