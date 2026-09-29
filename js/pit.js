@@ -25,6 +25,7 @@
 import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { peopleMesh } from './crowd.js';
+import { printMat } from './furniture.js';
 
 const LANE_TRACK = 5.6;      // metres of lane on the track side of the centreline
 const LANE_BOX = 6.6;        // metres on the garage side — the working lane
@@ -406,7 +407,7 @@ export function buildPitLane(scene, track, look, sign, world = null) {
     color: 0xfff6e6, emissive: 0xfff2dc, emissiveIntensity: 1.35, roughness: 0.4,
   }), { shadow: false }, 'glow');
   if (sign) {
-    add(boards, new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.65, side: THREE.DoubleSide }), { shadow: false }, 'boards');
+    add(boards, printMat(sign.texture, { roughness: 0.65 }), { shadow: false }, 'boards');
   }
 
   // Tyres: one instanced mesh for every tyre in every garage.

@@ -12,6 +12,7 @@
 // affordable to fill the stands rather than sprinkle a token few.
 import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
+import { printMat } from './furniture.js';
 
 const SEAT_PITCH = 0.62;     // metres between people along a row
 const ROW_DEPTH = 0.92;      // metres between rows, front to back
@@ -297,9 +298,7 @@ export function buildGrandstands(scene, track, env, look, world = null, sign = n
   // DoubleSide, because which way a stand faces is decided at run time by
   // asking the track, and a band that is backfacing is an invisible band.
   if (sign) {
-    const bm = band.mesh(new THREE.MeshStandardMaterial({
-      map: sign.texture, roughness: 0.72, side: THREE.DoubleSide,
-    }), { shadow: false });
+    const bm = band.mesh(printMat(sign.texture, { roughness: 0.72 }), { shadow: false });
     if (bm) { bm.name = 'stand.band'; scene.add(bm); }
   }
 

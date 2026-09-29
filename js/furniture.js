@@ -49,6 +49,41 @@ const at = (t, i, lat) => {
 const barrierLat = (t, i, side) => side > 0 ? t.w[i] + t.runL[i] : -(t.w[i] + t.runR[i]);
 
 // ---------------------------------------------------------------------------
+// PRINT ON ONE FACE ONLY.
+//
+// Every sign in this world is a single DoubleSide quad, which is right for
+// geometry (a board seen from behind must not vanish) and wrong for ink: from
+// behind, the print showed through reversed, so a trackside TV camera read
+// GNIDNARB off every hoarding on the lap. A real board has a plain back.
+//
+// Which face is the printed one cannot be read off the winding — the barrier
+// ads are laid the same way along the lap on both sides and the text is made
+// legible by flipping the UVs on one of them. So the shader asks the only
+// question that is always right: is the print being seen the right way round?
+// The sign of the UV Jacobian on screen answers it. Upright, unmirrored text
+// has u growing rightwards and v growing upwards, a positive determinant; the
+// same quad seen from behind mirrors u, and the determinant goes negative.
+// Where it is negative the fragment is the back of the board: painted plain.
+// ---------------------------------------------------------------------------
+export function printMat(map, { back = 0x2c2f34, ...opts } = {}) {
+  const m = new THREE.MeshStandardMaterial({ map, side: THREE.DoubleSide, ...opts });
+  const backCol = new THREE.Color(back);
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uBack = { value: backCol };
+    sh.fragmentShader = 'uniform vec3 uBack;\n' + sh.fragmentShader.replace('#include <map_fragment>', `
+#ifdef USE_MAP
+  vec2 pdx = dFdx(vMapUv), pdy = dFdy(vMapUv);
+  vec4 sampledDiffuseColor = texture2D(map, vMapUv);
+  if (pdx.x * pdy.y - pdx.y * pdy.x < 0.0) sampledDiffuseColor = vec4(uBack, 1.0);
+  diffuseColor *= sampledDiffuseColor;
+#endif
+`);
+  };
+  m.customProgramCacheKey = () => 'print-one-face';
+  return m;
+}
+
+// ---------------------------------------------------------------------------
 // The sign atlas. Everything in this world with WORDS on it draws into one
 // canvas, so the whole circuit's signage is a single texture and a single
 // draw call. Cells are 4:1, which suits a hoarding; square signs use a
@@ -294,9 +329,7 @@ export function buildBarriers(scene, track, look, sign, corridor = null, world =
   }), { shadow: false });
 
   if (sign) {
-    const adMat = new THREE.MeshStandardMaterial({
-      map: sign.texture, roughness: 0.7, metalness: 0.0, side: THREE.DoubleSide,
-    });
+    const adMat = printMat(sign.texture, { roughness: 0.7, metalness: 0.0 });
     push(ads, adMat, { shadow: false });
     out.adMat = adMat;
   }
@@ -408,7 +441,7 @@ export function buildBoards(scene, track, line, look, sign, world = null) {
   }
   if (!any) return null;
 
-  const mat = new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.68, side: THREE.DoubleSide });
+  const mat = printMat(sign.texture, { roughness: 0.68 });
   const m1 = b.mesh(mat, { shadow: false });
   const m2 = legs.mesh(look.mat('metal', { size: 1.2, tint: 0x2a2e34, roughness: 0.8, metalness: 0.7 }));
   for (const m of [m1, m2]) if (m) { if (world) world.liftGround(m.geometry); scene.add(m); }
@@ -518,7 +551,7 @@ export function buildStartFinish(scene, track, look, sign, world = null) {
   const Rf = [R[0] - f[0] * o, R[1] - f[2] * o], Lf = [L[0] - f[0] * o, L[1] - f[2] * o];
   ban.quadN([Rf[0], H + 0.08, Rf[1]], [Lf[0], H + 0.08, Lf[1]],
     [Lf[0], H + 1.02, Lf[1]], [Rf[0], H + 1.02, Rf[1]], uv);
-  const bm = ban.mesh(new THREE.MeshStandardMaterial({ map: sign.texture, roughness: 0.7, side: THREE.DoubleSide }), { shadow: false });
+  const bm = ban.mesh(printMat(sign.texture, { roughness: 0.7 }), { shadow: false });
   // Same lift as the gantry, or the banner parts company with the beam.
   if (bm) { if (world) world.lift(bm.geometry); scene.add(bm); out.push(bm); }
 
