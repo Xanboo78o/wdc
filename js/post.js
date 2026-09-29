@@ -85,6 +85,9 @@ export class Post {
     this.sat = 1.18;
     this.warm = 0.035;
     this.lift = 0.012;
+    // Heat shimmer strength, 0..1. render.js sets it from the sun and the
+    // weather every frame (?heat= pins it).
+    this.heat = 0;
     this.adapt = { up: 0.40, down: 1.20 };   // see below — asymmetric on purpose
     this.sun = new THREE.Vector3(0, 1, 0);
     this.sunUp = 0;              // 0 when the sun is behind you or below the horizon
@@ -220,7 +223,7 @@ export class Post {
     // ---- composite --------------------------------------------------------
     this.comp = new Pass(`
       uniform sampler2D tScene, tBloom, tRays, tAdapt;
-      uniform float uKey, uBloom, uRays, uSunUp, uFloor, uSat, uWarm, uLift;
+      uniform float uKey, uBloom, uRays, uSunUp, uFloor, uSat, uWarm, uLift, uHeat, uHorizon, uTime;
 
       // ACES, the fitted curve. The renderer used to do this; it happens here
       // now because everything above has to run in LINEAR light and tone
@@ -230,7 +233,19 @@ export class Post {
       }
       void main() {
         float ev = uKey / max(texture(tAdapt, vec2(0.5)).r, uFloor);
-        vec3 c = texture(tScene, vUv).rgb * ev;
+        // HEAT SHIMMER. On a hot bright day the air over far tarmac boils,
+        // and the last hundred metres of the straight wobble — air, not lens,
+        // so it belongs here (LOOK.md: the eye, not the camera). A thin band
+        // just under the horizon, strongest right at it, vertical wobble
+        // mostly, nothing at all when uHeat is 0 (cloud, night, rain).
+        vec2 suv = vUv;
+        if (uHeat > 0.001) {
+          float band = smoothstep(0.075, 0.0, uHorizon - vUv.y) * step(vUv.y, uHorizon + 0.004);
+          float w = sin(vUv.y * 900.0 + uTime * 7.0 + sin(vUv.x * 60.0 + uTime * 1.3) * 2.0)
+                  * sin(vUv.x * 140.0 - uTime * 3.1 + vUv.y * 300.0);
+          suv += vec2(0.0006, 0.0011) * w * band * uHeat;
+        }
+        vec3 c = texture(tScene, suv).rgb * ev;
         c += texture(tBloom, vUv).rgb * uBloom;
         c += texture(tRays, vUv).rgb * uRays * uSunUp;
         c = aces(c);
@@ -253,7 +268,7 @@ export class Post {
       }`, {
       tScene: u(null), tBloom: u(null), tRays: u(null), tAdapt: u(null),
       uKey: u(0.22), uBloom: u(0.85), uRays: u(0.75), uSunUp: u(0.0), uFloor: u(1e-4),
-      uSat: u(1.18), uWarm: u(0.035), uLift: u(0.012),
+      uSat: u(1.18), uWarm: u(0.035), uLift: u(0.012), uHeat: u(0), uHorizon: u(0.5), uTime: u(0),
     });
 
     // Bloom and rays run at a quarter of the width. Nobody has ever noticed a
@@ -295,6 +310,13 @@ export class Post {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
     const facing = dir.dot(fwd);
     this.sunUp = Math.max(0, Math.min(1, (facing - 0.1) / 0.5));
+    // where the horizon crosses the screen, for the shimmer band
+    const flat = new THREE.Vector3(fwd.x, 0, fwd.z);
+    if (flat.lengthSq() > 1e-6) {
+      flat.normalize().multiplyScalar(2000).add(camera.position);
+      flat.y = camera.position.y;
+      this.horizonY = (flat.project(camera).y + 1) / 2;
+    }
   }
 
   render(scene, camera, dt = 0.016) {
@@ -359,6 +381,8 @@ export class Post {
     c.uBloom.value = this.bloom;
     c.uRays.value = this.rays;
     c.uSat.value = this.sat; c.uWarm.value = this.warm; c.uLift.value = this.lift;
+    c.uHeat.value = this.heat; c.uHorizon.value = this.horizonY ?? 0.5;
+    c.uTime.value = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000 % 1000;
     c.uSunUp.value = this.sunUp;
     this.comp.to(r, null);
 

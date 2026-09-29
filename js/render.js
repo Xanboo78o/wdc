@@ -1034,6 +1034,16 @@ export class View {
       for (const { L, glow } of this.lamps) { L.intensity = on ? 16 * Math.max(0.35, k) : 0; glow.visible = on; }
     }
     if (this.courseLights) this.courseLights.setNight(ph.dark);
+    // Heat shimmer over the far tarmac: a high sun on a clear, dry, warm day.
+    if (this.post && this.post.on) {
+      if (this._heatQ === undefined) {
+        const hq = new URLSearchParams(location.search).get('heat');
+        this._heatQ = hq != null && Number.isFinite(+hq) ? +hq : null;
+      }
+      const warmth = Math.max(0, Math.min(1, ((this.wx.temp ?? 20) - 12) / 16));
+      this.post.heat = this._heatQ ?? (sm(18, 50, sol.elevation) * (1 - this.wx.cloud) *
+        (1 - (this.wx.wetness || 0)) * (0.35 + 0.65 * warmth));
+    }
 
     // Weather, every ten minutes, and never blocking a frame.
     if (now - this._wxAt > 600 || !this._wxAt) {
