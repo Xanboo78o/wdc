@@ -961,13 +961,17 @@ no validated file changed. Every car on the grid, not only yours.
 - **Smoke** is a lit soft sphere per puff, sorted back to front: rubber,
   gravel dust, earth, engine smoke past half damage, concrete dust on a big
   hit. Each puff knows the ground height under it and thins out as it meets it.
+- **Skid marks and ruts** (`js/skids.js`): every wheel of every car lays a
+  ribbon while locked, spinning, past the peak, or off the road (earth ruts);
+  a 6000-segment ring buffer, laid on the SURFACE under the wheel.
 - One draw call per effect type; nothing alive = not drawn. Idle cost 0 draws;
-  everything alive (47 pieces, 324 sparks, 53 puffs) +28 draws incl. shadows,
-  0.6 ms CPU. `window.__wdc.fx` = live counts, ms, and `bad` (failed shaders).
+  everything alive (47 pieces, 324 sparks, 53 puffs) +28 draws incl. shadows.
+  CPU: 200 pieces in flight 0.8 ms/frame for ~2 s, ~0 once at rest.
+  `window.__wdc.fx` = live counts, ms, and `bad` (failed shaders).
 
 Knobs: `?fx=0`, `?fxcam=yaw,pitch,dist[,lookX]`, `?fxdemo=wing|spark|smoke|
-dust|stones|scrape|all`, `?fxcrash=kmh,deg[,side]` (real physics crash),
-`?carenv=0`, `?carenvk=`. Gates: `node tools/fxcheck.mjs [--break]`,
+dust|stones|skids|scrape|all`, `?fxcrash=kmh,deg[,side[,yawrate]]` (a REAL
+physics crash or spin, photographable), `?carenv=0`, `?carenvk=`, `?skidlift=`. Gates: `node tools/fxcheck.mjs [--break]`,
 `node tools/debrisaudio.mjs` (+ `tools/debrisaudio.html` to listen).
 
 ### Gotchas paid for on the crash drama
@@ -1004,6 +1008,14 @@ dust|stones|scrape|all`, `?fxcrash=kmh,deg[,side]` (real physics crash),
     the normals away from the sky made it worse (more grazing). A specular
     MASK on uv1 (clearcoatMap + specularIntensityMap) fixed it, and it rides
     on the cloned paint so the whole grid gets it.
+50. **A mark laid on the car's plane sinks under the road.** The road crowns,
+    cambers and climbs; 5 cm of lift still lost the marks 10 m ahead. Lay on
+    the surface's own height (road profile + bank inside the barriers,
+    `groundY` beyond) — the same rule debris lands on.
+51. **The cost of a big accident is pieces SLIDING, not flying.** A flat piece
+    skating on the road ran 8 corners x 4 passes a substep; as a puck (planar
+    friction, yaw spin, eased flat, back to the solver at a wall) 200 pieces
+    went 2.5 -> 0.8 ms. Benchmark it over several runs: it is random.
 
 ## Not done yet
 
