@@ -36,6 +36,22 @@ uniform float uExposure;    // scales the whole thing into HDR
 const vec3 RAY = vec3(5.8e-3, 13.5e-3, 33.1e-3);
 const vec3 MIE = vec3(8.0e-3);
 
+// Value noise for the cloud deck. Hash, bilinear, five octaves: enough for
+// cumulus edges at the cube's resolution and nothing more.
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x),
+             mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float a = 0.5, s = 0.0;
+  // each octave turned ~37 degrees so the lattice never lines up into steps
+  for (int i = 0; i < 5; i++) { s += a * vnoise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p + vec2(1.7, 9.2); a *= 0.5; }
+  return s;
+}
+
 float rayleighPhase(float c) { return 3.0 / (16.0 * 3.14159265) * (1.0 + c * c); }
 float miePhase(float c, float g) {
   float g2 = g * g;
@@ -68,7 +84,13 @@ void main() {
   // air mass stands in for multiple scattering, which is what lifts a real
   // zenith to a third or so of the horizon rather than a fortieth; more
   // than that and the zenith greys out, because red saturates as well.
-  vec3 skyTint = exp(-(RAY * (1.0 + uTurb * 0.35) + MIE * 0.6) * (1.0 / max(sunUp + 0.08, 0.02)) * 2.0);
+  // OZONE. Without it a low sun's light, stripped of blue by Rayleigh, turns
+  // the whole blue dome GREEN-yellow (the "dark green sky at Suzuka" and a
+  // pea-soup dusk at Monza, 2026-09-28). The Chappuis band of ozone absorbs
+  // orange-to-green far more than blue along the same long path, which is
+  // precisely why a real twilight zenith stays blue and the clouds go pink.
+  const vec3 OZONE = vec3(0.012, 0.034, 0.0016);
+  vec3 skyTint = exp(-(RAY * (1.0 + uTurb * 0.35) + MIE * 0.6 + OZONE) * (1.0 / max(sunUp + 0.08, 0.02)) * 2.0);
   vec3 mieB = MIE * (0.10 + uTurb * 0.09);
   vec3 beta = RAY * (1.0 + uTurb * 0.12) + mieB;
   vec3 ins = 1.0 - exp(-beta * (air + 0.6) * 9.0);
@@ -83,10 +105,35 @@ void main() {
   float glow = pow(max(cosT, 0.0), 900.0);
   col += sunTint * (disc * 900.0 + glow * 22.0);
 
+  // FAIR-WEATHER CUMULUS (2026-09-28). A clear afternoon over a circuit is
+  // rarely an empty dome — a scatter of flat-bottomed cumulus is the
+  // broadcast sky, and the Mario Kart half of the brief (soft, warm, rich)
+  // wants it too. A cloud deck at a fixed height, value noise in five
+  // octaves, cover from the weather's cloud fraction. Lit from the sun's
+  // side with a darker belly, fading into the horizon haze with distance.
+  // It is drawn into the cube, which only re-renders when the sun moves, so
+  // it costs nothing per frame.
+  if (dir.y > 0.0) {
+    vec2 pl = dir.xz / (dir.y + 0.06) * 1.6;
+    float n = fbm(pl + vec2(3.1, 7.7));
+    float cover = mix(0.72, 0.34, clamp(uCloud * 1.4, 0.0, 1.0));
+    float dens = smoothstep(cover, cover + 0.16, n);
+    // light: step toward the sun and see how much cloud is in the way
+    vec2 toSun = normalize(uSun.xz + 1e-4) * 0.06;
+    float shade = smoothstep(cover - 0.05, cover + 0.3, fbm(pl + vec2(3.1, 7.7) + toSun));
+    float lit = 1.0 - 0.5 * shade;
+    vec3 cloudCol = skyTint * (0.55 + 0.75 * lit) * 1.15 * (0.35 + 0.65 * smoothstep(-0.05, 0.3, uSun.y));
+    cloudCol += sunTint * pow(max(cosT, 0.0), 8.0) * 0.6 * (1.0 - shade);   // silver lining toward the sun
+    float far = smoothstep(0.0, 0.16, dir.y);              // melt into the haze at the horizon
+    col = mix(col, mix(col, cloudCol, 0.85), dens * far * (1.0 - uNight));
+  }
+
   // CLOUD flattens everything toward a grey lid and kills the sun's edge —
   // the sky stops having a direction, which is exactly what overcast is.
+  // Only once the cumulus has run out of sky to cover: below half cover the
+  // clouds above do the work and a grey wash would only dull the blue.
   vec3 grey = vec3(0.70, 0.74, 0.80) * (0.20 + sunUp * 0.55);
-  col = mix(col, grey * (0.85 + 0.35 * up), uCloud * 0.88);
+  col = mix(col, grey * (0.85 + 0.35 * up), smoothstep(0.35, 0.95, uCloud) * 0.88);
 
   // NIGHT. Not black: a real night sky is deep blue with the horizon lit by
   // whatever is over it, and going fully black makes adaptation useless
@@ -105,7 +152,9 @@ void main() {
 }`;
 
 export class ProcSky {
-  constructor(renderer, { size = 256 } = {}) {
+  // 512 a face, not 256: the cube IS the background, and at 256 the clouds
+  // were smeared over three screen pixels a texel.
+  constructor(renderer, { size = 512 } = {}) {
     this.renderer = renderer;
     this.mat = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
