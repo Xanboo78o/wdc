@@ -1,8 +1,19 @@
 # Where the heights came from
 
-**NASA SRTM at 30 m**, read through [opentopodata.org](https://www.opentopodata.org/)
-— free, no key required, and it reports which dataset answered each point so
-the provenance stays with the numbers. SRTM is public domain.
+A **bare-earth survey (DTM)** from the national mapping agency wherever one
+answers a public query, because SRTM is radar and reads the TOP of trees and
+buildings — Monza came out 20 m "hilly" off the canopy of its park against a
+real 12.8 m. Each file's `dataset`/`source`/`licence` fields say which:
+
+| circuit | survey | licence |
+|---|---|---|
+| monza | Regione Lombardia DTM 5x5 (ed. 2015), bare earth | CC-BY 4.0 |
+| suzuka | GSI Japan DEM5A/10B, airborne laser | GSI terms, attribution |
+| zandvoort | AHN DTM 0.5 m lidar via PDOK | CC0 |
+| monaco | IGN RGE ALTI via Géoplateforme | Licence Ouverte 2.0 |
+| others | **NASA SRTM at 30 m**, via [opentopodata.org](https://www.opentopodata.org/) | public domain |
+
+Raw answers are cached per point in `raw/`, so a re-bake queries nobody.
 
 Refetch with `node tools/getelev.mjs [track|all] [--force]`.
 

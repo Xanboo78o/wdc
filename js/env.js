@@ -32,6 +32,7 @@
 import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { plantWoods } from './woods.js';
+import { FOREST } from '../data/env/forest.js';
 
 const NEAR = 340;            // metres: inside this a building gets detailed
 const MAX_WINDOWS = 26000;   // hard ceiling on window quads per circuit
@@ -632,8 +633,19 @@ export function buildEnv(scene, env, track, look, corridor = null, world = null)
 
 export async function loadEnv(key) {
   try {
-    const r = await fetch(`./data/env/${key}.json`);
+    // The satellite's ground cover (tools/getcover.mjs) rides along with the
+    // map's survey: woods.js plants its treelines from it and horizon.js puts
+    // the middle-distance woodland where the woodland actually is.
+    // Only where it has been switched on (data/env/forest.js `cover`) —
+    // each circuit's measured woods are checked by eye before they go live.
+    const spec = { ...FOREST._, ...(FOREST[key] || {}) };
+    const [r, c] = await Promise.all([
+      fetch(`./data/env/${key}.json`),
+      spec.cover ? fetch(`./data/env/cover/${key}.json`).catch(() => null) : null,
+    ]);
     if (!r.ok) return null;
-    return await r.json();
+    const env = await r.json();
+    if (c && c.ok) env.cover = await c.json().catch(() => null);
+    return env;
   } catch { return null; }
 }

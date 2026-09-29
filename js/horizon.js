@@ -198,7 +198,39 @@ function hazeBand(cx, cz, r, colour) {
  * flat-shaded cones and nobody will ever be closer than 400 m to one, so the
  * budget goes entirely into HOW MANY.
  */
-function farTrees(track, cx, cz, span, reach, land, horizonCol, world) {
+// Height of the drawn plate at (x, z): the same grid and the same two
+// triangles per cell that buildGround builds, (a, c, b) and (b, c, d), with
+// its corners read from the same groundY. Computed rather than read back,
+// because the horizon is built before the plate is.
+function plateY(x, z, world, track) {
+  const bb = track.bbox;
+  const cx = (bb.x0 + bb.x1) / 2, cz = Z((bb.y0 + bb.y1) / 2);
+  const reach = Math.max(24000, Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0) * 8), N = 108;
+  const step = (2 * reach) / N, x0 = cx - reach, z0 = cz - reach;
+  const fx = (x - x0) / step, fz = (z - z0) / step;
+  const i = Math.max(0, Math.min(N - 1, Math.floor(fx))), j = Math.max(0, Math.min(N - 1, Math.floor(fz)));
+  const u = fx - i, v = fz - j;
+  const Y = (a, b) => world.groundY(x0 + a * step, z0 + b * step);
+  const ya = Y(i, j), yb = Y(i + 1, j), yc = Y(i, j + 1), yd = Y(i + 1, j + 1);
+  const y = u + v <= 1 ? ya + (yb - ya) * u + (yc - ya) * v : yd + (yc - yd) * (1 - u) + (yb - yd) * (1 - v);
+  return y - 0.06;
+}
+
+// The satellite ground cover as a test: true = tree cover, false = measured
+// and not a tree, null = outside the survey (or no survey at all).
+function coverTest(c) {
+  if (!c) return () => null;
+  const cls = new Uint8Array(c.nx * c.ny);
+  let k = 0;
+  for (const run of c.rle.split(';')) { const [v, n] = run.split(','); cls.fill(+v, k, k + +n); k += +n; }
+  return (x, y) => {
+    const i = Math.floor((x - c.x0) / c.cell), j = Math.floor((y - c.y0) / c.cell);
+    if (i < 0 || j < 0 || i >= c.nx || j >= c.ny) return null;
+    return cls[j * c.nx + i] === 10;
+  };
+}
+
+function farTrees(track, cx, cz, span, reach, land, horizonCol, world, cover = null) {
   const geo = new THREE.ConeGeometry(4.2, 13, 5);
   geo.translate(0, 6.5, 0);
   // WHITE, not the tree colour. An InstancedMesh multiplies the material
@@ -216,15 +248,34 @@ function farTrees(track, cx, cz, span, reach, land, horizonCol, world) {
   // therefore invisible. This band starts at 320 m, which is where the eye can
   // still read one tree from the next.
   const inner = 430, outer = Math.max(2200, span * 1.4);
+  // Where the satellite measured the ground (tools/getcover.mjs), a cone
+  // stands only where it saw tree cover, so the woodland mass behind the
+  // treeline is the real park and the fields stay fields. Past that survey the
+  // old clumped scatter carries on. Candidates are drawn until the budget is
+  // spent, because most of a measured landscape is not trees.
+  const isTree = coverTest(cover);
   let n = 0;
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < count * 4 && n < count; i++) {
     const a = seeded(i, 5) * Math.PI * 2;
-    // Clumped rather than evenly sprinkled — woodland has edges and clearings,
-    // and an even scatter reads as a pattern from a distance.
-    const clump = seeded(Math.floor(a * 26), 9);
-    if (clump < 0.24) continue;
-    const r = inner + (outer - inner) * Math.sqrt(seeded(i, 13)) * (0.5 + clump * 0.7);
-    const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+    let r, x, z;
+    if (cover) {
+      r = inner + (outer - inner) * Math.sqrt(seeded(i, 13));
+      x = cx + Math.cos(a) * r; z = cz + Math.sin(a) * r;
+      const t = isTree(x, Z(z));
+      if (t === false) continue;
+      if (t == null) {
+        // Outside the survey: the clumped scatter.
+        const clump = seeded(Math.floor(a * 26), 9);
+        if (clump < 0.24) continue;
+      }
+    } else {
+      // Clumped rather than evenly sprinkled — woodland has edges and clearings,
+      // and an even scatter reads as a pattern from a distance.
+      const clump = seeded(Math.floor(a * 26), 9);
+      if (clump < 0.24 || i >= count) continue;
+      r = inner + (outer - inner) * Math.sqrt(seeded(i, 13)) * (0.5 + clump * 0.7);
+      x = cx + Math.cos(a) * r; z = cz + Math.sin(a) * r;
+    }
     // Radius from the middle of the circuit is NOT distance from the driver.
     // At Monza, 430 m from the centre can be right beside the back straight,
     // and a 20 m cone standing next to the road was the result. Measure to the
@@ -232,7 +283,11 @@ function farTrees(track, cx, cz, span, reach, land, horizonCol, world) {
     // from the OSM survey in env.js, and this band is the mass behind them.
     const dt = distToTrack(track, x, z);
     if (dt < 260) continue;
-    const gy = world ? world.groundY(x, z) : 0;
+    // On the skirt the ground is groundY; past it, the plate's own 440 m
+    // chords, which groundcheck measured up to 9.6 m off the survey — a cone
+    // on the survey there floats or sinks by that much.
+    const skirtReach = 260 + (2 * Math.max(24000, span * 8) / 108) * Math.SQRT2 + 40;
+    const gy = !world ? 0 : dt < skirtReach ? world.groundY(x, z) : plateY(x, z, world, track);
     const s = 0.8 + seeded(i, 21) * 0.9;
     q.setFromAxisAngle(up, seeded(i, 29) * 6.283);
     sc.set(s, s * (0.85 + seeded(i, 31) * 0.5), s);
@@ -456,24 +511,181 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
     }
   }
 
+  // ---- THE FINE LAYER NEXT TO THE CIRCUIT --------------------------------
+  //
+  // The coarse cells above are what groundcheck.mjs had been reporting as a
+  // KNOWN defect since 2026-09-19: a flat chord across 9-26 m, over a road
+  // surveyed every 2 m, stood grass up through the tarmac wherever the road
+  // dipped (Monaco 9.4 m, 20% of its racing surface). The fix it asked for is
+  // finer cells near the track, so near the track the grid IS fine: FINE-metre
+  // cells out to FINE_R, where the chord error (h²/8 × curvature) is a few
+  // centimetres on the steepest circuit we have. The coarse grid keeps the
+  // rest, and the two overlap by two coarse cells so there is never a crack;
+  // in that overlap the coarse grid is dropped a hand's breadth so the fine
+  // one — the one that agrees with groundY — is the surface you see.
+  const FINE = 6;
+  const FINE_R = world ? Math.max(50, (world.sinkTo || 0) + 20) : 50;
+  const BAND = FINE_R + 2 * CELL;
+  const m = Math.max(1, Math.round(dx / FINE)), mz = Math.max(1, Math.round(dz / FINE));
+  const fdx = dx / m, fdz = dz / mz, FW = nx * m + 1;
+  const fpos = [], fuv = [], fcol = [], fidx = [];
+  const fv = new Map(), fd = new Map();
+  const fdist = (gi, gj, obj = false) => {
+    const key = gj * FW + gi;
+    let d = fd.get(key);
+    if (d === undefined) {
+      const x = x0 + gi * fdx, z = z0 + gj * fdz;
+      d = world ? world.near(x, z) : { d: distToTrack(t, x, z) };
+      fd.set(key, d);
+    }
+    return obj ? d : d.d;
+  };
+  const vbase = (nx + 1) * (nz + 1);
+  const fvert = (gi, gj) => {
+    const key = gj * FW + gi;
+    let v = fv.get(key);
+    if (v !== undefined) return v;
+    const x = x0 + gi * fdx, z = z0 + gj * fdz;
+    v = vbase + fpos.length / 3;
+    fpos.push(x, world ? world.groundY(x, z, fdist(gi, gj, true)) : 0, z);
+    fuv.push(x, z);
+    const big = seeded(Math.floor(x / 700), Math.floor(z / 700));
+    const small = seeded(Math.floor(x / 190) + 41, Math.floor(z / 190) + 17);
+    c.copy(base).multiplyScalar(0.74 + big * 0.42 + (small - 0.5) * 0.17)
+      .lerp(horizon, hazeAt(fdist(gi, gj), span));
+    fcol.push(c.r, c.g, c.b);
+    fv.set(key, v);
+    return v;
+  };
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const a = j * (nx + 1) + i;
+      // Only coarse cells that can hold a fine one: a corner within reach.
+      const near = Math.min(dist[a], dist[a + 1], dist[a + nx + 1], dist[a + nx + 2]);
+      if (near > BAND + CELL * 1.5) continue;
+      for (let b = 0; b < mz; b++) {
+        for (let q = 0; q < m; q++) {
+          const gi = i * m + q, gj = j * mz + b;
+          if (fdist(gi, gj) > BAND && fdist(gi + 1, gj) > BAND &&
+              fdist(gi, gj + 1) > BAND && fdist(gi + 1, gj + 1) > BAND) continue;
+          const p00 = fvert(gi, gj), p10 = fvert(gi + 1, gj);
+          const p01 = fvert(gi, gj + 1), p11 = fvert(gi + 1, gj + 1);
+          fidx.push(p00, p01, p10, p10, p01, p11);
+        }
+      }
+    }
+  }
+
   // Keep only what fills the plate's hole, with a margin of overlap so there
-  // is never a seam of sky between the two.
+  // is never a seam of sky between the two — and none of what the fine layer
+  // already covers.
   const keep = REACH;
   const idx = [];
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
       const a = j * (nx + 1) + i, b = a + 1, cc = a + nx + 1, d = cc + 1;
       if (dist[a] > keep && dist[b] > keep && dist[cc] > keep && dist[d] > keep) continue;
+      if (dist[a] < FINE_R || dist[b] < FINE_R || dist[cc] < FINE_R || dist[d] < FINE_R) continue;
+      // Wholly under the fine layer (it reaches BAND): drawing it as well only
+      // lets its chord poke up through the fine one.
+      if (Math.max(dist[a], dist[b], dist[cc], dist[d]) < BAND - 2 * FINE) continue;
       idx.push(a, cc, b, b, cc, d);
     }
   }
-  if (!idx.length) return null;
+  if (!idx.length && !fidx.length) return null;
+  // Under the fine layer where they overlap, so the fine one is what shows.
+  for (let k = 0; k < dist.length; k++) if (dist[k] < BAND + CELL) pos[k * 3 + 1] -= 0.12;
+
+  // ---- WHERE THE LAND ITSELF IS CURVY, SUBDIVIDE ------------------------
+  // Away from the road a coarse chord is fine on a plain and wrong on a real
+  // bank — Monza's old Sopraelevata falls ten metres in sixty, and a 22 m
+  // chord over it missed by 0.86 m, which is a tree floating by that much.
+  // So every coarse cell is measured against the field it is drawn over, and
+  // one that misses by more than MISS is split into ~5 m sub-cells. Where a
+  // split cell meets an unsplit one, the shared edge's vertices are put ON
+  // the unsplit cell's chord, so the two meet exactly and no sky shows
+  // through the seam (the usual T-junction rule).
+  const MISS = 0.15;
+  const keepQ = [];
+  for (let q = 0; q < idx.length; q += 6) keepQ.push(idx[q]);   // corner a of each coarse cell
+  const coarseCell = new Set(keepQ);
+  const split = new Set();
+  if (world) {
+    for (const a of keepQ) {
+      const i = a % (nx + 1), j = (a / (nx + 1)) | 0;
+      const Y = k => pos[k * 3 + 1];
+      const ya = Y(a), yb = Y(a + 1), yc = Y(a + nx + 1), yd = Y(a + nx + 2);
+      let worst = 0;
+      const drop = Math.min(dist[a], dist[a + 1], dist[a + nx + 1], dist[a + nx + 2]) < BAND + CELL ? 0.12 : 0;
+      for (const [u, v] of [[0.3, 0.3], [0.7, 0.7], [0.5, 0.5]]) {
+        const ch = u + v <= 1 ? ya + (yb - ya) * u + (yc - ya) * v : yd + (yc - yd) * (1 - u) + (yb - yd) * (1 - v);
+        const px = x0 + (i + u) * dx, pz = z0 + (j + v) * dz;
+        const real = world.groundY(px, pz) - drop;
+        worst = Math.max(worst, Math.abs(ch - real));
+      }
+      if (worst > MISS) split.add(a);
+    }
+  }
+  if (split.size) {
+    const s = Math.max(2, Math.ceil(Math.max(dx, dz) / 7.5));
+    const cidx = [];
+    // Drop the split cells from the coarse index.
+    for (let q = 0; q < idx.length; q += 6) if (!split.has(idx[q])) for (let r = 0; r < 6; r++) cidx.push(idx[q + r]);
+    const addV = (x, y, z, d) => {
+      const v = vbase + fpos.length / 3;
+      fpos.push(x, y, z); fuv.push(x, z);
+      const big = seeded(Math.floor(x / 700), Math.floor(z / 700));
+      const small = seeded(Math.floor(x / 190) + 41, Math.floor(z / 190) + 17);
+      c.copy(base).multiplyScalar(0.74 + big * 0.42 + (small - 0.5) * 0.17).lerp(horizon, hazeAt(d, span));
+      fcol.push(c.r, c.g, c.b);
+      return v;
+    };
+    const sidx = [];
+    for (const a of split) {
+      const i = a % (nx + 1), j = (a / (nx + 1)) | 0;
+      const Y = k => pos[k * 3 + 1];
+      const ya = Y(a), yb = Y(a + 1), yc = Y(a + nx + 1), yd = Y(a + nx + 2);
+      // Is the neighbour across each edge also split (then share real heights)?
+      const nb = (di, dj) => split.has(a + di + dj * (nx + 1));
+      const loose = { w: !nb(-1, 0), e: !nb(1, 0), s: !nb(0, -1), n: !nb(0, 1) };
+      const ids = [];
+      for (let b = 0; b <= s; b++) {
+        for (let q = 0; q <= s; q++) {
+          const u = q / s, v = b / s;
+          const x = x0 + (i + u) * dx, z = z0 + (j + v) * dz;
+          let y;
+          if ((q === 0 || q === s) && (b === 0 || b === s)) y = q === 0 ? (b === 0 ? ya : yc) : (b === 0 ? yb : yd);
+          else if (q === 0 && loose.w) y = ya + (yc - ya) * v;
+          else if (q === s && loose.e) y = yb + (yd - yb) * v;
+          else if (b === 0 && loose.s) y = ya + (yb - ya) * u;
+          else if (b === s && loose.n) y = yc + (yd - yc) * u;
+          // Interior: the real ground — dropped under the fine layer where
+          // the two overlap, exactly as the coarse vertices are.
+          else { const nr = world.near(x, z); y = world.groundY(x, z, nr) - (nr.d < BAND + CELL ? 0.12 : 0); }
+          ids.push(addV(x, y, z, dist[a]));
+        }
+      }
+      for (let b = 0; b < s; b++) for (let q = 0; q < s; q++) {
+        const p00 = ids[b * (s + 1) + q], p10 = p00 + 1, p01 = ids[(b + 1) * (s + 1) + q], p11 = p01 + 1;
+        sidx.push(p00, p01, p10, p10, p01, p11);
+      }
+    }
+    idx.length = 0;
+    for (const v of cidx) idx.push(v);
+    for (const v of sidx) idx.push(v);
+  }
+  void coarseCell;
+  const coarseTris = idx.length / 3;
+  for (let k = 0; k < fidx.length; k++) idx.push(fidx[k]);
 
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  g.setAttribute('uv1', new THREE.BufferAttribute(uv, 2));
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const cat = (A, B) => { const o = new Float32Array(A.length + B.length); o.set(A); o.set(B, A.length); return o; };
+  const allUv = cat(uv, fuv);
+  g.setAttribute('position', new THREE.BufferAttribute(cat(pos, fpos), 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(allUv, 2));
+  g.setAttribute('uv1', new THREE.BufferAttribute(allUv, 2));
+  g.setAttribute('color', new THREE.BufferAttribute(cat(col, fcol), 3));
+  buildSkirt.stats = { coarse: CELL, fine: FINE, fineR: FINE_R, fineTris: fidx.length / 3, coarseTris, split: split.size };
   g.setIndex(idx);
   g.computeVertexNormals();
 
@@ -482,6 +694,7 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
     { size: 6, roughness: 1, vertexColors: true, env: 0.55 }));
   mesh.position.y = -0.05;
   mesh.receiveShadow = true;
+  mesh.userData.stats = buildSkirt.stats;
   return mesh;
 }
 
@@ -542,7 +755,7 @@ export function buildHorizon(scene, track, env, sky, world = null) {
   // Suzuka sits in woodland; filling that band with trees is both true and the
   // single biggest change to how far away the horizon feels.
   if (land.trees) {
-    const tm = farTrees(track, cx, cz, span, reach, land, horizon, world);
+    const tm = farTrees(track, cx, cz, span, reach, land, horizon, world, env && env.cover);
     if (tm) scene.add(tm);
   }
 

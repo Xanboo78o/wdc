@@ -37,7 +37,7 @@ import { bankTable, bankGround } from './bank.js';
 
 const NEAR = 55;       // inside this, the racing line's own profile wins
 const FAR = 240;       // beyond this, the terrain grid wins
-const CELL = 90;       // metres per bucket in the lookup grid
+const CELL = 45;       // metres per bucket in the lookup grid (measured: 45 is the quickest of 30/45/60/90)
 const SINK_MAX = 0.35; // how far the visible ground is pushed under the circuit
 const BLEND = 20;      // metres either side of the line between two legs that are blended
 
@@ -90,6 +90,10 @@ export class World {
       if (cx < 0 || cz < 0 || cx >= this.gnx || cz >= this.gnz) continue;
       this.buckets[cz * this.gnx + cx].push(i);
     }
+    // The same buckets holding every 4th sample (8 m): the first, cheap pass
+    // of `nearest`, and all `_blendNear` needs once its reach is wide.
+    this.buckets4 = this.buckets.map(b => b.filter(k => k % 4 === 0));
+    this.buckets8 = this.buckets.map(b => b.filter(k => k % 8 === 0));
     if (!this.on) return;
     // What the land does BEYOND the surveyed box. The DEM only covers the
     // world box; sampling it outside clamps to whatever the boundary happened
@@ -98,27 +102,66 @@ export class World {
     // ground falls away to the lowest thing the survey saw — the sea, on the
     // three circuits that have one, and a harmless dip inland.
     this.seaY = Math.min(...elev.grid.h);
+    this.gridLo = this.seaY; this.gridHi = Math.max(...elev.grid.h);
+    this.plane = elev.outside === 'plane' && elev.plane ? elev.plane : null;
   }
 
   /** Nearest centreline sample to a point, and how far away it is. */
   nearest(x, z) {
+    // Two passes. Every 4th sample first (8 m apart), which finds the right
+    // stretch of the lap at a quarter of the cost; then every sample within
+    // four of any coarse candidate that came within one spacing of the best.
+    // The nearest sample overall is always within 4 of some coarse sample,
+    // and that coarse sample is at most 8 m further than it — so it is found.
+    return this._nearestIn(this.buckets, x, z, 0);
+  }
+
+  /**
+   * `nearest`, but only as far as it matters to the ground: past FAR the
+   * height is the terrain grid alone and the sink is zero, so a point that
+   * far out only needs to be told so — {i: -1, d: Infinity} — instead of
+   * searching a kilometre of buckets for an answer nobody reads. That search
+   * was most of the cost of building the skirt.
+   */
+  near(x, z) {
+    return this._nearestIn(this.buckets, x, z, 0, Math.ceil((FAR + 30) / CELL) + 1);
+  }
+
+  /**
+   * Nearest sample among `buckets`, and (when `slack` > 0) every sample that
+   * came within `slack` metres of it — the candidates for a finer pass.
+   */
+  _nearestIn(buckets, x, z, slack, maxRing = 12) {
     let best = -1, bd = Infinity;
+    const cand = slack > 0 ? [] : null, cd = slack > 0 ? [] : null;
     const cx = Math.floor((x - this.gx0) / CELL), cz = Math.floor((z - this.gz0) / CELL);
-    // Widen the search until something is found — a point far out in the
-    // countryside may have no track within several buckets.
-    for (let ring = 1; ring <= 6 && best < 0; ring++) {
+    // Widen the search ring by ring — a point far out in the countryside may
+    // have no track within several buckets — and stop only when no bucket
+    // further out COULD hold anything nearer. (It used to stop at the first
+    // ring with anything in it. A sample in the next ring out can be closer
+    // than one in the corner of this one, so the "nearest" leg flipped early
+    // and the ground stepped by up to 0.9 m along a line 100 m from Monza's
+    // main straight, which groundcheck read as a 0.5 m chord error.)
+    for (let ring = 0; ring <= maxRing; ring++) {
       for (let j = cz - ring; j <= cz + ring; j++) {
         if (j < 0 || j >= this.gnz) continue;
-        for (let i = cx - ring; i <= cx + ring; i++) {
+        const edge = j === cz - ring || j === cz + ring;
+        for (let i = cx - ring; i <= cx + ring; i += (edge ? 1 : 2 * ring || 1)) {
           if (i < 0 || i >= this.gnx) continue;
-          for (const k of this.buckets[j * this.gnx + i]) {
+          for (const k of buckets[j * this.gnx + i]) {
             const dx = this.track.x[k] - x, dz = Z(this.track.y[k]) - z;
             const d = dx * dx + dz * dz;
+            if (cand) { cand.push(k); cd.push(d); }
             if (d < bd) { bd = d; best = k; }
           }
         }
       }
+      // Everything in ring r+1 is at least r*CELL away from any point in
+      // the centre bucket.
+      const lim = Math.sqrt(bd) + slack;
+      if (best >= 0 && lim <= ring * CELL) break;
     }
+    if (best < 0 && maxRing < 12) return { i: -1, d: Infinity };
     if (best < 0) {
       // Miles from the circuit. Coarse scan; this is rare and never per frame.
       for (let k = 0; k < this.track.n; k += 8) {
@@ -126,8 +169,11 @@ export class World {
         const d = dx * dx + dz * dz;
         if (d < bd) { bd = d; best = k; }
       }
+      if (cand) { cand.push(best); cd.push(bd); }
     }
-    return { i: best, d: Math.sqrt(bd) };
+    if (!cand) return { i: best, d: Math.sqrt(bd) };
+    const lim = (Math.sqrt(bd) + slack) ** 2;
+    return { i: best, d: Math.sqrt(bd), cand: cand.filter((_, q) => cd[q] <= lim) };
   }
 
   /**
@@ -156,6 +202,37 @@ export class World {
     return best < 0 ? null : { i: best, d: Math.sqrt(bd) };
   }
 
+  /**
+   * Weighted height of every centreline sample within `d + R` of (x, z):
+   * weight (1 - (dk - d)/R)², so the nearest counts fully and one R further
+   * counts nothing. `fallback` if nothing lands (never, in practice: the
+   * nearest sample is always within d). Every 4th sample when R is large —
+   * the profile is smoothed over 10 m, so 8 m spacing loses nothing.
+   */
+  _blendNear(x, z, d, R, fallback) {
+    const t = this.track, reach = d + R;
+    const step = R > 30 ? 8 : R > 12 ? 4 : 1;
+    const cx = Math.floor((x - this.gx0) / CELL), cz = Math.floor((z - this.gz0) / CELL);
+    const r = Math.ceil(reach / CELL);
+    let sw = 0, sh = 0;
+    const r2 = reach * reach;
+    for (let j = cz - r; j <= cz + r; j++) {
+      if (j < 0 || j >= this.gnz) continue;
+      for (let q = cx - r; q <= cx + r; q++) {
+        if (q < 0 || q >= this.gnx) continue;
+        for (const k of (step === 8 ? this.buckets8 : step === 4 ? this.buckets4 : this.buckets)[j * this.gnx + q]) {
+          const dx = t.x[k] - x, dz = Z(t.y[k]) - z;
+          const dd = dx * dx + dz * dz;
+          if (dd > r2) continue;
+          const u = Math.max(0, 1 - (Math.sqrt(dd) - d) / R);
+          const w = u * u;
+          sw += w; sh += w * this.elev.s[k];
+        }
+      }
+    }
+    return sw > 0 ? sh / sw : fallback;
+  }
+
   /** Bilinear sample of the terrain grid, in sim x / three z. */
   gridAt(x, z) {
     const g = this.elev.grid;
@@ -168,13 +245,31 @@ export class World {
     const j0 = Math.max(0, Math.min(g.n - 2, Math.floor(fy)));
     const tx = Math.max(0, Math.min(1, fx - i0)), ty = Math.max(0, Math.min(1, fy - j0));
     const h = g.h;
-    const a = h[j0 * g.n + i0], b = h[j0 * g.n + i0 + 1];
-    const c = h[(j0 + 1) * g.n + i0], d = h[(j0 + 1) * g.n + i0 + 1];
-    const v = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+    // CATMULL-ROM, not bilinear. Bilinear is continuous but its slope jumps
+    // at every grid line — a crease every 45-60 m across the whole landscape —
+    // and every ground mesh drawn over it is a set of flat chords that cannot
+    // follow a crease. groundcheck.mjs measured those creases as the worst
+    // disagreement left on Monza's skirt (0.53 m). A cubic through the same
+    // posts is smooth, passes through every measured height exactly, and
+    // leaves only true curvature for the chords to miss.
+    const at = (i, j) => h[Math.max(0, Math.min(g.n - 1, j)) * g.n + Math.max(0, Math.min(g.n - 1, i))];
+    const cr = (p0, p1, p2, p3, t) =>
+      p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
+    const row = j => cr(at(i0 - 1, j), at(i0, j), at(i0 + 1, j), at(i0 + 2, j), tx);
+    const v = cr(row(j0 - 1), row(j0), row(j0 + 1), row(j0 + 2), ty);
     if (out <= 0) return v;
     // Fall to sea level over about fifteen cells, so the edge of the survey is
     // a coastline or a slope rather than a cliff into a plateau.
     const f = Math.min(1, out / 15);
+    // An inland circuit has no sea to fall to, and falling to the lowest post
+    // the survey saw dug a moat round the Parco di Monza. Carry on along the
+    // land's own measured tilt instead (a plane fitted to the grid by
+    // tools/getelev.mjs), held within the relief the survey itself saw.
+    if (this.plane) {
+      const [a, b, c] = this.plane;
+      const p = Math.max(this.gridLo - 15, Math.min(this.gridHi + 15, a + b * x + c * Z(z)));
+      return v + (p - v) * (f * f * (3 - 2 * f));
+    }
     return v + (this.seaY - v) * (f * f * (3 - 2 * f));
   }
 
@@ -196,9 +291,10 @@ export class World {
    * circuit, the terrain grid far from it, crossfaded in between so the track
    * never ends up in a trench or on a plinth.
    */
-  heightAt(x, z) {
+  heightAt(x, z, near = null) {
     if (!this.on) return 0;
-    const { i, d } = this.nearest(x, z);
+    const { i, d } = near || this.near(x, z);
+    if (i < 0 || d >= FAR) return this.gridAt(x, z);
     // Interpolate ALONG the track rather than snapping to the nearest sample.
     // Samples are 2 m apart, so snapping leaves a centimetre-scale staircase
     // in the racing surface — invisible standing still and a shimmer at speed,
@@ -220,17 +316,27 @@ export class World {
     // Never on the circuit, nor within one grass-grid cell of it: tarmac and
     // run-off keep their own leg's height however close another leg runs
     // (Monaco's are metres apart), and so does the grass that meets them.
-    if (d < FAR && d > t.w[i] + Math.max(t.runL[i], t.runR[i]) + 26) {
-      const o = this.otherLeg(x, z, i, d + BLEND);
-      if (o) {
-        // Clamped at 0 as well: `nearest` stops at the first ring of buckets
-        // that has anything in it, so the "other" leg can come back closer
-        // than the nearest one, and an unclamped smoothstep of a negative
-        // number is not a weight — it threw the ground 57 m in the air.
-        const f = Math.max(0, Math.min(1, (o.d - d) / BLEND));
-        const wgt = 0.5 * (1 - f * f * (3 - 2 * f));
-        onTrack += (this.elev.s[o.i] - onTrack) * wgt;
-      }
+    //
+    // 2026-09-28: THAT WAS STILL A STEP, just a smaller one. "Nearest sample"
+    // is discontinuous on every line equidistant from two parts of the lap —
+    // not only between two legs but at the centre of every CORNER, where a
+    // point 75 m inside Lesmo is equally near five stretches of it. The
+    // nearest flipped from s=2174 to s=2238 to s=2304 across two metres, the
+    // ground stepped 0.7 m, and three trees planted there floated on one side
+    // of the step (groundcheck: 0.41 m). So off the circuit the height is a
+    // WEIGHTED blend of every sample within R of the nearest distance, R
+    // growing with the distance from the corridor: a point on the bisector
+    // gets exactly half of each side, and the weights move continuously, so
+    // the ground cannot step anywhere. At the corridor's edge R is zero, so
+    // tarmac, run-off and the grass that meets them keep exactly their own
+    // leg's height, however close another leg runs (Monaco's are metres
+    // apart, and Suzuka's cross over each other).
+    // The WIDEST corridor on the lap, not this sample's: a per-sample one
+    // would itself jump where the nearest sample does.
+    const corr = this.sinkTo - 12;
+    if (d < FAR && d > corr) {
+      const R = Math.min(70, 0.5 * (d - corr));
+      if (R > 0.5) onTrack = this._blendNear(x, z, d, R, onTrack);
     }
     if (d <= NEAR) return onTrack;
     const grid = this.gridAt(x, z);
@@ -258,10 +364,11 @@ export class World {
    * posts and the trees at the track edge all hovered over their own shadows
    * because the grass was sunk under them and they were not.
    */
-  groundY(x, z) {
-    const { i, d } = this.nearest(x, z);
-    let y = (this.on ? this.heightAt(x, z) : 0) - this.sinkAt(d);
-    if (this.bank && this.bank[i]) {
+  groundY(x, z, near = null) {
+    near = near || this.near(x, z);
+    const { i, d } = near;
+    let y = (this.on ? this.heightAt(x, z, near) : 0) - this.sinkAt(d);
+    if (this.bank && i >= 0 && this.bank[i]) {
       const t = this.track, h = t.hdg[i];
       const lat = -Math.sin(h) * (x - t.x[i]) + Math.cos(h) * (Z(z) - t.y[i]);
       y += bankGround(this.bank, t, i, lat);

@@ -6,6 +6,12 @@
 //   node tools/groundcheck.mjs --n 200 --reach 2400
 //   node tools/groundcheck.mjs --break             prove the gate can fail
 //   node tools/groundcheck.mjs --strict            fail on the known defect too
+//   node tools/groundcheck.mjs --gpu               render on the GeForce, not SwiftShader
+//
+// --gpu: SwiftShader renders on the CPU, and a CPU pegged by a headless render
+// crackles the game's audio if Adam is playing. The raycasts are JavaScript
+// either way; only the drawing moves to the card (ANGLE's Vulkan backend, the
+// route tools/shot.mjs found works for readback on this laptop).
 //
 // WHY THIS EXISTS. The ground near a circuit is drawn by two meshes that have
 // to agree with each other and with a height field neither of them owns:
@@ -46,7 +52,7 @@ const ROOT = new URL('../', import.meta.url).pathname;
 
 const args = process.argv.slice(2);
 const VALUE = new Set(['tracks', 'n', 'reach', 'bands', 'tol', 'seed']);
-const BOOL = new Set(['break', 'strict']);
+const BOOL = new Set(['break', 'strict', 'gpu']);
 // REFUSE A FLAG THIS DOES NOT UNDERSTAND, and refuse a repeated one.
 //
 // `--track monaco` instead of `--tracks monaco` would otherwise check the
@@ -197,23 +203,82 @@ async function pageCheck(opt) {
   // ~300 m cells and the skirt is 26 m, so a chord error that is a defect on
   // one is simply the resolution of the other. A gate that averages the two
   // together can only ever produce a number that means nothing.
-  const drop = (x, z, objs) => {
-    org.set(x, 6000, z);
-    rc.set(org, DOWN);
-    const h = rc.intersectObjects(objs, true);
-    return h.length ? { y: h[0].point.y, on: h[0].object.name } : null;
+  //
+  // A VERTICAL RAY NEEDS NO RAYCASTER. three's has no BVH, so each ray tests
+  // every triangle — fine against 26 m cells, a three-minute timeout once the
+  // skirt grew a 4 m fine layer (~300k triangles). So the ground meshes'
+  // ACTUAL triangles, through their world matrices, are bucketed by x/z once,
+  // and a downward ray is a point-in-triangle test on one bucket. Still the
+  // real geometry the GPU draws, not a re-derivation of the maths behind it;
+  // facing is honoured the way the raycaster would (a FrontSide triangle
+  // facing down is invisible to a downward ray).
+  const indexCache = new Map();
+  const BK = 16;
+  const indexOf = objs => {
+    const key = objs.map(o => o.uuid).join(',');
+    if (indexCache.has(key)) return indexCache.get(key);
+    const cells = new Map(), tris = [];
+    const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+    for (const root of objs) {
+      root.traverse(o => {
+        if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+        o.updateMatrixWorld(true);
+        const P = o.geometry.attributes.position, I = o.geometry.index;
+        const nT = I ? I.count / 3 : P.count / 3;
+        for (let t = 0; t < nT; t++) {
+          const a = I ? I.getX(t * 3) : t * 3, b = I ? I.getX(t * 3 + 1) : t * 3 + 1, c = I ? I.getX(t * 3 + 2) : t * 3 + 2;
+          va.fromBufferAttribute(P, a).applyMatrix4(o.matrixWorld);
+          vb.fromBufferAttribute(P, b).applyMatrix4(o.matrixWorld);
+          vc.fromBufferAttribute(P, c).applyMatrix4(o.matrixWorld);
+          const k = tris.length;
+          // normal.y sign: which way the triangle faces a downward ray
+          const ny = (vb.z - va.z) * (vc.x - va.x) - (vb.x - va.x) * (vc.z - va.z);
+          tris.push({ ax: va.x, ay: va.y, az: va.z, bx: vb.x, by: vb.y, bz: vb.z, cx: vc.x, cy: vc.y, cz: vc.z, ny, o, root });
+          const x0 = Math.floor(Math.min(va.x, vb.x, vc.x) / BK), x1 = Math.floor(Math.max(va.x, vb.x, vc.x) / BK);
+          const z0 = Math.floor(Math.min(va.z, vb.z, vc.z) / BK), z1 = Math.floor(Math.max(va.z, vb.z, vc.z) / BK);
+          for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) {
+            const kk = i * 73856093 ^ j * 19349663;
+            let cl = cells.get(kk);
+            if (!cl) cells.set(kk, cl = []);
+            cl.push(k);
+          }
+        }
+      });
+    }
+    const ix = { cells, tris };
+    indexCache.set(key, ix);
+    return ix;
   };
+  const drop = (x, z, objs, either = false) => {
+    const { cells, tris } = indexOf(objs);
+    const cl = cells.get(Math.floor(x / BK) * 73856093 ^ Math.floor(z / BK) * 19349663);
+    if (!cl) return null;
+    let best = null;
+    for (const k of cl) {
+      const T = tris[k];
+      const d = (T.bz - T.cz) * (T.ax - T.cx) + (T.cx - T.bx) * (T.az - T.cz);
+      if (Math.abs(d) < 1e-12) continue;
+      const l1 = ((T.bz - T.cz) * (x - T.cx) + (T.cx - T.bx) * (z - T.cz)) / d;
+      const l2 = ((T.cz - T.az) * (x - T.cx) + (T.ax - T.cx) * (z - T.cz)) / d;
+      const l3 = 1 - l1 - l2;
+      if (l1 < -1e-7 || l2 < -1e-7 || l3 < -1e-7) continue;
+      const side = either ? THREE.DoubleSide : T.o.material.side;
+      // A downward ray sees the face whose normal, (b-a)x(c-a), points UP —
+      // unless the material is double-sided.
+      const up = T.ny > 0;
+      if (side === THREE.FrontSide && !up) continue;
+      if (side === THREE.BackSide && up) continue;
+      const y = l1 * T.ay + l2 * T.by + l3 * T.cy;
+      if (!best || y > best.y) best = { y, on: T.root.name || T.o.name };
+    }
+    return best;
+  };
+  void rc; void DOWN; void org;
   const dropY = (x, z, objs) => { const h = drop(x, z, objs); return h ? h.y : null; };
   // A miss is retried with both faces enabled. "Nothing here" and "something
   // here, wound the wrong way up" are identical to a downward ray and are
   // completely different bugs, and the report has to be able to say which.
-  const dropEither = (x, z, objs) => {
-    const was = objs.map(o => o.material.side);
-    objs.forEach(o => { o.material.side = THREE.DoubleSide; });
-    const h = drop(x, z, objs);
-    objs.forEach((o, i) => { o.material.side = was[i]; });
-    return h;
-  };
+  const dropEither = (x, z, objs) => drop(x, z, objs, true);
 
   let seed = opt.seed >>> 0;
   const rnd = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) & 0x7fffffff) / 0x7fffffff;
@@ -329,7 +394,7 @@ async function pageCheck(opt) {
   let trees = 0, onCircuit = 0;
   const float = { 'ground.skirt': [], 'ground.plate': [] };
   const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3();
-  const offenders = [];
+  const offenders = [], floaters = [];
   S.traverse(o => {
     if (o.name !== 'env.trees' || !o.isInstancedMesh) return;
     trees += o.count;
@@ -350,19 +415,26 @@ async function pageCheck(opt) {
       // ground it was placed against. All of them is thousands of rays.
       if (i % 8 === 0) {
         const g = drop(v3.x, v3.z, ground);
-        if (g != null) (float[g.on] || (float[g.on] = [])).push(Math.abs(v3.y - g.y));
+        if (g != null) {
+          (float[g.on] || (float[g.on] = [])).push(Math.abs(v3.y - g.y));
+          if (Math.abs(v3.y - g.y) > opt.tol && floaters.length < 6) {
+            floaters.push({ x: Math.round(v3.x), z: Math.round(v3.z), tree: +v3.y.toFixed(2), seen: +g.y.toFixed(2), says: +says(v3.x, v3.z).toFixed(2), d: Math.round(n.d) });
+          }
+        }
       }
     }
   });
 
   return {
     meshes: ground.map(o => o.name),
+    tris: ground.map(o => `${o.name} ${Math.round((o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3)} tris` +
+      (o.userData.stats ? ' ' + JSON.stringify(o.userData.stats) : '')),
     total, miss, inverted, bands, holes, drift,
     agree: { skirt: stat(agree['ground.skirt']), plate: stat(agree['ground.plate']) },
     road: { n: roadN, over, worst: worstAt.slice(0, 6), clear: stat(clear) },
     paint,
     trees: {
-      n: trees, onCircuit, offenders,
+      n: trees, onCircuit, offenders, floaters,
       float: stat(float['ground.skirt']), floatN: float['ground.skirt'].length,
       farFloat: stat(float['ground.plate']), farFloatN: float['ground.plate'].length,
     },
@@ -450,7 +522,7 @@ const trio = st => st ? `${num(st.p50)} /${num(st.p95)} /${num(st.max)}` : '    
 
 function report(r, opt) {
   if (r.err) { console.log('  ' + r.err); return; }
-  console.log(`  ground meshes: ${r.meshes.join(', ')}`);
+  console.log(`  ground meshes: ${r.tris ? r.tris.join(', ') : r.meshes.join(', ')}`);
   console.log('  out to    n  holes  inv     skirt |seen-groundY| p50/p95/max        plate, same');
   for (const b of r.bands) {
     const bad = b.miss || b.inv;
@@ -471,6 +543,7 @@ function report(r, opt) {
   console.log(`  trees: ${r.trees.n} placed, ${r.trees.onCircuit} on the circuit`);
   console.log(`    standing on the skirt (${r.trees.floatN}): ${trio(r.trees.float).trim()} m off the ground` +
     `   |  on the plate (${r.trees.farFloatN}): ${trio(r.trees.farFloat).trim()} m`);
+  if (r.trees.floaters && r.trees.floaters.length) console.log('    off the ground at: ' + r.trees.floaters.map(f => `(${f.x},${f.z}) tree ${f.tree} ground seen ${f.seen} groundY ${f.says}, ${f.d} m from centre`).join(', '));
   if (r.trees.offenders.length) console.log('    on the circuit at: ' + r.trees.offenders.map(o => `(${o.x},${o.z}) ${o.d} m from centre, corridor ${o.clear} m`).join(', '));
 }
 
@@ -487,7 +560,9 @@ for (const track of TRACKS) {
   const url = `http://127.0.0.1:${PORT}/index.html?auto=${track}:f1`;
   const chrome = spawn('/usr/bin/chromium', [
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
-    '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader',
+    ...(args.includes('--gpu')
+      ? ['--use-angle=vulkan', '--use-gl=angle']
+      : ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader']),
     '--hide-scrollbars', '--mute-audio', '--disable-extensions',
     '--window-size=1280,720', `--remote-debugging-port=${CDP}`,
     `--user-data-dir=${profile}`, url,

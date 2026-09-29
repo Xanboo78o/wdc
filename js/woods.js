@@ -96,6 +96,56 @@ function slackIndex(track) {
   };
 }
 
+// The 10 m tree-cover raster, labelled into connected patches. Returns
+// `at(x, y)` -> patch index (offset by `base`, after the OSM polygons) or -1,
+// and `patches` shaped like polygons for the loops below ({box, cells}).
+const MIN_PATCH = 2;      // cells (200 m²): one lone 10 m pixel is a hedge, not a wood
+function coverIndex(c, base) {
+  const { nx, ny, cell, x0, y0 } = c;
+  const tree = new Uint8Array(nx * ny);
+  let k = 0;
+  for (const run of c.rle.split(';')) {
+    const [v, n] = run.split(',');
+    if (+v === 10) tree.fill(1, k, k + +n);
+    k += +n;
+  }
+  const label = new Int32Array(nx * ny).fill(-1);
+  const patches = [];
+  const stack = [];
+  for (let q = 0; q < tree.length; q++) {
+    if (!tree[q] || label[q] >= 0) continue;
+    const id = patches.length;
+    let x0c = Infinity, x1c = -Infinity, y0c = Infinity, y1c = -Infinity, cells = 0;
+    stack.push(q); label[q] = id;
+    const members = [];
+    while (stack.length) {
+      const p = stack.pop();
+      members.push(p);
+      const i = p % nx, j = (p / nx) | 0;
+      cells++;
+      if (i < x0c) x0c = i; if (i > x1c) x1c = i; if (j < y0c) y0c = j; if (j > y1c) y1c = j;
+      if (i > 0 && tree[p - 1] && label[p - 1] < 0) { label[p - 1] = id; stack.push(p - 1); }
+      if (i < nx - 1 && tree[p + 1] && label[p + 1] < 0) { label[p + 1] = id; stack.push(p + 1); }
+      if (j > 0 && tree[p - nx] && label[p - nx] < 0) { label[p - nx] = id; stack.push(p - nx); }
+      if (j < ny - 1 && tree[p + nx] && label[p + nx] < 0) { label[p + nx] = id; stack.push(p + nx); }
+    }
+    if (cells < MIN_PATCH) for (const p of members) label[p] = -2;
+    patches.push({
+      k: 'cover', p: [], cells,
+      box: [x0 + x0c * cell, x0 + (x1c + 1) * cell, y0 + y0c * cell, y0 + (y1c + 1) * cell],
+    });
+  }
+  return {
+    patches,
+    at(x, y) {
+      const i = Math.floor((x - x0) / cell), j = Math.floor((y - y0) / cell);
+      if (i < 0 || j < 0 || i >= nx || j >= ny) return -1;
+      const l = label[j * nx + i];
+      return l >= 0 ? base + l : -1;
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 export async function plantWoods(scene, env, track, look, corridor = null, world = null) {
   const renderer = look?.renderer;
@@ -123,7 +173,21 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
 
   // --- the treelines ---------------------------------------------------------
   const woods = (env.areas || []).filter(a => spec.kinds.includes(a.k) && a.p.length >= 3);
-  const inWood = polygonIndex(woods);
+  const inPoly = polygonIndex(woods);
+  // THE SATELLITE'S WOODS, as well as the map's. OSM is only as complete as
+  // its volunteers: in the Parco di Monza it maps the wood inside the north
+  // loop and a few strips, and left the rest of the park — the woods along the
+  // back straight, Serraglio, Ascari — as nothing, which drew as lawn. ESA
+  // WorldCover (tools/getcover.mjs) is a 10 m measurement of tree cover. Each
+  // connected patch of it is a wood with its own index after the polygons, so
+  // everything below — the treeline walk, "reached", the paper fill — treats a
+  // measured wood exactly like a mapped one. Measured on Monza: trees within
+  // 40 m of the run-off on 34% of the lap's two sides from OSM, 79% from this.
+  const cover = spec.cover && env.cover ? coverIndex(env.cover, woods.length) : null;
+  const inWood = cover
+    ? (x, y) => { const k = inPoly(x, y); return k >= 0 ? k : cover.at(x, y); }
+    : inPoly;
+  if (cover) woods.push(...cover.patches);
   const reached = new Set();
   const di = Math.max(1, Math.round(STEP / track.ds));
   for (const side of [1, -1]) {
