@@ -170,7 +170,7 @@ export class Fx {
       // `bad` = shader programs that failed to compile. A broken shader draws
       // NOTHING and three only logs it, which tools/shot.mjs does not catch:
       // the debris was invisible for exactly that reason and no error said so.
-      window.__wdc.fx = { debris: this.debris.count, sparks: this.sparks.count, smoke: this.smoke.count, skids: this.skids.count, ms: +this.ms.toFixed(3),
+      window.__wdc.fx = { debris: this.debris.count, sparks: this.sparks.count, smoke: this.smoke.count, skids: this.skids.count, soft: this.smoke.soft ? (this.smoke.depthRT ? this.smoke.depthRT.width : -1) : 0, why: this.smoke._why, ms: +this.ms.toFixed(3),
         bad: (v.renderer.info.programs || []).filter(p => p.diagnostics && !p.diagnostics.runnable).length };
     }
   }

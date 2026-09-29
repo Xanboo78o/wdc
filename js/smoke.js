@@ -99,6 +99,10 @@ const FS = /* glsl */`
   uniform vec3 uAmb;               // sky colour x intensity
   uniform vec3 fogColor;
   uniform float fogDensity;
+  uniform sampler2D uDepth;
+  uniform float uSoft;             // 1 when uDepth holds this frame's scene depth
+  uniform vec2 uRes;
+  uniform float uNear, uFar;
   varying vec2 vUv;
   varying vec2 vC;
   varying vec3 vView;
@@ -112,6 +116,14 @@ const FS = /* glsl */`
     // are no soft particles, but the ground is the plane smoke meets most,
     // and its height is known: thin the puff out as it reaches it.
     float dens = t.a * vA * smoothstep(0.0, 1.0, vAbove);
+    // SOFT PARTICLES. Everything opaque between us and the puff: fade the
+    // puff out over the last 0.7 m before it meets a hoarding, a barrier, a
+    // car. Without it smoke is cut off in a hard line by every board.
+    if (uSoft > 0.5) {
+      float d = texture2D(uDepth, gl_FragCoord.xy / uRes).x;
+      float zs = (2.0 * uNear * uFar) / (uFar + uNear - (d * 2.0 - 1.0) * (uFar - uNear));
+      dens *= clamp((zs - (-vView.z)) / 0.7, 0.0, 1.0);
+    }
     if (dens < 0.004) discard;
     // a soft sphere's normal, roughened by the puff's own noise
     float r2 = dot(vC, vC);
@@ -162,6 +174,8 @@ export class Smoke {
         uSun: { value: new THREE.Color(1, 1, 1) },
         uAmb: { value: new THREE.Color(0.5, 0.55, 0.6) },
         fogColor: { value: new THREE.Color() }, fogDensity: { value: 0 },
+        uDepth: { value: null }, uSoft: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) },
+        uNear: { value: 0.1 }, uFar: { value: 1000 },
       },
       transparent: true, depthWrite: false, depthTest: true,
     });
@@ -170,6 +184,8 @@ export class Smoke {
     this.mesh.visible = false;
     this.mesh.renderOrder = 4;
     this.mesh.name = 'fx.smoke';
+    this.mesh.onBeforeRender = (r, sc, cam) => this._grabDepth(r, cam);
+    this.soft = new URLSearchParams(typeof location !== 'undefined' ? location.search : '').get('softfx') !== '0';
     scene.add(this.mesh);
     this.geo = g;
     this.p = [];
@@ -200,6 +216,56 @@ export class Smoke {
     p.r = col[0] * sh; p.g = col[1] * sh; p.b = col[2] * sh;
     p.tile = (Math.random() * 4) | 0; p.rise = rise;
     p.gy = gy == null ? y - 0.3 : gy;
+  }
+
+  // THE SCENE'S DEPTH, for soft particles, without touching the post chain.
+  // Called just before the smoke draws — the opaque scene is finished and the
+  // scene target is bound — and it BLITS that target's depth buffer into a
+  // depth texture of our own. Sampling the target's own depth while drawing
+  // into it would be a feedback loop; a copy is not. Only the largest target
+  // seen (the main view, not the car mirrors) gets it; smaller passes draw
+  // hard-edged, which in a 320 px mirror nobody can see.
+  _grabDepth(r, cam) {
+    const u = this.mat.uniforms;
+    u.uSoft.value = 0;
+    if (!this.soft) return;                      // (r185 is WebGL2-only; there is no isWebGL2 flag to ask)
+    const rt = r.getRenderTarget();
+    this._why = !rt ? 'no target' : !rt.depthBuffer ? 'no depth' : 'ok';
+    if (!rt || !rt.depthBuffer) return;
+    const w = rt.width, h = rt.height;
+    // the main view only: a target the size of the canvas. (The car mirrors
+    // draw first each frame, at 320x120 with MSAA, and must not be it.)
+    const db = r.getDrawingBufferSize(this._db || (this._db = new THREE.Vector2()));
+    if (w !== db.x || h !== db.y) { this._why = 'not main ' + w + 'x' + h; return; }
+    if (!this.depthRT || this.depthRT.width !== w || this.depthRT.height !== h) {
+      if (this.depthRT) this.depthRT.dispose();
+      const dt = new THREE.DepthTexture(w, h);
+      dt.type = THREE.UnsignedIntType;
+      this.depthRT = new THREE.WebGLRenderTarget(w, h, { depthTexture: dt, depthBuffer: true });
+      r.initRenderTarget(this.depthRT);
+    }
+    const gl = r.getContext();
+    const src = r.properties.get(rt).__webglFramebuffer;
+    const dst = r.properties.get(this.depthRT).__webglFramebuffer;
+    if (!dst) { this._why = 'no dst fb'; return; }
+    // gl.getError is a synchronous round trip in Chrome (it stalls the whole
+    // pipeline: 9 ms measured), so it is asked ONCE, on the first blit, and the
+    // answer kept.
+    const probe = !this._verified;
+    if (probe) while (gl.getError() !== gl.NO_ERROR) { /* someone else's */ }
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, src);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, dst);
+    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, src);
+    if (probe) {
+      const err = gl.getError();
+      if (err !== gl.NO_ERROR) { this._why = 'gl error ' + err; this.soft = false; return; }
+      this._verified = true;
+    }   // formats refused: stay hard, never broken
+    u.uDepth.value = this.depthRT.depthTexture;
+    u.uRes.value.set(w, h);
+    u.uNear.value = cam.near; u.uFar.value = cam.far;
+    u.uSoft.value = 1;
   }
 
   /** Light and fog from the scene, once a frame. */
