@@ -42,7 +42,9 @@ export const FOREST = {
   baku:        { kinds: ['forest', 'park'], conifer: 0.06, depth: 30, density: 0.8, scrub: false },
   // Pembroke, NH (Adam's street circuit): white pine, red oak and maple.
   // Adam: "add LOTS of forest" — deep, dense woods.
-  street:      { kinds: ['forest'], conifer: 0.45, depth: 140, density: 1.3, scrub: true,
+  // Satellite (fitted to the town like bakeenv): trees within 40 m of the
+  // run-off on 59% of the lap's sides (OSM 51%), within 100 m 69% (64%).
+  street:      { kinds: ['forest'], conifer: 0.45, depth: 140, density: 1.3, scrub: true, cover: true,
                  singles: 4000, papers: 12000 },
   // Anything not named above.
   _:           { kinds: ['forest'], conifer: 0.5, depth: 45, density: 1, scrub: true, cover: false },

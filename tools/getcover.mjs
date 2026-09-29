@@ -94,11 +94,36 @@ function tileName(lat, lon) {
     `${lo >= 0 ? 'E' : 'W'}${String(Math.abs(lo)).padStart(3, '0')}_Map.tif`;
 }
 
+// Adam's street circuit is his own shape laid over Pembroke, NH, and the town
+// was FITTED to it (tools/bakeenv.mjs FITTED: two pins, a similarity —
+// scale 1.21 and a rotation). The cover has to be laid down the same way, or
+// the woods land beside the houses they grow between. Same pins, same maths.
+const FITTED = {
+  street: [
+    { lat: 43.1662829, lon: -71.4762809, s: 236 },
+    { lat: 43.1585268, lon: -71.4688370, s: 6426 },
+  ],
+};
+
 async function bake(key) {
   const env = JSON.parse(fs.readFileSync(`${ROOT}data/env/${key}.json`, 'utf8'));
   const { lat0, lon0 } = env;
   // The SAME projection as bakeenv/getelev, or the woods land in the wrong place.
   const mx = 111320 * Math.cos(lat0 * Math.PI / 180), my = 110540;
+  let back = ([X, Y]) => [X, Y];
+  if (FITTED[key]) {
+    const track = JSON.parse(fs.readFileSync(`${ROOT}data/tracks/${key}.json`, 'utf8'));
+    const local = (lat, lon) => [(lon - lon0) * mx, (lat - lat0) * my];
+    const at = s => { const i = Math.round(s / track.ds) % track.x.length; return [track.x[i], track.y[i]]; };
+    const [p, q] = FITTED[key].map(pn => local(pn.lat, pn.lon));
+    const [P, Q] = FITTED[key].map(pn => at(pn.s));
+    const u = [q[0] - p[0], q[1] - p[1]], v = [Q[0] - P[0], Q[1] - P[1]];
+    const uu = u[0] * u[0] + u[1] * u[1];
+    const a = (u[0] * v[0] + u[1] * v[1]) / uu, b = (u[0] * v[1] - u[1] * v[0]) / uu;
+    const tx = P[0] - (a * p[0] - b * p[1]), ty = P[1] - (b * p[0] + a * p[1]), d = a * a + b * b;
+    back = ([X, Y]) => { const x = X - tx, y = Y - ty; return [(a * x + b * y) / d, (-b * x + a * y) / d]; };
+    console.log(`  fitted: scale ${Math.sqrt(d).toFixed(3)}, rotated ${(Math.atan2(b, a) * 180 / Math.PI).toFixed(1)} deg`);
+  }
   const bb = env.bbox;
   const x0 = Math.floor((bb.x0 - PAD) / CELL) * CELL, y0 = Math.floor((bb.y0 - PAD) / CELL) * CELL;
   const nx = Math.ceil((bb.x1 + PAD - x0) / CELL), ny = Math.ceil((bb.y1 + PAD - y0) / CELL);
@@ -107,7 +132,7 @@ async function bake(key) {
   const counts = {};
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
-      const x = x0 + (i + 0.5) * CELL, y = y0 + (j + 0.5) * CELL;
+      const [x, y] = back([x0 + (i + 0.5) * CELL, y0 + (j + 0.5) * CELL]);
       const lat = lat0 + y / my, lon = lon0 + x / mx;
       const name = tileName(lat, lon);
       let cog = cogs.get(name);
