@@ -71,7 +71,9 @@ export class Post {
     // gravel to near-white and drained the grass: a scene that is mostly dark
     // green pulls the log-average DOWN, so the exposure goes up and the few
     // bright things clip. 0.12 puts the tarmac back where tarmac lives.
-    this.exposureKey = 0.12;
+    // 0.13 since the meter weights the road ahead (2026-09-28): with the
+    // tub and the sky no longer voting, 0.12 read a touch dim.
+    this.exposureKey = 0.13;
     this.bloom = 0.85;
     this.rays = 0.75;
     this.threshold = 1.15;       // bloom starts ABOVE white, so only real light glows
@@ -82,8 +84,8 @@ export class Post {
     // A real eye and a real camera stop adapting; so does this.
     this.lumFloor = 0.05;
     // The grade (see the composite). ?sat= ?warm= ?lift= in render.js.
-    this.sat = 1.18;
-    this.warm = 0.035;
+    this.sat = 1.25;
+    this.warm = 0.05;
     this.lift = 0.012;
     // Heat shimmer strength, 0..1. render.js sets it from the sun and the
     // weather every frame (?heat= pins it).
@@ -268,7 +270,7 @@ export class Post {
       }`, {
       tScene: u(null), tBloom: u(null), tRays: u(null), tAdapt: u(null),
       uKey: u(0.22), uBloom: u(0.85), uRays: u(0.75), uSunUp: u(0.0), uFloor: u(1e-4),
-      uSat: u(1.18), uWarm: u(0.035), uLift: u(0.012), uHeat: u(0), uHorizon: u(0.5), uTime: u(0),
+      uSat: u(1.25), uWarm: u(0.05), uLift: u(0.012), uHeat: u(0), uHorizon: u(0.5), uTime: u(0),
     });
 
     // Bloom and rays run at a quarter of the width. Nobody has ever noticed a

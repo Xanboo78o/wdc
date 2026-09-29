@@ -1204,7 +1204,7 @@ export class View {
     const RUNMAT = [
       groundDetail(look.mat('gravel', { size: 0.9, tint: 0xb9aa8e, roughness: 1, side: THREE.DoubleSide, normalScale: 1.5 }), look, 0.9, { amp: 0.45 }),
       groundDetail(look.mat('apron', { size: 1.6, tint: 0x8a8b8e, roughness: 0.97, side: THREE.DoubleSide, normalScale: 1.2 }), look, 1.6, { amp: 0.4 }),
-      groundDetail(look.mat('grass', { size: 1.7, tint: 0x74864a, roughness: 1, side: THREE.DoubleSide, normalScale: 1.2 }), look, 1.7, { amp: 0.35, stripes: 0.13 }),
+      groundDetail(look.mat('grass', { size: 1.7, tint: 0x7c9450, roughness: 1, side: THREE.DoubleSide, normalScale: 1.2 }), look, 1.7, { amp: 0.35, stripes: 0.13 }),
       look.mat('concrete', { size: 3.0, tint: 0xb8b6b0, roughness: 0.95, side: THREE.DoubleSide }),
     ];
     for (const [side, tag] of [[1, this.surf.runL], [-1, this.surf.runR]]) {
