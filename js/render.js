@@ -129,6 +129,7 @@ function roadSurface(track, line, bank) {
     const hi = t.hdg[i], hj = t.hdg[j];
     const pi = (lat) => [t.x[i] - Math.sin(hi) * lat, Z(t.y[i] + Math.cos(hi) * lat)];
     const pj = (lat) => [t.x[j] - Math.sin(hj) * lat, Z(t.y[j] + Math.cos(hj) * lat)];
+    b.setHint(i);
     for (let s = 0; s < ROAD_STRIPS; s++) {
       const f0 = s / ROAD_STRIPS, f1 = (s + 1) / ROAD_STRIPS;
       const li0 = -t.w[i] + 2 * t.w[i] * f0, li1 = -t.w[i] + 2 * t.w[i] * f1;
@@ -293,6 +294,7 @@ function ribbon(track, innerAt, outerAt, y, bank = null) {
     const yi1 = y + (bank ? bankY(bank, t, i, bi) : 0);
     const yj0 = y + (bank ? bankY(bank, t, j, aj) : 0);
     const yj1 = y + (bank ? bankY(bank, t, j, bj) : 0);
+    b.setHint(i);
     b.quad([p0[0], yi0, p0[1]], [p1[0], yi1, p1[1]], [q1[0], yj1, q1[1]], [q0[0], yj0, q0[1]],
       [0, 1, 0],
       [[ai, foldV(i * t.ds)], [bi, foldV(i * t.ds)], [bj, foldV(j * t.ds)], [aj, foldV(j * t.ds)]]);
@@ -322,6 +324,7 @@ function split(track, innerAt, outerAt, y, bank, matAt) {
     const yi1 = y + (bank ? bankY(bank, t, i, bi) : 0);
     const yj0 = y + (bank ? bankY(bank, t, j, aj) : 0);
     const yj1 = y + (bank ? bankY(bank, t, j, bj) : 0);
+    b.setHint(i);
     b.quad([p0[0], yi0, p0[1]], [p1[0], yi1, p1[1]], [q1[0], yj1, q1[1]], [q0[0], yj0, q0[1]],
       [0, 1, 0],
       [[ai, foldV(i * t.ds)], [bi, foldV(i * t.ds)], [bj, foldV(j * t.ds)], [aj, foldV(j * t.ds)]]);
@@ -414,6 +417,7 @@ function kerbs(track, bank, surf) {
     // hairpin kerb and a fast-corner kerb are not the same object: one is
     // there to punish you, one is there to be used every lap.
     const type = surf.kerb[i];
+    b.setHint(i); turfB.setHint(i);
     if (type && surf.kerb[j] === type && side[i] && side[i] === side[j]) {
       lay(i, j, side[i], KERB_SHAPE[type] || KERB_SHAPE[2], surf.turf[i] && surf.turf[j]);
     }

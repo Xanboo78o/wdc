@@ -449,6 +449,30 @@ export class World {
     if (!this.on || !geo) return geo;
     const p = geo.attributes.position;
     const a = p.array;
+    // Geometry built along the lap carries its own sample index (Builder.
+    // setHint). Lift each vertex by ITS leg: search only a few samples round
+    // the hint, so at a crossover the lower road stays down and the bridge
+    // stays up — plain nearest-sample handed both to whichever leg won.
+    const hint = geo.attributes.sHint;
+    if (hint) {
+      const t = this.track, n = t.n, h = hint.array, near = { i: 0, d: 0 };
+      for (let v = 0, k = 0; k < a.length; v++, k += 3) {
+        const c = h[v];
+        if (!(c >= 0)) { a[k + 1] += this.heightAt(a[k], a[k + 2]); continue; }
+        let best = -1, bd = Infinity;
+        const x = a[k], y = Z(a[k + 2]);
+        for (let o = -6; o <= 7; o++) {
+          const q = ((c + o) % n + n) % n;
+          const dx = x - t.x[q], dy = y - t.y[q], dd = dx * dx + dy * dy;
+          if (dd < bd) { bd = dd; best = q; }
+        }
+        near.i = best; near.d = Math.sqrt(bd);
+        a[k + 1] += this.heightAt(a[k], a[k + 2], near);
+      }
+      p.needsUpdate = true;
+      geo.computeBoundingSphere();
+      return geo;
+    }
     for (let k = 0; k < a.length; k += 3) a[k + 1] += this.heightAt(a[k], a[k + 2]);
     p.needsUpdate = true;
     geo.computeBoundingSphere();

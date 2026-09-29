@@ -62,6 +62,18 @@ export class Builder {
   get count() { return this.pos.length / 3; }
 
   /**
+   * Say which track sample the vertices pushed from here on belong to. The
+   * geometry then carries it as an `sHint` attribute, and World.lift() lifts
+   * each vertex by ITS OWN leg of the lap instead of by whichever leg is
+   * nearest — the difference at a crossover (Suzuka's figure eight), where
+   * both legs are at distance zero and the lower road was lifted onto the
+   * bridge deck.
+   */
+  setHint(i) {
+    (this._hints ||= []).push(this.count, i);
+  }
+
+  /**
    * Push one vertex colour. A hex or a CSS string goes through THREE.Color; a
    * [r, g, b] triple goes straight into the buffer UNCLAMPED.
    *
@@ -300,6 +312,14 @@ export class Builder {
       g.setAttribute('uv1', new THREE.Float32BufferAttribute(this.uv, 2));
     }
     if (this.col) g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    if (this._hints) {
+      const n = this.count, h = new Float32Array(n).fill(-1), r = this._hints;
+      for (let k = 0; k < r.length; k += 2) {
+        const end = k + 2 < r.length ? r[k + 2] : n;
+        for (let v = r[k]; v < end; v++) h[v] = r[k + 1];
+      }
+      g.setAttribute('sHint', new THREE.BufferAttribute(h, 1));
+    }
     g.setIndex(this.idx);
     g.computeBoundingSphere();
     return g;
