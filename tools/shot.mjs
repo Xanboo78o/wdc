@@ -69,7 +69,7 @@ const flagAll = (name) => {
 };
 // Positional args are anything not starting with `--` and not sitting in the
 // slot right after a flag that takes a value.
-const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q', 'probe', 'base']);
+const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q', 'probe', 'base', 'eval']);
 // --quick loads the page, waits for the world to exist, reports console errors
 // and exits. No frame-rate probe, no screenshot, about six seconds instead of
 // ninety.
@@ -82,6 +82,9 @@ const VALUE_FLAGS = new Set(['photo', 'out', 'wait', 'q', 'probe', 'base']);
 // check is the net, not the care. So it has to be cheap enough to run on every
 // edit rather than once before a push.
 const QUICK = args.includes('--quick');
+// --eval EXPR (repeatable): evaluate in the page after the wait and print the
+// JSON result — e.g. --eval "__wdc.car.wheelZ". State, not a picture.
+const EVALS = flagAll('eval');
 const ALL = args.includes('--all');
 const positional = args.filter((a, i) => !a.startsWith('--') &&
   !(i > 0 && args[i - 1].startsWith('--') && VALUE_FLAGS.has(args[i - 1].slice(2))));
@@ -349,6 +352,7 @@ try {
   console.log(`  ${target}${photo ? `  photo ${photo}` : ''}   ${fps != null ? fps + (GPU ? ' fps (GPU)' : ' fps (swiftshader, not a real GPU)') : ''}`);
   if (stats) console.log('  world: ' + JSON.stringify(stats));
   else console.log('  WORLD NEVER BUILT — window.__wdc is still undefined');
+  for (const ex of EVALS) console.log(`  eval ${ex} = ` + JSON.stringify(await cdp.eval(`(() => { try { return JSON.parse(JSON.stringify(${ex})); } catch (e) { return 'ERR ' + e.message; } })()`).catch(e => 'ERR ' + e.message)));
 
   const errs = [...new Set(cdp.errors)].filter(e => !/favicon|PHONE_REGISTRATION|DEPRECATED_ENDPOINT/.test(e));
   if (errs.length) {

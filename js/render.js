@@ -1258,10 +1258,17 @@ export class View {
     if (car.wheelZ && this.susp) {
       // Show the CHANGE from the car's resting deflection, not the absolute
       // compression — otherwise every wheel starts 12 mm into its arch.
-      if (!this.suspZ0) this.suspZ0 = car.wheelZ.slice();
+      // The baseline is taken ON THE GROUND. It used to be the first drawn
+      // frame, and with ?launch (or any load that starts mid-air) that frame
+      // caught the car in flight — a 5.26 m "rest" — so after landing every
+      // wheel was drawn metres from its hub, for good. And a wheel travels a
+      // few centimetres, never metres: airborne heights are clamped to droop.
+      if (!this.suspZ0 && !car.airborne) this.suspZ0 = car.wheelZ.slice();
+      const z0 = this.suspZ0 || [0, 0, 0, 0];
       for (let i = 0; i < 4; i++) {
         const h = this.susp[i];
-        if (h) h.position.y = this.suspY[i] - (car.wheelZ[i] - this.suspZ0[i]) * this.leanK;
+        const d = Math.max(-0.09, Math.min(0.06, car.wheelZ[i] - z0[i]));
+        if (h) h.position.y = this.suspY[i] - d * this.leanK;
       }
     }
 
