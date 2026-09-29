@@ -911,6 +911,8 @@ export function buildGT3(look, colour = 0x2f6fe0) {
     return m;
   };
   const at = (geo, x, y, z) => { geo.translate(x, y, z); return geo; };
+  // what each part is, for the damage (see buildCar); +Z is the car's right
+  const tag = (m, bin, role, side = 0) => { m.userData.dmg = { bin, role, side }; return m; };
 
   const paint = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.18, metalness: 0.2, envMapIntensity: 1.5 });
   const carbon = look.mat('carbon', { size: 0.26, tint: 0x24262b, roughness: 0.38, metalness: 0.2, env: 1.2 });
@@ -947,35 +949,39 @@ export function buildGT3(look, colour = 0x2f6fe0) {
   // --- four arches ---------------------------------------------------------
   for (const [ax, zo, big] of [[1.50, 0.86, 0], [1.50, -0.86, 0], [-1.45, 0.88, 1], [-1.45, -0.88, 1]]) {
     const w = big ? 0.26 : 0.24;
-    add(at(loft([
+    tag(add(at(loft([
       { x: ax + 0.72, y: 0.42, w, h: 0.22, n: 3.2 },
       { x: ax + 0.20, y: 0.60, w: w + 0.02, h: 0.42, n: 3.4 },
       { x: ax - 0.25, y: 0.60, w: w + 0.02, h: 0.42, n: 3.4 },
       { x: ax - 0.78, y: 0.44, w, h: 0.24, n: 3.2 },
-    ]), 0, 0, zo), paint);
+    ]), 0, 0, zo), paint), ax > 0 ? 'front' : 'rear', 'end', Math.sign(zo));
   }
 
   // --- splitter, diffuser, sills -------------------------------------------
-  add(at(new THREE.BoxGeometry(0.62, 0.035, 1.98), 2.06, 0.075, 0), carbon);
-  add(at(new THREE.BoxGeometry(0.30, 0.16, 1.90), 2.33, 0.30, 0), carbon);       // bumper
-  add(at(new THREE.BoxGeometry(1.05, 0.05, 1.70), -1.90, 0.20, 0), carbon);      // diffuser roof
+  const splitter = tag(add(at(new THREE.BoxGeometry(0.62, 0.035, 1.98), 2.06, 0.075, 0), carbon), 'front', 'fw');
+  tag(add(at(new THREE.BoxGeometry(0.30, 0.16, 1.90), 2.33, 0.30, 0), carbon), 'front', 'end');       // bumper
+  tag(add(at(new THREE.BoxGeometry(1.05, 0.05, 1.70), -1.90, 0.20, 0), carbon), 'rear', 'end');      // diffuser roof
   for (const side of [1, -1]) {
-    add(at(new THREE.BoxGeometry(2.2, 0.10, 0.18), 0, 0.22, side * 1.00), carbon);   // sill
-    add(at(new THREE.BoxGeometry(0.34, 0.16, 0.06), 1.05, 0.92, side * 0.98), matt); // mirror stalk
-    add(at(new THREE.BoxGeometry(0.10, 0.16, 0.28), 1.22, 0.95, side * 1.08), matt); // mirror
-    add(at(new THREE.BoxGeometry(0.10, 0.16, 0.42), 2.24, 0.52, side * 0.52), lamp, false);
+    const bin = side > 0 ? 'right' : 'left';
+    tag(add(at(new THREE.BoxGeometry(2.2, 0.10, 0.18), 0, 0.22, side * 1.00), carbon), bin, 'pod', side);   // sill
+    tag(add(at(new THREE.BoxGeometry(0.34, 0.16, 0.06), 1.05, 0.92, side * 0.98), matt), bin, 'mirror', side); // mirror stalk
+    tag(add(at(new THREE.BoxGeometry(0.10, 0.16, 0.28), 1.22, 0.95, side * 1.08), matt), bin, 'mirror', side); // mirror
+    tag(add(at(new THREE.BoxGeometry(0.10, 0.16, 0.42), 2.24, 0.52, side * 0.52), lamp, false), 'front', 'end', side);
   }
 
   // --- the wing, on swan necks ---------------------------------------------
   const wings = { front: [], rear: [] };
   const wg = wing(0.98, 0.34, 0.035, 0.10, -0.18, 0.0);
-  wings.rear.push(add(at(wg, -2.12, 1.26, 0), carbon));
+  wings.rear.push(tag(add(at(wg, -2.12, 1.26, 0), carbon), 'rear', 'rw'));
   for (const side of [1, -1]) {
-    wings.rear.push(add(at(new THREE.BoxGeometry(0.34, 0.30, 0.04), -2.02, 1.10, side * 0.62), carbon));
-    wings.rear.push(add(at(new THREE.BoxGeometry(0.40, 0.30, 0.03), -2.12, 1.30, side * 0.98), carbon));  // endplate
+    wings.rear.push(tag(add(at(new THREE.BoxGeometry(0.34, 0.30, 0.04), -2.02, 1.10, side * 0.62), carbon), 'rear', 'rw'));
+    wings.rear.push(tag(add(at(new THREE.BoxGeometry(0.40, 0.30, 0.03), -2.12, 1.30, side * 0.98), carbon), 'rear', 'rep', side));  // endplate
   }
-  // a splitter is bodywork that can be torn off, like a front wing
-  wings.front.push(...g.children.slice(-0));
+  // A splitter is bodywork that can be torn off, like a front wing — the
+  // splitter, and only the splitter. This read `g.children.slice(-0)`, which
+  // is EVERY child: a GT3 that lost its splitter lost its whole body and
+  // drove on as four wheels.
+  wings.front.push(splitter);
 
   // --- wheels --------------------------------------------------------------
   // 0.34 m: GT3 rubber is shorter and much wider than an F1 tyre, and it sits
