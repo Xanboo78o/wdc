@@ -364,7 +364,10 @@ export class Debris {
       // edge. Once a piece is slow and on the ground, ease it onto its
       // biggest face (thinnest axis up or down, whichever is nearer) the way
       // a real one flops over, and let it sleep.
-      if (p.vel.lengthSq() < 0.6 && p.w.lengthSq() < 9) {
+      // "slow" by the speed of its RIM: a 4 cm splinter rolling at 5 rad/s
+      // is barely moving, and it rolled between two near-equal faces forever
+      const rr = Math.max(p.half.x, p.half.y, p.half.z);
+      if (p.vel.lengthSq() < 0.6 && p.w.lengthSq() * rr * rr < 0.64) {
         const h = p.half;
         const ax = h.y <= h.x && h.y <= h.z ? _t.set(0, 1, 0) : h.x <= h.z ? _t.set(1, 0, 0) : _t.set(0, 0, 1);
         ax.applyQuaternion(p.q);

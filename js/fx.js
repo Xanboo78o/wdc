@@ -37,8 +37,8 @@ const q = new URLSearchParams(typeof location !== 'undefined' ? location.search 
 
 // what a tyre throws up, by surface (physics.js SURFACE values)
 const RUBBER = [0.88, 0.89, 0.92];
-const GRAVEL = [0.60, 0.52, 0.40];
-const EARTH = [0.47, 0.42, 0.31];
+const GRAVEL = [0.70, 0.54, 0.36];
+const EARTH = [0.55, 0.45, 0.30];
 
 const hash = n => { const s = Math.sin(n * 91.345 + 17.17) * 43758.5453; return s - Math.floor(s); };
 
@@ -116,7 +116,11 @@ export class Fx {
       const d = v.proc && rig.dir ? rig.dir : v.sunDir ? v.sunDir.toArray() : [0.5, 0.7, 0.4];
       _v.set(d[0], d[1], d[2]).normalize();
       const sc = rig.sun.color.clone().multiplyScalar(rig.sun.intensity);
-      const ac = rig.hemi ? rig.hemi.color.clone().multiplyScalar(rig.hemi.intensity * 0.9) : sc.clone().multiplyScalar(0.3);
+      // ambient = the hemisphere light AVERAGED over sky and ground: a puff
+      // is lit from all round, and sky alone turned brown dust blue-grey
+      const ac = rig.hemi
+        ? rig.hemi.color.clone().add(rig.hemi.groundColor).multiplyScalar(0.5 * rig.hemi.intensity)
+        : sc.clone().multiplyScalar(0.3);
       this.smoke.light(v.camera, _v, sc, ac, v.scene.fog);
     }
 
@@ -159,8 +163,11 @@ export class Fx {
       };
       this.state.set(car, st);
     }
-    if (sy == null) sy = this._surface(car, st);
-    else if (!st.proj || car.wallTouch) this._surface(car, st);
+    // Project every frame, the player too: plank sparks read the distance
+    // along the lap. (Projecting only on first sight left the player's
+    // position frozen, and their plank never sparked.)
+    const ownY = this._surface(car, st);
+    if (sy == null) sy = ownY;
     const M = this._matrix(car, sy);
     const cs = Math.cos(car.hdg), sn = Math.sin(car.hdg);
     const vwx = car.vx * cs - car.vy * sn, vwy = car.vx * sn + car.vy * cs;

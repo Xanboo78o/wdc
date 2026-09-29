@@ -104,8 +104,13 @@ const FS = /* glsl */`
     float fwd = pow(max(0.0, dot(toFrag, uSunV)), 5.0);     // sun behind the smoke
     // thin edges let more light through than the thick middle
     float thin = 1.0 - clamp(dens * 1.4, 0.0, 1.0);
-    vec3 light = uAmb * (0.75 + 0.25 * n.y) + uSun * (wrap * 0.85 + fwd * (0.8 + 1.6 * thin));
-    vec3 col = vCol * light;
+    // Self-shadowing, faked: the underside and the side away from the sun
+    // sit in the puff's own shadow, and the thick core is darker than the
+    // wisps. Without it a cloud of puffs is one flat-tinted blob.
+    float shade = mix(0.55, 1.0, smoothstep(-0.4, 0.8, n.y));
+    float sunLit = smoothstep(0.15, 0.95, wrap);
+    vec3 light = uAmb * shade + uSun * (sunLit * 0.95 + fwd * (0.8 + 1.6 * thin));
+    vec3 col = vCol * light * (0.85 + 0.3 * t.r) * mix(1.0, 0.72, clamp(dens * 1.2, 0.0, 1.0));
     // near the lens it thins out, rather than filling the screen with one texel
     dens *= smoothstep(0.35, 2.2, -vView.z);
     float d = length(vView);
