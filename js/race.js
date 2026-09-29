@@ -931,6 +931,8 @@ export class Race {
   cheerTick() {
     const me = this.me;
     if (me.retired || me.finished || me.inPit || this.time < 6) return;
+    // No passing under the safety car: a place taken behind it is not a pass.
+    if (this.safety > 0) { if (this._cand) this._cand.clear(); for (const o of this.entries) o.aheadOfMe = undefined; return; }
     const pMe = this.progress(me), half = this.track.length / 2, L = this.spec.bodyL;
     const cand = this._cand || (this._cand = new Map());
     for (const o of this.entries) {

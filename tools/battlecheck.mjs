@@ -167,6 +167,12 @@ function one(track, lines, spec, seed) {
         else { me.car.throttle = Math.min(me.car.throttle, 0.75); }
       }
     }
+    // A human follows the safety car too (race.js caps the bots after their
+    // driver; the stand-in gets the same cap, or it laps the field under it).
+    if (race.safety > 0 && !me.inPit) {
+      if (me.car.speed > 80 / 3.6) { me.car.throttle = 0; me.car.brake = Math.max(me.car.brake, Math.min(0.45, (me.car.speed - 80 / 3.6) * 0.10)); }
+      else me.car.throttle = Math.min(me.car.throttle, 0.32);
+    }
     race.tick(FIXED_DT, { throttle: me.car.throttle, brake: me.car.brake, delta: me.car.delta });
     t += FIXED_DT;
     if (race.state !== 'green' || me.retired) continue;
