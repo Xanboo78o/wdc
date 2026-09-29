@@ -1125,5 +1125,6 @@ export function buildGT3(look, colour = 0x2f6fe0) {
 
   // A GT3 driver sits further forward, higher, and on the left.
   ownEnv(g);
-  return { group: g, wheels, steer, hubs, drs: null, R, wings, eye: [0.28, 0.88, -0.34] };
+  // `paint` so debris.js paints the GT3's broken pieces in its colour
+  return { group: g, wheels, steer, hubs, drs: null, R, wings, eye: [0.28, 0.88, -0.34], paint };
 }
