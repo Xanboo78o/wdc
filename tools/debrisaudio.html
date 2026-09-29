@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Debris sounds</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; background: #111418; color: #e8e8ea; margin: 24px; }
+  button { font: inherit; padding: 8px 14px; margin: 4px; background: #2a2f37; color: #fff; border: 1px solid #444; border-radius: 6px; cursor: pointer; }
+  pre { background: #0b0d10; padding: 12px; border-radius: 6px; }
+</style>
+<h2>Debris sounds — js/debrisaudio.js</h2>
+<p>Every sound is synthesised from the event: which piece, how big, how fast it hit. Press one to hear it.
+Numbers below are measured from an offline render of the same calls.</p>
+<div id="b"></div>
+<pre id="out">rendering…</pre>
+<script type="module">
+import { DebrisAudio } from '../js/debrisaudio.js';
+
+// the scenes: [label, list of [time s, kind, args...]]
+const SCENES = [
+  ['front wing torn off', [[0, 'snap', 1]]],
+  ['wing half lands and flops', [[0, 'clatter', 9, 0.9], [0.22, 'clatter', 5, 0.9], [0.41, 'clatter', 2.5, 0.9], [0.55, 'clatter', 1.4, 0.9]]],
+  ['shard spray', Array.from({ length: 24 }, (_, i) => [i * 0.021 + Math.random() * 0.02, 'clatter', 3 + Math.random() * 7, 0.03 + Math.random() * 0.08])],
+  ['whole accident', [[0, 'snap', 1], [0.05, 'snap', 0.5],
+    ...Array.from({ length: 30 }, (_, i) => [0.1 + i * 0.03 + Math.random() * 0.03, 'clatter', 2 + Math.random() * 8, Math.random() < 0.2 ? 0.8 : 0.06])]],
+];
+
+async function render(scene, sr = 48000) {
+  const len = 2.0;
+  const ctx = new OfflineAudioContext(2, Math.ceil(sr * len), sr);
+  const bus = ctx.createGain();
+  bus.connect(ctx.destination);
+  const a = new DebrisAudio();
+  a.attach({ ctx, cans: bus, master: 1, offline: true }, null);
+  for (const [t, kind, x, y] of scene) {
+    a.at = t; a.voices = 0;          // offline: time is scheduled, voices never free by the clock
+    if (kind === 'snap') a.snap({ x: 0, y: 0, z: 0 }, x);
+    else a.clatter({ x: 0, y: 0, z: 0 }, x, y);
+  }
+  return ctx.startRendering();
+}
+
+function measure(buf) {
+  const d = buf.getChannelData(0), n = d.length;
+  let peak = 0, sum = 0, clip = 0, zc = 0, last = 0, lastLoud = 0;
+  for (let i = 0; i < n; i++) {
+    const v = d[i], av = Math.abs(v);
+    if (av > peak) peak = av;
+    if (av > 0.99) clip++;
+    sum += v * v;
+    if ((v > 0) !== (last > 0)) zc++;
+    last = v;
+    if (av > 0.01) lastLoud = i;
+  }
+  const rms = Math.sqrt(sum / n);
+  return { peak: +peak.toFixed(3), rmsDb: +(20 * Math.log10(rms + 1e-9)).toFixed(1), clipped: clip,
+    brightHz: Math.round(zc / 2 / buf.duration), tailS: +(lastLoud / buf.sampleRate).toFixed(3) };
+}
+
+const out = {};
+const box = document.getElementById('b');
+for (const [label, scene] of SCENES) {
+  const buf = await render(scene);
+  out[label] = measure(buf);
+  const btn = document.createElement('button');
+  btn.textContent = label;
+  btn.onclick = () => {
+    const c = new AudioContext();
+    const s = c.createBufferSource(); s.buffer = buf; s.connect(c.destination); s.start();
+  };
+  box.appendChild(btn);
+}
+document.getElementById('out').textContent = JSON.stringify(out, null, 1);
+window.__result = out;
+</script>

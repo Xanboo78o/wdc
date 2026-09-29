@@ -31,7 +31,10 @@ export class DebrisAudio {
 
   _ctx() {
     const e = this.engine;
-    if (!e || !e.ctx || !e.cans || e.muted || e.ctx.state !== 'running') return null;
+    if (!e || !e.ctx || !e.cans || e.muted) return null;
+    // tools/debrisaudio.html renders into an OfflineAudioContext, which is
+    // not 'running' until it renders; `e.offline` lets it through.
+    if (e.ctx.state !== 'running' && !e.offline) return null;
     if (!this.noise || this.noise.sampleRate !== e.ctx.sampleRate) {
       const n = e.ctx.sampleRate;             // one second of white noise
       const b = e.ctx.createBuffer(1, n, n), d = b.getChannelData(0);
@@ -94,9 +97,9 @@ export class DebrisAudio {
   snap(pos, strength = 1) {
     const ctx = this._ctx(); if (!ctx) return;
     const { g, pan } = this._place(pos.x, pos.y, pos.z);
-    const out = this._out(ctx, Math.min(1.2, 0.9 * g * (0.4 + strength)), pan, 0.5);
+    const out = this._out(ctx, Math.min(0.55, 0.45 * g * (0.4 + strength)), pan, 0.5);
     if (!out) return;
-    const t = ctx.currentTime + 0.005;
+    const t = ctx.currentTime + (this.at || 0) + 0.005;
     this._burst(ctx, out, t, 0.045, 'highpass', 1800, 0.7, 1.0);          // the crack
     for (let i = 0; i < 7; i++) {                                           // fibres going
       this._burst(ctx, out, t + 0.012 + Math.random() * 0.09, 0.012 + Math.random() * 0.02,
@@ -110,8 +113,9 @@ export class DebrisAudio {
   clatter(pos, speed, size = 0.3) {
     const ctx = this._ctx(); if (!ctx) return;
     const now = ctx.currentTime;
-    if (now - this.lastAt < 0.018) return;                 // a burst of hits is one knock
-    this.lastAt = now;
+    const at = now + (this.at || 0);
+    if (at - this.lastAt < 0.018 && at >= this.lastAt) return;   // a burst of hits is one knock
+    this.lastAt = at;
     const { g, pan, d } = this._place(pos.x, pos.y, pos.z);
     if (d > 160) return;
     const hard = Math.min(1, speed / 9);
@@ -121,7 +125,7 @@ export class DebrisAudio {
     const dur = small ? 0.05 + 0.04 * Math.random() : 0.08 + size * 0.22;
     const out = this._out(ctx, Math.min(1, lvl), pan, dur + 0.05);
     if (!out) return;
-    const t = now + 0.004;
+    const t = now + (this.at || 0) + 0.004;
     // pitch from size: a front-wing half knocks low, a splinter ticks
     const f0 = small ? 3800 + Math.random() * 4200 : Math.max(380, 1400 / Math.max(0.25, size * 2)) * (0.85 + Math.random() * 0.3);
     this._burst(ctx, out, t, small ? 0.012 : 0.02, 'bandpass', f0 * 1.6, 1.2, 0.8);
