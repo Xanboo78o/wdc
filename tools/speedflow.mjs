@@ -89,6 +89,22 @@ fs.mkdirSync(OUTDIR, { recursive: true });
 // The in-page measurement. Runs against the live View after a real frame.
 const MEASURE = `(async () => {
   const T = await import('three');
+  // How much the view SHAKES: frame-to-frame change of the view direction
+  // in the CAR's frame (so the road curving is not counted), degrees RMS.
+  const jit = await new Promise(r => { const a = []; const c0 = window.__wdcView.camera; let prev = null;
+    const f = () => { const d = c0.getWorldDirection(new T.Vector3()).applyQuaternion(window.__wdcView.car.getWorldQuaternion(new T.Quaternion()).invert()); if (prev) a.push(Math.acos(Math.min(1, d.dot(prev))) * 180 / Math.PI); prev = d;
+      a.length < 60 ? requestAnimationFrame(f) : r(Math.sqrt(a.reduce((s, x) => s + x * x, 0) / a.length)); }; requestAnimationFrame(f); });
+  // What the edge blur costs: wall time of SpeedBlur.render with a gl.finish()
+  // either side, so the GPU work is inside the number, median of 30 frames.
+  let blurMs = null;
+  const sb = window.__wdcView.speedBlur;
+  if (sb) {
+    const gl = window.__wdcView.renderer.getContext(), orig = sb.render.bind(sb), ts = [];
+    sb.render = (...a) => { gl.finish(); const t0 = performance.now(); orig(...a); gl.finish(); ts.push(performance.now() - t0); };
+    await new Promise(r => { const f = () => ts.length < 30 ? requestAnimationFrame(f) : r(); requestAnimationFrame(f); });
+    sb.render = orig; ts.sort((x, y) => x - y); blurMs = +ts[15].toFixed(2);
+  }
+  const fps = await new Promise(r => { let n = 0; const t0 = performance.now(); const f = () => { n++; performance.now() - t0 < 1500 ? requestAnimationFrame(f) : r(n / ((performance.now() - t0) / 1000)); }; requestAnimationFrame(f); });
   const v = window.__wdcView, cam = v.camera, car = window.__wdc.car;
   const rc = new T.Raycaster(); rc.far = 400;
   const own = new Set(); v.car.traverse(o => own.add(o));
@@ -122,7 +138,7 @@ const MEASURE = `(async () => {
     const scr = Math.hypot((b.x - a.x) * cam.aspect, b.y - a.y) / 2 / dt;
     return { ang: +ang.toFixed(0), scr: +scr.toFixed(2) };
   };
-  const out = { fov: +cam.fov.toFixed(1), eyeY: null, kmh: +(car.speed * 3.6).toFixed(0) };
+  const out = { fov: +cam.fov.toFixed(1), eyeY: null, kmh: +(car.speed * 3.6).toFixed(0), fps: +fps.toFixed(1), jit: +jit.toFixed(3), blurMs };
   // eye height above the ground straight below it
   rc.set(cam.position.clone(), new T.Vector3(0, -1, 0));
   const g = rc.intersectObjects(v.scene.children, true).find(h => !own.has(h.object));
@@ -202,7 +218,7 @@ try {
   const fmt = o => o ? `${String(o.ang).padStart(4)}°/s ${String(o.scr).padStart(5)} scr/s @${String(o.dist).padStart(5)}m v=${o.v} ${o.what}` : '—';
   console.log(`\n${target} at ${KMH} km/h, s=${S0}`);
   for (const r of rows) {
-    console.log(`\n  ${String(r.cam).padEnd(8)} fov ${r.fov}°  eye ${r.eyeY} m  pitch ${r.pitch}°  ${r.behind} m from car  car fills ${r.carLowerHalf} of lower half  (${r.kmh} km/h)`);
+    console.log(`\n  ${String(r.cam).padEnd(8)} fov ${r.fov}°  eye ${r.eyeY} m  pitch ${r.pitch}°  ${r.behind} m from car  car fills ${r.carLowerHalf} of lower half  (${r.kmh} km/h, ${r.fps} fps, shake ${r.jit}°/frame, blur ${r.blurMs} ms)`);
     console.log(`    nearest ground, bottom centre : ${fmt(r.bottom)}`);
     console.log(`    nearest ground, bottom left   : ${fmt(r.botL)}`);
     console.log(`    nearest ground, bottom right  : ${fmt(r.botR)}`);
