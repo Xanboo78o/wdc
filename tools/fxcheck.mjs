@@ -49,7 +49,9 @@ function rig() {
     camera: new THREE.PerspectiveCamera(), renderer: { info: { programs: [] } }, wx: null,
   };
   const fx = new Fx(view, null);
-  const n = { shards: 0, parts: [], sparks: 0, smoke: 0, snaps: 0 };
+  const n = { shards: 0, parts: [], sparks: 0, smoke: 0, snaps: 0, skids: 0 };
+  fx.skids.lay = () => { n.skids++; };
+  fx.skids.update = () => {};
   fx.debris.shards = (k) => { n.shards += k; };
   fx.debris.part = (k) => { n.parts.push(k); };
   fx.debris.update = () => {};
@@ -100,8 +102,26 @@ console.log(`${track.full} — ${spec.full}${BREAK ? '   (--break: crush observe
   const p = track.point(300, 0);
   car.x = p.x; car.y = p.y; car.hdg = p.hdg; car.vx = 80; car.throttle = 0;
   const r = run(car, 1.5, { wall: false });
-  check(r.shards === 0 && r.parts.length === 0, 'clean straight: no debris', `shards ${r.shards}, parts ${r.parts.length}`);
+  check(r.shards === 0 && r.parts.length === 0 && r.skids === 0, 'clean straight: no debris, no marks', `shards ${r.shards}, parts ${r.parts.length}, marks ${r.skids}`);
   check(true, 'clean straight: plank sparks over bumps', `${r.sparks} sparks (info)`);
+}
+// 1b. a locked-wheel stop (ABS off) lays rubber and smokes
+{
+  const car = makeCar({ cls: spec.key, aids: { tc: 0, abs: 0, sc: 0 } });
+  const p = track.point(300, 0);
+  car.x = p.x; car.y = p.y; car.hdg = p.hdg; car.vx = 60;
+  const orig = step;
+  const r = (() => { const { fx, n } = rig(); let hint = null, locked = 0;
+    const F = 1 / 60, sub = Math.round(F / FIXED_DT);
+    for (let f = 0; f < 60 * 1.2; f++) {
+      car.brake = 1; car.throttle = 0; car.delta = 0;
+      for (let k = 0; k < sub; k++) { const q = track.project(car.x, car.y, hint); hint = q.i; orig(car, FIXED_DT, { surface: SURFACE.track }); }
+      if (car.lock) locked++;
+      fx.update(car, F, 0);
+    }
+    return { ...n, locked }; })();
+  check(r.locked === 0 || (r.skids > 10 && r.smoke > 10), 'locked brakes from 216 km/h: rubber marks + smoke',
+    `${r.locked} locked frames, ${r.skids} mark segments, ${r.smoke} puffs`);
 }
 // 2. a hard wall strike
 {

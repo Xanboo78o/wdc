@@ -33,6 +33,7 @@ import { bankY } from './bank.js';
 import { Debris } from './debris.js';
 import { Sparks } from './sparks.js';
 import { Smoke } from './smoke.js';
+import { Skids } from './skids.js';
 import { DebrisAudio } from './debrisaudio.js';
 import { syncCarEnv } from './car.js';
 
@@ -46,6 +47,10 @@ const EARTH = [0.55, 0.45, 0.30];
 const STONE = [0.20, 0.18, 0.15];   // linear, not sRGB: 0.5 read as white
 const CLOD = [0.06, 0.045, 0.025];
 const SMOKE_OIL = [0.34, 0.34, 0.36];
+
+// wheel contact patches in car space [x, mesh z], then front/rear widths
+const WHEELS_F1 = [[1.8, 0.85], [1.8, -0.85], [-1.8, 0.8], [-1.8, -0.8], 0.30, 0.40];
+const WHEELS_GT3 = [[1.5, 0.86], [1.5, -0.86], [-1.45, 0.88], [-1.45, -0.88], 0.30, 0.33];
 
 const hash = n => { const s = Math.sin(n * 91.345 + 17.17) * 43758.5453; return s - Math.floor(s); };
 
@@ -77,6 +82,7 @@ export class Fx {
     });
     this.sparks = new Sparks(view.scene);
     this.smoke = new Smoke(view.scene);
+    this.skids = new Skids(view.scene);
     this.myColour = bundle && bundle.paint ? bundle.paint.color.clone() : new THREE.Color(0xd8352a);
     this.cars = [];                    // for kicking debris, reused
   }
@@ -158,12 +164,13 @@ export class Fx {
     this.debris.update(dt, this.cars);
     this.sparks.update(dt);
     this.smoke.update(dt, v.camera);
+    this.skids.update(v.scene.fog);
     this.ms = this.ms * 0.95 + (performance.now() - t0) * 0.05;
     if (typeof window !== 'undefined' && window.__wdc) {
       // `bad` = shader programs that failed to compile. A broken shader draws
       // NOTHING and three only logs it, which tools/shot.mjs does not catch:
       // the debris was invisible for exactly that reason and no error said so.
-      window.__wdc.fx = { debris: this.debris.count, sparks: this.sparks.count, smoke: this.smoke.count, ms: +this.ms.toFixed(3),
+      window.__wdc.fx = { debris: this.debris.count, sparks: this.sparks.count, smoke: this.smoke.count, skids: this.skids.count, ms: +this.ms.toFixed(3),
         bad: (v.renderer.info.programs || []).filter(p => p.diagnostics && !p.diagnostics.runnable).length };
     }
   }
@@ -334,6 +341,9 @@ export class Fx {
       }
     }
 
+    // ---- skid marks and ruts --------------------------------------------------
+    this._skids(car, st, M);
+
     // ---- smoke --------------------------------------------------------------
     if (car.airborne) return;
     const pk = (car.spec && car.spec._pk) || 0.13;
@@ -396,6 +406,50 @@ export class Fx {
     }
   }
 
+  // Each wheel lays a ribbon while it is locked, spinning, sliding past the
+  // tyre's peak, or off the road (earth, not rubber). A segment is laid from
+  // where the contact patch was to where it is, once it has moved 25 cm.
+  _skids(car, st, M) {
+    const wp = st.wp || (st.wp = [null, null, null, null]);
+    if (car.airborne) { wp[0] = wp[1] = wp[2] = wp[3] = null; return; }
+    const gt3 = car.cls === 'gt3';
+    const W = gt3 ? WHEELS_GT3 : WHEELS_F1;
+    const pk = (car.spec && car.spec._pk) || 0.13;
+    const overF = Math.abs(car.slipF || 0) / pk - 1, overR = Math.abs(car.slipR || 0) / pk - 1;
+    const off = (car.surface ?? 1) < 0.9, speed = car.speed || 0;
+    for (let i = 0; i < 4; i++) {
+      const front = i < 2;
+      let a = 0, kind = 0;
+      if (speed > 3) {
+        if (off) { a = 0.55; kind = 1; }
+        else if (front) a = car.lock ? 0.6 : overF > 0.35 ? Math.min(0.4, overF * 0.3) : 0;
+        else a = car.wheelspin && car.throttle > 0.3 ? 0.55 : overR > 0.35 ? Math.min(0.45, overR * 0.3) : 0;
+      }
+      if (!a) { wp[i] = null; continue; }
+      _w.set(W[i][0], 0, W[i][1]).applyMatrix4(M);
+      _w.y = this._groundAt(_w.x, _w.z, st);
+      if (!wp[i]) { wp[i] = _w.clone(); continue; }
+      const d = wp[i].distanceTo(_w);
+      if (d < 0.25) continue;
+      // rubber barely marks a wet road; ruts in the grass do not care
+      if (d < 6) this.skids.lay(wp[i], _w, front ? W[4] : W[5], kind ? a : this._wet(a), kind);
+      wp[i].copy(_w);
+    }
+  }
+
+  // The surface under a point: the road's own height (profile + camber)
+  // inside the barriers, the grass's (World.groundY) beyond — the same rule
+  // debris.js lands on. A mark laid on the car's plane instead sank under
+  // the road wherever it crowned or rose.
+  _groundAt(x, z, st) {
+    const v = this.view, t = v.track, w = v.world;
+    const pr = t.project(x, -z, st.hint);
+    if (Math.abs(pr.lat) <= pr.w + pr.run || !w || !w.groundY) {
+      return (w ? w.trackYAt(pr.s) : 0) + (v.bank ? bankY(v.bank, t, pr.i, pr.lat) : 0);
+    }
+    return w.groundY(x, z);
+  }
+
   // ?fxcrash=kmh,deg[,side] — a REAL accident, for the camera: on the first
   // frame the player's car is pointed at the barrier (deg off the track's
   // heading, toward side +1 left / -1 right) at kmh, and the physics does the
@@ -439,6 +493,21 @@ export class Fx {
     if ((d === 'dust' || d === 'stones') && Math.random() < 0.7) {
       const p = at(-1.8, 0.05, Math.random() < 0.5 ? 0.8 : -0.8);
       this.debris.stones(2, p, fwd.clone().multiplyScalar(4), STONE, { up: 3, spread: 3 });
+    }
+    if (d === 'skids' || d === 'all') {
+      // a locked pair of fronts running on for 30 m, and a rut beside it
+      if (!this._demoSk) {
+        this._demoSk = true;
+        for (let k = 0; k < 60; k++) {
+          const t0 = k * 0.5, t1 = t0 + 0.5, wob = Math.sin(k * 0.3) * 0.15;
+          for (const [lx, lz, kind, w] of [[1.8, 0.85, 0, 0.3], [1.8, -0.85, 0, 0.3], [1.8, 2.6, 1, 0.4]]) {
+            const a = at(lx + t0, 0, lz + wob), b = at(lx + t1, 0, lz + wob);
+            const st = this.state.get(car);
+            a.y = this._groundAt(a.x, a.z, st); b.y = this._groundAt(b.x, b.z, st);
+            this.skids.lay(a, b, w, 0.6 * (1 - k / 70), kind);
+          }
+        }
+      }
     }
     if (d === 'smoke' || d === 'all' || d === 'dust') {
       const col = d === 'dust' ? GRAVEL : RUBBER;
