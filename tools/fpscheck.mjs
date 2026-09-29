@@ -37,7 +37,9 @@ for (const t of tracks) {
     { encoding: 'utf8', timeout: 240000 });
   const out = (r.stdout || '') + (r.stderr || '');
   const fps = +((out.match(/([\d.]+) fps \(GPU\)/) || [])[1] || NaN);
-  const draws = +((out.match(/"draws":(\d+)/) || [])[1] || NaN);
+  // the FRAME's draws sit right before its "tris"; other stats (landmarks)
+  // carry a "draws" key of their own, and the first match read those
+  const draws = +((out.match(/"draws":(\d+),"tris"/) || [])[1] || NaN);
   const tris = +((out.match(/"tris":(\d+)/) || [])[1] || NaN);
   // network noise (the FFB bridge and radio servers not running) is not a fault
   const errs = (out.match(/^\s+! (?!network:|radio:).*/gm) || []);
