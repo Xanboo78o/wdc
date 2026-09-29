@@ -267,3 +267,4 @@ body.mirror #startLights,body.mirror #msg{top:calc(min(34vw,560px) / 4.2 + 26px)
 #tpJoin{padding:17px 70px;font-size:18px}
 .tpKeys{margin-top:18px;font-size:10.5px;letter-spacing:.14em;color:color-mix(in srgb,var(--ink) 38%,var(--bg))}
 .tpKeys b{color:var(--dim)}
+body.replaying #hud{display:none}

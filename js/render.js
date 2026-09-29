@@ -1141,7 +1141,13 @@ export class View {
         // 6-8 m, not 12. A camera twelve metres up at thirty looks DOWN at
         // twenty degrees and the shot becomes mostly tarmac; real trackside
         // towers sit low enough to shoot nearly along the track surface.
-        placed = { s, x: p.x, y: 6.2 + (run > 14 ? 1.6 : 0), z: Z(p.y) };
+        // ABOVE THE GROUND IT STANDS ON. This was 6.2 m above sea level, so
+        // on any circuit with real elevation the tower was buried and the
+        // broadcast shot was taken from inside the grass (Monza, found by the
+        // first replay photograph).
+        const w = this.world;
+        const base = w ? Math.max(w.trackYAt(s), w.groundY(p.x, Z(p.y))) : 0;
+        placed = { s, x: p.x, y: base + 6.2 + (run > 14 ? 1.6 : 0), z: Z(p.y) };
         break;
       }
       if (placed) cams.push(placed);

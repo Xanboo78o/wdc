@@ -23,6 +23,7 @@ import { PropWorld } from './props.js';
 import { Objects } from './build/objects.js';
 import { TIERS, BATTLE, makeAutopilot, makeDriver } from './autopilot.js';
 import { Field } from './field.js';
+import { Replay } from './replay.js';
 import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
 import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
@@ -543,10 +544,16 @@ async function start() {
       const ghost = makeAutopilot(t, lines, spec, state.peak,
         { driver: makeDriver(11, 'medium', t.corners.length || 24) });
       const me = state.me;
+      // The spooled seconds go on the replay tape too, so ?spool=40&replay=15
+      // photographs a replay of a race in progress.
+      state.tape = new Replay(state.race.entries.map(e => e.car));
+      state.tapeKey = state.race; state.simT = 0; state.marks = [];
       for (let n = Math.round(spool / FIXED_DT); n > 0; n--) {
         ghost(me.car, me.proj, FIXED_DT, me.ctx);
         state.race.tick(FIXED_DT,
           { throttle: me.car.throttle, brake: me.car.brake, delta: me.car.delta });
+        state.simT += FIXED_DT;
+        state.tape.record(state.simT);
       }
     }
   } else {
@@ -903,6 +910,20 @@ function loop(now) {
     return;
   }
 
+  // ---- instant replay (js/replay.js) --------------------------------------
+  // One tape per session, rebuilt when the session changes (a quali becoming
+  // the race hands over a new set of cars).
+  {
+    const key = state.race || state.car;
+    if (!state.tape || state.tapeKey !== key) {
+      state.tape = new Replay(state.race ? state.race.entries.map(e => e.car) : [state.car]);
+      state.tapeKey = key; state.simT = 0; state.marks = [];
+    }
+  }
+  if (!state.tape.playing && Q.has('replay') && !state._replayQ) { state._replayQ = true; replayStart(+Q.get('replay') || 15); }
+  if (!state.tape.playing && hands.tapped('KeyI')) replayStart();
+  if (state.tape.playing) { replayFrame(frame); hands.endFrame(); acc = 0; return; }
+
   // THE PADDLES ARE THE SELECTOR — drive and reverse, the real one.
   //
   // Not the gearbox: js/gearbox.js invents ratios so the engine has something
@@ -967,6 +988,7 @@ function loop(now) {
       const bump = state.me.bump;
       if (bump) {
         state.me.bump = null;
+        if (bump.closing > 6) state.marks.push({ t: (state.simT || 0) + steps * FIXED_DT, kind: 'contact' });
         hands.rumble(Math.min(1, bump.closing / 14), 0.5, 160);
         ffb.hit(bump.closing / 14);
         state.adr = 1;                     // contact: full adrenaline
@@ -1011,6 +1033,7 @@ function loop(now) {
     // ---- barrier: real rigid-body contact, resolved at the bodywork corners
     const hit = resolveBarrier(car, track, state.hint);
     if (hit && hit.closing > 3.5) {
+      if (hit.closing > 6) state.marks.push({ t: (state.simT || 0) + steps * FIXED_DT, kind: 'contact' });
       hands.rumble(Math.min(1, hit.closing / 14), 0.5, 160);
       ffb.hit(hit.closing / 14);
       state.adr = 1;
@@ -1035,6 +1058,14 @@ function loop(now) {
     state.lapT += FIXED_DT;
   }
   hands.endFrame();
+  state.simT = (state.simT || 0) + steps * FIXED_DT;
+  state.tape.record(state.simT);
+  // Moments the director should be onboard for, and slow down around.
+  if (race && state.me) {
+    const me = state.me;
+    if (state._posWas != null && me.pos < state._posWas && race.state !== 'grid') state.marks.push({ t: state.simT, kind: 'pass' });
+    state._posWas = me.pos;
+  }
 
   // In a race the surface under the player is worked out by the race layer, so
   // rather than test it a second time and risk the two disagreeing, read it off
@@ -1155,6 +1186,61 @@ function loop(now) {
 }
 
 // ---------------------------------------------------------------------------
+// INSTANT REPLAY. I (or REPLAY in the pause menu) rolls the last 20 s back and
+// hands the cameras to the director in js/replay.js. While it plays the race
+// is frozen — nothing steps — and ending it puts every car back exactly where
+// it was. Keys: I / Esc / START ends it, left/right skip 5 s, down toggles
+// slow motion, space pauses, the camera button takes the cameras off the
+// director (and gives them back on the next press of I).
+// ---------------------------------------------------------------------------
+let _replayBox = null;
+function replayStart(back = 20) {
+  const tape = state.tape;
+  if (!tape || !tape.start(back, state.marks.slice())) { toast('NOTHING TO REPLAY YET'); return; }
+  state._liveMode = state.view.mode;
+  if (!_replayBox) {
+    _replayBox = document.createElement('div');
+    _replayBox.id = 'replayBug';
+    _replayBox.style.cssText = 'position:fixed;top:18px;right:22px;z-index:40;font:italic 900 15px/1 system-ui,sans-serif;'
+      + 'letter-spacing:.14em;color:#fff;background:#c8102e;padding:7px 12px 6px;border-radius:3px;'
+      + 'box-shadow:0 2px 10px rgba(0,0,0,.35);pointer-events:none';
+    document.body.appendChild(_replayBox);
+  }
+  _replayBox.style.display = '';
+  document.body.classList.add('replaying');
+}
+function replayEnd() {
+  state.tape.stop();
+  state.view.setMode(state._liveMode ?? 0);
+  if (_replayBox) _replayBox.style.display = 'none';
+  document.body.classList.remove('replaying');
+  prev = performance.now();
+}
+function replayFrame(frame) {
+  const tape = state.tape, dir = tape.director, view = state.view;
+  if (hands.tapped('KeyI') || hands.tapped('Escape') || hands.tapped('w:pause') || hands.tapped('w:back') || hands.tapped('Enter') || hands.tapped('w:confirm')) { replayEnd(); return; }
+  if (hands.tapped('ArrowLeft') || hands.tapped('w:left')) tape.seek(-5);
+  if (hands.tapped('ArrowRight') || hands.tapped('w:right')) tape.seek(5);
+  if (hands.tapped('ArrowDown') || hands.tapped('w:down')) tape.userRate = tape.userRate < 1 ? 1 : 0.25;
+  if (hands.tapped('Space')) tape.paused = !tape.paused;
+  if (hands.tapped('KeyC') || hands.tapped('pad:y') || hands.tapped('w:cam')) { dir.auto = false; view.setMode(view.mode + 1); }
+  const more = tape.tick(frame);
+  const car = state.car;
+  const m = dir.pick(frame, CAMS, car);
+  if (m >= 0 && m !== view.mode) view.setMode(m);
+  if (state.field) state.field.frame(state.race.entries, frame * tape.rate);
+  if (state.box) {
+    state.box.update(frame, car.speed * 3.6, car.throttle);
+    if (state.engine) state.engine.update(state.box.rpm, car.throttle, { off: 0, speed: car.speed, slip: 0, peak: state._peak || 0.15, surf: 1, wall: false, dt: frame });
+  }
+  if (state.engine && state.engine.place) state.engine.place(view.camera, car, state.race, frame);
+  view.frame(car, frame, { slipOver: 0, rough: 0 });
+  const left = Math.max(0, tape.t1 - tape.t);
+  _replayBox.textContent = 'REPLAY' + (tape.rate < 0.99 ? '  ·  SLOW' : '') + (tape.paused ? '  ·  PAUSED' : '') + (dir.auto ? '' : '  ·  ' + CAMS[view.mode]) + '  ' + left.toFixed(0) + 's';
+  if (!more) replayEnd();
+}
+
+// ---------------------------------------------------------------------------
 // HUD. The slip bars are the point of the whole thing: the marker is where the
 // tyre actually peaks, computed from the tyre curve, so it cannot drift out of
 // agreement with the physics.
@@ -1242,6 +1328,7 @@ function hud(over, rough) {
 // new UI out of that file keeps cache-busting working.
 const MENU_ITEMS = () => [
   ['RESUME', () => setPaused(false)],
+  ['REPLAY', () => { setPaused(false); replayStart(); }],
   [state.race ? 'REJOIN' : 'RESTART LAP', () => { setPaused(false); if (state.race) rejoin(); else resetCar(); }],
   ['CAMERA — ' + CAMS[state.view.mode], () => { state.view.setMode(state.view.mode + 1); drawMenu(); }],
   ['IDEAL LINE', () => { state.view.toggleLine(); drawMenu(); }],
