@@ -69,6 +69,10 @@ const VS = /* glsl */`
   void main() {
     vec4 mv = viewMatrix * vec4(iPos, 1.0);
     float s = iSRAT.x, r = iSRAT.y;
+    // A puff that has swallowed the lens is a full-screen quad of nearly
+    // clear air — the most expensive thing this file can draw, for nothing.
+    // Shrink it as the camera gets inside it.
+    s *= clamp(-mv.z / (s * 1.2), 0.15, 1.0);
     vec2 c = position.xy;
     vec2 rc = vec2(c.x * cos(r) - c.y * sin(r), c.x * sin(r) + c.y * cos(r));
     mv.xy += rc * s;
