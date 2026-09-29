@@ -12,7 +12,7 @@ import { makeAero } from './aero.js';
 import { Hands, steerLock } from './input.js';
 import { FFB } from './ffb.js';
 import { Engineer } from './engineer.js';
-import { cheer } from './cheer.js';
+import { cheer, cheerRoute } from './cheer.js';
 import { startRadio, ptt, say } from './radio.js';
 import { View } from './render.js';
 import { loadEnv } from './env.js';
@@ -1099,7 +1099,13 @@ function loop(now) {
     if (c && c !== state.cheerSeen) {
       state.cheerSeen = c; state.passFlash = { race: state.race, t: c.t };
       // One roar per burst: a lap-one scramble confirms three passes in a second.
-      if (!(state.roarAt > performance.now() - 3000)) { state.roarAt = performance.now(); cheer({ big: c.pos === 1 }); }
+      if (!(state.roarAt > performance.now() - 3000)) {
+        state.roarAt = performance.now();
+        // On the sound session's bus (limiter, master volume) once it exists.
+        const en = state.engine;
+        if (en && en.ctx && en.cans && state.cheerBus !== en.cans) { cheerRoute(en.ctx, en.cans); state.cheerBus = en.cans; }
+        if (!(en && en.muted)) cheer({ big: c.pos === 1, gain: en ? en.master : 0.78 });
+      }
       // For the replay director: the moment the pass happened, not the moment it was confirmed.
       if (state.marks) state.marks.push({ t: (state.simT || 0) - (state.race.time - c.at), kind: 'pass', held: true });
     }

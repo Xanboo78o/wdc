@@ -17,6 +17,16 @@
 // — the moment they want the crowd on their bus (and under their master).
 //
 // Volume: localStorage 'wdc.cheer' (0..1, default 0.6). 0 turns it off.
+// main.js routes it onto audio.js's `cans` bus (under its limiter) and scales
+// it by the engine's master volume.
+//
+// MEASURED (tools/cheermix.mjs, 2026-09-28), against the engine at 250 km/h
+// flat out (rms -7.6 dBFS, peak -1.0): a pass peaks at -3.2 dBFS and holds
+// about -15 dBFS rms — some 7 dB under the engine, clearly there, never on
+// top of it; the lead, -12 dBFS rms. 0 clipped samples through the bus. Level
+// held ~1.3 s, then falls 20 dB over 2 s. Centroid ~1.0-1.2 kHz with 90% of
+// the energy between 250 Hz and 2.5 kHz — voices, not hiss (the first cut was
+// 20 dB too quiet to hear under the engine and centred at 1.6 kHz).
 
 let ctx = null, out = null, noise = null, hall = null;
 
@@ -31,7 +41,8 @@ function ac() {
     if (!AC) return null;
     ctx = new AC(); out = ctx.destination;
   }
-  if (ctx.state === 'suspended') ctx.resume();
+  // An OfflineAudioContext (tools/cheermix) rejects resume() before it renders.
+  if (ctx.state === 'suspended' && !(typeof OfflineAudioContext !== 'undefined' && ctx instanceof OfflineAudioContext)) ctx.resume().catch(() => {});
   return ctx;
 }
 
@@ -81,13 +92,13 @@ function hallNode(c) {
  * The crowd goes up. `big` (taking the lead) is longer and louder, with more
  * whistles. Safe to call anywhere: without Web Audio it does nothing.
  */
-export function cheer({ big = false } = {}) {
-  const vol = level();
+export function cheer({ big = false, gain = 1 } = {}) {
+  const vol = level() * gain;
   if (vol <= 0) return;
   const c = ac();
   if (!c) return;
   const now = c.currentTime + 0.02;
-  const len = big ? 4.2 : 3.2, peak = (big ? 0.62 : 0.5) * vol;
+  const len = big ? 4.6 : 3.6, peak = (big ? 2.0 : 1.9) * vol;
 
   // The bus: everything below meets here, is shaped once, and goes dry to the
   // output and wet to the hall.
@@ -97,20 +108,24 @@ export function cheer({ big = false } = {}) {
   bus.connect(hp); hp.connect(lp); lp.connect(out); lp.connect(hallNode(c));
   bus.gain.setValueAtTime(0, now);
   bus.gain.linearRampToValueAtTime(peak, now + 0.28);
-  bus.gain.setValueAtTime(peak, now + 0.28 + len * 0.22);
-  bus.gain.exponentialRampToValueAtTime(0.0008, now + len);
+  // Held while the stand is on its feet, then a long fall: a crowd does not
+  // stop, it subsides — -20 dB by the end, then out.
+  const hold = now + 0.28 + len * 0.38;
+  bus.gain.setValueAtTime(peak, hold);
+  bus.gain.exponentialRampToValueAtTime(peak * 0.1, now + len);
+  bus.gain.linearRampToValueAtTime(0, now + len + 0.08);
 
   const buf = noiseBuf(c);
   const src = () => {
     const s = c.createBufferSource(); s.buffer = buf; s.loop = true;
-    s.start(now, Math.random() * 3); s.stop(now + len + 0.1);
+    s.start(now, Math.random() * 3); s.stop(now + len + 0.2);
     return s;
   };
 
   // 1. The roar: broad, centred where voices are.
   {
     const s = src();
-    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.55;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 650; bp.Q.value = 0.7;
     const g = c.createGain(); g.gain.value = 0.9;
     s.connect(bp); bp.connect(g); g.connect(bus);
   }
@@ -120,17 +135,17 @@ export function cheer({ big = false } = {}) {
   const nv = big ? 14 : 10;
   for (let k = 0; k < nv; k++) {
     const s = src();
-    const f0 = 380 + Math.random() * 2200;
+    const f0 = 320 + Math.random() * 1300;
     const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 7 + Math.random() * 9;
     bp.frequency.setValueAtTime(f0, now);
     bp.frequency.linearRampToValueAtTime(f0 * (1.08 + Math.random() * 0.2), now + 0.6 + Math.random() * 0.6);
     bp.frequency.linearRampToValueAtTime(f0 * 0.95, now + len);
     const g = c.createGain(); g.gain.value = 0.0;
     const lfo = c.createOscillator(); lfo.frequency.value = 2.5 + Math.random() * 5;
-    const depth = c.createGain(); depth.gain.value = 0.45 + Math.random() * 0.2;
+    const depth = c.createGain(); depth.gain.value = 0.3 + Math.random() * 0.15;
     lfo.connect(depth); depth.connect(g.gain);
     const base = c.createConstantSource ? c.createConstantSource() : null;
-    if (base) { base.offset.value = 0.6; base.connect(g.gain); base.start(now); base.stop(now + len + 0.1); }
+    if (base) { base.offset.value = 0.75; base.connect(g.gain); base.start(now); base.stop(now + len + 0.1); }
     lfo.start(now); lfo.stop(now + len + 0.1);
     s.connect(bp); bp.connect(g); g.connect(bus);
     // Stereo spread, so the stand is wide rather than one point.

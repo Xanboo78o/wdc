@@ -1,0 +1,61 @@
+<script type="module">
+// cheermix.html — the crowd, measured against the engine it has to sit under.
+// Driven by tools/cheermix.mjs. Two offline renders:
+//   A  the engine (audio.js, 250 km/h, full throttle, 11,500 rpm) for 6 s,
+//      with a cheer fired at 1.0 s ON THE ENGINE'S OWN BUS (cheerRoute to
+//      e.cans, scaled by e.master) — exactly what main.js does in the game;
+//   B  the cheer alone, same gain, straight to the output.
+const SR = 44100;
+const off = new OfflineAudioContext(2, SR * 6, SR);
+window.AudioContext = function () { return off; };
+const { Engine } = await import('/js/audio.js');
+const { cheer, cheerRoute } = await import('/js/cheer.js');
+localStorage.clear();
+const big = location.hash === '#big';
+const e = new Engine({ pick: 1, cls: 'f1', synth: true });
+await e.start('/');
+let fired = false;
+for (let t = 0.02; t < 6; t += 1 / 60) {
+  off.suspend(t).then(() => {
+    e.update(11500, 1, { speed: 250 / 3.6, slip: 0, peak: 0.12, off: 0, surf: 1, dt: 1 / 60 });
+    if (t >= 1 && !fired) { fired = true; cheerRoute(off, e.cans); cheer({ big, gain: e.master }); }
+    off.resume();
+  });
+}
+const A = (await off.startRendering()).getChannelData(0);
+const off2 = new OfflineAudioContext(2, SR * 5, SR);
+cheerRoute(off2, off2.destination);
+cheer({ big, gain: 0.78 });
+const bufB = await off2.startRendering();
+const B = bufB.getChannelData(0), BR = bufB.getChannelData(1);
+const db = x => (20 * Math.log10(x + 1e-12)).toFixed(1);
+const rms = (L, a, b) => { let q = 0; const i0 = Math.floor(a * SR), i1 = Math.floor(b * SR); for (let i = i0; i < i1; i++) q += L[i] * L[i]; return Math.sqrt(q / (i1 - i0)); };
+const peak = (L, a, b) => { let p = 0; for (let i = Math.floor(a * SR); i < b * SR; i++) p = Math.max(p, Math.abs(L[i])); return p; };
+const out = [];
+out.push(`A engine alone 0.3-1.0 s     rms ${db(rms(A, 0.3, 1))} dBFS  peak ${db(peak(A, 0.3, 1))}`);
+out.push(`A engine + cheer 1.3-2.5 s   rms ${db(rms(A, 1.3, 2.5))} dBFS  peak ${db(peak(A, 1.3, 2.5))}`);
+out.push(`A engine after 5.0-6.0 s     rms ${db(rms(A, 5, 6))} dBFS`);
+out.push(`A clipped samples (>=0.999): ${A.reduce((n, x) => n + (Math.abs(x) >= 0.999), 0)}`);
+out.push(`B cheer alone: peak ${db(peak(B, 0, 5))} dBFS  loudest 0.25 s rms ${db(Math.max(...[...Array(20)].map((_, k) => rms(B, k * 0.25, k * 0.25 + 0.25))))} dBFS  clipped ${B.reduce((n, x) => n + (Math.abs(x) >= 0.999), 0)}`);
+out.push('B envelope (rms dB per 0.25 s): ' + [...Array(20)].map((_, k) => db(rms(B, k * 0.25, k * 0.25 + 0.25))).join(' '));
+// Where its energy is, and how much it MOVES: a roar is loud mid-band noise
+// whose level wobbles at syllable rate; flat noise does not wobble.
+{
+  const n = 16384, i0 = Math.floor(0.6 * SR), re = new Float64Array(n), im = new Float64Array(n);
+  for (let i = 0; i < n; i++) re[i] = B[i0 + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / n));
+  for (let i = 1, j = 0; i < n; i++) { let b = n >> 1; for (; j & b; b >>= 1) j ^= b; j ^= b; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+  for (let len = 2; len <= n; len <<= 1) { const a = -2 * Math.PI / len; for (let i = 0; i < n; i += len) for (let k = 0; k < len / 2; k++) {
+    const c = Math.cos(a * k), sn = Math.sin(a * k), u = i + k, v = i + k + len / 2;
+    const tr = re[v] * c - im[v] * sn, ti = re[v] * sn + im[v] * c; re[v] = re[u] - tr; im[v] = im[u] - ti; re[u] += tr; im[u] += ti; } }
+  const band = [0, 0, 0, 0, 0]; const edges = [0, 250, 800, 2500, 6000, 1e9]; let sw = 0, sf = 0;
+  for (let k = 1; k < n / 2; k++) { const f = k * SR / n, m2 = re[k] ** 2 + im[k] ** 2; sw += m2; sf += m2 * f; for (let b = 0; b < 5; b++) if (f >= edges[b] && f < edges[b + 1]) band[b] += m2; }
+  out.push(`B spectrum 0.6-1.0 s: centroid ${(sf / sw).toFixed(0)} Hz; energy <250 ${(100 * band[0] / sw).toFixed(0)}%  250-800 ${(100 * band[1] / sw).toFixed(0)}%  0.8-2.5k ${(100 * band[2] / sw).toFixed(0)}%  2.5-6k ${(100 * band[3] / sw).toFixed(0)}%  >6k ${(100 * band[4] / sw).toFixed(0)}%`);
+  // envelope modulation: 10 ms rms frames 0.5-2 s, their spread in dB
+  const fr = []; for (let t = 0.5; t < 2; t += 0.01) fr.push(20 * Math.log10(rms(B, t, t + 0.01)));
+  const m = fr.reduce((a, b) => a + b) / fr.length, sd = Math.sqrt(fr.reduce((a, b) => a + (b - m) ** 2, 0) / fr.length);
+  out.push(`B level wobble (sd of 10 ms frames, 0.5-2 s): ${sd.toFixed(2)} dB  (steady white noise ~0.5 dB)`);
+  let c = 0; for (let i = 0; i < B.length; i++) c += B[i] * BR[i];
+  out.push(`B stereo L/R correlation ${(c / Math.sqrt(B.reduce((a, x) => a + x * x, 0) * BR.reduce((a, x) => a + x * x, 0))).toFixed(2)}`);
+}
+document.body.innerText = out.join('\n'); document.title = 'done';
+</script>
