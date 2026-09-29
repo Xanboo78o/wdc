@@ -22,7 +22,9 @@
 //   ?fx=0                 all of it off
 //   ?fxcam=yaw,pitch,dist[,lookX]   orbit the player's car, for screenshots:
 //                         yaw 0 = in front of the nose, 90 = its right side
-//   ?fxdemo=wing|spark|smoke|dust|scrape|all   stage an accident on the
+//   ?fxcrash=kmh,deg[,side]   point the player's car at the barrier on load
+//                         and let the REAL physics crash it (debug preset)
+//   ?fxdemo=wing|spark|smoke|dust|stones|scrape|all   stage an accident on the
 //                         player's car at load, for screenshots (visual only —
 //                         the physics car is untouched)
 import * as THREE from 'three';
@@ -32,6 +34,7 @@ import { Debris } from './debris.js';
 import { Sparks } from './sparks.js';
 import { Smoke } from './smoke.js';
 import { DebrisAudio } from './debrisaudio.js';
+import { syncCarEnv } from './car.js';
 
 const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
 
@@ -54,6 +57,7 @@ export class Fx {
     this.view = view;
     this.bundle = bundle;
     this.on = q.get('fx') !== '0';
+    this.carEnv = q.get('carenv') !== '0';
     const fc = q.get('fxcam');
     if (fc) {
       const [yaw, pitch, dist, lookX] = fc.split(',').map(Number);
@@ -61,6 +65,7 @@ export class Fx {
       this.orbit = this._orbit.bind(this);
     }
     this.demo = q.get('fxdemo');
+    this.crashQ = q.get('fxcrash');
     this.state = new WeakMap();
     this.entries = null;
     this.ms = 0;
@@ -111,6 +116,16 @@ export class Fx {
   }
 
   update(car, dt, surfaceY) {
+    // The cars' own reflection strengths (car.js syncCarEnv) — not an effect,
+    // but this is the one per-frame hook the car's damage owner has, and it
+    // must run with ?fx=0 too. ?carenv=0 turns it off, to compare.
+    if (this.carEnv) {
+      const roots = this._envRoots || (this._envRoots = []);
+      roots.length = 0;
+      if (this.bundle && this.bundle.group) roots.push(this.bundle.group);
+      for (const c of this.view.scene.children) if (c.name === 'rival') roots.push(c);
+      syncCarEnv(this.view.scene, roots);
+    }
     if (!this.on) return;
     const t0 = performance.now();
     const v = this.view;
@@ -138,6 +153,7 @@ export class Fx {
       }
     }
     if (this.demo) this._demo(car, dt, surfaceY);
+    if (this.crashQ && !this._crashed) this._crash(car);
 
     this.debris.update(dt, this.cars);
     this.sparks.update(dt);
@@ -377,6 +393,21 @@ export class Fx {
       emit(4, r, 1.8, 0.85, o); emit(5, r, 1.8, -0.85, o);
       emit(2, r, -1.8, 0.8, o); emit(3, r, -1.8, -0.8, o);
     }
+  }
+
+  // ?fxcrash=kmh,deg[,side] — a REAL accident, for the camera: on the first
+  // frame the player's car is pointed at the barrier (deg off the track's
+  // heading, toward side +1 left / -1 right) at kmh, and the physics does the
+  // rest. The one place this file writes the physics car, and only because
+  // it was asked to in the URL — the same family as ?launch= and ?crush=.
+  _crash(car) {
+    this._crashed = true;
+    const [kmh, deg, side] = this.crashQ.split(',').map(Number);
+    const t = this.view.track;
+    const pr = t.project(car.x, car.y, null);
+    const sd = side === -1 ? -1 : 1;
+    car.hdg = pr.hdg + sd * (deg || 30) * Math.PI / 180;
+    car.vx = (kmh || 150) / 3.6; car.vy = 0; car.r = 0;
   }
 
   // ?fxdemo= — an accident staged for the camera. Visual only.

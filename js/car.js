@@ -472,6 +472,57 @@ function brokenNose(tip, carbon, paint, dark) {
 }
 
 // ---------------------------------------------------------------------------
+// THE CAR'S OWN REFLECTIONS.
+//
+// Measured 2026-09-28 (sky.js): in this three build, a material with no
+// envMap of its own takes scene.environmentIntensity IN PLACE OF its own
+// envMapIntensity on every draw. So every strength set in this file — paint
+// 1.35, carbon 0.55, decals 1.1 — had never applied, and the car reflected
+// the sky exactly as hard as the tarmac did. A material that holds the
+// environment itself keeps its own intensity; that is the whole fix.
+//
+// The sky rebuilds its environment (a NEW texture) whenever the sun moves a
+// tenth of a degree, so this is not set once: syncCarEnv() is called every
+// frame and re-points the car materials when scene.environment changes. It
+// is cheap: a pointer comparison, and a walk of the cars every two seconds
+// so rivals that appear later (field.js clones, which copy userData) join.
+function ownEnv(group) {
+  group.traverse(m => {
+    if (!m.isMesh) return;
+    for (const mt of Array.isArray(m.material) ? m.material : [m.material]) {
+      if (mt && 'envMapIntensity' in mt) mt.userData.carEnv = true;
+    }
+  });
+}
+
+const _envState = { env: null, at: -1e9, mats: new Set() };
+export function syncCarEnv(scene, roots, now = performance.now()) {
+  const env = scene.environment || null;
+  const S = _envState;
+  const walk = now - S.at > 2000;
+  if (env === S.env && !walk) return;
+  if (walk) {
+    S.at = now;
+    for (const r of roots) {
+      if (!r) continue;
+      r.traverse(m => {
+        if (!m.isMesh) return;
+        for (const mt of Array.isArray(m.material) ? m.material : [m.material]) {
+          if (mt && mt.userData.carEnv && !S.mats.has(mt)) S.mats.add(mt);
+        }
+      });
+    }
+  }
+  S.env = env;
+  for (const mt of S.mats) {
+    if (mt.envMap === env) continue;
+    const had = !!mt.envMap;
+    mt.envMap = env;
+    if (!had || !env) mt.needsUpdate = true;   // the program changes only on null <-> map
+  }
+}
+
+// ---------------------------------------------------------------------------
 // THE SINGLE-SEATER (F1, and F4 on the same body).
 //
 // Adam, 2026-09-25: "make cars look so much better". The shapes below are a
@@ -889,6 +940,7 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
 
   // Where the driver's eyes are, for the first-person camera. A single-seater
   // sits low and far back, behind the halo.
+  ownEnv(g);
   return { group: g, wheels, steer, hubs, drs, R, wings, eye: [-0.22, 0.68, 0], decalMat, numMat, paint2, paint, mirrors, head, cockpitRim, haloMat };
 }
 
@@ -1019,5 +1071,6 @@ export function buildGT3(look, colour = 0x2f6fe0) {
   }
 
   // A GT3 driver sits further forward, higher, and on the left.
+  ownEnv(g);
   return { group: g, wheels, steer, hubs, drs: null, R, wings, eye: [0.28, 0.88, -0.34] };
 }

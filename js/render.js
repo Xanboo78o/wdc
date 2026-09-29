@@ -1489,7 +1489,8 @@ export class View {
 
     // Debris, sparks and lit tyre smoke for every car (js/fx.js); the old
     // point-sprite puffs below remain only for ?fx=0.
-    if (this.fx && this.fx.on) { this.fx.update(car, dt, surfaceY); this.smokePts.visible = false; } else {
+    if (this.fx) this.fx.update(car, dt, surfaceY);   // (also the cars' own env maps, even with ?fx=0)
+    if (this.fx && this.fx.on) { this.smokePts.visible = false; } else {
     // smoke, fired by REAL slip past the tyre's peak, never by "a key is held"
     const over = hud.slipOver || 0;
     if (over > 0 && car.speed > 6) {
