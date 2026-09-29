@@ -1,0 +1,87 @@
+<!doctype html><meta charset="utf-8"><title>speedmix</title><base href="/">
+<!-- tools/speedmix.mjs drives this. An OfflineAudioContext render of a car
+     accelerating down Monza's main straight: the engine, plus js/speedsound.js
+     (wind, tyre hiss, walls, rail posts, a rival going past). Modes (hash):
+       #all     everything (shipped)
+       #engine  speed sounds OFF — the old mix
+       #speed   engine silent — the speed layers alone -->
+<script type="importmap">{ "imports": { "three": "/js/vendor/three.module.min.js" } }</script>
+<script type="module">
+const SR = 44100, LEN = 13;
+const off = new OfflineAudioContext(2, SR * LEN, SR);
+window.AudioContext = function () { return off; };
+const mode = (location.hash || '#all').slice(1);
+const { Engine, FX } = await import('/js/audio.js');
+const { SPEEDSOUND } = await import('/js/speedsound.js');
+const { Track } = await import('/js/track.js');
+if (mode === 'engine') SPEEDSOUND.on = false;
+if (mode.startsWith('speed')) Object.assign(FX, { engBoost: 0, grit: 0, synth: 0 });
+// speed:wind, speed:hiss, speed:walls, speed:rivals — one layer alone
+if (mode.includes(':')) { const only = mode.split(':')[1]; for (const k of ['wind', 'hiss', 'walls', 'posts', 'rivals']) if (k !== only && !(only === 'walls' && k === 'posts')) SPEEDSOUND[k] = 0; }
+localStorage.clear();
+const e = new Engine({ pick: 1, cls: 'f1', synth: true });
+await e.start('/');
+const t = await Track.load('monza');
+e.setTrack(t);
+// [t0, t1, km/h, label]
+const seg = [[0, 3, 150, '150 km/h'], [3, 6, 250, '250 km/h'], [6, 9, 350, '350 km/h'],
+  [9, 11, 350, '350 + rival passing +70 km/h at 2.5 m'], [11, 13, 350, '350 a car length off the LEFT barrier', 'wall']];
+let s = 60, rs = 0;
+const car = { x: 0, y: 0, hdg: 0, speed: 0 };
+const riv = { idx: 1, isPlayer: false, car: { x: 0, y: 0, hdg: 0, speed: 0, throttle: 1 } };
+const race = { entries: [{ idx: 0, isPlayer: true, car }, riv] };
+const cam = { updateMatrixWorld() {}, matrixWorld: { elements: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,1,0,1] } };
+for (let tt = 0.02; tt < LEN; tt += 1 / 60) {
+  off.suspend(tt).then(() => {
+    const q = seg.find(z => tt >= z[0] && tt < z[1]) || seg[seg.length - 1];
+    const v = q[2] / 3.6;
+    s += v / 60;
+    const pr = t.project(t.point(s, 0).x, t.point(s, 0).y);
+    const lat = q[4] === 'wall' ? pr.w + pr.runL - 1.6 : 0;
+    const p = t.point(s, lat), p2 = t.point(s + 2, lat);
+    Object.assign(car, { x: p.x, y: p.y, hdg: Math.atan2(p2.y - p.y, p2.x - p.x), speed: v, vx: v, vy: 0 });
+    const withRival = tt >= 9 && tt < 11;
+    if (withRival) {
+      if (!rs) rs = s - 18;
+      rs += (v + 70 / 3.6) / 60;
+      const r = t.point(rs, 2.5), r2 = t.point(rs + 2, 2.5);
+      Object.assign(riv.car, { x: r.x, y: r.y, hdg: Math.atan2(r2.y - r.y, r2.x - r.x), speed: v + 70 / 3.6 });
+    } else Object.assign(riv.car, { x: 1e6, y: 1e6 });
+    // the listener's head in the cockpit: at the car, facing down the road
+    const h = car.hdg, M = cam.matrixWorld.elements;
+    M[0] = Math.sin(h); M[1] = 0; M[2] = Math.cos(h);
+    M[4] = 0; M[5] = 1; M[6] = 0;
+    M[8] = -Math.cos(h); M[9] = 0; M[10] = Math.sin(h);
+    M[12] = car.x; M[13] = 1.0; M[14] = -car.y;
+    e.update(12000, 1, { speed: v, slip: 0, peak: 0.12, off: 0, surf: 1, dt: 1 / 60 });
+    e.place(cam, car, race, 1 / 60);
+    off.resume();
+  });
+}
+const buf = await off.startRendering();
+const L = buf.getChannelData(0), R = buf.getChannelData(1);
+const db = x => (20 * Math.log10(x + 1e-12)).toFixed(1);
+const out = [`mode ${mode}`];
+for (const [a, b, , name] of seg) {
+  let sq = 0, pk = 0; const i0 = Math.floor((a + 0.3) * SR), i1 = Math.floor(b * SR);
+  for (let i = i0; i < i1; i++) { const m = (L[i] + R[i]) / 2; sq += m * m; pk = Math.max(pk, Math.abs(L[i]), Math.abs(R[i])); }
+  // energy above 2 kHz: a first difference is a crude high-pass
+  let hf = 0; for (let i = i0 + 1; i < i1; i++) { const d = L[i] - L[i - 1]; hf += d * d; }
+  out.push(`${name.padEnd(40)} rms ${db(Math.sqrt(sq / (i1 - i0)))} dBFS  peak ${db(pk)}  hf ${db(Math.sqrt(hf / (i1 - i0)))}`);
+}
+// The post flutter: envelope of the high band at 350, its strongest period.
+{
+  const i0 = 11.3 * SR | 0, n = 1.6 * SR, hop = 64, env = [];
+  for (let i = i0; i < i0 + n; i += hop) { let q = 0; for (let j = 1; j < hop; j++) { const d = L[i + j] - L[i + j - 1]; q += d * d; } env.push(Math.sqrt(q)); }
+  const mean = env.reduce((a, b) => a + b) / env.length; const x = env.map(v => v - mean);
+  let best = 0, lag = 0; const fr = SR / hop;
+  for (let l = Math.round(fr / 40); l < Math.round(fr / 4); l++) { let c = 0; for (let i = 0; i + l < x.length; i++) c += x[i] * x[i + l]; if (c > best) { best = c; lag = l; } }
+  let c0 = 0; for (const v of x) c0 += v * v;
+  { const l16 = Math.round(fr / 16.2); let c = 0; for (let i = 0; i + l16 < x.length; i++) c += x[i] * x[i + l16]; out.push(`  correlation at the 16.2 Hz post period: ${(c / c0).toFixed(2)}`); }
+  out.push(`350 by the wall, high-band pulse: strongest period ${(lag / fr * 1000).toFixed(1)} ms = ${(fr / lag).toFixed(1)} Hz, strength ${(best / c0).toFixed(2)}  (posts every ~6 m at 97.2 m/s = 16.2 Hz)`);
+}
+// L/R during the rival pass: it is on your LEFT (lat +2.5)
+{ let l = 0, r = 0; for (let i = 9.6 * SR | 0; i < 10.4 * SR; i++) { l += L[i] * L[i]; r += R[i] * R[i]; } out.push(`rival pass L/R balance ${db(Math.sqrt(l / r))} dB (+ = louder on the left)`); }
+out.push(`clipped samples (>=1.0): ${L.reduce((n, x) => n + (Math.abs(x) >= 0.999), 0) + R.reduce((n, x) => n + (Math.abs(x) >= 0.999), 0)}`);
+document.body.innerText = out.join('\n'); document.title = 'done';
+</script>

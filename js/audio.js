@@ -58,6 +58,7 @@ const RATE_MIN = 0.35, RATE_MAX = 2.60;
 // guess the fix was to clear their browser storage.
 import { SynthEngine } from './enginesynth.js';
 import { Spatial } from './spatial.js';
+import { SpeedSound } from './speedsound.js';
 
 export const MIX_KEY = 'wdc.sound.v2';
 
@@ -328,6 +329,10 @@ export class Engine {
       // and its airbox, the rivals from where they are, through HRTF.
       this.spatial = new Spatial(this.ctx, this.cans);
       if (this.synthOn) this.synth = new SynthEngine(this.ctx, this.cans, this.cls, this.spatial);
+      // THE SOUND OF SPEED (js/speedsound.js): wind, tyre hiss, the walls and
+      // rail posts going past, rivals' air. Synthesised, under the engine.
+      this.speedSound = new SpeedSound(this.ctx, this.cans);
+      if (this._track) this.speedSound.setTrack(this._track);
       // THE LOOPS MUST STOP WHEN THE GAME DOES. update() only runs while the
       // car is being driven, so in the pause menu, on the results screen or
       // after leaving the circuit the loops just kept playing at whatever
@@ -379,6 +384,7 @@ export class Engine {
     if (this.gritGain) this._to(this.gritGain.gain, 0, 0.05);
     if (this.barkGain) this._to(this.barkGain.gain, 0, 0.05);
     if (this.synth) this.synth.silence();
+    if (this.speedSound) this.speedSound.silence();
   }
 
   // Fire a recording once. `rate` a little off 1 each time so twenty hits in
@@ -550,6 +556,7 @@ export class Engine {
     }
 
     const kmh = speed * 3.6;
+    if (this.speedSound) this.speedSound.update(speed, surf, this.master);
 
     // ---- tyres: a fraction of THIS car's limit, silent below a threshold ----
     if (this.tyre) {
@@ -646,7 +653,11 @@ export class Engine {
   place(camera, car, race, dt = 1 / 60) {
     if (!this.spatial || !this.ctx) return;
     this.spatial.update(camera, car, race, this.muted ? 0 : this.master * FX.synth * 0.8, dt);
+    if (this.speedSound && !this.muted) this.speedSound.place(car, race, this.master);
   }
+
+  /** The circuit, so the walls and rail posts beside you can be heard. */
+  setTrack(track) { this._track = track; if (this.speedSound) this.speedSound.setTrack(track); }
   stop() { clearInterval(this.watch); try { this.src?.stop(); this.ctx?.close(); } catch { /* going away anyway */ } this.ok = false; }
 }
 

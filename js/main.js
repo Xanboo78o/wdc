@@ -489,6 +489,7 @@ async function start() {
   const lines = buildLines(t, spec);
   const line = lines.race;
   state.track = t; state.line = line; state.lines = lines;
+  if (state.engine && state.engine.setTrack) state.engine.setTrack(t);   // walls + posts you hear (speedsound.js)
   state.peak = peakSlip(spec);
   state.box = makeBox(spec);
   // Not awaited: a missing or slow .wav must not hold up the green light.
