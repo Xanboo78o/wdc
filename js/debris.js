@@ -172,6 +172,12 @@ export class Debris {
     }
     const sh = shardGeometry();
     this._kind('shard', { geo: sh.geo, c0: new THREE.Vector3(), half: sh.half }, 360, false, { shard: true });
+    // Stones and clods: what a car drags out of a gravel trap or tears out of
+    // the grass, and leaves on the racing line for the next car to find. A
+    // low-poly lump, its own pool so an off cannot evict a crash's shards.
+    const st = new THREE.IcosahedronGeometry(0.5, 0);
+    st.setAttribute('paint', new THREE.Float32BufferAttribute(new Array(st.attributes.position.count).fill(1), 1));
+    this._kind('stone', { geo: st, c0: new THREE.Vector3(), half: new THREE.Vector3(0.42, 0.42, 0.42) }, 300, false, { shard: true });
   }
 
   _kind(name, src, cap, shadow, def) {
@@ -256,6 +262,25 @@ export class Debris {
    * Shards from a point: `n` of them, `size` their typical width, `painted`
    * the share that wear the car's colour on one face.
    */
+  /** Stones or clods thrown by a wheel: `colour` is the ground's. */
+  stones(n, at, vel, colour, { size = 0.035, spread = 1.5, up = 1.8 } = {}) {
+    const K = this.kinds.stone;
+    for (let i = 0; i < n; i++) {
+      const p = this._alloc('stone');
+      p.pos.copy(at).add(_v.set((Math.random() - 0.5) * 0.3, Math.random() * 0.1, (Math.random() - 0.5) * 0.3));
+      p.q.setFromEuler(new THREE.Euler(Math.random() * 6.3, Math.random() * 6.3, Math.random() * 6.3));
+      const s = size * (0.5 + Math.random() * Math.random() * 2);
+      p.scale.set(s * (0.8 + Math.random() * 0.5), s * (0.5 + Math.random() * 0.4), s * (0.8 + Math.random() * 0.5));
+      this._shape(p, K.src.half);
+      p.drag = 0.1; p.flutter = 0;
+      p.vel.copy(vel).add(_v.set((Math.random() - 0.5) * spread, Math.random() * up, (Math.random() - 0.5) * spread));
+      p.w.set((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30);
+      const sh = 0.7 + Math.random() * 0.5;
+      p.colour.setRGB(colour[0] * sh, colour[1] * sh, colour[2] * sh);
+      p.e = 0.35; p.mu = 0.6;
+    }
+  }
+
   shards(n, at, vel, colour, { size = 0.09, spread = 3, up = 2.5, painted = 0.45, kick = 1 } = {}) {
     const K = this.kinds.shard;
     for (let i = 0; i < n; i++) {

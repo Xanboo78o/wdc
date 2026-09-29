@@ -40,10 +40,14 @@ const RUBBER = [0.88, 0.89, 0.92];
 const GRAVEL = [0.70, 0.54, 0.36];
 const EARTH = [0.55, 0.45, 0.30];
 
+const STONE = [0.20, 0.18, 0.15];   // linear, not sRGB: 0.5 read as white
+const CLOD = [0.06, 0.045, 0.025];
+const SMOKE_OIL = [0.34, 0.34, 0.36];
+
 const hash = n => { const s = Math.sin(n * 91.345 + 17.17) * 43758.5453; return s - Math.floor(s); };
 
 const _M = new THREE.Matrix4(), _R = new THREE.Matrix4(), _E = new THREE.Euler(0, 0, 0, 'XYZ');
-const _p = new THREE.Vector3(), _v = new THREE.Vector3();
+const _p = new THREE.Vector3(), _v = new THREE.Vector3(), _w = new THREE.Vector3();
 
 export class Fx {
   constructor(view, bundle) {
@@ -171,11 +175,14 @@ export class Fx {
     const M = this._matrix(car, sy);
     const cs = Math.cos(car.hdg), sn = Math.sin(car.hdg);
     const vwx = car.vx * cs - car.vy * sn, vwy = car.vx * sn + car.vy * cs;
-    const vel = _v.set(vwx, car.vz || 0, Z(vwy)).clone();
+    const vel = (st.vel || (st.vel = new THREE.Vector3())).set(vwx, car.vz || 0, Z(vwy));
     const speed = car.speed || 0;
     const col = st.colour;
-    this.cars.push({ x: car.x, z: Z(car.y), cs, sn, vx: vel.x, vz: vel.z, speed });
-    const at = (x, y, z) => new THREE.Vector3(x, y, z).applyMatrix4(M);
+    // a pooled record per car, for debris.js to kick pieces with
+    const k = st.kick || (st.kick = {});
+    k.x = car.x; k.z = Z(car.y); k.cs = cs; k.sn = sn; k.vx = vel.x; k.vz = vel.z; k.speed = speed;
+    this.cars.push(k);
+    const at = (x, y, z) => _p.set(x, y, z).applyMatrix4(M);
 
     // ---- impacts: the crush went up somewhere ------------------------------
     for (const k of ['front', 'rear', 'left', 'right']) {
@@ -194,6 +201,13 @@ export class Fx {
         this.sparks.emit(n, p.x, p.y, p.z, vel.x * 0.6, 0.5, vel.z * 0.6, sy, { spread: 4 + d * 12, up: 2 + d * 6, life: 0.6 });
       }
       if (d > 0.08) this.audio.snap(p, Math.min(1, d * 3));
+      // a big hit throws up a cloud: concrete dust, tyre-wall rubber, carbon
+      if (d > 0.1) {
+        for (let i = 0; i < Math.min(14, 3 + d * 30); i++) {
+          this.smoke.emit(p.x, p.y, p.z, vel.x * 0.2 + (Math.random() - 0.5) * 4, 0.5 + Math.random() * 1.5,
+            vel.z * 0.2 + (Math.random() - 0.5) * 4, { size: 0.4, grow: 1.8, life: 2.8, alpha: 0.22, col: [0.72, 0.70, 0.66], rise: 0.3 });
+        }
+      }
       // things that leave at a threshold
       if (k === 'front' && was <= 0.55 && now > 0.55) {
         this.debris.part('fepL', M, vel, col, 0.8);
@@ -290,6 +304,20 @@ export class Fx {
       this.sparks.emit(2, p.x, sy + 0.02, p.z, vel.x * 0.8, 0.2, vel.z * 0.8, sy, { spread: 1.5, up: 1, life: 0.35 });
     }
 
+    // ---- a wounded car smokes ------------------------------------------------
+    // Past a heavy knock the engine bay is breached: oil on hot metal, a
+    // grey trail from under the engine cover that thickens with the damage.
+    if ((car.damage || 0) > 0.5 && !car.airborne) {
+      const dmg = car.damage;
+      st.acc[7] += (dmg - 0.5) * 60 * dt;
+      let n = Math.floor(st.acc[7]); st.acc[7] -= n;
+      while (n-- > 0) {
+        const p = at(-1.5, 0.62, (Math.random() - 0.5) * 0.3);
+        this.smoke.emit(p.x, p.y, p.z, vel.x * 0.35, 0.6 + Math.random() * 0.4, vel.z * 0.35,
+          { size: 0.25, grow: 1.1, life: 2.5, alpha: 0.10 + 0.25 * (dmg - 0.5), col: SMOKE_OIL, rise: 0.7 });
+      }
+    }
+
     // ---- smoke --------------------------------------------------------------
     if (car.airborne) return;
     const pk = (car.spec && car.spec._pk) || 0.13;
@@ -328,6 +356,16 @@ export class Fx {
         emit(2, 30, -1.8, 0.8, o); emit(3, 30, -1.8, -0.8, o);
       }
     } else if (speed > 5) {
+      // Stones and clods flung back off the rear tyres. They land — often on
+      // the racing line — and stay, until a car kicks them on.
+      const gravelS = surf > 0.5;
+      st.acc[6] += Math.min(30, speed * (gravelS ? 0.9 : 0.35)) * dt;
+      let ns = Math.floor(st.acc[6]); st.acc[6] -= ns;
+      while (ns-- > 0) {
+        const p = at(-1.8, 0.05, Math.random() < 0.5 ? 0.8 : -0.8);
+        _w.set(-vel.x * 0.1 + vel.x * 0.25, 0, -vel.z * 0.1 + vel.z * 0.25);
+        this.debris.stones(1, p, _w, gravelS ? STONE : CLOD, { up: 1 + speed * 0.05, spread: 1 + speed * 0.04 });
+      }
       // dust off the gravel and the grass, from every wheel, more the faster
       const wet = (this.view.wx && this.view.wx.wetness) || 0;
       const gravel = surf > 0.5;
@@ -365,6 +403,10 @@ export class Fx {
     if (d === 'scrape') {
       const p = at(2.2, 0.25, -0.9);
       this.sparks.emit(10, p.x, p.y, p.z, -fwd.x * 25, 0.6, -fwd.z * 25, sy, { spread: 2.5, up: 2.2, life: 0.5 });
+    }
+    if ((d === 'dust' || d === 'stones') && Math.random() < 0.7) {
+      const p = at(-1.8, 0.05, Math.random() < 0.5 ? 0.8 : -0.8);
+      this.debris.stones(2, p, fwd.clone().multiplyScalar(4), STONE, { up: 3, spread: 3 });
     }
     if (d === 'smoke' || d === 'all' || d === 'dust') {
       const col = d === 'dust' ? GRAVEL : RUBBER;
