@@ -539,8 +539,13 @@ BUILD.oval = (it, ctx) => {
       return Math.abs(q.lat) < q.w + q.run + 1.5;
     });
     // Bank: rises with curvature (a 320 m radius curve is the full rim).
-    const bank = sg.k.map(k => Math.min(1, Math.abs(k) * 320) * RIM);
-    const sm = bank.map((_, k) => { let a = 0, c = 0; for (let d = -5; d <= 5; d++) { const q = bank[k + d]; if (q != null) { a += q; c++; } } return a / c; });
+    // The survey's curvature is noisy vertex to vertex (a kink at every OSM
+    // node), and a rim that followed it came out as a row of humps. Average
+    // over +-60 m first, then ease the result over another +-40 m, so a curve
+    // is banked continuously and ramps in and out at its ends.
+    const box = (arr, r) => arr.map((_, k) => { let a = 0, c = 0; for (let d = -r; d <= r; d++) { const q = arr[k + d]; if (q != null) { a += q; c++; } } return a / c; });
+    const km = box(sg.k.map(Math.abs), 15);
+    const sm = box(km.map(k => Math.min(1, k * 420) * RIM), 10);
     const X = [], lastU = [];
     let u = 0;
     for (let k = 0; k < n; k++) {
