@@ -23,6 +23,7 @@ import { buildEnv } from './env.js';
 import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
 import { carLamps, buildCourseLights, LightTrails } from './lamps.js';
 import { buildGrandstands } from './crowd.js';
+import { placeLandmarks } from './landmarks.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar, buildGT3, liveryAtlas } from './car.js';
@@ -1273,6 +1274,7 @@ export class View {
     // The pit complex is laid out BEFORE the city so the city can be told to
     // keep out of its way.
     const corridor = pitCorridor(t);
+    stats.landmarks = placeLandmarks(this, env);   // js/landmarks.js: before the city, which it may clear over a tunnel
     stats.env = buildEnv(S, env, t, look, corridor, this.world);
     this.corridor = corridor;
 
