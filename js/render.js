@@ -1224,9 +1224,15 @@ export class View {
     }
 
     const kp = kerbs(t, bank, this.surf);
-    const kb = kp.kerb.mesh(look.mat('concrete', {
-      size: 1.4, roughness: 0.62, side: THREE.DoubleSide, vertexColors: true,
-    }));
+    // PAINT, not tinted concrete. The concrete scan's albedo (0.32 linear)
+    // multiplied under the paint turned red into brick and white into grey;
+    // a kerb is painted, so the paint IS the albedo and the scan contributes
+    // only its relief (normal map) and its wear (roughness).
+    const kerbMat = look.mat('concrete', {
+      size: 1.4, roughness: 0.55, side: THREE.DoubleSide, vertexColors: true, normalScale: 0.7,
+    });
+    kerbMat.map = null;
+    const kb = kp.kerb.mesh(kerbMat);
     if (kb) { this.world.lift(kb.geometry); S.add(kb); }
     const tf = kp.turf.mesh(look.mat('grass', {
       size: 1.1, tint: 0x3f6b34, roughness: 1, side: THREE.DoubleSide,

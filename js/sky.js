@@ -128,6 +128,8 @@ export class ProcSky {
     this.pmrem = new THREE.PMREMGenerator(renderer);
     this.env = null;
     this._key = '';
+    const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('envi') : null;
+    this.envIntensity = q != null && Number.isFinite(+q) ? +q : 0.5;
   }
 
   /**
@@ -161,6 +163,19 @@ export class ProcSky {
     const old = this.env;
     this.env = this.pmrem.fromCubemap(this.cube.texture).texture;
     scene.environment = this.env;
+    // The drawn sky is brighter overhead than it used to be (the saturating
+    // in-scatter above), and all of that light arrives in every reflection.
+    // At full strength this cube lit dark carbon and the tub a pale blue.
+    // ?envi= overrides.
+    //
+    // NOTE, measured 2026-09-28: in this three build, whenever a material has
+    // no envMap of its own and the scene has an environment, the renderer
+    // WRITES scene.environmentIntensity over the material's envMapIntensity
+    // on every draw. So every per-material envMapIntensity in this repo (car
+    // paint 1.35, carbon 0.55, the road's rain boost in render.js) is
+    // silently ignored and THIS is the one knob. ?envi=0 vs ?envi=3 on the
+    // chase camera proves it: the whole car, road and tub move together.
+    scene.environmentIntensity = this.envIntensity;
     if (old) old.dispose();
     return true;
   }

@@ -213,8 +213,13 @@ export function sunRig(scene, sky, { shadows = true } = {}) {
   // the only thing filling the shadows besides the environment map.
   // Under overcast there is barely a sun, so almost all the light has to come
   // from the dome. Get this balance wrong and Zandvoort reads as dusk.
+  // The sky colour is taken half-neutral: the HDR's zenith pixel is a
+  // saturated blue, and poured over every shaded surface at full strength it
+  // painted carbon, tyres and the cockpit tub cornflower (LOOK.md amendment:
+  // soft light, nothing pitch black, but not blue either). A real shadow is
+  // lit by the WHOLE dome, and the dome averages much greyer than its zenith.
   const hemi = new THREE.HemisphereLight(
-    new THREE.Color(sky?.sky || '#93a8ce'), new THREE.Color(0x4a4438),
+    new THREE.Color(sky?.sky || '#93a8ce').lerp(new THREE.Color(0xd8d4cc), 0.5), new THREE.Color(0x4a4438),
     0.55 + (1 - punch) * 1.15);
   scene.add(hemi);
 
