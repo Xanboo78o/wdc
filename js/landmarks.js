@@ -33,6 +33,12 @@ import { buildGrandstands } from './crowd.js';
 // warns if the baked file ever disagrees.
 const COVERED = { monaco: [[1476, 1836]] };
 
+// Env-bake buildings a landmark REPLACES rather than decorates: the flat-topped
+// prisms env.js extrudes for the Flame Towers (OSM ways 253081850/253082095,
+// centroids as baked in data/env/baku.json) poke out of the tapered flames.
+// Matched by footprint centroid, within 8 m, and only if taller than 50 m.
+const REPLACED = { baku: [[-1186, -1080], [-1272, -998]] };
+
 const VER = new URL(import.meta.url).searchParams.get('v') || '';
 
 function coversRoad(t, ring, s0, s1) {
@@ -66,6 +72,15 @@ export function placeLandmarks(view, env) {
     env.buildings = env.buildings.filter(b => b.k === 'grandstand'
       || !COVERED[key].some(([a, c]) => coversRoad(t, b.p, a, c)));
     stats.removed = before - env.buildings.length;
+  }
+  if (env && env.buildings && REPLACED[key]) {
+    const before = env.buildings.length;
+    env.buildings = env.buildings.filter(b => {
+      if (!(b.h > 50)) return true;
+      const cx = b.p.reduce((a, q) => a + q[0], 0) / b.p.length, cy = b.p.reduce((a, q) => a + q[1], 0) / b.p.length;
+      return !REPLACED[key].some(([x, y]) => Math.hypot(cx - x, cy - y) < 8);
+    });
+    stats.removed += before - env.buildings.length;
   }
   if (new URLSearchParams(location.search).has('nolandmarks')) return stats;
   fetch(`./data/landmarks/${key}.json${VER ? '?v=' + VER : ''}`)
@@ -321,7 +336,10 @@ function yachtGeometry(sail) {
   const b = new Builder({ color: true, uv: true });
   const white = [0.93, 0.93, 0.92], boot = [0.10, 0.13, 0.18], teak = [0.55, 0.40, 0.25], glassC = [0.06, 0.08, 0.1];
   // Plan: x along the hull (-0.5 stern .. +0.5 bow), z across; beam 0.2.
-  const half = x => (x < 0.18 ? 0.1 : 0.1 * Math.max(0, 1 - ((x - 0.18) / 0.32) ** 1.6));
+  // Never exactly zero at the stem: a quad that collapses to a line has no
+  // normal, the shader normalises (0,0,0) into NaN, and bloom spreads one NaN
+  // pixel into a black square over every yacht.
+  const half = x => (x < 0.18 ? 0.1 : 0.1 * Math.max(0.03, 1 - ((x - 0.18) / 0.32) ** 1.6));
   const N = 10, xs = [];
   for (let k = 0; k <= N; k++) xs.push(-0.5 + k / N);
   const yb = -0.02, yt = 0.075, yd = 0.078;
@@ -882,7 +900,7 @@ BUILD.flames = (it, ctx) => {
     const H = HEIGHT[n] || tw.h;
     const STEPS = 14;
     // Lean toward the bay (south-east, the Caspian) as it rises.
-    const lean = [0.18, -0.22];
+    const lean = [0.08, -0.1];
     const at = (p, f) => {
       const k = 1.012 * (1 - Math.pow(f, 2.4) * 0.97);
       return [c[0] + (p[0] - c[0]) * k + lean[0] * f * H * 0.25, g + f * H, Z(c[1] + (p[1] - c[1]) * k + lean[1] * f * H * 0.25)];
