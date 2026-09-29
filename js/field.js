@@ -385,7 +385,12 @@ export class Field {
       if (!rig.wasVisible) { rig.yaw.visible = true; rig.wasVisible = true; }
       drawn++;
 
-      const near = detailed.has(k);
+      // A car that has lost a wing stays the full model: the merged and dot
+      // versions are baked with every wing on, so a wrecked car seen from
+      // down the road drove on looking pristine. Wrecks are few, so the
+      // extra draws are too.
+      const lostWing = car.lost && (car.lost.frontWing || car.lost.rearWing);
+      const near = detailed.has(k) || !!lostWing;
       const level = near ? 0 : d2[k] > DOT_RANGE * DOT_RANGE ? 2 : 1;
       if (level !== rig.level) {
         rig.full.visible = level === 0; rig.lod.visible = level === 1; rig.dot.visible = level === 2;

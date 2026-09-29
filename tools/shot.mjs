@@ -134,7 +134,8 @@ class CDPClient {
         this.errors.push(`${d.text} ${d.exception?.description || ''}`.trim());
       }
       if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
-        this.errors.push(`${m.params.entry.source}: ${m.params.entry.text}`);
+        // name the URL: "status of 404" alone sent everyone hunting for hours
+        this.errors.push(`${m.params.entry.source}: ${m.params.entry.text}${m.params.entry.url ? ' ' + m.params.entry.url : ''}`);
       }
     });
   }
