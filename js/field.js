@@ -66,6 +66,23 @@ const DRAW_RANGE = 900;      // metres from the camera before a car stops drawin
 const DETAIL_RANGE = 90;     // ...before it drops to the merged version
 const MAX_DETAIL = 4;        // ...and at most this many are the full model
 const SHADOW_RANGE = 60;     // ...before it stops casting a shadow
+// ...and past this, ONE mesh per car. Frame budget, 2026-09-28: the merged car
+// is still ~15 draws (one per material), and a full grid strung out down a
+// straight is two hundred of them for cars a few pixels tall. The third
+// version bakes every material's colour — and the team livery, evaluated on
+// the CPU with the same box rules js/livery.js runs in the paint shader — into
+// vertex colours, so the whole car is one draw with one shared material.
+const DOT_RANGE = 140;
+
+// The paint shader's livery rule, on the CPU: [col, x0, x1, y0, y1, z0, z1, shear].
+function liveryColourAt(liv, x, y, z, out) {
+  const az = Math.abs(z);
+  for (const r of liv.rules.slice(0, 10)) {
+    const xs = x + (r[7] || 0) * y;
+    if (xs >= r[1] && xs <= r[2] && y >= r[3] && y <= r[4] && az >= r[5] && az <= r[6]) out.set(r[0]);
+  }
+  return out;
+}
 
 /**
  * Flatten a car down to one geometry per material.
@@ -227,6 +244,11 @@ export class Field {
     }
     lod.visible = false;
 
+    const dot = new THREE.Mesh(this._dotGeometry(team, colour, swap), this._dotMat());
+    dot.name = 'rival.dot';
+    dot.castShadow = false;
+    dot.visible = false;
+
     const wheels = {}, steer = {};
     for (const k in src.wheels) wheels[k] = map.get(src.wheels[k]);
     for (const k in src.steer) steer[k] = map.get(src.steer[k]);
@@ -241,14 +263,14 @@ export class Field {
     // versions of the car hang from, so swapping between them changes the level
     // of detail and nothing else.
     const tilt = new THREE.Group();
-    tilt.add(full, lod);
+    tilt.add(full, lod, dot);
     const yaw = new THREE.Group();
     yaw.name = 'rival';
     yaw.add(tilt);
     this.view.scene.add(yaw);
 
     return {
-      yaw, tilt, full, lod, wheels, steer, wings,
+      yaw, tilt, full, lod, dot, wheels, steer, wings, level: 0,
       // head, tail and brake lights, on the tilt group so both LODs carry them
       lamps: carLamps(tilt, this.refBox),
       drs: src.drs ? map.get(src.drs) : null,
@@ -256,6 +278,48 @@ export class Field {
       R: src.R, spin: 0, crushAt: null,
       wasVisible: true, detail: true, shadows: true,
     };
+  }
+
+  // One shared material for every far car: the colour lives in the vertices.
+  _dotMat() {
+    if (!this._dm) this._dm = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.15, envMapIntensity: 0.8 });
+    return this._dm;
+  }
+
+  // The merged car as a single vertex-coloured geometry, one per team (or per
+  // colour for an entry with no team). `swap` is make()'s material map, so the
+  // colours are exactly the ones the nearer versions of this car wear.
+  _dotGeometry(team, colour, swap) {
+    this._dots = this._dots || new Map();
+    const key = team ? team.key : 'c' + colour;
+    if (this._dots.has(key)) return this._dots.get(key);
+    const pos = [], nrm = [], col = [];
+    const c = new THREE.Color();
+    for (const part of this.merged) {
+      const mat = swap(part.mat);
+      if (!mat || (mat.transparent && (mat.opacity ?? 1) < 0.35)) continue;
+      const liv = mat.userData && mat.userData.livery;
+      const base = new THREE.Color();
+      if (mat.color) base.copy(mat.color); else base.setRGB(0.1, 0.1, 0.1);
+      // a textured material's colour multiplies a photograph: carbon, tyres,
+      // stickers. Darken to about what the photograph averages to.
+      if (mat.map && !liv) base.multiplyScalar(0.35);
+      const p = part.geo.attributes.position, n = part.geo.attributes.normal;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+        pos.push(x, y, z); nrm.push(n.getX(i), n.getY(i), n.getZ(i));
+        c.copy(base);
+        if (liv) liveryColourAt(liv, x, y, z, c);
+        col.push(c.r, c.g, c.b);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nrm), 3));
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
+    g.computeBoundingSphere();
+    this._dots.set(key, g);
+    return g;
   }
 
   // Shadows cost as much as the car itself — every mesh is drawn a second time
@@ -322,11 +386,13 @@ export class Field {
       drawn++;
 
       const near = detailed.has(k);
-      if (near !== rig.detail) {
-        rig.full.visible = near; rig.lod.visible = !near; rig.detail = near;
+      const level = near ? 0 : d2[k] > DOT_RANGE * DOT_RANGE ? 2 : 1;
+      if (level !== rig.level) {
+        rig.full.visible = level === 0; rig.lod.visible = level === 1; rig.dot.visible = level === 2;
+        rig.level = level; rig.detail = near;
       }
       const wantShadow = d2[k] < SHADOW_RANGE * SHADOW_RANGE;
-      if (wantShadow !== rig.shadows) Field.setShadows(rig, wantShadow);
+      if (wantShadow !== rig.shadows) { Field.setShadows(rig, wantShadow); rig.dot.castShadow = false; }
 
       // Height. The surveyed ground under the racing line, plus the camber of
       // whatever corner it is in, plus how far off the ground the car is —

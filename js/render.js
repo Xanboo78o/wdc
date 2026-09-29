@@ -13,7 +13,8 @@ import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { Look, sunRig } from './tex.js';
 import { Post } from './post.js';
-let RIGS_NAMES = [];
+let RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
+import { SpeedShake, SpeedBlur, SFX } from './speedfx.js';
 import { ProcSky } from './sky.js';
 import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation, dayPhase, WeatherDirector } from './weather.js';
 import { Rain } from './rain.js';
@@ -25,7 +26,7 @@ import { buildGrandstands } from './crowd.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar, buildGT3, liveryAtlas } from './car.js';
-import { makeDeformer } from './dent.js';
+import { makeDeformer, crushParts, applyCrush } from './dent.js';
 import { loadChassis, chassisGeometry } from './mesh.js';
 import { World, loadElev } from './world.js';
 import { loadSurface, defaultSurface, KERB_SHAPE } from './surface.js';
@@ -250,63 +251,9 @@ function kerbs(track, bank, surf) {
   return { kerb: b, turf: turfB };
 }
 
-export function crushParts(group, wheels) {
-  const skip = new Set(Object.values(wheels || {}));
-  const out = { front: [], rear: [], left: [], right: [] };
-  group.traverse(m => {
-    if (!m.isMesh || skip.has(m)) return;
-    const p = m.position;
-    let bin = null;
-    if (p.x > 1.45) bin = 'front';
-    else if (p.x < -1.45) bin = 'rear';
-    else if (Math.abs(p.z) > 0.40 && Math.abs(p.x) < 1.25) bin = p.z > 0 ? 'left' : 'right';
-    if (!bin) return;
-    // A stable wobble per part, from its own position — so a given car always
-    // folds the same way rather than re-rolling on every impact.
-    const s = Math.sin(p.x * 37.13 + p.y * 71.7 + p.z * 13.9) * 43758.5453;
-    out[bin].push({
-      m, wob: (s - Math.floor(s)) * 2 - 1,
-      home: { px: p.x, py: p.y, pz: p.z, rx: m.rotation.x, ry: m.rotation.y, rz: m.rotation.z },
-      endplate: Math.abs(p.z) > 0.70 && p.x > 1.45,
-    });
-  });
-  return out;
-}
-
-export function applyCrush(parts, crush) {
-  if (!parts) return;
-  for (const key of ['front', 'rear', 'left', 'right']) {
-    const c = Math.min(1, (crush && crush[key]) || 0);
-    for (const it of parts[key]) {
-      const h = it.home, m = it.m;
-      if (c < 0.001) {
-        m.position.set(h.px, h.py, h.pz);
-        m.rotation.set(h.rx, h.ry, h.rz);
-        m.scale.set(1, 1, 1);
-        m.visible = true;
-        continue;
-      }
-      if (key === 'front' || key === 'rear') {
-        // the end folds back toward the tub and drops
-        m.position.x = h.px * (1 - 0.30 * c);
-        m.position.y = h.py - 0.13 * c;
-        m.position.z = h.pz + it.wob * 0.10 * c;
-        m.rotation.z = h.rz + it.wob * 0.55 * c;
-        m.rotation.y = h.ry + it.wob * 0.30 * c;
-        m.scale.x = 1 - 0.45 * c;
-        // wing endplates are the first thing to leave an F1 car
-        m.visible = !(it.endplate && c > 0.55);
-      } else {
-        // a side impact pushes the pod in against the tub
-        m.position.z = h.pz * (1 - 0.50 * c);
-        m.position.y = h.py - 0.05 * c;
-        m.rotation.x = h.rx + it.wob * 0.40 * c;
-        m.scale.z = 1 - 0.55 * c;
-        m.scale.y = 1 - 0.20 * c;
-      }
-    }
-  }
-}
+// The region fold (crushParts/applyCrush) lives in dent.js with the rest of
+// the damage; re-exported here because field.js imports it from this file.
+export { crushParts, applyCrush };
 
 function puffTexture() {
   const c = document.createElement('canvas');
@@ -501,7 +448,7 @@ export class View {
     // ?cam=0..3 picks a rig at load, so the harness can photograph one
     // without a human pressing C.
     const camQ = new URLSearchParams(location.search).get('cam');
-    if (camQ != null) this.mode = Math.max(0, Math.min(3, parseInt(camQ, 10) || 0));
+    if (camQ != null) this.mode = Math.max(0, Math.min(RIGS_NAMES.length - 1, parseInt(camQ, 10) || 0));
 
     const ph = new URLSearchParams(location.search).get('photo');
     if (ph) {
@@ -713,6 +660,10 @@ export class View {
     const E = this._mE.set(eye[0], eye[1], eye[2]).applyMatrix4(car.matrixWorld);
     const M = this._mM.copy(m.c).applyMatrix4(car.matrixWorld);
     const N = this._mN.copy(m.n).transformDirection(car.matrixWorld);
+    // The glass must face the EYE. Its first vertex normal can point into the
+    // housing, which parked the mirror's camera inside the mirror and drew
+    // the glass solid black.
+    if (N.dot(this._v2.copy(E).sub(M)) < 0) N.negate();
     // the reflected sight line: V - 2(V.N)N
     const V = M.clone().sub(E).normalize();
     const R = V.sub(N.clone().multiplyScalar(2 * V.dot(N)));
@@ -1219,7 +1170,7 @@ export class View {
     p.vy = 0.5 + Math.random() * 0.9 * force;
   }
 
-  setMode(m) { this.mode = ((m % 4) + 4) % 4; }
+  setMode(m) { const n = RIGS_NAMES.length; this.mode = ((m % n) + n) % n; }
   /** Is it dark enough for lamps? The sun, not the H key: that is yours alone. */
   // How dark it is, 0..1 — or 0 until it is dark enough for lamps (truthy = on).
   nightOn() { const d = this.phase ? this.phase.dark : 0; return d > 0.2 ? d : 0; }
@@ -1375,17 +1326,42 @@ export class View {
     // handing the car off to each other as it comes past, ZOOMING to hold it
     // at a constant size in frame. The zoom is the tell — it is what makes
     // footage read as televised rather than as a game replay.
-    RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV'];
+    //
+    // SPEED (Adam, 2026-09-28: "make 350 kmh feel like 350 kmh not 40 mph").
+    // Measured with tools/speedflow.mjs, not guessed — see js/speedfx.js for
+    // the numbers. What changed here:
+    //   - every rig SHAKES now, angularly, per mount (speedfx.js SpeedShake):
+    //     the old centimetre of positional jitter moved the halo and left the
+    //     world where it was;
+    //   - the lens no longer WIDENS with speed. A wider lens at 350 puts
+    //     everything further away, which is the one thing speed must not look
+    //     like. It kicks with ACCELERATION instead (g, not v), briefly;
+    //   - the chase camera no longer falls ~9 m behind at top speed (a lerp
+    //     toward a target running at 97 m/s lags by v/k), and sits lower and
+    //     tighter so the road rushes under it;
+    //   - T-CAM, the real one: on the stalk above the airbox, behind the
+    //     driver's head, looking over the halo.
+    // ?fovkick=1 brings back the old speed-widening lens for an A/B.
+    RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
+    if (typeof window !== 'undefined') window.__wdcRigs = RIGS_NAMES;
     const RIGS = [
       // ONBOARD is the DRIVER'S EYES (Adam, 2026-09-25: "first person is like on
       // top of my halo"). It sat at 1.19 m, T-cam height above the airbox. Then
       // "i need to sit higher bc thats how my rig is": his rig seats him
       // upright with the wheel in front of him, so the eye is at the halo's
       // height (car.js eye), not slumped under it.
-      { name: 'ONBOARD', kind: 'bolted', at: this.carEye || [-0.34, 1.19, 0], aim: 24, drop: this.carEye ? 1.1 : 0.22, fov: 62, kick: 0.55, roll: 0.55 },
-      { name: 'CHASE', kind: 'chase', dist: 5.6, height: 1.66, lead: 13, fov: 55, kick: 1 },
-      { name: 'NOSE', kind: 'bolted', at: [1.62, 0.46, 0], aim: 26, fov: 62, kick: 0.8, roll: 0.85 },
+      { name: 'ONBOARD', kind: 'bolted', at: this.carEye || [-0.34, 1.19, 0], aim: 24, drop: this.carEye ? 1.1 : 0.22, fov: 62, kick: 0.55, roll: 0.55, mount: 'onboard' },
+      // Lower (1.66 -> 1.28 m) and tighter (5.6 -> 4.9 m): the ground in the
+      // bottom of the frame is nearer, so it streams past faster.
+      { name: 'CHASE', kind: 'chase', dist: 4.9, height: 1.28, lead: 15, aimY: 0.62, fov: 55, kick: 1, mount: 'chase' },
+      { name: 'NOSE', kind: 'bolted', at: [1.62, 0.46, 0], aim: 26, fov: 62, kick: 0.8, roll: 0.85, mount: 'nose' },
       { name: 'TV', kind: 'tv', fov: 40, kick: 0 },
+      // T-CAM. The broadcast onboard: the camera on the T-bar on top of the
+      // airbox (car.js puts the pod at x -0.62, top 0.82 m), BEHIND the
+      // driver's head, so it looks over the helmet and the halo loop at the
+      // road. A longer lens than the eye (50 vs 62 deg) and the chassis's
+      // full roll — it is a camera bolted to a car, not a person's head.
+      { name: 'T-CAM', kind: 'bolted', at: [-0.62, 0.875, 0], aim: 24, drop: 0.92, fov: 50, kick: 0.3, roll: 0.92, mount: 'tcam' },
     ];
     if (this.photo) {
       const t = this.track;
@@ -1410,11 +1386,32 @@ export class View {
     // is the other reason 210 km/h used to read as 60 — there was nothing
     // shaking. High frequency and TINY: this is felt rather than seen, and the
     // moment you can see it, it is a gimmick.
-    const buzz = (0.0016 + car.speed * 0.00017) * (rig.kick || 0);
+    //
+    // With speedfx on, the per-frame buzz is ANGULAR (SpeedShake, below) and
+    // this positional term keeps only the hits — kerbs, grass, big lateral g —
+    // at a third of its old size, because the angular kick now carries them.
+    const sfxOn = SFX.on && SFX.shake > 0;
+    const buzz = sfxOn ? 0 : (0.0016 + car.speed * 0.00017) * (rig.kick || 0);
     this.shake = Math.max(this.shake * (1 - dt * 6),
       (hud.rough || 0) * 0.42 + Math.max(0, Math.abs(latG) - 1.8) * 0.045);
     const jx = (Math.random() - 0.5), jy = (Math.random() - 0.5), jz = (Math.random() - 0.5);
-    const amp = this.shake + buzz;
+    const amp = this.shake * (sfxOn ? 0.35 : 1) + buzz;
+    if (!this.speedShake) this.speedShake = new SpeedShake();
+    const sk = this.speedShake.step(dt, car.speed || 0, rig.mount,
+      hud.rough || 0, car.surface > 0.9 && car.surface < 1);
+    // Acceleration, smoothed, from the speed alone (a replay sets only that).
+    const acc = dt > 0 && this._lastSpd != null ? ((car.speed || 0) - this._lastSpd) / dt : 0;
+    this._lastSpd = car.speed || 0;
+    this._acc = (this._acc || 0) + (Math.max(-60, Math.min(60, acc)) - (this._acc || 0)) * Math.min(1, dt * 4);
+    // The old lens widened with SPEED; ?fovkick=1 brings it back.
+    if (this._fovKick === undefined) {
+      const fq = new URLSearchParams(location.search).get('fovkick');
+      this._fovKick = fq != null && fq !== '' && Number.isFinite(+fq) ? +fq : 0;
+    }
+    // ...and the new one breathes with ACCELERATION: a couple of degrees wider
+    // while it is pulling hard, tighter under braking, back to rest at a
+    // steady 350. A change of lens you feel as the car shoving you.
+    const gKick = Math.max(-3, Math.min(3.5, this._acc * 0.28)) * (rig.kick || 0) * (sfxOn ? 1 : 0);
 
     let fov = rig.fov;
     const fp = rig.name === 'ONBOARD' && !!this.carEye;
@@ -1435,14 +1432,18 @@ export class View {
       this.camera.up.copy(this._v2);
       this.camera.position.copy(this._v0).addScaledVector(this._v2, 0);
       this.camera.position.x += jx * amp; this.camera.position.y += jy * amp; this.camera.position.z += jz * amp;
+      this.camera.position.addScaledVector(this._v2, sk.h);
       this.camera.lookAt(this._v1);
-      fov = rig.fov + Math.min(16, car.speed * 0.17) * rig.kick;
+      this.camera.rotateX(sk.p); this.camera.rotateY(sk.y); this.camera.rotateZ(sk.r);
+      fov = rig.fov + Math.min(16, car.speed * 0.17) * rig.kick * this._fovKick + gKick;
     } else if (rig.kind === 'tv') {
       const cam = this._pickTvCamera(proj.s);
       if (cam) {
         this.camera.up.copy(this._up);
         this.camera.position.set(cam.x, cam.y, cam.z);
-        this._v1.set(car.x, 0.6, Z(car.y));
+        // Above the ROAD, not above sea level: Monza rises 20 m, and an
+        // absolute 0.6 aimed the broadcast camera into the ground there.
+        this._v1.set(car.x, surfaceY + 0.6, Z(car.y));
         this.camera.lookAt(this._v1);
         // Hold the car at a constant size in frame. A broadcast camera zooms;
         // a game camera does not, and that is most of the difference.
@@ -1462,13 +1463,31 @@ export class View {
       while (d < -Math.PI) d += 2 * Math.PI;
       this.camH += d * Math.min(1, dt * 7);
       const ch = Math.cos(this.camH), sh = Math.sin(this.camH);
-      this._v0.set(car.x - ch * rig.dist, surfaceY + rig.height, Z(car.y - sh * rig.dist));
-      this.camPos.lerp(this._v0, Math.min(1, dt * 9));
+      // NO LAG ALONG THE ROAD. This was camPos.lerp(target, dt*9) — and a
+      // lerp chasing a target that moves at v settles v/9 behind it: at 350
+      // km/h the camera sat ~9 m further back than at 50, so the car shrank
+      // and the road under the lens got further away exactly as you went
+      // faster. Now the camera is placed exactly behind the car along the
+      // (smoothed) heading, and only a small spring on the car's
+      // ACCELERATION moves it: pushed back a touch when it pulls, drawn in
+      // when it brakes. Height is still smoothed so bumps do not jar it.
+      const pull = Math.max(-0.7, Math.min(0.9, this._acc * 0.07));
+      this._chaseG = (this._chaseG || 0) + (pull - (this._chaseG || 0)) * Math.min(1, dt * 5);
+      const dd = rig.dist + this._chaseG;
+      this._v0.set(car.x - ch * dd, surfaceY + rig.height, Z(car.y - sh * dd));
+      if (!this._chaseInit || this.camPos.distanceToSquared(this._v0) > 400) { this.camPos.copy(this._v0); this._chaseInit = true; }
+      this.camPos.x = this._v0.x; this.camPos.z = this._v0.z;
+      this.camPos.y += (this._v0.y - this.camPos.y) * Math.min(1, dt * 9);
       this.camera.up.copy(this._up);
-      this.camera.position.set(this.camPos.x + jx * amp, this.camPos.y + jy * amp, this.camPos.z + jz * amp);
-      this.camAim.lerp(this._v1.set(car.x + ch * rig.lead, surfaceY + 0.75, Z(car.y + sh * rig.lead)), Math.min(1, dt * 10));
+      this.camera.position.set(this.camPos.x + jx * amp, this.camPos.y + jy * amp + sk.h, this.camPos.z + jz * amp);
+      this._v1.set(car.x + ch * rig.lead, surfaceY + (rig.aimY ?? 0.75), Z(car.y + sh * rig.lead));
+      if (this.camAim.distanceToSquared(this._v1) > 400) this.camAim.copy(this._v1);
+      // The aim point already rides the smoothed heading, so it needs no lag
+      // of its own along the road; only its height is eased.
+      this.camAim.set(this._v1.x, this.camAim.y + (this._v1.y - this.camAim.y) * Math.min(1, dt * 10), this._v1.z);
       this.camera.lookAt(this.camAim);
-      fov = rig.fov + Math.min(20, car.speed * 0.22) * rig.kick;
+      this.camera.rotateX(sk.p); this.camera.rotateY(sk.y); this.camera.rotateZ(sk.r);
+      fov = rig.fov + Math.min(20, car.speed * 0.22) * rig.kick * this._fovKick + gKick;
     }
     if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
 
@@ -1478,6 +1497,28 @@ export class View {
     this.rig.follow(car.x, Z(car.y));
 
     this._draw();
+
+    // Motion blur at the edges (speedfx.js SpeedBlur), after the frame is on
+    // the canvas. Fades in from 110 to 260 km/h; never on the broadcast rig,
+    // whose long lens pans rather than travels. ?blur=0 / ?speedfx=0.
+    if (SFX.on && SFX.blur > 0 && rig.kind !== 'tv' && car.speed > 30) {
+      if (!this.speedBlur) { this.speedBlur = new SpeedBlur(this.renderer); this._sfxVel = new THREE.Vector3(); }
+      const kmh = car.speed * 3.6;
+      const amt = Math.min(1, Math.max(0, (kmh - 110) / 150));
+      const bt = Math.atan2(car.vy || 0, Math.max(Math.abs(car.vx || 0), 1));
+      const dir = car.hdg + bt;
+      this._sfxVel.set(Math.cos(dir) * car.speed, 0, Z(Math.sin(dir) * car.speed));
+      let hole = null;
+      if (this.mirrorOn) {
+        const r = this.renderer, pr = r.getPixelRatio();
+        const size = r.getSize(this._mirSize || (this._mirSize = new THREE.Vector2()));
+        const w = Math.round(Math.min(size.x * 0.34, 560)), h = Math.round(w / 4.2);
+        const x = Math.round((size.x - w) / 2), y = Math.round(size.y - h - 10);
+        hole = [(x - 4) * pr, (y - 4) * pr, (x + w + 4) * pr, (y + h + 4) * pr];
+      }
+      this.speedBlur.render(this.scene, this.camera, this.car, this._sfxVel,
+        this.camera.position.y - surfaceY, hole, amt);
+    }
 
     // Publish the real cost of a frame once, after there is one to measure.
     // Guessing at triangle counts from source is how a scene quietly ends up
