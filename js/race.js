@@ -68,13 +68,16 @@ const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
 // 2.0 ± 0.5, passes 100 -> 70, contacts 167 -> 96. `duel: false` reproduces
 // the old race byte for byte.
 const DUEL_N = 3, DUEL_GAP = 0.55, DUEL_STEP = 0.75, DUEL_FREEZE = 0.45;
-const K_WAIT = 0.022, K_FIRM = 0.005, K_CHASE = 0.012;
+const K_WAIT = 0.05, K_FIRM = 0.005, K_CHASE = 0.012;
 // Outside SUPERCASUAL's OVERTAKES window the tiers keep their meaning: a
 // neighbour may only trim its OWN grip, by this much down and this much up.
 const DUEL_DOWN = 0.05, DUEL_UP = 0.025;
 // After YOUR mistake: a neighbour more than DUEL_SLACK s past the gap it
 // wants may drop DUEL_DOWN_FAR below the window, and it is leashed from there.
-const DUEL_SLACK = 1.0, DUEL_DOWN_FAR = 0.12;
+// Swept 2026-09-29 (battlecheck --blunder 3, 24 races a side): K_WAIT 0.022
+// -> 0.05, SLACK 1.0 -> 0.6, DOWN_FAR 0.12 -> 0.18 took "still > 2 s behind
+// 20 s after a 3 s stop" from 32 +- 8% to 8 +- 5%; back within 1 s ~14 s.
+const DUEL_SLACK = 0.6, DUEL_DOWN_FAR = 0.18;
 // "Building, building": an attacker sits in the car ahead's tow, within
 // 0.8 s, for BUILD_T * (1.5 - aggression) seconds before it commits — pulls
 // out of the slipstream, goes for the inside, lunges. Until then it follows,
@@ -83,16 +86,20 @@ const DUEL_SLACK = 1.0, DUEL_DOWN_FAR = 0.12;
 // Measured first (tools/_duelwhy.mjs classifies every swap): in a 12-car
 // train everybody is always within 0.8 s, so a gate that only filled was
 // always open. It has to EMPTY on an attempt.
-const BUILD_T = 16, TRY_T = 9;
+const BUILD_T = 10, TRY_T = 9;
+// How much of its own lunge a defender uses when braking late on the inside.
+const DEF_LUNGE = 0.45;
 // DRS: within DRS_GAP s of the car ahead at a zone's detection line opens the
 // flap for that zone, from the start of lap DRS_FROM_LAP + 1, never behind the
 // safety car. Only for a car whose spec has one (physics.js CARS.f1.drs).
 const DRS_GAP = 1.0, DRS_FROM_LAP = 1;
 // ...and only where the road is straight: a zone drawn through a corner
-// (Kate Mascoi's runs 2.5 km, through the whole banked turn) shuts the flap
-// wherever the centreline bends tighter than 1/DRS_CURV metres. Open again on
-// the straight after it.
-const DRS_CURV = 1 / 700;
+// shuts the flap wherever the centreline bends tighter than 1/DRS_CURV metres
+// (280 m: Kate Mascoi's bank is ~200 m, the flat-out kinks after it 320 m+).
+// Kate's zones themselves now sit where F1 puts them (data/tracks/kate.json):
+// detection before a corner, activation on the straight after it, ending
+// before the next braking zone — the 2.5 km zone through the bank is gone.
+const DRS_CURV = 1 / 280;
 // Celebrate the pass: YOUR overtake counts once the car is behind you for
 // CHEER_HOLD s and you are clear of it by half a car.
 const CHEER_HOLD = 2.0;
@@ -259,6 +266,17 @@ export class Race {
     }
   }
 
+  // The nearest car ahead within `gate` metres laterally and 150 m along.
+  laneAhead(e, gate) {
+    let best = null, bd = 150;
+    for (const o of this.entries) {
+      if (o === e || o.retired || o.inPit) continue;
+      const ds = this.track.gap(o.proj.s, e.proj.s);
+      if (ds > 0 && ds < bd && Math.abs(o.proj.lat - e.proj.lat) < gate) { bd = ds; best = o; }
+    }
+    return best;
+  }
+
   // Rank every live rival by where it is relative to you: e.rank = +1 for the
   // car directly ahead, -1 directly behind, 0 for nobody near enough to count
   // (pit lane, retired). e.gapMe is the signed gap in seconds at the circuit's
@@ -389,7 +407,7 @@ export class Race {
   racecraft(e) {
     const t = this.track, i = e.proj.i, d = e.driver;
     const lim = Math.max(0.3, t.w[i] - 1.0);
-    let bias = 0, speedCap = null;
+    let bias = 0, speedCap = null, obstDs = null, obstV = null;
 
     // MEASURED AND REJECTED: an opening-lap caution.
     //
@@ -540,7 +558,7 @@ export class Race {
       // which is how a defender makes a dive not quite work. A fraction of the
       // attacker's own lunge, so the better-placed car still wins it.
       if (this.duel && braking && ds < 22 && e.lastMove === move) {
-        lunge = Math.max(lunge, 0.45 * (d.lungeMax ?? 0.02) * d.defence);
+        lunge = Math.max(lunge, DEF_LUNGE * (d.lungeMax ?? 0.02) * d.defence);
       }
       pressure = Math.max(pressure, Math.min(1, 1 - e.behindGapT / defendT));
     }
@@ -584,17 +602,31 @@ export class Race {
       // car being squeezed is the one with the wall on its far side.
       if (Math.abs(bias + lineOff) > lim) {
         bias = before;
-        yieldTo = Math.min(yieldTo ?? Infinity, o.car.speed * 0.94);
+        // ...but only the car BEHIND brakes. Two cars level, each yielding to
+        // 94% of the other, is a feedback loop: both slow together until the
+        // pair is crawling, and the pack arrives into the back of them.
+        // tools/incidents.mjs traced it to the start (a two-abreast grid is
+        // exactly this) and to side-by-side pairs braking on a straight at
+        // 250 km/h. In the duel, a car ahead of the other keeps its speed.
+        if (!this.duel || t.gap(o.proj.s, e.proj.s) > -0.5) yieldTo = Math.min(yieldTo ?? Infinity, o.car.speed * 0.94);
       }
     }
 
     // Car-following: settle at a sensible headway and MATCH the car ahead once
     // there. Always targeting a fraction of their speed cascades down the field
     // until the whole train stops.
-    if (e.ahead && !e.inPit) {
-      const ds = t.gap(e.ahead.proj.s, e.proj.s);
-      const dl = Math.abs(e.ahead.proj.lat - e.proj.lat);
-      const vA = e.ahead.car.speed || 0, v = e.car.speed;
+    // THE CAR AHEAD IN YOUR LANE, not the nearest car ahead (the duel). On a
+    // two-abreast grid the nearest car ahead is always the one diagonally in
+    // front, in the OTHER column, so the one directly in front was nobody's
+    // problem: tools/incidents.mjs caught cars launching flat out into a car
+    // 8 m ahead that was itself held back by the car in front of it, as the
+    // merge to the racing line closed the columns — eight contacts in the
+    // first two seconds of one Suzuka start.
+    const A = this.duel ? (this.laneAhead(e, this.brakingZone(e.proj.s, 140) ? Math.max(4.5, t.w[i] * 1.1) : 3.4) || e.ahead) : e.ahead;
+    if (A && !e.inPit) {
+      const ds = t.gap(A.proj.s, e.proj.s);
+      const dl = Math.abs(A.proj.lat - e.proj.lat);
+      const vA = A.car.speed || 0, v = e.car.speed;
       const closing = v - vA;
       const braking = this.brakingZone(e.proj.s, 140);
       const zone = braking ? 1.7 : 1.0;
@@ -659,6 +691,16 @@ export class Race {
       // zone concertinas all 22 of them. That single missing bound took the
       // grid from 22 finishers to 4.
       const overlap = ds < this.spec.bodyL * 1.15 && dl > 1.9;
+      // BRAKE FOR THE CAR AHEAD, NOT JUST THE LINE (the duel). The follow cap
+      // above only ever reacts to the speed the car ahead has NOW, and the
+      // pedals plan their stop from the racing line's corner speeds — so a car
+      // that brakes earlier than the line (slower, defending, lapped, off
+      // line) is hit by the one behind before either rule notices. Measured,
+      // tools/incidents.mjs: nose-to-tail in a braking zone was the biggest
+      // single kind of contact, lap one and after. So the car ahead in your
+      // lane is also a braking target: arrive no faster than you could shed
+      // to its speed in the room there is.
+      if (this.duel && !overlap && ds > 0 && ds < 150 && dl < latGate) { obstDs = ds - this.spec.bodyL * 1.15; obstV = vA; }
       if (!overlap && ds > 0 && ds < headway * 1.3 && dl < latGate) {
         // Both halves matter. With room, a bounded run — that is the overtake.
         // Without it, actively SLOWER than the car ahead, so the gap is
@@ -686,7 +728,7 @@ export class Race {
     // What the slew starts from next time is where the car was ALLOWED to go,
     // pit bias excluded (it is re-added fresh each pass).
     e.biasS = bias - (pitting && this.lane ? (Math.sign(this.lane.off) || 1) * lim * 1.5 : 0);
-    e.ctx = { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: e.hold ?? 1 };
+    e.ctx = { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: e.hold ?? 1, obstDs, obstV };
   }
 
   // ---- one substep --------------------------------------------------------

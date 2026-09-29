@@ -24,6 +24,7 @@
 //    is the single biggest thing separating a lap time from a spin.
 import { steerLock } from './input.js';
 import { wetGrip } from './physics.js';
+import { towDrag } from './aero.js';
 
 // ---------------------------------------------------------------------------
 // Difficulty. `line: 'centre'` is the interesting one — SUPERCASUAL drivers are
@@ -325,10 +326,25 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     const wear = Math.max(car.tyre.wf, car.tyre.wr);
     mod *= 1 - 0.05 * wear * d.tyreCare;
     mod *= 1 - 0.17 * (car.dirty || 0);                  // no front wing in the wake
-    if (car.drsOpen) mod *= 1.02;
 
     const look = Math.min(60, v * 0.30);
     let need = line.v[idxAt(look)] * mod;
+    // THE TOW AND DRS ARE SPEED, ON THE STRAIGHT (2026-09-28). The profile is
+    // solved for this car's own drag, so a bot in a slipstream or with the
+    // flap open used to hold the SAME top speed with less throttle — the tow
+    // did nothing for it, while it did everything for you (a human just keeps
+    // the pedal down). Where the line is drag-limited the top speed goes as
+    // drag^(-1/3); blend that in over the last 6% below the line's top speed,
+    // never in a corner. Braking is still planned from the corner speeds
+    // ahead, so arriving faster just means braking earlier. No tow, flap shut:
+    // exactly the old number.
+    const dragK = towDrag(car.tow || 0) * (car.drsOpen && spec.drs ? spec.drsCd : 1);
+    if (dragK < 0.999) {
+      const vTop = line.vTop || (line.vTop = line.v.reduce((a, b) => Math.max(a, b), 0));
+      const vl = line.v[idxAt(look)];
+      const k = Math.max(0, Math.min(1, (vl / vTop - 0.94) / 0.05));
+      if (k > 0) need *= 1 + (dragK ** (-1 / 3) - 1) * k;
+    }
     if (lost) need = Math.min(need, 13);                 // you cannot rejoin at 250 km/h
     // The lunge: an attacker diving up the inside brakes LATER than the line
     // says it can. Read `look` ahead, so it is the braking point that moves.
@@ -376,6 +392,12 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     for (let dm = 6; dm < reachM; dm += 4) {
       const vk = line.v[idxAt(dm)] * mod;
       if (vk < v) { const a = (v * v - vk * vk) / (2 * dm); if (a > aReq) aReq = a; }
+    }
+    // The car ahead in your lane is a braking target too (race.js obstDs /
+    // obstV): shed down to its speed in the room to it.
+    if (ctx?.obstV != null && v > ctx.obstV) {
+      const a = (v * v - ctx.obstV * ctx.obstV) / (2 * Math.max(1.5, ctx.obstDs));
+      if (a > aReq) aReq = a;
     }
     const bWant = aReq / Math.max(1, aBrk);
     if (braking) { if (bWant < 0.12 && err > -0.3) braking = false; }

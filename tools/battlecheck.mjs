@@ -153,12 +153,12 @@ function one(track, lines, spec, seed) {
         if (BKIND === 'late') armed = true;
         else {
           blunderT = BLUNDER; held = me.car.delta;
-          blunders.push({ t: race.time, pos: me.pos, pos20: null, gap20: null });
+          blunders.push({ t: race.time, pos: me.pos, pos20: null, gap20: null, gap30: null, back: null, left: false });
         }
       }
       if (armed && me.car.brake > 0.25) {
         armed = false; blunderT = BLUNDER;
-        blunders.push({ t: race.time, pos: me.pos, pos20: null, gap20: null });
+        blunders.push({ t: race.time, pos: me.pos, pos20: null, gap20: null, gap30: null, back: null, left: false });
       }
       if (blunderT > 0) {
         blunderT -= FIXED_DT;
@@ -203,6 +203,12 @@ function one(track, lines, spec, seed) {
         b.pos20 = me.pos;
         b.gap20 = dA < Infinity ? dA / vRef : 0;
       }
+      if (b.gap30 == null && race.time - b.t >= 30) b.gap30 = dA < Infinity ? dA / vRef : 0;
+      // BACK: seconds from the mistake until whoever is ahead is inside 1 s
+      // again — having first been pushed outside it (else it never left).
+      const g = dA < Infinity ? dA / vRef : 0;
+      if (!b.left && g > 1.0 && race.time - b.t < 15) b.left = true;
+      if (b.left && b.back == null && g < 1.0) b.back = race.time - b.t;
     }
     if (race.time > 20) {
       timed += FIXED_DT;
@@ -233,8 +239,15 @@ function one(track, lines, spec, seed) {
     youOut: me.retired ? 1 : 0,
     drs: green ? drsT / green * 100 : 0,
     cheers: race.cheers ? race.cheers.length : 0,
+    // Pace: the rivals' median best lap, and yours — so a change to how the
+    // field fights can be checked for what it did to what the TIER means.
+    rivalLap: pct(race.entries.filter(e => !e.isPlayer && e.bestLap).map(e => e.bestLap), 0.5),
+    myLap: me.bestLap || NaN,
     bLost: done.length ? done.reduce((a, b) => a + (b.pos20 - b.pos), 0) / done.length : NaN,
     bGap: done.length ? done.reduce((a, b) => a + b.gap20, 0) / done.length : NaN,
+    bGap30: mean(blunders.filter(b => b.gap30 != null).map(b => b.gap30)),
+    // Never back inside a second: counts the time to the flag (censored, <= 60).
+    bBack: done.length ? mean(done.map(b => !b.left ? 0 : b.back ?? Math.min(60, race.time - b.t))) : NaN,
     bFar: done.length ? done.filter(b => b.gap20 > 2).length / done.length * 100 : NaN,
   };
 }
@@ -251,7 +264,7 @@ const t0 = Date.now();
 console.log(`${GRID} cars · ${LAPS} laps · rivals ${TIER}${BATTLE !== 'none' ? ' / overtakes ' + BATTLE : ''} · you drive like ${YOU} from P${START}` +
   `${BLUNDER ? ` · ${BLUNDER}s ${BKIND} blunder a lap` : ''} · ${CLS} · ${SEEDS} seeds${DUEL != null ? ` · duel ${DUEL}` : ''}\n`);
 console.log('CIRCUIT      SWAPS  (YOU/THEM)  FIELD  AHEAD<1s  GAP p50  p90  BEHIND<1s  BATTLE  ALONG s  HITS  FIN P  OUT  YOU OUT  LEAD   NEXT   DRS%  CHEERS' +
-  (BLUNDER ? '  BL:LOST  GAP@20s  >2s%' : ''));
+  (BLUNDER ? '  BL:LOST  GAP@20s  GAP@30s  BACK<1s  >2s%' : ''));
 for (const key of TRACKS) {
   const { track, lines, spec } = loadTrack(key, CLS);
   const runs = [];
@@ -267,13 +280,13 @@ for (const key of TRACKS) {
     m('pos').toFixed(1).padStart(6), m('retired').toFixed(2).padStart(5), m('youOut').toFixed(2).padStart(8),
     (m('leadGap').toFixed(1) + 's').padStart(6), (m('nextGap').toFixed(1) + 's').padStart(6),
     m('drs').toFixed(0).padStart(5), m('cheers').toFixed(2).padStart(7),
-    ...(BLUNDER ? [m('bLost').toFixed(2).padStart(8), (m('bGap').toFixed(2) + 's').padStart(8), m('bFar').toFixed(0).padStart(5)] : []),
+    ...(BLUNDER ? [m('bLost').toFixed(2).padStart(8), (m('bGap').toFixed(2) + 's').padStart(8), (m('bGap30').toFixed(2) + 's').padStart(8), (m('bBack').toFixed(1) + 's').padStart(8), m('bFar').toFixed(0).padStart(5)] : []),
   ].join(' '));
 }
 const k = n => `${mean(all.map(r => r[n])).toFixed(2)} ± ${se(all.map(r => r[n])).toFixed(2)}`;
 console.log(`\nall: swaps with you ${k('swaps')} (you passed ${k('youPassed')}, passed you ${k('passedYou')}) · field passes ${k('field')}` +
   `\n     car ahead within 1 s ${k('aheadClose')}% · gap p50 ${k('gapP50')} s · car behind within 1 s ${k('behindClose')}% · any rival within 1 s ${k('close')}%` +
   `\n     alongside ${k('along')} s · your hits ${k('hits')} · rivals out ${k('retired')} · you out ${k('youOut')} · finish P ${k('pos')}` +
-  `\n     worst gap to leader ${k('leadGap')} s · worst gap to next car ${k('nextGap')} s · leader >5 s away ${k('over5')}% · DRS open ${k('drs')}% · cheers ${k('cheers')}` +
-  (BLUNDER ? `\n     per blunder: places lost after 20 s ${k('bLost')} · gap to car ahead after 20 s ${k('bGap')} s · still >2 s behind ${k('bFar')}%` : ''));
+  `\n     worst gap to leader ${k('leadGap')} s · worst gap to next car ${k('nextGap')} s · leader >5 s away ${k('over5')}% · DRS open ${k('drs')}% · cheers ${k('cheers')}\n     rivals' median best lap ${k('rivalLap')} s · your best lap ${k('myLap')} s` +
+  (BLUNDER ? `\n     per blunder: places lost after 20 s ${k('bLost')} · gap to car ahead after 20 s ${k('bGap')} s · after 30 s ${k('bGap30')} s · back within 1 s after ${k('bBack')} s · still >2 s behind ${k('bFar')}%` : ''));
 console.log(`${all.length} races in ${((Date.now() - t0) / 1000).toFixed(0)}s — ± is the standard error; under ~2x it is not a result.`);
