@@ -1347,15 +1347,19 @@ export class View {
     //   - every rig SHAKES now, angularly, per mount (speedfx.js SpeedShake):
     //     the old centimetre of positional jitter moved the halo and left the
     //     world where it was;
-    //   - the lens no longer WIDENS with speed. A wider lens at 350 puts
-    //     everything further away, which is the one thing speed must not look
-    //     like. It kicks with ACCELERATION instead (g, not v), briefly;
-    //   - the chase camera no longer falls ~9 m behind at top speed (a lerp
-    //     toward a target running at 97 m/s lags by v/k), and sits lower and
+    //   - the lens STILL widens with speed, because it was measured: I
+    //     expected a wider lens to push the world away and read slower, and
+    //     the numbers said the opposite: the edges of a wider frame see
+    //     nearer ground, and at 350 the chase camera's edges stream at 87
+    //     screen heights/s wide against 55 without the kick. On top of
+    //     that it now also breathes with ACCELERATION (g, not v), briefly;
+    //   - the chase camera no longer falls behind at top speed (a lerp toward
+    //     a target running at 97 m/s lags by ~v/k: measured 11.7 m from the
+    //     car at 350 against a 5.6 m setting; 4.9 m now), and sits lower and
     //     tighter so the road rushes under it;
     //   - T-CAM, the real one: on the stalk above the airbox, behind the
     //     driver's head, looking over the halo.
-    // ?fovkick=1 brings back the old speed-widening lens for an A/B.
+    // ?fovkick=0 takes the speed-widening lens away for an A/B.
     RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
     if (typeof window !== 'undefined') window.__wdcRigs = RIGS_NAMES;
     const RIGS = [
@@ -1375,7 +1379,7 @@ export class View {
       // driver's head, so it looks over the helmet and the halo loop at the
       // road. A longer lens than the eye (50 vs 62 deg) and the chassis's
       // full roll — it is a camera bolted to a car, not a person's head.
-      { name: 'T-CAM', kind: 'bolted', at: [-0.62, 0.875, 0], aim: 24, drop: 0.92, fov: 50, kick: 0.3, roll: 0.92, mount: 'tcam' },
+      { name: 'T-CAM', kind: 'bolted', at: [-0.62, 0.93, 0], aim: 24, drop: 1.0, fov: 50, kick: 0.3, roll: 0.92, mount: 'tcam' },
     ];
     if (this.photo) {
       const t = this.track;
@@ -1417,10 +1421,10 @@ export class View {
     const acc = dt > 0 && this._lastSpd != null ? ((car.speed || 0) - this._lastSpd) / dt : 0;
     this._lastSpd = car.speed || 0;
     this._acc = (this._acc || 0) + (Math.max(-60, Math.min(60, acc)) - (this._acc || 0)) * Math.min(1, dt * 4);
-    // The old lens widened with SPEED; ?fovkick=1 brings it back.
+    // The lens widens with SPEED (measured to help, see above); ?fovkick=0 A/B.
     if (this._fovKick === undefined) {
       const fq = new URLSearchParams(location.search).get('fovkick');
-      this._fovKick = fq != null && fq !== '' && Number.isFinite(+fq) ? +fq : 0;
+      this._fovKick = fq != null && fq !== '' && Number.isFinite(+fq) ? +fq : 1;
     }
     // ...and the new one breathes with ACCELERATION: a couple of degrees wider
     // while it is pulling hard, tighter under braking, back to rest at a

@@ -18,9 +18,12 @@
 //      travel, and it is the streaks the brain reads as speed. So: blur, but
 //      only where the geometry says the flow is that fast, which is the edges.
 //
-//   3. (render.js) The chase camera fell ~9 m further behind at top speed,
-//      and every rig WIDENED its lens as speed rose — both make the world look
-//      further away, which is to say slower.
+//   3. (render.js) The chase camera fell ~6 m further behind at top speed
+//      (measured 11.7 m from the car at 350 against its 5.6 m setting), so
+//      the car shrank and the road under the lens moved away as you went
+//      faster. The lens widening with speed was suspected too and CLEARED by
+//      measurement: a wider frame's edges see nearer ground and stream
+//      faster (chase 87 vs 55 screen heights/s), so it stays.
 //
 // Two classes, both driven by car.speed and a clock of their own, never by
 // accumulated sim state — so an instant replay that sets the speed from a

@@ -168,7 +168,7 @@ let code = 0;
 try {
   const cdp = await connect();
   await cdp.send('Runtime.enable'); await cdp.send('Page.enable');
-  for (let i = 0; i < 80; i++) { if (await cdp.eval('!!(window.__wdc && window.__wdcView && window.__wdc.car)')) break; await sleep(400); }
+  for (let i = 0; i < 200; i++) { if (await cdp.eval('!!(window.__wdc && window.__wdcView && window.__wdc.car)')) break; await sleep(400); }
   // Pin the car on the straight at S0, at speed, every frame.
   await cdp.eval(`(() => {
     const v = window.__wdcView, t = v.track, car = window.__wdc.car, V = ${KMH} / 3.6;
