@@ -216,6 +216,10 @@ export function buildBarriers(scene, track, look, sign, corridor = null, world =
       const li = barrierLat(t, i, side), lj = barrierLat(t, j, side);
       const p = at(t, i, li), q = at(t, j, lj);
       if (nearPit(p[0], p[1])) continue;
+      // Which track sample these vertices belong to, so World.liftGround
+      // stands them on THIS leg's ground where the circuit crosses itself
+      // (Suzuka's upper leg no longer drops its rail into the underpass).
+      for (const bb of [rail, posts, conc, fence, ads]) bb.setHint(i);
       const seg = Math.hypot(q[0] - p[0], q[1] - p[1]);
       // `inward` points from the barrier back across the track, which is the
       // side every face here has to look at.
@@ -451,6 +455,7 @@ export function buildBoards(scene, track, line, look, sign, world = null) {
     const marks = vMax > 78 ? [300, 250, 200, 150, 100, 50] : [200, 150, 100, 50];
     for (const d of marks) {
       const i = t.idx(c.s0 - d);
+      b.setHint(i); legs.setHint(i);
       const run = side > 0 ? t.runL[i] : t.runR[i];
       // ON THE VERGE, a few metres off the white line, where a real board
       // stands — not against a barrier that is 20 m away across Monza's
@@ -492,6 +497,7 @@ export function buildBoards(scene, track, line, look, sign, world = null) {
     const cell = c.name ? sign.cells.names.get(c.name) : undefined;
     if (cell !== undefined) {
       const i = t.idx(c.s0 - 26);
+      b.setHint(i);
       const lat = barrierLat(t, i, side) - side * 0.30;
       const h = t.hdg[i];
       const inw = side > 0 ? [Math.sin(h), 0, Math.cos(h)] : [-Math.sin(h), 0, -Math.cos(h)];
