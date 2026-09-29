@@ -22,7 +22,7 @@
 //   ?fx=0                 all of it off
 //   ?fxcam=yaw,pitch,dist[,lookX]   orbit the player's car, for screenshots:
 //                         yaw 0 = in front of the nose, 90 = its right side
-//   ?fxcrash=kmh,deg[,side]   point the player's car at the barrier on load
+//   ?fxcrash=kmh,deg[,side[,yawrate]]   point the player's car at the barrier on load
 //                         and let the REAL physics crash it (debug preset)
 //   ?fxdemo=wing|spark|smoke|dust|stones|scrape|all   stage an accident on the
 //                         player's car at load, for screenshots (visual only —
@@ -450,19 +450,19 @@ export class Fx {
     return w.groundY(x, z);
   }
 
-  // ?fxcrash=kmh,deg[,side] — a REAL accident, for the camera: on the first
+  // ?fxcrash=kmh,deg[,side[,yawrate]] — a REAL accident, for the camera: on the first
   // frame the player's car is pointed at the barrier (deg off the track's
   // heading, toward side +1 left / -1 right) at kmh, and the physics does the
   // rest. The one place this file writes the physics car, and only because
   // it was asked to in the URL — the same family as ?launch= and ?crush=.
   _crash(car) {
     this._crashed = true;
-    const [kmh, deg, side] = this.crashQ.split(',').map(Number);
+    const [kmh, deg, side, spin] = this.crashQ.split(',').map(Number);
     const t = this.view.track;
     const pr = t.project(car.x, car.y, null);
     const sd = side === -1 ? -1 : 1;
     car.hdg = pr.hdg + sd * (deg || 30) * Math.PI / 180;
-    car.vx = (kmh || 150) / 3.6; car.vy = 0; car.r = 0;
+    car.vx = (kmh || 150) / 3.6; car.vy = 0; car.r = spin || 0;   // rad/s: a spin
   }
 
   // ?fxdemo= — an accident staged for the camera. Visual only.
