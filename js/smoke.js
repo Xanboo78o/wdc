@@ -58,7 +58,7 @@ function puffAtlas() {
 }
 
 const VS = /* glsl */`
-  attribute vec3 iPos;
+  attribute vec4 iPos;             // xyz = centre, w = the ground's height under it
   attribute vec4 iSRAT;            // size, rotation, alpha, tile
   attribute vec3 iCol;
   varying vec2 vUv;
@@ -66,8 +66,9 @@ const VS = /* glsl */`
   varying vec3 vView;
   varying vec3 vCol;
   varying float vA;
+  varying float vAbove;
   void main() {
-    vec4 mv = viewMatrix * vec4(iPos, 1.0);
+    vec4 mv = viewMatrix * vec4(iPos.xyz, 1.0);
     float s = iSRAT.x, r = iSRAT.y;
     // A puff that has swallowed the lens is a full-screen quad of nearly
     // clear air — the most expensive thing this file can draw, for nothing.
@@ -75,6 +76,13 @@ const VS = /* glsl */`
     s *= clamp(-mv.z / (s * 1.2), 0.15, 1.0);
     vec2 c = position.xy;
     vec2 rc = vec2(c.x * cos(r) - c.y * sin(r), c.x * sin(r) + c.y * cos(r));
+    // The billboard's corner in WORLD space (camera right and up are the
+    // first two rows of the view matrix), so the fragment knows how high
+    // above the ground it is.
+    vec3 camR = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+    vec3 camU = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+    vec3 wp = iPos.xyz + (camR * rc.x + camU * rc.y) * s;
+    vAbove = (wp.y - iPos.w) / max(0.15, s * 0.45);
     mv.xy += rc * s;
     vView = mv.xyz;
     vC = c;
@@ -96,9 +104,14 @@ const FS = /* glsl */`
   varying vec3 vView;
   varying vec3 vCol;
   varying float vA;
+  varying float vAbove;
   void main() {
     vec4 t = texture2D(map, vUv);
-    float dens = t.a * vA;
+    // THE GROUND. A flat billboard crossing the road is cut off in a hard
+    // straight line — the tell of a sprite. Without a depth texture there
+    // are no soft particles, but the ground is the plane smoke meets most,
+    // and its height is known: thin the puff out as it reaches it.
+    float dens = t.a * vA * smoothstep(0.0, 1.0, vAbove);
     if (dens < 0.004) discard;
     // a soft sphere's normal, roughened by the puff's own noise
     float r2 = dot(vC, vC);
@@ -133,11 +146,11 @@ export class Smoke {
     const g = new THREE.InstancedBufferGeometry();
     g.index = quad.index;
     g.attributes.position = quad.attributes.position;
-    this.aPos = new Float32Array(MAX * 3);
+    this.aPos = new Float32Array(MAX * 4);
     this.aSRAT = new Float32Array(MAX * 4);
     this.aCol = new Float32Array(MAX * 3);
     const ia = (arr, n) => { const a = new THREE.InstancedBufferAttribute(arr, n); a.setUsage(THREE.DynamicDrawUsage); return a; };
-    g.setAttribute('iPos', this.bPos = ia(this.aPos, 3));
+    g.setAttribute('iPos', this.bPos = ia(this.aPos, 4));
     g.setAttribute('iSRAT', this.bSRAT = ia(this.aSRAT, 4));
     g.setAttribute('iCol', this.bCol = ia(this.aCol, 3));
     g.instanceCount = 0;
@@ -162,7 +175,7 @@ export class Smoke {
     this.p = [];
     for (let i = 0; i < MAX; i++) {
       this.p.push({ on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 1, s0: 1, grow: 1,
-        a: 1, rot: 0, spin: 0, r: 1, g: 1, b: 1, tile: 0, rise: 0.5, key: 0 });
+        a: 1, rot: 0, spin: 0, r: 1, g: 1, b: 1, tile: 0, rise: 0.5, key: 0, gy: 0 });
     }
     this.next = 0;
     this.live = [];
@@ -174,7 +187,7 @@ export class Smoke {
    * One puff. Position and velocity in three space. `size` is its starting
    * radius in metres and `grow` how fast it spreads; `alpha` its thickness.
    */
-  emit(x, y, z, vx, vy, vz, { size = 0.5, grow = 1.4, life = 3, alpha = 0.5, col = [0.86, 0.87, 0.9], rise = 0.45 } = {}) {
+  emit(x, y, z, vx, vy, vz, { size = 0.5, grow = 1.4, life = 3, alpha = 0.5, col = [0.86, 0.87, 0.9], rise = 0.45, gy = null } = {}) {
     let p = this.p[this.next];
     this.next = (this.next + 1) % MAX;
     if (!p.on) this.live.push(p);
@@ -186,6 +199,7 @@ export class Smoke {
     const sh = 0.94 + Math.random() * 0.08;
     p.r = col[0] * sh; p.g = col[1] * sh; p.b = col[2] * sh;
     p.tile = (Math.random() * 4) | 0; p.rise = rise;
+    p.gy = gy == null ? y - 0.3 : gy;
   }
 
   /** Light and fog from the scene, once a frame. */
@@ -227,7 +241,7 @@ export class Smoke {
       const size = p.s0 + p.grow * Math.pow(p.age, 0.65);
       // in fast, a long thinning tail; a big puff is thinner per unit area
       const a = p.a * Math.min(1, p.age / 0.08) * Math.pow(1 - t, 1.6);
-      this.aPos[i * 3] = p.x; this.aPos[i * 3 + 1] = p.y; this.aPos[i * 3 + 2] = p.z;
+      this.aPos[i * 4] = p.x; this.aPos[i * 4 + 1] = p.y; this.aPos[i * 4 + 2] = p.z; this.aPos[i * 4 + 3] = p.gy;
       this.aSRAT[i * 4] = size; this.aSRAT[i * 4 + 1] = p.rot; this.aSRAT[i * 4 + 2] = a; this.aSRAT[i * 4 + 3] = p.tile;
       this.aCol[i * 3] = p.r; this.aCol[i * 3 + 1] = p.g; this.aCol[i * 3 + 2] = p.b;
     }

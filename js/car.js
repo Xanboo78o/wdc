@@ -486,11 +486,27 @@ function brokenNose(tip, carbon, paint, dark) {
 // frame and re-points the car materials when scene.environment changes. It
 // is cheap: a pointer comparison, and a walk of the cars every two seconds
 // so rivals that appear later (field.js clones, which copy userData) join.
+//
+// The strengths in this file were written against an intensity nobody could
+// see, and at face value they wash the paint out: paint at 1.35 read pale
+// pink next to the richer red everyone had been judging at the global 0.5.
+// So the car keeps their RATIOS — carbon duller than paint, the visor and
+// mirrors brighter, which is what was lost — scaled by CAR_ENV so the paint
+// lands where it has always looked right (1.35 x 0.4 = 0.54). ?carenvk=
+// overrides it, for the look pass.
+const CAR_ENV = (() => {
+  const v = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('carenvk') : null;
+  return v != null && Number.isFinite(+v) ? +v : 0.4;
+})();
 function ownEnv(group) {
+  const seen = new Set();
   group.traverse(m => {
     if (!m.isMesh) return;
     for (const mt of Array.isArray(m.material) ? m.material : [m.material]) {
-      if (mt && 'envMapIntensity' in mt) mt.userData.carEnv = true;
+      if (!mt || !('envMapIntensity' in mt) || seen.has(mt)) continue;
+      seen.add(mt);
+      if (!mt.userData.carEnv) mt.envMapIntensity *= CAR_ENV;   // once: clones inherit it
+      mt.userData.carEnv = true;
     }
   });
 }

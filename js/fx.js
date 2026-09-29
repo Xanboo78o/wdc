@@ -92,7 +92,7 @@ export class Fx {
     if (!this.on) return;
     this.smoke.emit(x, baseY + 0.25, z, vx * 0.2 + (Math.random() - 0.5) * 1.5, 0.4 + Math.random() * 0.5,
       vz * 0.2 + (Math.random() - 0.5) * 1.5,
-      { size: 0.35, grow: 1.5, life: 2.6, alpha: this._wet(0.16 + 0.1 * Math.min(2, force)), col: RUBBER });
+      { size: 0.35, grow: 1.5, life: 2.6, alpha: this._wet(0.16 + 0.1 * Math.min(2, force)), col: RUBBER, gy: baseY });
   }
 
   _wet(a) { const w = (this.view.wx && this.view.wx.wetness) || 0; return a * (1 - 0.8 * w); }
@@ -221,7 +221,7 @@ export class Fx {
       if (d > 0.1) {
         for (let i = 0; i < Math.min(14, 3 + d * 30); i++) {
           this.smoke.emit(p.x, p.y, p.z, vel.x * 0.2 + (Math.random() - 0.5) * 4, 0.5 + Math.random() * 1.5,
-            vel.z * 0.2 + (Math.random() - 0.5) * 4, { size: 0.4, grow: 1.8, life: 2.8, alpha: 0.22, col: [0.72, 0.70, 0.66], rise: 0.3 });
+            vel.z * 0.2 + (Math.random() - 0.5) * 4, { size: 0.4, grow: 1.8, life: 2.8, alpha: 0.22, col: [0.72, 0.70, 0.66], rise: 0.3, gy: sy });
         }
       }
       // things that leave at a threshold
@@ -330,7 +330,7 @@ export class Fx {
       while (n-- > 0) {
         const p = at(-1.5, 0.62, (Math.random() - 0.5) * 0.3);
         this.smoke.emit(p.x, p.y, p.z, vel.x * 0.35, 0.6 + Math.random() * 0.4, vel.z * 0.35,
-          { size: 0.25, grow: 1.1, life: 2.5, alpha: 0.10 + 0.25 * (dmg - 0.5), col: SMOKE_OIL, rise: 0.7 });
+          { size: 0.25, grow: 1.1, life: 2.5, alpha: 0.10 + 0.25 * (dmg - 0.5), col: SMOKE_OIL, rise: 0.7, gy: sy });
       }
     }
 
@@ -345,7 +345,8 @@ export class Fx {
       let n = Math.floor(st.acc[slot]); st.acc[slot] -= n;
       while (n-- > 0) {
         const p = wheel(lx, lz);
-        this.smoke.emit(p.x, sy + 0.18 + Math.random() * 0.1, p.z,
+        o.gy = off && this.view.world && this.view.world.groundY ? Math.max(sy - 0.6, this.view.world.groundY(p.x, p.z)) : sy;
+        this.smoke.emit(p.x, o.gy + 0.18 + Math.random() * 0.1, p.z,
           vel.x * o.carry + (Math.random() - 0.5) * 1.6, 0.25 + Math.random() * 0.6,
           vel.z * o.carry + (Math.random() - 0.5) * 1.6, o);
       }
@@ -446,7 +447,7 @@ export class Fx {
         const p = at(lx, 0.12, lz);
         this.smoke.emit(p.x - fwd.x * 2 * Math.random(), sy + 0.25, p.z - fwd.z * 2 * Math.random(),
           -fwd.x * 3 + (Math.random() - 0.5) * 2, 0.5, -fwd.z * 3 + (Math.random() - 0.5) * 2,
-          { size: 0.4, grow: 1.6, life: 3, alpha: d === 'dust' ? 0.3 : 0.3, col });
+          { size: 0.4, grow: 1.6, life: 3, alpha: 0.3, col, gy: sy });
       }
     }
   }
