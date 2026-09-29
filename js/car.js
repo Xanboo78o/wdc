@@ -381,6 +381,40 @@ function plate(pts, thick, z) {
   return g;
 }
 
+// AN ENDPLATE'S INNER FACE CANNOT SEE THE SKY. From the chase camera it is
+// seen almost edge-on, where the clearcoat reflects nearly all of whatever
+// the environment cube holds in that direction — the bright horizon — and red
+// plus sky read as washed-out lilac (look pass 2026-09-28; deep red with the
+// car's env at zero, so it is the reflection). On a real car that face sees
+// the other endplate and the engine cover. A cube map has no occlusion, so
+// the faces are MASKED: a second UV channel (uv1) that is (0.25, .5) on all
+// bodywork and (0.75, .5) on the inward faces, sampled by the paint's
+// clearcoatMap and specularIntensityMap from a 2x1 texture — white, then
+// nearly black. Bending the normals away from the sky was tried first and
+// made it worse: the face only got more edge-on, Fresnel rose, and it
+// reflected grey road instead of blue sky. The maps ride on the paint
+// MATERIAL, and field.js makes every rival's paint by cloning it, so the whole
+// grid gets them; the mask lives in the shared GEOMETRY.
+let _specMask = null;
+function specMask() {
+  if (_specMask) return _specMask;
+  const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255, 22, 22, 22, 22]), 2, 1);
+  t.magFilter = t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.channel = 1;
+  t.needsUpdate = true;
+  return (_specMask = t);
+}
+function occludeInner(geo, side) {
+  const n = geo.attributes.normal, uv1 = new Float32Array(n.count * 2);
+  for (let i = 0; i < n.count; i++) {
+    uv1[i * 2] = n.getZ(i) * side < -0.5 ? 0.75 : 0.25;   // faces pointing at the centreline
+    uv1[i * 2 + 1] = 0.5;
+  }
+  geo.setAttribute('uv1', new THREE.BufferAttribute(uv1, 2));
+  return geo;
+}
+
 // THE BROKEN NOSE: what is left on the car when the front wing and the nose
 // tip have been torn off. A nose box fails as a crash structure is meant to —
 // the paint skin splits back in a ragged line and the carbon laminate under it
@@ -578,6 +612,9 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
     color: (opts.livery && opts.livery.second) || 0xf2f2f2, roughness: 0.3, metalness: 0.2, clearcoat: 1.0, clearcoatRoughness: 0.06, envMapIntensity: 1.35,
   });
   if (opts.livery) applyLivery(paint, opts.livery);
+  // the endplates' specular mask (occludeInner); everything else reads white
+  paint.clearcoatMap = specMask();
+  paint.specularIntensityMap = specMask();
   // DoubleSide: from the cockpit you look DOWN the inside of the front tyres,
   // and a single-sided wall there is a window (Adam: "i can see through my
   // tires").
@@ -727,8 +764,8 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
     tag(add(at(wing(0.95, 0.20, 0.026, 0.025, -0.40, 0.150), 2.31, 0.185, 0), carbon), 'front', 'fw'),
     tag(add(at(wing(0.92, 0.15, 0.022, 0.020, -0.50, 0.185), 2.23, 0.225, 0), paint2), 'front', 'fw'));
   for (const side of [1, -1]) {
-    wings.front.push(tag(add(plate([[2.82, 0.05], [2.22, 0.05], [2.16, 0.16], [2.24, 0.40],
-      [2.44, 0.44], [2.64, 0.31], [2.80, 0.18]], 0.014, side * 0.985), paint), 'front', 'fep', side));
+    wings.front.push(tag(add(occludeInner(plate([[2.82, 0.05], [2.22, 0.05], [2.16, 0.16], [2.24, 0.40],
+      [2.44, 0.44], [2.64, 0.31], [2.80, 0.18]], 0.014, side * 0.985), side), paint), 'front', 'fep', side));
   }
   // The tip leaves with the wing; its torn stub (inside it) stays.
   wings.front.push(noseTip);
@@ -738,8 +775,8 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
   const drs = tag(add(at(wing(0.50, 0.19, 0.028, 0.045, 0, 0), -2.60, 0.945, 0), carbon), 'rear', 'rw');
   wings.rear.push(tag(add(at(wing(0.52, 0.30, 0.036, 0.05, 0, 0), -2.44, 0.845, 0), paint), 'rear', 'rw'), drs);
   for (const side of [1, -1]) {
-    wings.rear.push(tag(add(plate([[-2.22, 0.58], [-2.25, 0.92], [-2.34, 1.01], [-2.62, 1.03],
-      [-2.77, 0.97], [-2.81, 0.70], [-2.70, 0.56]], 0.018, side * 0.53), paint), 'rear', 'rep', side));
+    wings.rear.push(tag(add(occludeInner(plate([[-2.22, 0.58], [-2.25, 0.92], [-2.34, 1.01], [-2.62, 1.03],
+      [-2.77, 0.97], [-2.81, 0.70], [-2.70, 0.56]], 0.018, side * 0.53), side), paint), 'rear', 'rep', side));
     tag(add(rod([-2.10, 0.40, side * 0.07], [-2.40, 0.80, side * 0.07], 0.016, 0.5), carbon), 'rear', 'neck');
   }
   tag(add(at(wing(0.42, 0.18, 0.028, 0.035, 0, 0.02), -2.30, 0.380, 0), carbon), 'rear', 'beam');

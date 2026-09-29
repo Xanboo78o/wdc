@@ -50,6 +50,10 @@ export function makeDeformer(group, wheels) {
     parts.push({
       m, attr,
       base: Float32Array.from(attr.array),
+      // The normals car.js built, kept: some are deliberately NOT the ones
+      // computeVertexNormals would give (endplates bend theirs away from the
+      // sky), and recomputing on reset silently undid that on your car only.
+      baseN: own.attributes.normal ? Float32Array.from(own.attributes.normal.array) : null,
       // Dents are addressed in CAR space, but a vertex is in its mesh's space.
       // The HOME offset is the bridge, and it has to be the home one: applyCrush
       // moves these meshes around, and deforming against a moved mesh would
@@ -61,11 +65,17 @@ export function makeDeformer(group, wheels) {
 
   let stamp = '-';
 
+  function restoreNormals(p) {
+    const n = p.m.geometry.attributes.normal;
+    if (p.baseN && n) { n.array.set(p.baseN); n.needsUpdate = true; }
+    else p.m.geometry.computeVertexNormals();
+  }
+
   function reset() {
     for (const p of parts) {
       p.attr.array.set(p.base);
       p.attr.needsUpdate = true;
-      p.m.geometry.computeVertexNormals();
+      restoreNormals(p);
     }
   }
 
@@ -118,12 +128,17 @@ export function makeDeformer(group, wheels) {
         a[k + 1] = b[k + 1] + wrinkle(cz, cx, cy) * best * 0.20 * bdep;
         a[k + 2] = b[k + 2] - bny * best + wr * 0.6;
       }
-      if (touched || sig === '') {
+      if (touched) {
         p.attr.needsUpdate = true;
         // Without this the dent is invisible: the panel is bent but still lit
         // as though it were flat, so it reads as a texture glitch rather than
         // as damage. Only runs when the dents actually changed.
         p.m.geometry.computeVertexNormals();
+        p.dented = true;
+      } else if (p.dented) {
+        p.attr.needsUpdate = true;
+        restoreNormals(p);
+        p.dented = false;
       }
     }
     return true;
