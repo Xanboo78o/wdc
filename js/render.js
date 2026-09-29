@@ -231,7 +231,16 @@ function groundDetail(mat, look, size, { amp = 0.35, stripes = 0 } = {}) {
 function macroTarmac(mat, look, size, amp = 0.55) {
   const src = look.maps.apron && look.maps.apron.c;
   if (!mat.map || !src) return mat;
+  // Wetness, 0..1, written by View._weather. Water collects where the road
+  // is lowest and most worn — here, the darker patches of the macro map and
+  // the rubbered line — as near-mirror puddles, while the rest goes merely
+  // dark and glossy.
+  const wetU = { value: 0 };
+  mat.userData.wetU = wetU;
   mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uWet = wetU;
+    sh.fragmentShader = 'uniform float uWet;\nfloat gPuddle = 0.0;\n' + sh.fragmentShader.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+  roughnessFactor = mix(roughnessFactor, mix(0.32, 0.04, gPuddle), uWet);`);
     sh.uniforms.uMacro = { value: src };
     sh.uniforms.uMacroSize = { value: size };
     sh.uniforms.uMacroAmp = { value: amp };
@@ -246,6 +255,9 @@ function macroTarmac(mat, look, size, amp = 0.55) {
     // the scan's linear mean is ~0.19; express both as a ratio to it
     float f = 1.0 + uMacroAmp * ((a * 0.6 + b * 0.4) / 0.19 - 1.0);
     diffuseColor.rgb *= clamp(f, 0.6, 1.45);
+    // standing water in the low, dark patches; a wet road is darker overall
+    gPuddle = smoothstep(0.17, 0.12, a * 0.7 + b * 0.3) * smoothstep(0.3, 0.9, uWet);
+    diffuseColor.rgb *= 1.0 - uWet * (0.28 + 0.3 * gPuddle);
 
     // braking marks: lanes 9 cm wide, one in three carrying rubber, each
     // broken along its length by a slow noise so it reads as streaks
@@ -982,6 +994,15 @@ export class View {
       m.roughness = d.r * (1 - 0.6 * w);
       m.color.copy(d.c).multiplyScalar(1 - 0.35 * w);
       m.envMapIntensity = d.e * (1 + 1.3 * w);
+      if (m.userData.wetU) {
+        m.userData.wetU.value = w;
+        // The renderer writes scene.environmentIntensity over any material
+        // WITHOUT its own envMap (see sky.js), so the boost above never
+        // applied. Giving the wet road the scene's own cube as its envMap is
+        // what lets it reflect the sky at its own, stronger intensity.
+        const want = w > 0.02 ? this.scene.environment : null;
+        if (m.envMap !== want) { m.envMap = want; m.envMapIntensity = 1.6; m.needsUpdate = true; }
+      }
     }
     if (wx.rain > 0.05 && !this.rain) this.rain = new Rain(this.scene);
     if (this.rain) this.rain.update(wx.rain, this.camera, dt);
