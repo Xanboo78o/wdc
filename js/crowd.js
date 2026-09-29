@@ -28,72 +28,173 @@ const SHIRTS = [
 ];
 const SKIN = [0xf0c8a0, 0xd9a273, 0xa9714b, 0x7a4b30, 0xf5d5b8, 0x5c3a24];
 
+// Who comes to which race. A grandstand at Monza is a red sea of tifosi, at
+// Zandvoort it is the orange army, at Suzuka it is every team's replica shirt
+// at once. Weighted palettes: each entry is [colour, weight]. The flags are
+// what they wave — national colours and team colours.
+const FANS = {
+  monza: { shirts: [[0xd21f26, 9], [0xc0171d, 4], [0xf5c518, 1], ...SHIRTS.map(c => [c, 0.5])],
+    flags: [0xd21f26, 0xd21f26, 0xf5c518, 0x1d8f3c, 0xeeeeea] },
+  zandvoort: { shirts: [[0xff6a13, 10], [0xf05a0a, 4], [0x1b3f8f, 1], ...SHIRTS.map(c => [c, 0.4])],
+    flags: [0xff6a13, 0xff6a13, 0xae1c28, 0x21468b, 0xeeeeea] },
+  suzuka: { shirts: SHIRTS.map(c => [c, 1]), flags: [0xeeeeea, 0xbc002d, 0xff6a13, 0x1b4fd8, 0xd21f26, 0x35d6a0] },
+  monaco: { shirts: SHIRTS.map(c => [c, 1]), flags: [0xce1126, 0xeeeeea, 0xd21f26, 0x1b4fd8] },
+  baku: { shirts: SHIRTS.map(c => [c, 1]), flags: [0x0092bc, 0xe4002b, 0x00af66, 0xd21f26] },
+  nurburgring: { shirts: SHIRTS.map(c => [c, 1]), flags: [0x111111, 0xdd0000, 0xffce00, 0xeeeeea, 0x00a19c] },
+  default: { shirts: SHIRTS.map(c => [c, 1]), flags: [0xd21f26, 0xff6a13, 0x1b4fd8, 0xeeeeea, 0xf5c518] },
+};
+const pickW = (list) => {
+  let t = 0; for (const [, w] of list) t += w;
+  let r = Math.random() * t;
+  for (const [c, w] of list) { r -= w; if (r <= 0) return c; }
+  return list[0][0];
+};
+
 // ---------------------------------------------------------------------------
-// A person: three boxes. At 40 m they are four pixels tall and at 400 m they
-// are a coloured speck, so the budget goes into HOW MANY rather than how good.
+// A person. At 40 m they are a handful of pixels and at 400 m a speck, so the
+// budget still goes into HOW MANY — but a person is no longer three boxes.
+// Two legs with a gap, a torso that is wider at the shoulders than the waist,
+// and two arms hanging off it: the silhouette is what the eye reads as a
+// human at distance, and a solid block reads as a bollard. ~70 triangles.
 // Exported because the pit crew are the same mesh with a different palette.
 // ---------------------------------------------------------------------------
 export function personGeometry() {
   const b = new Builder({ uv: false });
-  b.box(0, 0.40, 0, 0.32, 0.80, 0.22, 0, 0xffffff, 1);   // legs
-  b.box(0, 1.06, 0, 0.42, 0.56, 0.26, 0, 0xffffff, 1);   // torso
+  b.box(-0.085, 0.42, 0, 0.13, 0.84, 0.17, 0, 0xffffff, 1);    // left leg
+  b.box(0.085, 0.42, 0, 0.13, 0.84, 0.17, 0, 0xffffff, 1);     // right leg
+  b.box(0, 0.87, 0, 0.34, 0.12, 0.21, 0, 0xffffff, 1);         // hips
+  b.box(0, 1.12, 0, 0.40, 0.42, 0.23, 0, 0xffffff, 1);         // chest
+  b.box(-0.245, 1.02, 0, 0.09, 0.58, 0.11, 0, 0xffffff, 1);    // left arm
+  b.box(0.245, 1.02, 0, 0.09, 0.58, 0.11, 0, 0xffffff, 1);     // right arm
   const g = b.geometry();
   g.deleteAttribute('uv'); g.deleteAttribute('uv1');
+  // taper the chest: pull the waist in so the shoulders read
+  const P = g.attributes.position;
+  for (let i = 0; i < P.count; i++) {
+    const y = P.getY(i), x = P.getX(i);
+    if (y > 0.9 && y < 0.92 && Math.abs(x) < 0.21) P.setX(i, x * 0.8);
+  }
+  g.computeVertexNormals();
   return g;
 }
 
-// The head is a SECOND instanced mesh rather than a third box on the first.
+// The head is a SECOND instanced mesh rather than part of the first.
 //
 // An InstancedMesh has one colour per instance, so a person built as one mesh
 // is one solid colour from shoe to scalp — a coloured pole. Two meshes sharing
 // the same transforms cost one extra draw call for the entire crowd and are
-// the difference between people and bollards.
+// the difference between people and bollards. Round now (an icosahedron,
+// 20 triangles): a box head is the most toy-like thing a figure can have.
 export function headGeometry() {
-  const b = new Builder({ uv: false });
-  b.box(0, 1.45, 0, 0.21, 0.23, 0.20, 0, 0xffffff, 1);
-  const g = b.geometry();
-  g.deleteAttribute('uv'); g.deleteAttribute('uv1');
+  const g = new THREE.IcosahedronGeometry(0.115, 0);
+  g.scale(0.95, 1.08, 1.0);
+  g.translate(0, 1.47, 0);
+  g.deleteAttribute('uv');
   return g;
 }
 
+// A flag on a short pole, held up above the head. The third instanced mesh,
+// for the few percent of a crowd that brought one — which at Monza and
+// Zandvoort is the whole look of the place.
+function flagGeometry() {
+  const b = new Builder({ uv: false });
+  b.box(0.22, 1.95, 0, 0.025, 1.1, 0.025, 0, 0xffffff, 1);     // pole
+  const g0 = b.geometry();
+  const flag = new THREE.PlaneGeometry(0.95, 0.62, 3, 1);
+  flag.translate(0.22 + 0.475, 2.2, 0);
+  const pos = flag.attributes.position;
+  // a little wave baked in, so a still flag is not a card
+  for (let i = 0; i < pos.count; i++) pos.setZ(i, Math.sin((pos.getX(i) - 0.22) * 5.0) * 0.07);
+  flag.deleteAttribute('uv');
+  const idx = [];
+  const all = new Float32Array(g0.attributes.position.count * 3 + pos.count * 3);
+  all.set(g0.attributes.position.array, 0);
+  all.set(pos.array, g0.attributes.position.count * 3);
+  const base = g0.attributes.position.count;
+  for (let i = 0; i < g0.index.count; i++) idx.push(g0.index.array[i]);
+  for (let i = 0; i < flag.index.count; i++) idx.push(flag.index.array[i] + base);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(all, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+// A crowd that is ALIVE: every figure sways a few centimetres on its own
+// slow clock (the instance index seeds the phase), and the flags wave. One
+// uniform, advanced by onBeforeRender, costs nothing per figure on the CPU.
+const CROWD_T = { value: 0 };
+function sway(mat, amp, speed) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uCrowdT = CROWD_T;
+    sh.vertexShader = 'uniform float uCrowdT;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+  {
+    float ph = float(gl_InstanceID) * 1.618;
+    float k = smoothstep(0.6, 2.6, transformed.y);
+    transformed.x += sin(uCrowdT * ${speed.toFixed(2)} + ph) * ${amp.toFixed(3)} * k;
+    transformed.z += cos(uCrowdT * ${(speed * 0.7).toFixed(2)} + ph * 1.3) * ${(amp * 0.5).toFixed(3)} * k;
+  }`);
+  };
+  mat.customProgramCacheKey = () => `crowd-sway-${amp}-${speed}`;
+  return mat;
+}
+
 // A crowd is a list of { x, z, y, ry, scale, seated }. This turns it into one
-// mesh with a per-instance colour.
-export function peopleMesh(spots, { palette = SHIRTS } = {}) {
+// mesh with a per-instance colour. `fans` (a key into FANS) picks the
+// circuit's colours and turns flags on.
+export function peopleMesh(spots, { palette = SHIRTS, fans = null } = {}) {
   if (!spots.length) return null;
-  // flatShading keeps the boxes reading as boxes rather than as soft blobs
-  // once there are thousands of them overlapping.
-  const bodyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, flatShading: true });
-  const headMat = new THREE.MeshStandardMaterial({ roughness: 0.78, metalness: 0, flatShading: true });
+  const F = fans ? (FANS[fans] || FANS.default) : null;
+  // flatShading keeps the figures crisp rather than soft blobs once there are
+  // thousands of them overlapping.
+  const bodyMat = sway(new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, flatShading: true }), 0.035, 1.3);
+  const headMat = sway(new THREE.MeshStandardMaterial({ roughness: 0.78, metalness: 0, flatShading: true }), 0.035, 1.3);
   const body = new THREE.InstancedMesh(personGeometry(), bodyMat, spots.length);
   const head = new THREE.InstancedMesh(headGeometry(), headMat, spots.length);
+  const flagSpots = F ? spots.filter(() => Math.random() < 0.07) : [];
+  const flags = flagSpots.length ? new THREE.InstancedMesh(flagGeometry(),
+    sway(new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0, side: THREE.DoubleSide }), 0.16, 2.6),
+    flagSpots.length) : null;
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3();
   const c = new THREE.Color();
   const up = new THREE.Vector3(0, 1, 0);
-  for (let i = 0; i < spots.length; i++) {
-    const sp = spots[i];
+  const place = (mesh, i, sp) => {
     q.setFromAxisAngle(up, sp.ry);
-    const sc = sp.scale ?? (0.92 + Math.random() * 0.16);
+    const sc = sp._sc ?? (sp._sc = sp.scale ?? (0.9 + Math.random() * 0.2));
     // Sitting is modelled as being shorter, not as a second mesh. At the
     // distance you ever see a grandstand from, the difference between a seated
     // figure and a short one is nothing.
     s.set(sc, sc * (sp.seated ? 0.72 : 1), sc);
     v.set(sp.x, sp.y, sp.z);
     m.compose(v, q, s);
-    body.setMatrixAt(i, m);
-    head.setMatrixAt(i, m);
-    c.setHex(palette[(Math.random() * palette.length) | 0]);
+    mesh.setMatrixAt(i, m);
+  };
+  for (let i = 0; i < spots.length; i++) {
+    const sp = spots[i];
+    place(body, i, sp); place(head, i, sp);
+    c.setHex(F ? pickW(F.shirts) : palette[(Math.random() * palette.length) | 0]);
+    // no two shirts in a crowd are quite the same colour after a day in the sun
+    c.multiplyScalar(0.82 + Math.random() * 0.3);
     body.setColorAt(i, c);
     c.setHex(SKIN[(Math.random() * SKIN.length) | 0]);
     head.setColorAt(i, c);
   }
+  for (let i = 0; i < flagSpots.length; i++) {
+    const sp = flagSpots[i];
+    place(flags, i, { ...sp, seated: false, _sc: sp._sc });
+    c.setHex(F.flags[(Math.random() * F.flags.length) | 0]);
+    flags.setColorAt(i, c);
+  }
   const g = new THREE.Group();
-  for (const mesh of [body, head]) {
+  for (const mesh of [body, head, flags]) {
+    if (!mesh) continue;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.castShadow = false;    // 9,000 shadow casters is not worth one frame
     mesh.receiveShadow = false;
     g.add(mesh);
   }
+  body.onBeforeRender = () => { CROWD_T.value = performance.now() / 1000; };
   return g;
 }
 
@@ -302,7 +403,7 @@ export function buildGrandstands(scene, track, env, look, world = null, sign = n
     if (bm) { bm.name = 'stand.band'; scene.add(bm); }
   }
 
-  const pm = peopleMesh(seats);
+  const pm = peopleMesh(seats, { fans: track.key });
   if (pm) scene.add(pm);
   return { stands: stands.length, people: seats.length };
 }
