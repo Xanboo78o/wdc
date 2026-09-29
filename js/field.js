@@ -39,7 +39,7 @@ import { bankY, bankRoll } from './bank.js';
 import { buildCar, buildGT3, liveryAtlas, numberTexture } from './car.js';
 import { liveryFor, applyLivery } from './livery.js';
 import { carLamps } from './lamps.js';
-import { crushParts, applyCrush } from './render.js';
+import { crushParts, applyCrush, slopePitch } from './render.js';
 
 // ---------------------------------------------------------------------------
 // AND WHY THERE ARE TWO VERSIONS OF EVERY CAR
@@ -411,7 +411,7 @@ export class Field {
       const grounded = car.airborne ? 0 : 1;
       rig.tilt.rotation.x = (car.roll || 0) + latG * 0.030
         + bankRoll(view.bank, t, proj.i, proj.lat) * grounded;
-      rig.tilt.rotation.z = (car.pitch || 0) + car.gLong * 0.022;
+      rig.tilt.rotation.z = (car.pitch || 0) + car.gLong * 0.022 + slopePitch(view.world, t, proj, car) * grounded;
 
       // Everything below here is a moving part, and the merged car has none.
       // Skipping it is most of the point of having a merged car at all.

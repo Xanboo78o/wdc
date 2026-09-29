@@ -13,9 +13,22 @@ import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { Look, sunRig } from './tex.js';
 import { Post } from './post.js';
-let RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM', 'DASHCAM'];
+/**
+ * The road's GRADIENT under a car, as a pitch angle in the car's own frame.
+ * Adam, 2026-09-29: "when i go down hills and on banked turns, my car doesnt
+ * tilt, it stays flat and follows the height". The car was lifted to the
+ * surveyed height and never tipped to its slope. Radians, + = nose up; the
+ * slope is taken over 8 m of the lap and projected on the car's heading, so a
+ * car pointing back down a hill tips the other way.
+ */
+export function slopePitch(world, track, proj, car) {
+  if (!world || !world.on) return 0;
+  const g = (world.trackYAt(proj.s + 4) - world.trackYAt(proj.s - 4)) / 8;
+  return Math.atan(g) * Math.cos((car.hdg || 0) - track.hdg[proj.i]);
+}
+
+let RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
 import { SpeedShake, SpeedBlur, SFX } from './speedfx.js';
-import { Dashcam, DASH_FOV } from './dashcam.js';
 import { ProcSky } from './sky.js';
 import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation, dayPhase, WeatherDirector } from './weather.js';
 import { Rain } from './rain.js';
@@ -934,7 +947,7 @@ export class View {
   }
 
   _drawMirror() {
-    if (!this.mirrorOn || this.photo || RIGS_NAMES[this.mode] === 'TV' || RIGS_NAMES[this.mode] === 'DASHCAM') return;
+    if (!this.mirrorOn || this.photo || RIGS_NAMES[this.mode] === 'TV') return;
     const r = this.renderer;
     // Redraw the reflection on even frames only (see _drawCarMirrors); the
     // quad is still composited EVERY frame from the last reflection, so the
@@ -1302,8 +1315,6 @@ export class View {
     const corridor = pitCorridor(t);
     stats.landmarks = placeLandmarks(this, env);   // js/landmarks.js: before the city, which it may clear over a tunnel
     stats.env = buildEnv(S, env, t, look, corridor, this.world);
-    // the survey's origin, so the DASHCAM stamp can print real GPS
-    this.geo = env && env.lat0 != null ? { lat0: env.lat0, lon0: env.lon0 } : null;
     this.corridor = corridor;
 
     const sign = signAtlas(t);
@@ -1507,7 +1518,7 @@ export class View {
     this.leanK += ((car.airborne ? 1 : this.soften) - this.leanK) * Math.min(1, dt * 6);
     this.car.rotation.x = (car.roll || 0) * this.leanK
       + bankRoll(this.bank, this.track, proj.i, proj.lat) * grounded;
-    this.car.rotation.z = (car.pitch || 0) * this.leanK;
+    this.car.rotation.z = (car.pitch || 0) * this.leanK + slopePitch(this.world, this.track, proj, car) * grounded;
     // The wheels move in their arches. 60 mm of travel is a lot of visible
     // movement at this scale, and it is the cue that reads as "this is a
     // machine with springs" from the chase camera and from onboard.
@@ -1617,7 +1628,7 @@ export class View {
     //   - T-CAM, the real one: on the stalk above the airbox, behind the
     //     driver's head, looking over the halo.
     // ?fovkick=0 takes the speed-widening lens away for an A/B.
-    RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM', 'DASHCAM'];
+    RIGS_NAMES = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
     if (typeof window !== 'undefined') window.__wdcRigs = RIGS_NAMES;
     const RIGS = [
       // ONBOARD is the DRIVER'S EYES (Adam, 2026-09-25: "first person is like on
@@ -1625,23 +1636,18 @@ export class View {
       // "i need to sit higher bc thats how my rig is": his rig seats him
       // upright with the wheel in front of him, so the eye is at the halo's
       // height (car.js eye), not slumped under it.
-      { name: 'ONBOARD', kind: 'bolted', at: this.carEye || [-0.34, 1.19, 0], aim: 24, drop: this.carEye ? 1.1 : 0.22, fov: 62, kick: 0.55, roll: 0.55, mount: 'onboard' },
+      { name: 'ONBOARD', kind: 'bolted', at: this.carEye || [-0.34, 1.19, 0], aim: 24, drop: this.carEye ? 1.1 : 0.22, fov: 62, kick: 0.55, roll: 1.0, mount: 'onboard' },
       // Lower (1.66 -> 1.28 m) and tighter (5.6 -> 4.9 m): the ground in the
       // bottom of the frame is nearer, so it streams past faster.
       { name: 'CHASE', kind: 'chase', dist: 4.9, height: 1.28, lead: 15, aimY: 0.62, fov: 55, kick: 1, mount: 'chase' },
-      { name: 'NOSE', kind: 'bolted', at: [1.62, 0.46, 0], aim: 26, fov: 62, kick: 0.8, roll: 0.85, mount: 'nose' },
+      { name: 'NOSE', kind: 'bolted', at: [1.62, 0.46, 0], aim: 26, fov: 62, kick: 0.8, roll: 1.0, mount: 'nose' },
       { name: 'TV', kind: 'tv', fov: 40, kick: 0 },
       // T-CAM. The broadcast onboard: the camera on the T-bar on top of the
       // airbox (car.js puts the pod at x -0.62, top 0.82 m), BEHIND the
       // driver's head, so it looks over the helmet and the halo loop at the
       // road. A longer lens than the eye (50 vs 62 deg) and the chassis's
       // full roll — it is a camera bolted to a car, not a person's head.
-      { name: 'T-CAM', kind: 'bolted', at: [-0.62, 0.93, 0], aim: 24, drop: 1.0, fov: 50, kick: 0.3, roll: 0.92, mount: 'tcam' },
-      // DASHCAM (js/dashcam.js): an action camera suckered to the airbox. A
-      // fixed wide lens (no fov kick), the horizon tipping fully with the
-      // chassis (roll 1), and the rigid mount's shake. The barrel pass bends
-      // it into the look every piece of real speed footage online has.
-      { name: 'DASHCAM', kind: 'bolted', at: [-0.66, 1.0, 0], aim: 24, drop: 1.12, fov: DASH_FOV, kick: 0, roll: 1.0, mount: 'dashcam' },
+      { name: 'T-CAM', kind: 'bolted', at: [-0.62, 0.93, 0], aim: 24, drop: 1.0, fov: 50, kick: 0.3, roll: 1.0, mount: 'tcam' },
     ];
     if (this.photo) {
       const t = this.track;
@@ -1690,15 +1696,19 @@ export class View {
     const sk = this.speedShake.step(dt, car.speed || 0, rig.mount, {
       rough: hud.rough || 0, kerb: kType, gLong: this._acc / 9.81,
       gVert: Math.abs(latG) * Math.sin(bankA) });
-    // The lens widens with SPEED (measured to help, see above); ?fovkick=0 A/B.
+    // FIXED LENS. Adam, 2026-09-29: "no fov resizing, this is for a simrig".
+    // On a rig the screen is a window at a real distance from your eyes; a lens
+    // that widens with speed or breathes with acceleration is a camera doing
+    // something your eyes never do. Off by default; ?fovkick=1 brings back the
+    // old speed-widening and breathing for comparison.
     if (this._fovKick === undefined) {
       const fq = new URLSearchParams(location.search).get('fovkick');
-      this._fovKick = fq != null && fq !== '' && Number.isFinite(+fq) ? +fq : 1;
+      this._fovKick = fq != null && fq !== '' && Number.isFinite(+fq) ? +fq : 0;
     }
     // ...and the new one breathes with ACCELERATION: a couple of degrees wider
     // while it is pulling hard, tighter under braking, back to rest at a
     // steady 350. A change of lens you feel as the car shoving you.
-    const gKick = Math.max(-3, Math.min(3.5, this._acc * 0.28)) * (rig.kick || 0) * (sfxOn ? 1 : 0);
+    const gKick = Math.max(-3, Math.min(3.5, this._acc * 0.28)) * (rig.kick || 0) * (sfxOn ? 1 : 0) * this._fovKick;
 
     let fov = rig.fov;
     const fp = rig.name === 'ONBOARD' && !!this.carEye;
@@ -1789,7 +1799,7 @@ export class View {
     // Motion blur at the edges (speedfx.js SpeedBlur), after the frame is on
     // the canvas. Fades in from 110 to 260 km/h; never on the broadcast rig,
     // whose long lens pans rather than travels. ?blur=0 / ?speedfx=0.
-    if (SFX.on && SFX.blur > 0 && rig.kind !== 'tv' && rig.name !== 'DASHCAM' && car.speed > 30) {
+    if (SFX.on && SFX.blur > 0 && rig.kind !== 'tv' && car.speed > 30) {
       if (!this.speedBlur) { this.speedBlur = new SpeedBlur(this.renderer); this._sfxVel = new THREE.Vector3(); }
       const kmh = car.speed * 3.6;
       const amt = Math.min(1, Math.max(0, (kmh - 110) / 150));
@@ -1808,16 +1818,6 @@ export class View {
         this.camera.position.y - surfaceY, hole, amt,
         this.post && this.post.on && this.post.sceneRT ? this.post.sceneRT.depthTexture : null);
     }
-
-    // DASHCAM: the lens, the shutter, the encoder and the stamp, over the
-    // finished frame. A dashcam shoots at a fast shutter — no motion blur —
-    // so the blur above is skipped for it and the encoder's breakup does
-    // that job instead.
-    if (rig.name === 'DASHCAM') {
-      if (!this.dashcam) this.dashcam = new Dashcam(this.renderer);
-      this.dashcam.render(car, dt, sk, this.geo,
-        this.post && this.post.on && this.post.sceneRT ? this.post.sceneRT.depthTexture : null, this.camera);
-    } else if (this.dashcam) this.dashcam.hide();
 
     // Publish the real cost of a frame once, after there is one to measure.
     // Guessing at triangle counts from source is how a scene quietly ends up

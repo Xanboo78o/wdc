@@ -34,7 +34,7 @@ import { liveryFor } from './livery.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 
 const $ = id => document.getElementById(id);
-const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM', 'DASHCAM'];
+const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
 
 const state = {
   track: null, line: null, lines: null, car: null, view: null,

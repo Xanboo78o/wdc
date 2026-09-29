@@ -157,8 +157,7 @@ export class SpeedSound {
     // buffeting: three incommensurate waves, 3-11 Hz, deeper at speed
     const buf = 0.5 * Math.sin(t * 2 * Math.PI * 3.1) + 0.3 * Math.sin(t * 2 * Math.PI * 6.7 + 1.1) + 0.2 * Math.sin(t * 2 * Math.PI * 10.9 + 2.3);
     const b = 1 + 0.28 * k * buf;
-    // .mic: the DASHCAM's cheap microphone, which the wind overwhelms (dashcam.js)
-    const w = SPEEDSOUND.wind * master * k * k * b * (SPEEDSOUND.mic || 1);
+    const w = SPEEDSOUND.wind * master * k * k * b;
     this._to(this.windBody.gain, w * 0.9, 0.03);
     this._to(this.windRush.gain, w * 0.55, 0.03);
     this.windLP.frequency.value = 220 + 900 * k;
