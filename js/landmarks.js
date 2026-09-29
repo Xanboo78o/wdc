@@ -703,3 +703,262 @@ BUILD.wheel = (it, ctx) => {
   if (bmesh) G.add(bmesh);
   ctx.G.add(G);
 };
+
+// ---- SUZUKA: the figure-eight bridge ---------------------------------------------
+// The road over the bridge is the circuit's own surface; what was missing is
+// the BRIDGE — the deck's edge, its parapets, and the abutments either side of
+// the leg that runs underneath. Everything hangs off the road's own height
+// (trackYAt), so it follows the elevation data rather than asserting one.
+BUILD.crossover = (it, ctx) => {
+  const { t } = ctx, M = mats(ctx);
+  const b = new Builder({ color: true });
+  // Where the lower leg passes: the nearest lap sample to the bridge's middle
+  // that is NOT on the bridge itself.
+  const mid = t.point((it.s0 + it.s1) / 2, 0);
+  let lo = null, bd = Infinity;
+  for (let i = 0; i < t.n; i++) {
+    const s = i * t.ds;
+    if (Math.abs(t.gap(s, (it.s0 + it.s1) / 2)) < 200) continue;
+    const d = (t.x[i] - mid.x) ** 2 + (t.y[i] - mid.y) ** 2;
+    if (d < bd) { bd = d; lo = s; }
+  }
+  const yLow = rY(ctx, lo);
+  let u = 0;
+  for (let s = it.s0; s < it.s1; s += 2) {
+    const i = t.idx(s);
+    const y0 = rY(ctx, s), y1 = rY(ctx, s + 2);
+    for (const sg of [1, -1]) {
+      const lat0 = sg * (t.w[i] + (sg > 0 ? t.runL[i] : t.runR[i]) + 0.4);
+      const p = t.point(s, lat0), q = t.point(s + 2, lat0);
+      // Parapet: 1.1 m of concrete on the deck edge, and the deck's fascia.
+      b.quadN([p.x, y0 - 1.3, Z(p.y)], [q.x, y1 - 1.3, Z(q.y)], [q.x, y1 + 1.1, Z(q.y)], [p.x, y0 + 1.1, Z(p.y)],
+        [[u, 0], [u + 2, 0], [u + 2, 2.4], [u, 2.4]], [0.86, 0.85, 0.82]);
+    }
+    // Soffit, where there is anything to see under it.
+    if (y0 - yLow > 3) {
+      const a = t.point(s, t.w[i] + t.runL[i] + 0.4), c = t.point(s, -(t.w[i] + t.runR[i] + 0.4));
+      const a2 = t.point(s + 2, t.w[i] + t.runL[i] + 0.4), c2 = t.point(s + 2, -(t.w[i] + t.runR[i] + 0.4));
+      b.quadN([a.x, y0 - 1.3, Z(a.y)], [a2.x, y1 - 1.3, Z(a2.y)], [c2.x, y1 - 1.3, Z(c2.y)], [c.x, y0 - 1.3, Z(c.y)],
+        [[0, u], [0, u + 2], [20, u + 2], [20, u]], [0.55, 0.55, 0.53]);
+    }
+    u += 2;
+  }
+  // Abutments beside the lower leg, up to the deck.
+  const yUp = rY(ctx, (it.s0 + it.s1) / 2);
+  if (yUp - yLow > 3) {
+    const i = t.idx(lo);
+    for (const sg of [1, -1]) {
+      const p = t.point(lo, sg * (t.w[i] + (sg > 0 ? t.runL[i] : t.runR[i]) + 1.5));
+      b.box(p.x, (yLow + yUp - 1.3) / 2 - 0.5, Z(p.y), 26, yUp - 1.3 - yLow + 1, 1.8, p.hdg, [0.8, 0.79, 0.76]);
+    }
+  }
+  const m = put(ctx, b, M.concrete);
+  if (m) m.name = 'landmark.crossover';
+};
+
+// ---- ZANDVOORT: the radar tower behind Tarzan ------------------------------------
+// A 50 m square steel lattice with a radar house and dish on top. Legs and
+// cross-bracing are one instanced bar, so the see-through lattice costs one
+// draw call.
+BUILD.lattice = (it, ctx) => {
+  const [x, y] = it.p, g = gY(ctx, x, y), H = it.h;
+  const bars = [];
+  const V = (a, b2) => bars.push([a, b2]);
+  const half = h => 3.2 - 2.0 * (h / H);          // tapers from 6.4 m to 2.4 m
+  const corners = h => [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([a, c]) => [a * half(h), h, c * half(h)]);
+  const levels = 10;
+  for (let k = 0; k < levels; k++) {
+    const h0 = k * H / levels, h1 = (k + 1) * H / levels;
+    const A = corners(h0), B = corners(h1);
+    for (let j = 0; j < 4; j++) {
+      V(A[j], B[j]);                                // leg
+      V(A[j], B[(j + 1) % 4]);                      // X bracing
+      V(A[(j + 1) % 4], B[j]);
+      V(B[j], B[(j + 1) % 4]);                      // ring
+    }
+  }
+  const M = new THREE.MeshStandardMaterial({ color: 0xb9bec4, roughness: 0.5, metalness: 0.6 });
+  const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 5), M, bars.length);
+  const o = new THREE.Object3D(), Y = new THREE.Vector3(0, 1, 0);
+  bars.forEach(([a, b2], k) => {
+    const A = new THREE.Vector3(x + a[0], g + a[1], Z(y) + a[2]), B = new THREE.Vector3(x + b2[0], g + b2[1], Z(y) + b2[2]);
+    const d = B.clone().sub(A), L = d.length();
+    o.position.copy(A).addScaledVector(d, 0.5);
+    o.quaternion.setFromUnitVectors(Y, d.normalize());
+    o.scale.set(0.12, L, 0.12);
+    o.updateMatrix(); im.setMatrixAt(k, o.matrix);
+  });
+  im.castShadow = true;
+  im.name = 'landmark.lattice';
+  ctx.G.add(im);
+  const b = new Builder({ color: true });
+  b.box(x, g + H + 1.6, Z(y), 4, 3.2, 4, 0.3, [0.93, 0.93, 0.92]);
+  b.box(x, g + H + 3.6, Z(y), 7.5, 0.8, 1.2, 0.3, [0.85, 0.2, 0.15]);   // the scanner bar
+  put(ctx, b, mats(ctx).paint);
+};
+
+// ---- ZANDVOORT: marram grass --------------------------------------------------------
+// Crossed cards with the flora set's grass photograph (data/flora, CC0), one
+// instanced mesh. Tall, pale and straw-tipped: marram, not lawn.
+BUILD.marram = (it, ctx) => {
+  const loader = new THREE.TextureLoader();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xc9c49a, roughness: 1, metalness: 0, side: THREE.DoubleSide, alphaTest: 0.45 });
+  loader.load(`./data/flora/grass-c.jpg`, tx => { tx.colorSpace = THREE.SRGBColorSpace; mat.map = tx; mat.needsUpdate = true; });
+  loader.load(`./data/flora/grass-a.png`, tx => { mat.alphaMap = tx; mat.needsUpdate = true; });
+  const b = new Builder({ uv: true });
+  for (const a of [0, Math.PI / 3, 2 * Math.PI / 3]) {
+    const cx = Math.cos(a) * 0.55, cz = Math.sin(a) * 0.55;
+    b.quad([-cx, 0, -cz], [cx, 0, cz], [cx, 0.9, cz], [-cx, 0.9, -cz], [-cz, 0, cx], [[0, 0], [1, 0], [1, 1], [0, 1]]);
+  }
+  const geo = b.geometry();
+  const im = new THREE.InstancedMesh(geo, mat, it.list.length);
+  const o = new THREE.Object3D();
+  it.list.forEach(([x, y, s], k) => {
+    o.position.set(x, gY(ctx, x, y) - 0.05, Z(y));
+    o.rotation.set(0, (x * 12.9898 + y * 78.233) % 6.283, 0);
+    o.scale.set(s * 1.3, s, s * 1.3);
+    o.updateMatrix(); im.setMatrixAt(k, o.matrix);
+  });
+  im.castShadow = false; im.receiveShadow = true;
+  im.name = 'landmark.marram';
+  ctx.G.add(im);
+};
+
+// ---- BAKU: the walls of the Old City ---------------------------------------------------
+// Sandstone curtain wall with a crenellated top and round bastions every
+// ~42 m, as the castle section runs beside it. Towers are instanced.
+BUILD.citywall = (it, ctx) => {
+  const b = new Builder({ color: true });
+  const towers = [];
+  const H = it.h || 9, T = 2.2;
+  const stone = [0.86, 0.74, 0.55], dark = [0.72, 0.6, 0.44];
+  for (const run of it.runs) {
+    let acc = 0;
+    for (let k = 0; k + 1 < run.length; k++) {
+      const a = run[k], c = run[k + 1];
+      const ga = gY(ctx, a[0], a[1]), gc = gY(ctx, c[0], c[1]);
+      const L = Math.hypot(c[0] - a[0], c[1] - a[1]) || 1;
+      const nx = -(c[1] - a[1]) / L * T / 2, ny = (c[0] - a[0]) / L * T / 2;
+      for (const sg of [1, -1]) {
+        const A = [a[0] + nx * sg, Z(a[1] + ny * sg)], C = [c[0] + nx * sg, Z(c[1] + ny * sg)];
+        b.quadN([A[0], ga - 1, A[1]], [C[0], gc - 1, C[1]], [C[0], gc + H, C[1]], [A[0], ga + H, A[1]],
+          [[acc, 0], [acc + L, 0], [acc + L, H], [acc, H]], sg > 0 ? stone : dark);
+      }
+      b.quadN([a[0] + nx, ga + H, Z(a[1] + ny)], [c[0] + nx, gc + H, Z(c[1] + ny)], [c[0] - nx, gc + H, Z(c[1] - ny)], [a[0] - nx, ga + H, Z(a[1] - ny)],
+        [[0, 0], [1, 0], [1, 1], [0, 1]], stone);
+      // Merlons: one every 3 m sample, both faces' worth of a small box.
+      b.box((a[0] + c[0]) / 2, (ga + gc) / 2 + H + 0.6, Z((a[1] + c[1]) / 2), 1.3, 1.2, T, Math.atan2(c[1] - a[1], c[0] - a[0]), stone);
+      acc += L;
+      if (acc > it.towerEvery) { acc = 0; towers.push([c[0], c[1], gc]); }
+    }
+  }
+  const m = put(ctx, b, mats(ctx).plaster);
+  if (m) m.name = 'landmark.citywall';
+  if (towers.length) {
+    const geo = new THREE.CylinderGeometry(4.2, 4.8, H + 2.5, 14);
+    geo.translate(0, (H + 2.5) / 2 - 1, 0);
+    const im = new THREE.InstancedMesh(geo, ctx.look.mat('plaster', { size: 3, tint: 0xdcc08e, roughness: 1, metalness: 0 }), towers.length);
+    const o = new THREE.Object3D();
+    towers.forEach(([x, y, g], k) => { o.position.set(x, g, Z(y)); o.updateMatrix(); im.setMatrixAt(k, o.matrix); });
+    im.castShadow = true; im.receiveShadow = true;
+    ctx.G.add(im);
+  }
+};
+
+// ---- BAKU: the Flame Towers ---------------------------------------------------------------
+// Three glass flames on the hill above the boulevard. Each is its surveyed
+// footprint, extruded and tapered to a tip leaning toward the sea; the env
+// bake's flat-topped prisms stay inside it. Heights are the published ones
+// (182, 161 and ~140 m), matched to the survey's storey counts.
+BUILD.flames = (it, ctx) => {
+  const glass = new THREE.MeshStandardMaterial({ color: 0x3f5c78, roughness: 0.08, metalness: 0.75, envMapIntensity: 1.8, side: THREE.DoubleSide });
+  const byLv = it.towers.slice().sort((a, c) => (c.lv || c.h) - (a.lv || a.h));
+  const HEIGHT = [182, 161, 140];
+  const b = new Builder({ color: false });
+  byLv.forEach((tw, n) => {
+    const ring = tw.ring;
+    const c = ring.reduce((a, p) => [a[0] + p[0] / ring.length, a[1] + p[1] / ring.length], [0, 0]);
+    const g = lowest(ctx, ring);
+    const H = HEIGHT[n] || tw.h;
+    const STEPS = 14;
+    // Lean toward the bay (south-east, the Caspian) as it rises.
+    const lean = [0.18, -0.22];
+    const at = (p, f) => {
+      const k = 1.012 * (1 - Math.pow(f, 2.4) * 0.97);
+      return [c[0] + (p[0] - c[0]) * k + lean[0] * f * H * 0.25, g + f * H, Z(c[1] + (p[1] - c[1]) * k + lean[1] * f * H * 0.25)];
+    };
+    for (let s = 0; s < STEPS; s++) {
+      const f0 = s / STEPS, f1 = (s + 1) / STEPS;
+      for (let k = 0; k < ring.length; k++) {
+        const p = ring[k], q = ring[(k + 1) % ring.length];
+        b.quadN(at(p, f0), at(q, f0), at(q, f1), at(p, f1), [[0, f0 * H], [1, f0 * H], [1, f1 * H], [0, f1 * H]]);
+      }
+    }
+  });
+  const m = b.mesh(glass);
+  if (m) { m.name = 'landmark.flames'; ctx.G.add(m); }
+};
+
+// ---- NÜRBURGRING: the castle -----------------------------------------------------------------
+BUILD.castle = (it, ctx) => {
+  const b = new Builder({ color: true });
+  const stone = [0.62, 0.58, 0.52];
+  const ring = it.wall;
+  for (let k = 0; k + 1 < ring.length; k++) {
+    const a = ring[k], c = ring[k + 1];
+    const ga = gY(ctx, a[0], a[1]), gc = gY(ctx, c[0], c[1]);
+    const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    b.quadN([a[0], ga - 2, Z(a[1])], [c[0], gc - 2, Z(c[1])], [c[0], gc + 7, Z(c[1])], [a[0], ga + 7, Z(a[1])],
+      [[0, 0], [L, 0], [L, 9], [0, 9]], stone);
+  }
+  for (const tw of it.towers) {
+    const g = lowest(ctx, tw.ring);
+    b.prism(toXZ(tw.ring), g - 2, g + tw.h, tw.h > 15 ? [0.66, 0.62, 0.56] : stone, true);
+    // Crenellated top on the keep.
+    if (tw.h > 15) {
+      const c = tw.ring.reduce((a, p) => [a[0] + p[0] / tw.ring.length, a[1] + p[1] / tw.ring.length], [0, 0]);
+      tw.ring.forEach((p, k) => { if (k % 2 === 0) b.box(p[0] * 0.9 + c[0] * 0.1, g + tw.h + 0.6, Z(p[1] * 0.9 + c[1] * 0.1), 1.1, 1.2, 1.1, 0, stone); });
+    }
+  }
+  const m = put(ctx, b, mats(ctx).plaster);
+  if (m) m.name = 'landmark.castle';
+};
+
+// ---- NÜRBURGRING: the Nordschleife -------------------------------------------------------
+// Grey tarmac ribbons along the surveyed Nordschleife where it passes the GP
+// circuit, with its white edge lines and Armco both sides.
+BUILD.ribbon = (it, ctx) => {
+  const W = it.width || 9;
+  const road = new Builder({ color: true }), rail = new Builder({ color: true });
+  for (const run of it.runs) {
+    const n = run.length;
+    const P = run.map(p => [p[0], p[1], gY(ctx, p[0], p[1]) + 0.12]);
+    let u = 0;
+    for (let k = 0; k + 1 < n; k++) {
+      const a = P[k], c = P[k + 1];
+      const o = P[Math.max(0, k - 1)], d = P[Math.min(n - 1, k + 2)];
+      const n0 = [-(c[1] - o[1]), c[0] - o[0]], n1 = [-(d[1] - a[1]), d[0] - a[0]];
+      const l0 = Math.hypot(...n0) || 1, l1 = Math.hypot(...n1) || 1;
+      const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+      for (const [f0, f1, col] of [[-1, -0.97, [2.4, 2.4, 2.3]], [-0.97, 0.97, [0.95, 0.95, 0.95]], [0.97, 1, [2.4, 2.4, 2.3]]]) {
+        const pa0 = [a[0] + n0[0] / l0 * W / 2 * f0, a[1] + n0[1] / l0 * W / 2 * f0];
+        const pa1 = [a[0] + n0[0] / l0 * W / 2 * f1, a[1] + n0[1] / l0 * W / 2 * f1];
+        const pc0 = [c[0] + n1[0] / l1 * W / 2 * f0, c[1] + n1[1] / l1 * W / 2 * f0];
+        const pc1 = [c[0] + n1[0] / l1 * W / 2 * f1, c[1] + n1[1] / l1 * W / 2 * f1];
+        road.quad([pa0[0], a[2], Z(pa0[1])], [pc0[0], c[2], Z(pc0[1])], [pc1[0], c[2], Z(pc1[1])], [pa1[0], a[2], Z(pa1[1])],
+          [0, 1, 0], [[f0 * W / 2, u], [f0 * W / 2, u + L], [f1 * W / 2, u + L], [f1 * W / 2, u]], col);
+      }
+      for (const sg of [1, -1]) {
+        const pa = [a[0] + n0[0] / l0 * (W / 2 + 1.2) * sg, a[1] + n0[1] / l0 * (W / 2 + 1.2) * sg];
+        const pc = [c[0] + n1[0] / l1 * (W / 2 + 1.2) * sg, c[1] + n1[1] / l1 * (W / 2 + 1.2) * sg];
+        rail.quadN([pa[0], a[2] + 0.45, Z(pa[1])], [pc[0], c[2] + 0.45, Z(pc[1])], [pc[0], c[2] + 0.75, Z(pc[1])], [pa[0], a[2] + 0.75, Z(pa[1])],
+          [[0, 0], [1, 0], [1, 1], [0, 1]], [0.8, 0.82, 0.84]);
+      }
+      u += L;
+    }
+  }
+  const m = put(ctx, road, ctx.look.mat('tarmac', { size: 1.6, tint: 0xa9a7a2, roughness: 0.92, metalness: 0, side: THREE.DoubleSide, vertexColors: true,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }), { shadow: false });
+  if (m) m.name = 'landmark.nordschleife';
+  put(ctx, rail, mats(ctx).metal, { shadow: false });
+};

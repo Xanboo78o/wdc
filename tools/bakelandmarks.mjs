@@ -358,10 +358,10 @@ SPEC.zandvoort = (C, E) => {
   const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
   const tufts = [];
   const bb = C.env.bbox;
-  for (let k = 0; k < 90000 && tufts.length < 9000; k++) {
+  for (let k = 0; k < 400000 && tufts.length < 7000; k++) {
     const x = bb.x0 + rnd() * (bb.x1 - bb.x0), y = bb.y0 + rnd() * (bb.y1 - bb.y0);
     const q = C.near(x, y);
-    if (q.d > 320) continue;
+    if (q.d > 220) continue;
     if (C.onCircuit(x, y, 5)) continue;
     const poly = polys.find(a => inside([x, y], a.p));
     if (!poly) continue;
@@ -369,7 +369,7 @@ SPEC.zandvoort = (C, E) => {
     if (poly.k === 'scrub' && rnd() < 0.5) continue;
     tufts.push([C.r1(x), C.r1(y), Math.round((0.7 + rnd() * 0.8) * 100) / 100]);
   }
-  items.push({ type: 'marram', name: 'Marram grass on the dunes', src: `scattered (seeded) over the env bake's sand and scrub polygons (OSM natural=sand/beach/scrub via bakeenv), within 320 m of the lap; ${tufts.length} tufts`, list: tufts });
+  items.push({ type: 'marram', name: 'Marram grass on the dunes', src: `scattered (seeded) over the env bake's sand and scrub polygons (OSM natural=sand/beach/scrub via bakeenv), within 220 m of the lap; ${tufts.length} tufts`, list: tufts });
   return items;
 };
 
