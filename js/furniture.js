@@ -20,6 +20,7 @@ import { Z, Builder, Atlas, fitText } from './geom.js';
 // The grid lives in a module that imports NOTHING, so the headless race gate
 // can call the same function this file paints from. See js/grid.js.
 import { gridSlots } from './grid.js';
+import { KERB_PAINT } from './surface.js';
 // Circular with crowd.js (which takes printMat from here); both sides only use
 // the other's function declarations at build time, so it resolves.
 import { peopleMesh } from './crowd.js';
@@ -357,18 +358,48 @@ export function buildTyreWalls(scene, track, look, world = null) {
       if (run > 16) continue;                     // a big gravel trap needs none
       const lat = barrierLat(t, i, side) - side * 0.55;
       const q = at(t, i, lat);
-      stacks.push({ p: q, h: t.hdg[i], y: world ? world.groundY(q[0], q[1]) : 0 });
+      stacks.push({ p: q, h: t.hdg[i], y: world ? world.groundY(q[0], q[1]) : 0, s, side, i, c });
     }
   }
   if (!stacks.length) return null;
 
+  // THE BELT. A modern tyre barrier is not bare tyres: the stacks are bolted
+  // together and faced with a rubber conveyor belt, and the belt is painted in
+  // bold alternating blocks so a driver can read the barrier at the end of a
+  // braking zone from 200 m. Bare black tyres read as a dark smudge. The
+  // belt stands 0.4 m in front of the stacks, 1.1 m tall, in the circuit's
+  // kerb colours (surface.js KERB_PAINT), 1.9 m blocks.
+  const belt = new Builder({ color: true });
+  const paint = KERB_PAINT[t.key] || KERB_PAINT.default;
+  for (let n = 0; n + 1 < stacks.length; n++) {
+    const A = stacks[n], B = stacks[n + 1];
+    if (A.c !== B.c || B.s - A.s > 1.5) continue;       // one run per corner
+    const sd = A.side;
+    const la = barrierLat(t, A.i, sd) - sd * 0.97, lb = barrierLat(t, B.i, sd) - sd * 0.97;
+    const pa = at(t, A.i, la), pb = at(t, B.i, lb);
+    const h = t.hdg[A.i];
+    const inw = sd > 0 ? [Math.sin(h), 0, Math.cos(h)] : [-Math.sin(h), 0, -Math.cos(h)];
+    const col = (Math.floor(A.s / 1.9) % 2) ? paint[0] : paint[1];
+    const ya = A.y, yb = B.y;
+    belt.quad([pa[0], ya + 0.04, pa[1]], [pb[0], yb + 0.04, pb[1]], [pb[0], yb + 1.12, pb[1]], [pa[0], ya + 1.12, pa[1]],
+      inw, [[0, 0], [1, 0], [1, 1], [0, 1]], col);
+    // a dark cap along the top edge, so it reads as a thick belt, not a card
+    belt.quad([pa[0], ya + 1.12, pa[1]], [pb[0], yb + 1.12, pb[1]],
+      [pb[0] - inw[0] * 0.4, yb + 1.1, pb[1] - inw[2] * 0.4], [pa[0] - inw[0] * 0.4, ya + 1.1, pa[1] - inw[2] * 0.4],
+      [0, 1, 0], [[0, 0], [1, 0], [1, 1], [0, 1]], 0x1a1b1e);
+  }
+  const bm = belt.mesh(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0, side: THREE.DoubleSide }));
+  if (bm) { bm.name = 'tyres.belt'; bm.castShadow = true; scene.add(bm); }
+
   const geo = new THREE.CylinderGeometry(0.36, 0.36, 0.24, 12, 1, true);
   const mat = look.mat('metal', { size: 0.9, tint: 0x16171a, roughness: 1, metalness: 0.0, side: THREE.DoubleSide });
-  const mesh = new THREE.InstancedMesh(geo, mat, stacks.length * 3);
+  // Four high, not three: a real stack comes up to about a metre, which is
+  // what the belt in front of it is sized to.
+  const mesh = new THREE.InstancedMesh(geo, mat, stacks.length * 4);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1);
   let k = 0;
   for (const st of stacks) {
-    for (let level = 0; level < 3; level++) {
+    for (let level = 0; level < 4; level++) {
       // A real tyre wall is bolted but not surveyed — the slight stagger is
       // what stops 2,000 identical cylinders reading as a machine part.
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), st.h + level * 0.4);
