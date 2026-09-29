@@ -1,0 +1,270 @@
+// speedfx.js — what 350 km/h does to a camera, and to a picture of it.
+//
+// Adam, 2026-09-28: "make 350 kmh feel like 350 kmh not 40 mph, make it feel
+// FAST". The physics speed was already right. What was wrong was measured by
+// tools/speedflow.mjs, and it is three things, none of them the speed:
+//
+//   1. NOTHING SHOOK. A camera that is perfectly still at 350 km/h is, to the
+//      eye, a camera on a tripod watching a video wall. The old vibration was
+//      a positional jitter of about a centimetre, which moves the halo and
+//      leaves the world exactly where it was — a car's shake is ANGULAR, and
+//      it is the angle that moves the whole frame.
+//
+//   2. THE NEAR GROUND WAS UNREADABLE. From the driver's eyes the nearest
+//      visible tarmac streams past at ~27 screen heights a second — nearly
+//      half the screen PER FRAME at 60 fps. Past about a tenth of a screen per
+//      frame the eye stops tracking texture and sees noise; what a real camera
+//      records there instead is motion blur, streaks along the direction of
+//      travel, and it is the streaks the brain reads as speed. So: blur, but
+//      only where the geometry says the flow is that fast, which is the edges.
+//
+//   3. (render.js) The chase camera fell ~9 m further behind at top speed,
+//      and every rig WIDENED its lens as speed rose — both make the world look
+//      further away, which is to say slower.
+//
+// Two classes, both driven by car.speed and a clock of their own, never by
+// accumulated sim state — so an instant replay that sets the speed from a
+// recording shakes and blurs exactly as the live lap did.
+//
+// Knobs: ?speedfx=0 (all of it off), ?blur=0|0.5|1.5 (strength), ?shake=0|2.
+import * as THREE from 'three';
+
+const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+const num = (k, d) => (Q.has(k) && Q.get(k) !== '' && Number.isFinite(+Q.get(k)) ? +Q.get(k) : d);
+export const SFX = {
+  on: Q.get('speedfx') !== '0',
+  blur: num('blur', 1),
+  shake: num('shake', 1),
+};
+
+// ---------------------------------------------------------------------------
+// SHAKE
+//
+// Per mount, in DEGREES at 350 km/h on smooth tarmac. Three bands:
+//   buzz   the engine and the tyres at 20-60 Hz. Far above the frame rate, so
+//          it is drawn as a fresh random offset every frame — which is exactly
+//          what a 50 fps broadcast camera records of it: judder.
+//   road   the surface's own undulation, 2-9 Hz. Road bumps are fixed in
+//          SPACE, so their frequency is distance, not time — they come faster
+//          the faster you go, which is itself a speed cue.
+//   kerb   the hit. car.surface on a kerb, or the renderer's `rough`.
+// The T-cam is the loudest: it sits on a stalk on the airbox and its
+// vertical judder at Monza is the most recognisable shot in the sport.
+// The driver's head is damped by a neck, so less buzz, more road. The chase
+// camera is not bolted to anything — a whisper of it, or it reads as fake.
+const MOUNTS = {
+  onboard: { buzzP: 0.075, buzzY: 0.035, buzzR: 0.03, roadP: 0.16, roadR: 0.10, heave: 0.004, kerb: 0.9 },
+  tcam:    { buzzP: 0.16, buzzY: 0.045, buzzR: 0.05, roadP: 0.14, roadR: 0.12, heave: 0.005, kerb: 1.1 },
+  nose:    { buzzP: 0.12, buzzY: 0.05, buzzR: 0.04, roadP: 0.20, roadR: 0.08, heave: 0.006, kerb: 1.2 },
+  chase:   { buzzP: 0.025, buzzY: 0.015, buzzR: 0.0, roadP: 0.06, roadR: 0.03, heave: 0.012, kerb: 0.35 },
+};
+const D2R = Math.PI / 180;
+
+export class SpeedShake {
+  constructor() {
+    this.dist = 0;              // metres travelled, for the road band
+    this.kick = 0;              // decaying kerb/bump energy
+    this.out = { p: 0, y: 0, r: 0, h: 0 };
+    this._hf = { p: 0, y: 0, r: 0 };
+  }
+  /**
+   * dt real seconds; speed m/s; mount key; rough 0..0.45 (render.js hud);
+   * kerb true on a kerb. Returns radians (p pitch, y yaw, r roll) and metres (h).
+   */
+  step(dt, speed, mount, rough = 0, kerb = false) {
+    const o = this.out;
+    const M = MOUNTS[mount];
+    if (!SFX.on || !M || SFX.shake <= 0) { o.p = o.y = o.r = o.h = 0; return o; }
+    dt = Math.min(0.1, Math.max(0, dt));
+    const v = Math.max(0, speed);
+    const k = v / 97.2;                                 // 1.0 at 350 km/h
+    this.dist += v * dt;
+    // Kerbs arrive as hits: every stripe is a fresh kick, not a steady hum.
+    if (kerb && v > 8) this.kick = Math.max(this.kick, 0.55 + 0.45 * Math.min(1, k));
+    this.kick = Math.max(this.kick, Math.min(1, rough * 1.6));
+    this.kick *= Math.exp(-dt * 7);
+    // buzz: rises faster than speed (aero load and tyre frequency both climb)
+    const b = Math.pow(k, 1.6) * SFX.shake;
+    const rnd = () => Math.random() * 2 - 1;
+    // Lightly low-passed so it is judder rather than static at 144 Hz.
+    const a = Math.min(1, dt * 55);
+    this._hf.p += (rnd() - this._hf.p) * a;
+    this._hf.y += (rnd() - this._hf.y) * a;
+    this._hf.r += (rnd() - this._hf.r) * a;
+    // road: three incommensurate spatial wavelengths (m)
+    const d = this.dist;
+    const w1 = Math.sin(d / 9.1 * 6.283), w2 = Math.sin(d / 3.7 * 6.283 + 1.3), w3 = Math.sin(d / 14.3 * 6.283 + 2.1);
+    const road = (0.5 * w2 + 0.3 * w1 + 0.2 * w3) * Math.min(1, k) * SFX.shake;
+    const roll = (0.6 * Math.sin(d / 5.3 * 6.283 + 0.4) + 0.4 * w3) * Math.min(1, k) * SFX.shake;
+    const kk = this.kick * M.kerb * SFX.shake;
+    o.p = (M.buzzP * b * this._hf.p + M.roadP * road + kk * rnd() * 0.9) * D2R;
+    o.y = (M.buzzY * b * this._hf.y + kk * rnd() * 0.25) * D2R;
+    o.r = (M.buzzR * b * this._hf.r + M.roadR * roll + kk * rnd() * 0.5) * D2R;
+    o.h = M.heave * (road + 0.5 * b * this._hf.p) + 0.01 * kk * rnd();
+    return o;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BLUR
+//
+// Camera motion blur with the camera's motion KNOWN rather than guessed, and
+// the scene's depth ASSUMED rather than read — there is no depth texture in
+// the post chain, and rendering one would be a second pass of the whole
+// world. For each pixel below the horizon the depth is the ground plane, which
+// on a race track is very nearly exact; above it, a corridor of barriers and
+// boards ~11 m either side. Reproject that point with the camera moved on by
+// one shutter interval and you have the pixel's streak: zero at the point you
+// are driving towards, longest in the lower corners, following the real
+// perspective of the road instead of a generic zoom.
+//
+// Your own car is masked out (it moves WITH the camera, so a real lens does
+// not smear it), by drawing just the car, white, into a quarter-size target.
+// Taps that land on the car are dropped, so red paint never bleeds into the
+// tarmac beside the sidepod. A mirror strip, when there is one, is left alone.
+// And a radial mask keeps the centre of the frame — where you are looking —
+// sharp whatever the numbers say.
+const MASK_LAYER = 7;
+const TAPS = 12;
+
+const VERT = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+const FRAG = `
+precision highp float;
+uniform sampler2D tCol; uniform sampler2D tMask;
+uniform mat4 uProj; uniform mat4 uInvProj; uniform mat3 uRot;
+uniform vec3 uVel; uniform float uH; uniform float uShutter; uniform float uAspect;
+uniform float uMax; uniform float uAmt; uniform vec4 uHole; uniform vec2 uRes;
+varying vec2 vUv;
+vec2 streak(vec2 uv) {
+  vec4 v = uInvProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 ray = normalize(v.xyz / v.w);            // view space
+  vec3 rw = uRot * ray;                          // world space direction
+  float t;
+  if (rw.y < -0.004) t = min(400.0, uH / -rw.y);
+  else {
+    vec3 vd = normalize(uVel + vec3(1e-5));
+    vec3 perp = ray - dot(ray, vd) * vd;
+    t = min(400.0, 11.0 / max(0.03, length(perp)));
+  }
+  vec3 P = ray * t - uVel * uShutter;            // the camera moved on
+  vec4 c = uProj * vec4(P, 1.0);
+  if (c.w <= 0.05) return vec2(0.0);
+  vec2 uv2 = c.xy / c.w * 0.5 + 0.5;
+  vec2 d = uv2 - uv;
+  float L = length(d * vec2(uAspect, 1.0));
+  return L > uMax ? d * (uMax / L) : d;
+}
+void main() {
+  vec4 base = texture2D(tCol, vUv);
+  vec2 px = vUv * uRes;
+  bool hole = px.x > uHole.x && px.x < uHole.z && px.y > uHole.y && px.y < uHole.w;
+  float me = texture2D(tMask, vUv).r;
+  // never the centre: 0 inside ~a third of the way out, full by the corners
+  vec2 q = (vUv - 0.5) * vec2(uAspect, 1.0);
+  float r = length(q) / length(vec2(uAspect, 1.0) * 0.5);
+  float edge = smoothstep(0.22, 0.78, r) * uAmt;
+  if (hole || me > 0.5 || edge < 0.01) { gl_FragColor = base; return; }
+  vec2 d = streak(vUv) * edge;
+  if (length(d * uRes) < 1.2) { gl_FragColor = base; return; }
+  vec3 acc = base.rgb; float wsum = 1.0;
+  for (int i = 0; i < ${TAPS}; i++) {
+    float f = (float(i) + 0.5) / float(${TAPS}) - 0.5;
+    vec2 u = vUv + d * f;
+    if (u.x < 0.0 || u.y < 0.0 || u.x > 1.0 || u.y > 1.0) continue;
+    if (texture2D(tMask, u).r > 0.5) continue;   // do not smear the car in
+    acc += texture2D(tCol, u).rgb; wsum += 1.0;
+  }
+  gl_FragColor = vec4(acc / wsum, 1.0);
+}`;
+
+export class SpeedBlur {
+  constructor(renderer) {
+    this.r = renderer;
+    this.size = new THREE.Vector2();
+    this.tex = null;
+    this.mask = new THREE.WebGLRenderTarget(4, 4, { depthBuffer: true, stencilBuffer: false });
+    this.white = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    this.mat = new THREE.ShaderMaterial({
+      vertexShader: VERT, fragmentShader: FRAG,
+      depthTest: false, depthWrite: false,
+      uniforms: {
+        tCol: { value: null }, tMask: { value: this.mask.texture },
+        uProj: { value: new THREE.Matrix4() }, uInvProj: { value: new THREE.Matrix4() },
+        uRot: { value: new THREE.Matrix3() }, uVel: { value: new THREE.Vector3() },
+        uH: { value: 1 }, uShutter: { value: 1 / 100 }, uAspect: { value: 1 },
+        uMax: { value: 0.07 }, uAmt: { value: 1 }, uHole: { value: new THREE.Vector4(-1, -1, -1, -1) },
+        uRes: { value: new THREE.Vector2(1, 1) },
+      },
+    });
+    this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
+    this.quad.frustumCulled = false;
+    this.flat = new THREE.Scene(); this.flat.add(this.quad);
+    this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this._tagged = 0; this._frame = 0;
+    this._m4 = new THREE.Matrix4(); this._v = new THREE.Vector3();
+  }
+
+  _tag(car) {
+    let n = 0;
+    car.traverse(o => { if (o.isMesh || o.isInstancedMesh) { o.layers.enable(MASK_LAYER); n++; } });
+    this._tagged = n;
+  }
+
+  /**
+   * After the frame is on the canvas.
+   *   car      your car's Object3D (masked out)
+   *   vel      camera velocity, world, m/s (THREE.Vector3)
+   *   height   camera height above the road, m
+   *   hole     [x0, y0, x1, y1] drawing-buffer pixels to leave alone, or null
+   *   amt      0..1 strength multiplier (render.js ramps it in with speed)
+   */
+  render(scene, camera, car, vel, height, hole = null, amt = 1) {
+    if (!SFX.on || SFX.blur <= 0 || amt <= 0.01) return;
+    const r = this.r;
+    r.getDrawingBufferSize(this.size);
+    const W = this.size.x, H = this.size.y;
+    if (!this.tex || this.tex.image.width !== W || this.tex.image.height !== H) {
+      if (this.tex) this.tex.dispose();
+      this.tex = new THREE.FramebufferTexture(W, H);
+      this.mat.uniforms.tCol.value = this.tex;
+      this.mask.setSize(Math.max(2, W >> 2), Math.max(2, H >> 2));
+    }
+    // Re-tag now and then: a dented or rebuilt car gets new meshes.
+    if ((this._frame++ % 120) === 0) this._tag(car);
+
+    // 1. the car, white, into the mask
+    const layers = camera.layers.mask, bg = scene.background, ov = scene.overrideMaterial;
+    const sm = r.shadowMap.autoUpdate, ac = r.autoClear, tm = r.toneMapping;
+    const cc = r.getClearColor(this._cc || (this._cc = new THREE.Color())).getHex(), ca = r.getClearAlpha();
+    camera.layers.set(MASK_LAYER);
+    scene.background = null; scene.overrideMaterial = this.white;
+    r.shadowMap.autoUpdate = false; r.autoClear = true; r.toneMapping = THREE.NoToneMapping;
+    r.setClearColor(0x000000, 1);
+    r.setRenderTarget(this.mask);
+    r.render(scene, camera);
+    camera.layers.mask = layers; scene.background = bg; scene.overrideMaterial = ov;
+    r.shadowMap.autoUpdate = sm; r.setClearColor(cc, ca);
+
+    // 2. what is on the canvas now, into a texture
+    r.setRenderTarget(null);
+    r.copyFramebufferToTexture(this.tex, null);
+
+    // 3. streak it
+    const u = this.mat.uniforms;
+    u.uProj.value.copy(camera.projectionMatrix);
+    u.uInvProj.value.copy(camera.projectionMatrixInverse);
+    u.uRot.value.setFromMatrix4(camera.matrixWorld);
+    // velocity into VIEW space: the inverse of the camera's rotation
+    this._v.copy(vel).transformDirection(this._m4.copy(camera.matrixWorld).invert()).multiplyScalar(vel.length());
+    u.uVel.value.copy(this._v);
+    u.uH.value = Math.max(0.2, height);
+    u.uAspect.value = W / H;
+    u.uRes.value.set(W, H);
+    u.uAmt.value = Math.min(1.5, amt * SFX.blur);
+    u.uMax.value = 0.07 * Math.min(1.5, SFX.blur);
+    if (hole) u.uHole.value.set(hole[0], hole[1], hole[2], hole[3]); else u.uHole.value.set(-1, -1, -1, -1);
+    r.autoClear = false;
+    r.render(this.flat, this.cam);
+    r.autoClear = ac; r.toneMapping = tm;
+  }
+}
