@@ -88,6 +88,11 @@ const BUILD_T = 16, TRY_T = 9;
 // flap for that zone, from the start of lap DRS_FROM_LAP + 1, never behind the
 // safety car. Only for a car whose spec has one (physics.js CARS.f1.drs).
 const DRS_GAP = 1.0, DRS_FROM_LAP = 1;
+// ...and only where the road is straight: a zone drawn through a corner
+// (Kate Mascoi's runs 2.5 km, through the whole banked turn) shuts the flap
+// wherever the centreline bends tighter than 1/DRS_CURV metres. Open again on
+// the straight after it.
+const DRS_CURV = 1 / 700;
 // Celebrate the pass: YOUR overtake counts once the car is behind you for
 // CHEER_HOLD s and you are clear of it by half a car.
 const CHEER_HOLD = 2.0;
@@ -912,8 +917,10 @@ export class Race {
         e.drsFor = e.lap >= DRS_FROM_LAP && e.ahead && e.aheadGapT < DRS_GAP ? z : null;
       }
     }
-    if (e.drsFor && t.drsZoneAt(s) === e.drsFor) e.drsOk = true;
-    else { if (e.drsOk) e.drsFor = null; e.drsOk = false; }
+    const inZone = e.drsFor && t.drsZoneAt(s) === e.drsFor;
+    if (inZone) e.drsOk = Math.abs(t.curv[e.proj.i] || 0) < DRS_CURV;
+    else { if (e.drsOk || e.drsIn) e.drsFor = null; e.drsOk = false; }
+    e.drsIn = !!inZone;
   }
 
   // ---- celebrate the pass --------------------------------------------------

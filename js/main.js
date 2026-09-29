@@ -1097,7 +1097,9 @@ function loop(now) {
     // tower flashes you. The radio call is the engineer's, from the same event.
     const cz = state.race.cheers, c = cz && cz[cz.length - 1];
     if (c && c !== state.cheerSeen) {
-      state.cheerSeen = c; state.passFlash = { race: state.race, t: c.t }; cheer({ big: c.pos === 1 });
+      state.cheerSeen = c; state.passFlash = { race: state.race, t: c.t };
+      // One roar per burst: a lap-one scramble confirms three passes in a second.
+      if (!(state.roarAt > performance.now() - 3000)) { state.roarAt = performance.now(); cheer({ big: c.pos === 1 }); }
       // For the replay director: the moment the pass happened, not the moment it was confirmed.
       if (state.marks) state.marks.push({ t: (state.simT || 0) - (state.race.time - c.at), kind: 'pass', held: true });
     }

@@ -98,7 +98,30 @@ export class Engineer {
     this.proximity(t);
     this.limitsTick(t);
     this.strategy(t);
+    this.tail(dt, t);
     this.events();
+  }
+
+  // BUILDING (2026-09-28). Sat within 0.7 s of the same car for a while: the
+  // engineer tells you it is coming, and where — which is the half of "building,
+  // building" a driver cannot see from the cockpit. Rationed hard; this is
+  // encouragement, not commentary.
+  tail(dt, t) {
+    const me = this.me, i = me.pos - 1, a = i > 0 ? this.race.standings[i - 1] : null;
+    if (!a || a.inPit || a.retired) { this.tailOn = null; this.tailT = 0; return; }
+    if (a !== this.tailOn) { this.tailOn = a; this.tailT = 0; }
+    const gap = this.gapTo(a);
+    if (gap < 0.7) this.tailT += dt; else if (gap > 1.3) this.tailT = 0;
+    if (this.tailT > 25 && this.ready('tail', 75)) {
+      const drs = this.race.drsRule && me.lap >= 1;
+      const lines = [
+        `Good, stay with ${nice(a.name)}. You are quicker. Be patient, it will come.`,
+        drs ? `Keep it inside the second for the DRS. ${nice(a.name)} is struggling.` : `${nice(a.name)} is struggling on the exits. Get a good one and take the tow.`,
+        `He is defending the inside everywhere. Better exit, then the outside.`,
+      ];
+      this.call(lines[(this.tailN = (this.tailN || 0) + 1) % lines.length]);
+      this.tailT = 0;
+    }
   }
 
   lapsLeft() { return this.race.laps - this.me.lap; }
@@ -110,7 +133,8 @@ export class Engineer {
     const w = this.wear();
     if (this.lapWear != null) this.wearPerLap = Math.max(0.001, w - this.lapWear);
     this.lapWear = w;
-    if (left === 2) this.call('Two laps to go.');
+    if (me.lap === 1 && this.race.drsRule && left > 1) this.call('DRS enabled.');
+    else if (left === 2) this.call('Two laps to go.');
     else if (left === 1) this.call('Last lap. Bring it home.');
   }
 
@@ -308,20 +332,34 @@ export class Engineer {
   // someone's gearbox for two laps does not say "position gained" — he loses
   // it a little. Two in quick succession get a short one, not a speech.
   cheer(c) {
-    const t = this.race.time, name = nice(c.name);
-    const again = t - (this.lastCheer ?? -99) < 8;
+    // Places you were told to give back are not passes.
+    if (this.owed && this.owed.who.includes(c.idx)) return;
+    // A lap-one scramble or a double move lands several at once: one call,
+    // a beat after the last of them, not three stacked in the queue.
+    (this.cheerQ || (this.cheerQ = [])).push(c);
+    if (this.cheerQ.length > 1) return;
+    this.pending.push([this.race.time + 1.2, () => this.cheerSay()]);
+  }
+
+  cheerSay() {
+    const q = this.cheerQ || [];
+    this.cheerQ = [];
+    if (!q.length) return;
+    const c = q[q.length - 1], pos = this.me.pos, name = nice(c.name);
+    const t = this.race.time, again = t - (this.lastCheer ?? -99) < 10;
     this.lastCheer = t;
     this.cheers = (this.cheers || 0) + 1;
     let line;
-    if (c.pos === 1) line = again ? 'And that is the lead! P1!' : `YES! P1! Get in there, you are leading the race!`;
-    else if (again) line = [`And another one! P${c.pos}.`, `Two in a row! P${c.pos}.`][this.cheers % 2];
+    if (pos === 1) line = again ? 'And that is the lead! P1!' : 'YES! P1! Get in there, you are leading the race!';
+    else if (q.length > 1) line = `YES! ${q.length} cars in one go! P${pos}.`;
+    else if (again) line = [`And another one! P${pos}.`, `Two in a row! P${pos}.`][this.cheers % 2];
     else {
       const lines = [
-        `YES! Get in there! Great move on ${name}. P${c.pos}.`,
-        `Mega, mega. ${name} done, P${c.pos}.`,
-        `That's it! Beautiful, beautiful move. P${c.pos}.`,
-        `Yes mate! ${name} is behind you. P${c.pos}, keep it clean.`,
-        `Get in! You earned that one. P${c.pos}.`,
+        `YES! Get in there! Great move on ${name}. P${pos}.`,
+        `Mega, mega. ${name} done, P${pos}.`,
+        `That's it! Beautiful, beautiful move. P${pos}.`,
+        `Yes mate! ${name} is behind you. P${pos}, keep it clean.`,
+        `Get in! You earned that one. P${pos}.`,
       ];
       line = lines[this.cheers % lines.length];
     }

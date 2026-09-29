@@ -30,6 +30,9 @@
 // is now directly ahead. --blunder-kind picks the mistake:
 //   brake  stands on the brakes with no throttle (a missed brake point, the
 //          2026-09-24 "miss a brake point and auto lose")
+//   late   the real missed braking point: at the first braking zone after
+//          --blunder-at, stays OFF the brake (and the throttle) for N s after
+//          the moment it should have braked — overshoots, runs wide or off
 //   wide   takes the OUTSIDE edge of the road with a lift to 75% throttle —
 //          the longer, slower way round (the
 //          2026-09-28 "flooring it on the outside of the giant banked turn of
@@ -81,7 +84,7 @@ const BKIND = flag('blunder-kind', 'brake');
 const BAT = flag('blunder-at', null);
 const DUEL = flag('duel', null);
 const KIND_WIDE = BKIND === 'wide';
-if (!['brake', 'wide'].includes(BKIND)) { console.error(`battlecheck: --blunder-kind ${BKIND}? brake|wide`); process.exit(2); }
+if (!['brake', 'wide', 'late'].includes(BKIND)) { console.error(`battlecheck: --blunder-kind ${BKIND}? brake|wide|late`); process.exit(2); }
 
 // Where the stand-in errs: the start of the steepest banked run, or 40%.
 function blunderPoint(track) {
@@ -124,7 +127,7 @@ function one(track, lines, spec, seed) {
   const maxT = LAPS * 200 + 90;
   let t = 0, n = 0;
   const vRef = lines.race.v.reduce((a, b) => a + b, 0) / lines.race.v.length;
-  let held = 0, leadGap = 0, nextGap = 0, blunderLap = -1, blunderT = -99, over5 = 0, timed = 0;
+  let armed = false, held = 0, leadGap = 0, nextGap = 0, blunderLap = -1, blunderT = -99, over5 = 0, timed = 0;
   let aheadClose = 0, behindClose = 0, drsT = 0;
   const gapSamples = [];
   const blunders = [];            // { t, pos } -> filled with pos20 / gap20
@@ -146,12 +149,21 @@ function one(track, lines, spec, seed) {
     if (BLUNDER > 0 && race.state === 'green') {
       const d = track.gap(me.proj.s, at);
       if (me.lap !== blunderLap && d >= 0 && d < 60 && race.time > 10) {
-        blunderLap = me.lap; blunderT = BLUNDER; held = me.car.delta;
+        blunderLap = me.lap;
+        if (BKIND === 'late') armed = true;
+        else {
+          blunderT = BLUNDER; held = me.car.delta;
+          blunders.push({ t: race.time, pos: me.pos, pos20: null, gap20: null });
+        }
+      }
+      if (armed && me.car.brake > 0.25) {
+        armed = false; blunderT = BLUNDER;
         blunders.push({ t: race.time, pos: me.pos, pos20: null, gap20: null });
       }
       if (blunderT > 0) {
         blunderT -= FIXED_DT;
         if (BKIND === 'brake') { me.car.throttle = 0; me.car.brake = 1; me.car.drsOpen = false; }
+        else if (BKIND === 'late') { me.car.throttle = 0; me.car.brake = 0; }
         else { me.car.throttle = Math.min(me.car.throttle, 0.75); }
       }
     }
