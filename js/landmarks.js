@@ -445,22 +445,45 @@ BUILD.casino = (it, ctx) => {
   const stone = [0.93, 0.87, 0.74], copper = [0.35, 0.58, 0.5];
   const P = (a, d) => [ax + fx * a + nx * d, ay + fy * a + ny * d];
   const hd = Math.atan2(Z(fy), fx);
-  // Central front block, 18 m.
-  const m = P(L / 2, 7);
-  b.box(m[0], g + 9, Z(m[1]), L - 10, 18, 14, -hd, stone);
-  // Arched windows band (dark).
-  const w = P(L / 2, -0.05);
-  b.box(w[0], g + 7, Z(w[1]), L - 14, 5, 0.3, -hd, [0.2, 0.18, 0.16]);
-  // Towers at both ends of the facade.
-  for (const a of [3, L - 3]) {
-    const p = P(a, 3);
-    b.box(p[0], g + 12, Z(p[1]), 7, 24, 7, -hd, stone);
-    roof.box(p[0], g + 25.5, Z(p[1]), 6, 3, 6, -hd, copper);
-    roof.box(p[0], g + 28.5, Z(p[1]), 3.4, 3, 3.4, -hd, copper);
-    roof.box(p[0], g + 31, Z(p[1]), 1, 2.5, 1, -hd, [0.8, 0.7, 0.35]);
+  // Central front block: two tall storeys of arched bays, a cornice, and a
+  // copper attic with the clock over the middle.
+  const m = P(L / 2, 8);
+  b.box(m[0], g + 7, Z(m[1]), L - 8, 14, 16, -hd, stone);
+  const cor = P(L / 2, 7.6);
+  b.box(cor[0], g + 14.3, Z(cor[1]), L - 7, 0.9, 17, -hd, [0.97, 0.93, 0.83]);
+  b.box(cor[0], g + 7.2, Z(cor[1]), L - 7.5, 0.5, 16.6, -hd, [0.97, 0.93, 0.83]);
+  // Bays: dark glass inside a pale frame, every 4.2 m along the facade.
+  for (let a = 8; a < L - 8; a += 4.2) {
+    for (const [y0, hgt] of [[1.2, 5.2], [8.2, 5.0]]) {
+      const w = P(a, -0.12);
+      b.box(w[0], g + y0 + hgt / 2, Z(w[1]), 2.8, hgt + 0.6, 0.25, -hd, [0.99, 0.96, 0.88]);
+      const w2 = P(a, -0.2);
+      b.box(w2[0], g + y0 + hgt / 2 - 0.2, Z(w2[1]), 2.0, hgt - 0.4, 0.2, -hd, [0.16, 0.14, 0.12]);
+    }
   }
-  // The pediment/clock over the middle.
-  roof.box(m[0], g + 19.5, Z(m[1]), L * 0.35, 3, 10, -hd, copper);
+  // Towers at both ends of the facade, with copper domes and lanterns.
+  const domes = [];
+  for (const a of [3.5, L - 3.5]) {
+    const p = P(a, 3.5);
+    b.box(p[0], g + 11, Z(p[1]), 7.5, 22, 7.5, -hd, stone);
+    b.box(p[0], g + 22.3, Z(p[1]), 8.3, 0.8, 8.3, -hd, [0.97, 0.93, 0.83]);
+    const w = P(a, -0.3);
+    b.box(w[0], g + 17.5, Z(w[1]), 2.4, 4.5, 0.2, -hd, [0.16, 0.14, 0.12]);
+    domes.push([p[0], g + 22.7, Z(p[1])]);
+    roof.box(p[0], g + 29.4, Z(p[1]), 1.2, 2.6, 1.2, -hd, [0.8, 0.7, 0.35]);
+  }
+  const pd = P(L / 2, 2.5);
+  roof.box(pd[0], g + 16.5, Z(pd[1]), L * 0.3, 3.4, 4, -hd, copper);
+  const clk = P(L / 2, 0.4);
+  roof.box(clk[0], g + 16.6, Z(clk[1]), 2.2, 2.2, 0.2, -hd, [0.95, 0.92, 0.8]);
+  const domeM = new THREE.MeshStandardMaterial({ color: 0x5f9c86, roughness: 0.5, metalness: 0.45 });
+  for (const d of domes) {
+    const dm = new THREE.Mesh(new THREE.SphereGeometry(3.9, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeM);
+    dm.scale.y = 1.55;
+    dm.position.set(d[0], d[1], d[2]);
+    dm.castShadow = true;
+    ctx.G.add(dm);
+  }
   put(ctx, b, M.plaster);
   put(ctx, roof, M.metal);
 };
