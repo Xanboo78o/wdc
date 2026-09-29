@@ -226,7 +226,12 @@ export class Debris {
     // box inertia, unit mass: I = (b^2 + c^2)/3 for half-extents
     p.half.copy(half).multiply(p.scale).max(_v.set(0.008, 0.008, 0.008));
     const h = p.half;
-    p.inv.set(3 / (h.y * h.y + h.z * h.z), 3 / (h.x * h.x + h.z * h.z), 3 / (h.x * h.x + h.y * h.y));
+    // Inertia from a slightly ROUNDER box than the piece: a 1.6 cm thick
+    // splinter has almost no inertia about its long axis, so every friction
+    // impulse spun it up again and it rolled on the spot for ever. Nobody can
+    // see the difference in how it tumbles; everybody could see that.
+    const ix = Math.max(h.x, 0.03), iy = Math.max(h.y, 0.03), iz = Math.max(h.z, 0.03);
+    p.inv.set(3 / (iy * iy + iz * iz), 3 / (ix * ix + iz * iz), 3 / (ix * ix + iy * iy));
     // Flat things flutter and are slowed by the air; chunky things are not.
     const flat = Math.min(h.x, h.y, h.z) / Math.max(h.x, h.y, h.z);
     p.drag = 0.15 + 0.9 * (1 - flat) * Math.min(1, Math.max(h.x, h.z) * 2.5);
@@ -459,7 +464,12 @@ export class Debris {
       const rim = Math.max(p.half.x, p.half.y, p.half.z);
       const moved = p.pos.distanceTo(p.prevPos) + rim * 2 * Math.acos(Math.min(1, Math.abs(p.q.dot(p.prevQ))));
       p.prevPos.copy(p.pos); p.prevQ.copy(p.q);
-      if (touch && moved < 0.25 * dt) {
+      // ...or it has been crawling on the ground for over a second: a
+      // splinter under the settle can keep trading a few mm/s between two
+      // corners forever, and a second of that is nothing anyone can see.
+      if (touch && p.vel.lengthSq() < 0.6 && p.w.lengthSq() * rim * rim < 0.64) p.slowT = (p.slowT || 0) + dt;
+      else p.slowT = 0;
+      if (touch && (moved < 0.25 * dt || p.slowT > 1.2)) {
         p.sleep += dt;
         if (p.sleep > 0.4) { p.asleep = true; p.vel.set(0, 0, 0); p.w.set(0, 0, 0); }
       } else p.sleep = 0;
