@@ -938,6 +938,73 @@ HOOK
 chmod +x .git/hooks/pre-commit
 ```
 
+## Crash drama — debris, sparks, smoke
+*(`js/fx.js` watches; `js/debris.js`, `js/sparks.js`, `js/smoke.js` draw;
+`js/debrisaudio.js` sounds; the damage shapes are `js/dent.js` + `js/car.js`)*
+
+Adam: "i wanna see my car crumble when i hit a wall... BeamNG level". The
+physics already knew everything about an accident. `fx.js` **observes** each
+car frame to frame (crush went up, `lost.frontWing` turned true, `wallTouch`,
+`onRoof`, `lock`, `wheelspin`, surface) and never writes the physics back, so
+no validated file changed. Every car on the grid, not only yours.
+
+- **Debris** is the car's own meshes: car.js tags every part
+  (`userData.dmg = {bin, role, side}`), debris.js merges each role into one
+  kind (wing halves, nose tip, endplates, rear wing, mirrors) plus shards and
+  stones. Rigid bodies: 8 box corners against the ground, sequential impulses
+  with restitution and friction, glance off the barrier, settle flat, sleep,
+  stay 150 s, kicked on by passing cars (the piece moves, never the car).
+- **Sparks** are streaks a thirtieth of a second long. Plank sparks come from
+  BUMP BINS (6 m of lap, fixed by a hash, so the same patch sparks every lap)
+  plus heavy braking and kerbs; also wall scrapes, landings, roofs, a dragging
+  nose.
+- **Smoke** is a lit soft sphere per puff, sorted back to front: rubber,
+  gravel dust, earth, engine smoke past half damage, concrete dust on a big
+  hit. Each puff knows the ground height under it and thins out as it meets it.
+- One draw call per effect type; nothing alive = not drawn. Idle cost 0 draws;
+  everything alive (47 pieces, 324 sparks, 53 puffs) +28 draws incl. shadows,
+  0.6 ms CPU. `window.__wdc.fx` = live counts, ms, and `bad` (failed shaders).
+
+Knobs: `?fx=0`, `?fxcam=yaw,pitch,dist[,lookX]`, `?fxdemo=wing|spark|smoke|
+dust|stones|scrape|all`, `?fxcrash=kmh,deg[,side]` (real physics crash),
+`?carenv=0`, `?carenvk=`. Gates: `node tools/fxcheck.mjs [--break]`,
+`node tools/debrisaudio.mjs` (+ `tools/debrisaudio.html` to listen).
+
+### Gotchas paid for on the crash drama
+41. **The region fold had been dead since the 2022 car.** `crushParts` binned
+    meshes by `m.position`, and every mesh on that car sits at the origin with
+    its shape translated into the geometry — so no part was in any bin and
+    nothing folded, silently. Parts are now TAGGED by car.js and fold about a
+    pivot of their own; an untagged body (none now) falls back to the
+    geometry's centre, never its position.
+42. **Mesh +Z is the car's RIGHT; collide.js's `ly` is its LEFT.** dent.js
+    said otherwise and every dent was mirrored: a left-hand hit bent the right
+    sidepod. geom.js `left(h)` is the ground truth.
+43. **Anything that writes `visible` every frame owns it (again).** The old
+    fold set `visible = true` whenever a region was undamaged, fighting the
+    lost-wing hide. The fold now never touches `visible`; a part that has come
+    off is scaled to 1e-4 (not 0 — a singular matrix is a NaN normal matrix).
+44. **A shader that fails to compile draws NOTHING and nothing reports it.**
+    three logs it; shot.mjs never saw it; the debris was simply invisible
+    (`vColor` is a vec4 in this build). `__wdc.fx.bad` counts failed programs.
+45. **Instance colours are linear.** A stone at 0.5 rendered nearly white.
+46. **A resting plate never quite rests.** Sequential corner impulses trade a
+    few mm/s forever, and a 1.6 cm splinter has no inertia about its long axis
+    so friction spins it up again. Fixes: settle onto the biggest face once
+    slow, sleep by measured MOTION not velocity, inertia from a box at least
+    3 cm, and a crawl timeout. Judge it over several runs (it is random).
+47. **`g.children.slice(-0)` is every child.** The GT3's "splitter" list was
+    the whole car: lose the splitter, lose the body.
+48. **Per-material `envMapIntensity` never applied** (a material with no envMap
+    of its own gets `scene.environmentIntensity`). car.js now hands its
+    materials the scene's env (re-pointed when sky.js makes a new one) and
+    scales its intensities ×0.4 so the paint keeps the look it was judged by.
+49. **Bent normals cannot fix a grazing reflection.** The lilac endplates were
+    clearcoat Fresnel on faces that see the other endplate, not the sky. Tilting
+    the normals away from the sky made it worse (more grazing). A specular
+    MASK on uv1 (clearcoatMap + specularIntensityMap) fixed it, and it rides
+    on the cloned paint so the whole grid gets it.
+
 ## Not done yet
 
 - **A pit lane that a car can actually use.** `js/pit.js` draws one and the
