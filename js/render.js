@@ -20,7 +20,7 @@ import { solarPosition, sunVector, fetchWeather, readWeather, guessLocation, day
 import { Rain } from './rain.js';
 import { bankTable, bankY, bankRoll } from './bank.js';
 import { buildEnv } from './env.js';
-import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts } from './furniture.js';
+import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish, buildMarshalPosts, buildFlagpoles } from './furniture.js';
 import { carLamps, buildCourseLights, LightTrails } from './lamps.js';
 import { buildGrandstands } from './crowd.js';
 import { placeLandmarks } from './landmarks.js';
@@ -1310,6 +1310,7 @@ export class View {
     buildBoards(S, t, this.line, look, sign, this.world);
     buildStartFinish(S, t, look, sign, this.world);
     buildMarshalPosts(S, t, look, this.world);
+    buildFlagpoles(S, t, this.world);
     this.courseLights = buildCourseLights(S, t, this.world);
     stats.stands = buildGrandstands(S, t, env, look, this.world, sign);
     stats.pit = buildPitLane(S, t, look, sign, this.world);

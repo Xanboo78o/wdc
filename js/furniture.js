@@ -695,3 +695,129 @@ export function buildMarshalPosts(scene, track, look, world = null) {
   if (pm) { pm.name = 'marshals'; scene.add(pm); out.push(pm); }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Flagpoles along the start/finish straight, opposite the pits.
+//
+// The one thing every broadcast of a grid shows and this world did not have:
+// a row of tall poles behind the barrier with the host nation's flag and the
+// flags of the travelling circus snapping in the wind. Trackside life that
+// moves, which is what makes a still frame read as a place and not a model.
+// One merged mesh for the poles, one for the cloth; the cloth waves in the
+// vertex shader from the pole outward, so the flags cost nothing per frame.
+// Flags are drawn, like signs are drawn: a flag is a flat graphic, and there
+// is no photograph of one lying flat to use instead.
+// ---------------------------------------------------------------------------
+const FLAG_ART = {
+  ITALY: g => stripesV(g, ['#009246', '#f1f2f1', '#ce2b37']),
+  NETHERLANDS: g => stripesH(g, ['#ae1c28', '#ffffff', '#21468b']),
+  MONACO: g => stripesH(g, ['#ce1126', '#ffffff']),
+  GERMANY: g => stripesH(g, ['#000000', '#dd0000', '#ffce00']),
+  AZERBAIJAN: g => { stripesH(g, ['#0092bc', '#e4002b', '#00af66']); disc(g, 0.47, 0.5, 0.11, '#ffffff'); disc(g, 0.5, 0.5, 0.09, '#e4002b'); },
+  JAPAN: g => { stripesH(g, ['#ffffff']); disc(g, 0.5, 0.5, 0.3, '#bc002d'); },
+  'UNITED STATES': g => {
+    const w = g.canvas.width, h = g.canvas.height, c = h / 13;
+    for (let i = 0; i < 13; i++) { g.fillStyle = i % 2 ? '#ffffff' : '#b22234'; g.fillRect(0, i * c, w, c + 1); }
+    g.fillStyle = '#3c3b6e'; g.fillRect(0, 0, w * 0.4, c * 7);
+  },
+  FRANCE: g => stripesV(g, ['#0055a4', '#ffffff', '#ef4135']),
+  AUSTRIA: g => stripesH(g, ['#ed2939', '#ffffff', '#ed2939']),
+  BELGIUM: g => stripesV(g, ['#000000', '#fdda24', '#ef3340']),
+};
+function stripesH(g, cols) {
+  const w = g.canvas.width, h = g.canvas.height;
+  cols.forEach((c, i) => { g.fillStyle = c; g.fillRect(0, (i * h) / cols.length, w, h / cols.length + 1); });
+}
+function stripesV(g, cols) {
+  const w = g.canvas.width, h = g.canvas.height;
+  cols.forEach((c, i) => { g.fillStyle = c; g.fillRect((i * w) / cols.length, 0, w / cols.length + 1, h); });
+}
+function disc(g, x, y, r, col) {
+  const w = g.canvas.width, h = g.canvas.height;
+  g.fillStyle = col; g.beginPath(); g.arc(x * w, y * h, r * h, 0, Math.PI * 2); g.fill();
+}
+
+export function buildFlagpoles(scene, track, world = null) {
+  const t = track;
+  const host = FLAG_ART[t.country] ? t.country : null;
+  const names = Object.keys(FLAG_ART);
+  // host every other pole, the rest of the circus in between
+  const order = [];
+  for (let k = 0; k < 16; k++) order.push(host && k % 2 === 0 ? host : names[(k * 3 + 1) % names.length]);
+  const kinds = [...new Set(order)];
+  const cw = 96, ch = 64;
+  const cv = document.createElement('canvas');
+  cv.width = cw * kinds.length; cv.height = ch;
+  const g = cv.getContext('2d');
+  kinds.forEach((k, i) => {
+    const sub = document.createElement('canvas'); sub.width = cw; sub.height = ch;
+    FLAG_ART[k](sub.getContext('2d'));
+    g.drawImage(sub, i * cw, 0);
+  });
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+
+  const side = t.pit && t.pit.side ? -t.pit.side : 1;     // opposite the pit lane
+  const poles = new Builder();
+  const pos = [], uv = [], fu = [], fn = [], idx = [];
+  const SEG = 8, FW = 1.8, FH = 1.2, POLE = 9.0;
+  let n = 0;
+  for (let k = 0; k < order.length; k++) {
+    const s = -70 + k * 10;
+    const i = t.idx(((s % t.length) + t.length) % t.length);
+    const lat = barrierLat(t, i, side) + side * 2.6;
+    const p = at(t, i, lat);
+    const y0 = world ? world.groundY(p[0], p[1]) : 0;
+    const h = t.hdg[i];
+    poles.box(p[0], y0 + POLE / 2, p[1], 0.12, POLE, 0.12, h, 0xd8dadd, 1);
+    poles.box(p[0], y0 + POLE + 0.05, p[1], 0.2, 0.1, 0.2, h, 0xd8dadd, 1);
+    // the cloth streams downwind along the track, from the pole
+    const fx = Math.cos(h), fz = -Math.sin(h);
+    const nx = -fz, nz = fx;                     // the cloth's face normal
+    const cell = kinds.indexOf(order[k]);
+    const u0 = cell / kinds.length, u1 = (cell + 1) / kinds.length;
+    const base = n;
+    for (let a = 0; a <= SEG; a++) {
+      const f = a / SEG;
+      for (const [yy, vv] of [[POLE - FH, 0], [POLE, 1]]) {
+        pos.push(p[0] + fx * FW * f, y0 + yy - 0.05, p[1] + fz * FW * f);
+        uv.push(u0 + (u1 - u0) * f, vv);
+        fu.push(f);
+        fn.push(nx, 0, nz);
+        n++;
+      }
+    }
+    for (let a = 0; a < SEG; a++) {
+      const q = base + a * 2;
+      idx.push(q, q + 2, q + 1, q + 1, q + 2, q + 3);
+    }
+  }
+  const pm = poles.mesh(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.7 }));
+  if (pm) { pm.name = 'flagpoles'; scene.add(pm); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('fu', new THREE.Float32BufferAttribute(fu, 1));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(fn, 3));
+  geo.setIndex(idx);
+  geo.computeBoundingSphere();
+  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, side: THREE.DoubleSide });
+  const T = { value: 0 };
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uFlagT = T;
+    sh.vertexShader = 'uniform float uFlagT;\nattribute float fu;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+  {
+    float ph = position.x * 0.37 + position.z * 0.23;
+    float wv = sin(uFlagT * 5.5 - fu * 7.0 + ph) * 0.16 + sin(uFlagT * 8.3 - fu * 11.0 + ph * 1.7) * 0.05;
+    transformed += normal * wv * fu;
+    transformed.y -= fu * fu * 0.12;
+  }`);
+  };
+  mat.customProgramCacheKey = () => 'flag-cloth';
+  const cloth = new THREE.Mesh(geo, mat);
+  cloth.name = 'flags';
+  cloth.onBeforeRender = () => { T.value = performance.now() / 1000; };
+  scene.add(cloth);
+  return [pm, cloth];
+}
