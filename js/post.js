@@ -90,6 +90,11 @@ export class Post {
 
     // ---- the scene, in HDR ---------------------------------------------
     this.sceneRT = hdr(1, 1);
+    // The ONE target here that draws geometry, so the one that needs a depth
+    // buffer. Without it nothing depth-tests and three's opaque sort (by
+    // material before distance) decides what is in front: the woods, whose
+    // materials are made last, painted a band of hedge over the car's tyres.
+    this.sceneRT.depthBuffer = true;
 
     // ---- luminance pyramid ----------------------------------------------
     // Log-average, not mean: a few blinding pixels should not decide the
