@@ -66,13 +66,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // --- the bare-earth surveys ---------------------------------------------------
 // `one(lat, lon)` answers a single point in metres above sea level, or null
 // where the survey has no data (a building footprint in a lidar DTM, a lake).
-async function fetchText(url, tries = 5) {
+async function fetchText(url, tries = 9) {
   for (let a = 0; a < tries; a++) {
     try {
       const r = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(30000) });
       if (r.ok) return await r.text();
     } catch { /* retry */ }
-    await sleep(800 * (a + 1));
+    await sleep(1000 * 1.6 ** a);
   }
   throw new Error('no answer from ' + url.slice(0, 80));
 }
@@ -95,7 +95,7 @@ const SOURCES = {
   gsi: {
     name: 'GSI Japan DEM (5 m airborne laser where surveyed, else 10 m), bare earth',
     licence: 'GSI Japan, Geospatial Information Authority terms (attribution)',
-    step: 8, grid: 56, conc: 3,
+    step: 8, grid: 56, conc: 2,
     async one(lat, lon) {
       const j = JSON.parse(await fetchText(`https://cyberjapandata2.gsi.go.jp/general/dem/scripts/getelevation.php?lon=${lon.toFixed(7)}&lat=${lat.toFixed(7)}&outtype=JSON`));
       return typeof j.elevation === 'number' ? j.elevation : null;
@@ -126,6 +126,18 @@ const SOURCES = {
     },
   },
 };
+// TUNNELS, as [from s, to s] in metres along the lap. A bare-earth survey
+// measures the hill ABOVE a tunnel, not the road inside it: Monaco's tunnel
+// under the Fairmont came out 14 m up the hillside (IGN: 21.8 m ASL at
+// s=1600 against 7.7 m at the Portier portal and 8.3 m at the harbour one).
+// Inside these spans the road runs straight between its two portals.
+// The spans are read off the survey itself: where the ground rises above
+// both portals and falls back.
+const TUNNELS = { monaco: [[1440, 1860]] };
+
+// The water line, metres above mean sea level. The Caspian is 28 m below it.
+const SEA_ASL = { baku: -28 };
+
 // Which survey answers for which circuit. Anything not listed stays on SRTM.
 const CIRCUIT_SOURCE = { monza: 'lombardia', suzuka: 'gsi', zandvoort: 'ahn', monaco: 'ign' };
 
@@ -343,6 +355,12 @@ async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
   // a running median of five posts (40 m) removes it and leaves a crest alone.
   const m = idx.length;
   const clean = centre.map((_, k) => median([-2, -1, 0, 1, 2].map(o => centre[(k + o + m) % m])));
+  for (const [s0, s1] of TUNNELS[key] || []) {
+    const k0 = idx.findIndex(i => i * ds >= s0), k1 = idx.findIndex(i => i * ds >= s1);
+    if (k0 < 0 || k1 <= k0) continue;
+    for (let k = k0 + 1; k < k1; k++) clean[k] = clean[k0] + (clean[k1] - clean[k0]) * (k - k0) / (k1 - k0);
+    console.log(`\n  tunnel s=${s0}-${s1}: road laid straight between its portals, ${clean[k0].toFixed(1)} to ${clean[k1].toFixed(1)} m`);
+  }
   // Spread LINEARLY over every 2 m sample (smoothstep between posts makes a
   // flat step at every post), then a true Gaussian of 10 m: a road is graded,
   // and a 5 m lidar cell still carries kerb and verge texture.
@@ -354,6 +372,37 @@ async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
   }
   const prof = gauss(raw, 10 / ds);
 
+  // A CROSSOVER (Suzuka's figure of eight) is two legs at one point. In the
+  // real world one is on a bridge; a bare-earth survey has the bridge taken
+  // OUT, and this renderer has no bridge to put back — the road, run-off and
+  // ground near a point all take the height of the NEAREST leg. So two legs
+  // at different heights there would tear every mesh across the crossing.
+  // Until there is a bridge, the legs are brought to their shared mean over a
+  // Gaussian of ±60 m each side (the old SRTM data happened to put them within
+  // 0.1 m of each other, so this keeps what the game already drew).
+  const crossings = [];
+  const far = Math.round(400 / ds);
+  for (let i = 0; i < n; i += 2) {
+    for (let j = i + far; j < n; j += 2) {
+      if (n - (j - i) < far) continue;
+      if (Math.hypot(track.x[i] - track.x[j], track.y[i] - track.y[j]) < 4) crossings.push([i, j]);
+    }
+  }
+  const seen = new Set();
+  for (const [i, j] of crossings) {
+    const key = Math.round(i / 40) + ':' + Math.round(j / 40);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const avg = (prof[i] + prof[j]) / 2, di = avg - prof[i], dj = avg - prof[j];
+    const sig = 60 / ds, R = Math.ceil(sig * 3);
+    for (let k = -R; k <= R; k++) {
+      const w = Math.exp(-(k * k) / (2 * sig * sig));
+      prof[((i + k) % n + n) % n] += di * w;
+      prof[((j + k) % n + n) % n] += dj * w;
+    }
+    console.log(`\n  crossover at s=${i * ds} / s=${j * ds}: legs ${(-di * 2).toFixed(1)} m apart in the survey, levelled to the mean`);
+  }
+
   // --- the world grid ------------------------------------------------------
   const G = src.grid, bb = env.bbox;
   const dx = (bb.x1 - bb.x0) / (G - 1), dy = (bb.y1 - bb.y0) / (G - 1);
@@ -363,8 +412,27 @@ async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
     pts.push(toLL(bb.x0 + i * dx, bb.y0 + j * dy));
   }
   let grid = await survey(src, pts, cache, 'grid      ');
-  // Holes in the grid (the sea off a lidar survey, a building) from the mean of
-  // whatever answered around them, widening until something did.
+  // THE SEA IS NOT A HOLE TO FILL. A lidar or IGN survey has no answer over
+  // water, and filling that from the neighbours built a shelf of coastal land
+  // out into Monaco's harbour, above the water it should be under. A post
+  // inside a surveyed sea polygon is sea bed: 4 m under the water line
+  // (SEA_ASL). Only holes on land (a building in a lidar DTM) are filled.
+  const seaPolys = (env.sea || []).map(q => q.p || q);
+  const inSea = (x, y) => seaPolys.some(p => {
+    let ins = false;
+    for (let a = 0, b = p.length - 1; a < p.length; b = a++) {
+      if ((p[a][1] > y) !== (p[b][1] > y) && x < (p[b][0] - p[a][0]) * (y - p[a][1]) / (p[b][1] - p[a][1]) + p[a][0]) ins = !ins;
+    }
+    return ins;
+  });
+  // The water line: what the survey itself reads on the water (IGN reads
+  // Monaco's harbour at ~1.2 m), but never above a point 1.5 m under the
+  // lowest road — a quay is above its water. And every post in the sea is sea
+  // BED, whatever the survey says: a DTM's reading on water is the surface.
+  const wet = grid.filter((v, q) => v != null && inSea(gx[q], gy[q])).sort((a, b) => a - b);
+  let seaASL = SEA_ASL[key] ?? (wet.length ? wet[wet.length >> 1] : 0);
+  seaASL = Math.min(seaASL, Math.min(...prof) - 1.5);
+  grid = grid.map((v, q) => inSea(gx[q], gy[q]) ? seaASL - 4 : v);
   const filled = grid.slice();
   for (let r = 1; r < G && filled.some(v => v == null); r++) {
     const prev = filled.slice();
@@ -405,6 +473,9 @@ async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
     // Past the edge of the survey: fall to the sea where there is one, else
     // carry on along the land's own tilt (see World.gridAt).
     outside: coastal ? 'sea' : 'plane',
+    // Where the water is, on the same datum as everything else: the sea's
+    // height above sea level (0, or the Caspian's -28) less the mean.
+    sea: coastal ? +(seaASL - mean).toFixed(2) : null,
     plane,
   }));
   const kb = Math.round(fs.statSync(out).size / 1024);

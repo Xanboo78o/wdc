@@ -164,7 +164,16 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
   const inPits = (x, y) => corridor && corridor.pts.some(q => (q[0] - x) ** 2 + (q[1] - y) ** 2 < r2);
   // The world's (x, y) is three's (x, -z).
   const ground = (x, z) => (world ? world.groundY(x, z) : 0);
-  const clear = (x, z) => { const k = slack(x, -z); return k >= CLEAR && k <= REACH && !inPits(x, -z); };
+  // Nothing grows on a cliff. Where two legs of a hillside circuit pass at
+  // different heights (Monaco: Beau Rivage 20 m above the harbour front, 40 m
+  // across) the ground between is a retaining wall in all but name, and a
+  // tree planted on it hangs off it by metres.
+  const steep = (x, z) => {
+    if (!world) return false;
+    const e = 3, gx = world.groundY(x + e, z) - world.groundY(x - e, z), gz = world.groundY(x, z + e) - world.groundY(x, z - e);
+    return Math.hypot(gx, gz) / (2 * e) > 0.9;
+  };
+  const clear = (x, z) => { const k = slack(x, -z); return k >= CLEAR && k <= REACH && !inPits(x, -z) && !steep(x, z); };
   const forest = new Forest(kit, {
     ground, clear, shadows: renderer.shadowMap.enabled, name: 'env.woods', seed: 7,
     skip: (new URLSearchParams(location.search).get('woods') || '').split(',')

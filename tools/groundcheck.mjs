@@ -417,7 +417,7 @@ async function pageCheck(opt) {
         const g = drop(v3.x, v3.z, ground);
         if (g != null) {
           (float[g.on] || (float[g.on] = [])).push(Math.abs(v3.y - g.y));
-          if (Math.abs(v3.y - g.y) > opt.tol && floaters.length < 6) {
+          if (Math.abs(v3.y - g.y) > opt.tol) {
             floaters.push({ x: Math.round(v3.x), z: Math.round(v3.z), tree: +v3.y.toFixed(2), seen: +g.y.toFixed(2), says: +says(v3.x, v3.z).toFixed(2), d: Math.round(n.d) });
           }
         }
@@ -434,7 +434,8 @@ async function pageCheck(opt) {
     road: { n: roadN, over, worst: worstAt.slice(0, 6), clear: stat(clear) },
     paint,
     trees: {
-      n: trees, onCircuit, offenders, floaters,
+      n: trees, onCircuit, offenders,
+      floaters: floaters.sort((p, q) => Math.abs(q.tree - q.seen) - Math.abs(p.tree - p.seen)).slice(0, 6),
       float: stat(float['ground.skirt']), floatN: float['ground.skirt'].length,
       farFloat: stat(float['ground.plate']), farFloatN: float['ground.plate'].length,
     },
@@ -534,7 +535,7 @@ function report(r, opt) {
   console.log(`  racing surface: ${r.road.n} points; grass sits ${r.road.clear ? `${r.road.clear.p50} m below it (p50), ${r.road.clear.max} m at best, ` : ''}` +
     `${r.road.over} point(s) at or above it`);
   if (r.road.worst.length) {
-    console.log('    closest: ' + r.road.worst.slice(0, 4).map(w => `s=${w.s} lat ${w.lat} ${w.up >= 0 ? '+' : ''}${w.up} m`).join(', '));
+    console.log('    closest: ' + r.road.worst.slice(0, 4).map(w => `s=${w.s} lat ${w.lat} ${w.up >= 0 ? '+' : ''}${w.up} m (${w.on})`).join(', '));
   }
   for (const p of r.paint) {
     console.log(`  ${p.name}: ${p.n} vertices checked, sitting ${p.lo} to ${p.hi} m above the road` +

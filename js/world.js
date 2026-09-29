@@ -36,10 +36,10 @@ import { Z } from './geom.js';
 import { bankTable, bankGround } from './bank.js';
 
 const NEAR = 55;       // inside this, the racing line's own profile wins
+const RAMP = 20;       // m past the corridor over which a bare-earth survey takes over
 const FAR = 240;       // beyond this, the terrain grid wins
 const CELL = 45;       // metres per bucket in the lookup grid (measured: 45 is the quickest of 30/45/60/90)
 const SINK_MAX = 0.35; // how far the visible ground is pushed under the circuit
-const BLEND = 20;      // metres either side of the line between two legs that are blended
 
 export async function loadElev(key) {
   try {
@@ -101,9 +101,19 @@ export class World {
     // of the hillside and floated the whole city on it. Past the box the
     // ground falls away to the lowest thing the survey saw — the sea, on the
     // three circuits that have one, and a harmless dip inland.
-    this.seaY = Math.min(...elev.grid.h);
-    this.gridLo = this.seaY; this.gridHi = Math.max(...elev.grid.h);
+    this.gridLo = Math.min(...elev.grid.h); this.gridHi = Math.max(...elev.grid.h);
+    // The water line. A bare-earth bake knows it (0 m above sea level, less
+    // the circuit's mean — Monaco's harbour is 12.9 m below the lap's mean);
+    // an older SRTM bake did not, and its lowest post is the best guess.
+    this.seaY = elev.sea != null ? elev.sea : this.gridLo;
     this.plane = elev.outside === 'plane' && elev.plane ? elev.plane : null;
+    // A bare-earth survey (tools/getelev.mjs): its grid can be trusted near
+    // the circuit, so heightAt leans on it off the corridor (see there).
+    // Per sample, how far the road's profile sits from the survey's grid.
+    if (['lombardia', 'gsi', 'ahn', 'ign'].includes(elev.dataset)) {
+      this.resid = new Float32Array(track.n);
+      for (let k = 0; k < track.n; k++) this.resid[k] = elev.s[k] - this.gridAt(track.x[k], Z(track.y[k]));
+    }
   }
 
   /** Nearest centreline sample to a point, and how far away it is. */
@@ -203,18 +213,36 @@ export class World {
   }
 
   /**
+   * The nearest sample to (x, z) on the stretch of lap around sample `k0`
+   * (within `span` samples either side) — "which point of THIS leg" rather
+   * than of the whole circuit. For the ground on either side of a step
+   * between two legs (js/horizon.js draws the step as a wall).
+   */
+  nearestOnLeg(x, z, k0, span = 60) {
+    const t = this.track, n = t.n;
+    let best = k0, bd = Infinity;
+    for (let o = -span; o <= span; o++) {
+      const k = ((k0 + o) % n + n) % n;
+      const dx = t.x[k] - x, dz = Z(t.y[k]) - z;
+      const d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = k; }
+    }
+    return { i: best, d: Math.sqrt(bd) };
+  }
+
+  /**
    * Weighted height of every centreline sample within `d + R` of (x, z):
    * weight (1 - (dk - d)/R)², so the nearest counts fully and one R further
    * counts nothing. `fallback` if nothing lands (never, in practice: the
    * nearest sample is always within d). Every 4th sample when R is large —
    * the profile is smoothed over 10 m, so 8 m spacing loses nothing.
    */
-  _blendNear(x, z, d, R, fallback) {
+  _blendNear(x, z, d, R, fallback, both = false) {
     const t = this.track, reach = d + R;
     const step = R > 30 ? 8 : R > 12 ? 4 : 1;
     const cx = Math.floor((x - this.gx0) / CELL), cz = Math.floor((z - this.gz0) / CELL);
     const r = Math.ceil(reach / CELL);
-    let sw = 0, sh = 0;
+    let sw = 0, sh = 0, sr = 0;
     const r2 = reach * reach;
     for (let j = cz - r; j <= cz + r; j++) {
       if (j < 0 || j >= this.gnz) continue;
@@ -227,9 +255,11 @@ export class World {
           const u = Math.max(0, 1 - (Math.sqrt(dd) - d) / R);
           const w = u * u;
           sw += w; sh += w * this.elev.s[k];
+          if (both) sr += w * this.resid[k];
         }
       }
     }
+    if (both) return sw > 0 ? { h: sh / sw, r: sr / sw } : { h: fallback ?? 0, r: 0 };
     return sw > 0 ? sh / sw : fallback;
   }
 
@@ -335,8 +365,30 @@ export class World {
     // would itself jump where the nearest sample does.
     const corr = this.sinkTo - 12;
     if (d < FAR && d > corr) {
-      const R = Math.min(70, 0.5 * (d - corr));
-      if (R > 0.5) onTrack = this._blendNear(x, z, d, R, onTrack);
+      const R = Math.min(70, d - corr);
+      if (R > 0.5) {
+        if (this.resid) {
+          // ON A BARE-EARTH SURVEY THE GRID IS THE TRUTH, and the lap's own
+          // profile is only needed where the road is. Between two legs of a
+          // hillside switchback (Monaco, s=1040 at 19 m above s=1160) a
+          // blend of the two PROFILES is a cliff at the halfway line; the
+          // survey knows it is a slope. So off the corridor the ground is
+          // the grid plus the lap's (profile - grid) residual, blended the
+          // same continuous way, faded in over RAMP metres from the
+          // corridor's edge (the road stays level across) and out by FAR.
+          const b = this._blendNear(x, z, d, R, null, true);
+          const f = Math.min(1, (d - corr) / RAMP), ff = f * f * (3 - 2 * f);
+          const g = Math.min(1, Math.max(0, (d - NEAR) / (FAR - NEAR))), gg = g * g * (3 - 2 * g);
+          // Over the sea the grid is sea BED, and the residual (the quay's
+          // height over that bed) must not be carried out over the water, or
+          // Monaco's harbour fills in with lawn at road level.
+          const gz = this.gridAt(x, z);
+          const wet = this.elev.sea != null ? Math.max(0, Math.min(1, (gz - (this.seaY - 4)) / 4)) : 1;
+          const surv = gz + b.r * (1 - gg) * wet;
+          return b.h + (surv - b.h) * ff;
+        }
+        onTrack = this._blendNear(x, z, d, R, onTrack);
+      }
     }
     if (d <= NEAR) return onTrack;
     const grid = this.gridAt(x, z);

@@ -557,6 +557,92 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
     fv.set(key, v);
     return v;
   };
+  // ---- A STEP BETWEEN TWO LEGS, drawn as a wall -------------------------
+  // Where two stretches of lap run side by side at different heights (the
+  // Fairmont hairpin: 13 m apart, 8 m apart vertically) each road keeps its
+  // own height up to the halfway line, so the ground there is a vertical
+  // step. A grid chords across a step and stood grass 4 m over the lower
+  // road. So a cell whose corners belong to two legs is cut along the
+  // halfway line (where the distances to the two legs are equal): each side
+  // is drawn at its own leg's ground, and the cut is a wall between them.
+  // 24 m of lap apart is "another leg" here — the two sides of a hairpin
+  // are only ~60 m of lap apart at Monaco — as long as the heights differ
+  // (the 25 cm test below): round an ordinary corner they never do.
+  const gapK = Math.ceil(24 / t.ds);
+  const legOf = (gi, gj) => fdist(gi, gj, true).i;
+  const apart = (a, b) => { const g = Math.abs(a - b); return Math.min(g, t.n - g) > gapK; };
+  const vx = (gi) => x0 + gi * fdx, vz = (gj) => z0 + gj * fdz;
+  const fAdd = (x, y, z, shade) => {
+    const v = vbase + fpos.length / 3;
+    fpos.push(x, y, z); fuv.push(x, z);
+    const big = seeded(Math.floor(x / 700), Math.floor(z / 700));
+    const small = seeded(Math.floor(x / 190) + 41, Math.floor(z / 190) + 17);
+    c.copy(base).multiplyScalar((0.74 + big * 0.42 + (small - 0.5) * 0.17) * shade);
+    fcol.push(c.r, c.g, c.b);
+    return v;
+  };
+  let steps = 0;
+  const drawn = new Map(), plain = [];
+  const stepCell = (gi, gj) => {
+    const L = [legOf(gi, gj), legOf(gi + 1, gj), legOf(gi, gj + 1), legOf(gi + 1, gj + 1)];
+    if (L.some(k => k < 0)) return false;
+    const A = L[0], B = L.find(k => apart(k, A));
+    if (B === undefined) return false;
+    // Only where the field itself steps: inside the corridor it is the
+    // nearest leg's height, exactly; past it World.heightAt blends the legs
+    // continuously, and a wall there would disagree with everything standing
+    // on the ground beside it.
+    const corrMax = world.sinkTo - 12;
+    if (Math.min(...[[gi, gj], [gi + 1, gj], [gi, gj + 1], [gi + 1, gj + 1]].map(([a, b]) => fdist(a, b))) > corrMax) return false;
+    // Search each leg only up to halfway to the other, or a hairpin's two
+    // sides find each other.
+    const gAB = Math.min(Math.abs(A - B), t.n - Math.abs(A - B));
+    const span = Math.max(4, Math.min(60, Math.floor(gAB / 2)));
+    // Signed: negative on A's side.
+    const P = [[gi, gj], [gi + 1, gj], [gi, gj + 1], [gi + 1, gj + 1]].map(([a, b]) => {
+      const x = vx(a), z = vz(b);
+      const na = world.nearestOnLeg(x, z, A, span), nb = world.nearestOnLeg(x, z, B, span);
+      // A real corner keeps the height the field gives it (fvert's), so the
+      // cell still meets its neighbours exactly.
+      return { x, z, phi: na.d - nb.d, na, nb, y: fpos[(fvert(a, b) - vbase) * 3 + 1] };
+    });
+    // A corner: its own height. A point on the cut: that leg's own ground,
+    // the profile across (no blending), less the sink — what the field is on
+    // that side of the halfway line inside the corridor.
+    const legY = (p, n) => p.y !== undefined ? p.y
+      : world.trackY(n.i) - world.sinkAt(n.d);
+    const hA = p => legY(p, p.na), hB = p => legY(p, p.nb);
+    // A flat step (< 25 cm) is just ground: draw it whole.
+    if (P.every(p => Math.abs(world.trackY(p.na.i) - world.trackY(p.nb.i)) < 0.25)) return false;
+    steps++;
+    for (const tri of [[0, 2, 1], [1, 2, 3]]) {
+      const polyA = [], polyB = [], cut = [];
+      for (let e = 0; e < 3; e++) {
+        const p = P[tri[e]], q = P[tri[(e + 1) % 3]];
+        (p.phi <= 0 ? polyA : polyB).push(p);
+        if ((p.phi <= 0) !== (q.phi <= 0)) {
+          const u = p.phi / (p.phi - q.phi);
+          const x = p.x + (q.x - p.x) * u, z = p.z + (q.z - p.z) * u;
+          const r = { x, z, na: world.nearestOnLeg(x, z, A, span), nb: world.nearestOnLeg(x, z, B, span), phi: 0 };
+          polyA.push(r); polyB.push(r); cut.push(r);
+        }
+      }
+      for (const [poly, h] of [[polyA, hA], [polyB, hB]]) {
+        if (poly.length < 3) continue;
+        const ids = poly.map(p => fAdd(p.x, h(p), p.z, 1));
+        for (let k = 1; k + 1 < ids.length; k++) fidx.push(ids[0], ids[k], ids[k + 1]);
+      }
+      if (cut.length === 2) {
+        // The wall, darker (earth, not lawn), both faces.
+        const [r1, r2] = cut;
+        const a1 = fAdd(r1.x, hA(r1), r1.z, 0.5), a2 = fAdd(r2.x, hA(r2), r2.z, 0.5);
+        const b1 = fAdd(r1.x, hB(r1), r1.z, 0.5), b2 = fAdd(r2.x, hB(r2), r2.z, 0.5);
+        fidx.push(a1, a2, b1, b1, a2, b2, a1, b1, a2, a2, b1, b2);
+      }
+    }
+    return true;
+  };
+
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
       const a = j * (nx + 1) + i;
@@ -570,9 +656,66 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
               fdist(gi, gj + 1) > BAND && fdist(gi + 1, gj + 1) > BAND) continue;
           const p00 = fvert(gi, gj), p10 = fvert(gi + 1, gj);
           const p01 = fvert(gi, gj + 1), p11 = fvert(gi + 1, gj + 1);
-          fidx.push(p00, p01, p10, p10, p01, p11);
+          if (world && stepCell(gi, gj)) { drawn.set(gj * FW + gi, 2); continue; }
+          drawn.set(gj * FW + gi, 1);
+          plain.push(gi, gj, p00, p01, p10, p11);
         }
       }
+    }
+  }
+  // ---- WHERE THE FIELD BENDS FASTER THAN 6 m CAN FOLLOW, 2 m ------------
+  // A bank between a road in a cutting and the hillside above it (Suzuka,
+  // Monaco) curves hard over a few metres, and a 6 m chord missed it by up
+  // to 2.9 m — a tree on it hangs that far off the grass. Each plain fine
+  // cell is measured against the field; one that misses by more than FMISS
+  // is drawn as SUB x SUB cells. An edge shared with a cell that is NOT
+  // split is pinned to that cell's chord, so the two meet without a crack.
+  const FMISS = 0.08, SUB = 3;
+  const Yv = v => fpos[(v - vbase) * 3 + 1];
+  const fsplit = new Set();
+  if (world) {
+    for (let q = 0; q < plain.length; q += 6) {
+      const gi = plain[q], gj = plain[q + 1];
+      const y00 = Yv(plain[q + 2]), y01 = Yv(plain[q + 3]), y10 = Yv(plain[q + 4]), y11 = Yv(plain[q + 5]);
+      let worst = 0;
+      for (const [u, v] of [[0.3, 0.3], [0.7, 0.7], [0.5, 0.5]]) {
+        const ch = u + v <= 1 ? y00 + (y10 - y00) * u + (y01 - y00) * v : y11 + (y01 - y11) * (1 - u) + (y10 - y11) * (1 - v);
+        worst = Math.max(worst, Math.abs(ch - world.groundY(vx(gi + u), vz(gj + v))));
+      }
+      if (worst > FMISS) fsplit.add(gj * FW + gi);
+    }
+  }
+  for (let q = 0; q < plain.length; q += 6) {
+    const gi = plain[q], gj = plain[q + 1];
+    const p00 = plain[q + 2], p01 = plain[q + 3], p10 = plain[q + 4], p11 = plain[q + 5];
+    if (!fsplit.has(gj * FW + gi)) { fidx.push(p00, p01, p10, p10, p01, p11); continue; }
+    const y00 = Yv(p00), y01 = Yv(p01), y10 = Yv(p10), y11 = Yv(p11);
+    const pinned = (di, dj) => { const k = (gj + dj) * FW + gi + di; return drawn.has(k) && !fsplit.has(k); };
+    const W = pinned(-1, 0), E = pinned(1, 0), Sd = pinned(0, -1), N = pinned(0, 1);
+    const ids = [];
+    for (let b = 0; b <= SUB; b++) {
+      for (let a = 0; a <= SUB; a++) {
+        const u = a / SUB, v = b / SUB;
+        let id;
+        if (a === 0 && b === 0) id = p00; else if (a === SUB && b === 0) id = p10;
+        else if (a === 0 && b === SUB) id = p01; else if (a === SUB && b === SUB) id = p11;
+        else {
+          const x = vx(gi + u), z = vz(gj + v);
+          let y;
+          if (a === 0 && W) y = y00 + (y01 - y00) * v;
+          else if (a === SUB && E) y = y10 + (y11 - y10) * v;
+          else if (b === 0 && Sd) y = y00 + (y10 - y00) * u;
+          else if (b === SUB && N) y = y01 + (y11 - y01) * u;
+          else y = world.groundY(x, z);
+          id = fAdd(x, y, z, 1);
+        }
+        ids.push(id);
+      }
+    }
+    for (let b = 0; b < SUB; b++) for (let a = 0; a < SUB; a++) {
+      const v00 = ids[b * (SUB + 1) + a], v10 = ids[b * (SUB + 1) + a + 1];
+      const v01 = ids[(b + 1) * (SUB + 1) + a], v11 = ids[(b + 1) * (SUB + 1) + a + 1];
+      fidx.push(v00, v01, v10, v10, v01, v11);
     }
   }
 
@@ -594,7 +737,8 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
   }
   if (!idx.length && !fidx.length) return null;
   // Under the fine layer where they overlap, so the fine one is what shows.
-  for (let k = 0; k < dist.length; k++) if (dist[k] < BAND + CELL) pos[k * 3 + 1] -= 0.12;
+  const UNDER = BAND + FINE * 1.5;      // past this the fine layer never reaches
+  for (let k = 0; k < dist.length; k++) if (dist[k] < UNDER) pos[k * 3 + 1] -= 0.12;
 
   // ---- WHERE THE LAND ITSELF IS CURVY, SUBDIVIDE ------------------------
   // Away from the road a coarse chord is fine on a plain and wrong on a real
@@ -605,7 +749,7 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
   // split cell meets an unsplit one, the shared edge's vertices are put ON
   // the unsplit cell's chord, so the two meet exactly and no sky shows
   // through the seam (the usual T-junction rule).
-  const MISS = 0.15;
+  const MISS = 0.1;
   const keepQ = [];
   for (let q = 0; q < idx.length; q += 6) keepQ.push(idx[q]);   // corner a of each coarse cell
   const coarseCell = new Set(keepQ);
@@ -616,8 +760,8 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
       const Y = k => pos[k * 3 + 1];
       const ya = Y(a), yb = Y(a + 1), yc = Y(a + nx + 1), yd = Y(a + nx + 2);
       let worst = 0;
-      const drop = Math.min(dist[a], dist[a + 1], dist[a + nx + 1], dist[a + nx + 2]) < BAND + CELL ? 0.12 : 0;
-      for (const [u, v] of [[0.3, 0.3], [0.7, 0.7], [0.5, 0.5]]) {
+      const drop = Math.min(dist[a], dist[a + 1], dist[a + nx + 1], dist[a + nx + 2]) < UNDER ? 0.12 : 0;
+      for (const [u, v] of [[0.3, 0.3], [0.7, 0.7], [0.5, 0.5], [0.2, 0.6], [0.6, 0.2]]) {
         const ch = u + v <= 1 ? ya + (yb - ya) * u + (yc - ya) * v : yd + (yc - yd) * (1 - u) + (yb - yd) * (1 - v);
         const px = x0 + (i + u) * dx, pz = z0 + (j + v) * dz;
         const real = world.groundY(px, pz) - drop;
@@ -646,8 +790,12 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
       const Y = k => pos[k * 3 + 1];
       const ya = Y(a), yb = Y(a + 1), yc = Y(a + nx + 1), yd = Y(a + nx + 2);
       // Is the neighbour across each edge also split (then share real heights)?
-      const nb = (di, dj) => split.has(a + di + dj * (nx + 1));
-      const loose = { w: !nb(-1, 0), e: !nb(1, 0), s: !nb(0, -1), n: !nb(0, 1) };
+      // Pinned to the chord only where the neighbour IS that chord: a drawn,
+      // unsplit coarse cell. A neighbour that is not drawn at all (under the
+      // fine layer) has no edge to meet, and pinning to it stood a 1.6 m
+      // chord up through the fine ground at Suzuka.
+      const nb = (di, dj) => { const q = a + di + dj * (nx + 1); return coarseCell.has(q) && !split.has(q); };
+      const loose = { w: nb(-1, 0), e: nb(1, 0), s: nb(0, -1), n: nb(0, 1) };
       const ids = [];
       for (let b = 0; b <= s; b++) {
         for (let q = 0; q <= s; q++) {
@@ -661,7 +809,7 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
           else if (b === s && loose.n) y = yc + (yd - yc) * u;
           // Interior: the real ground — dropped under the fine layer where
           // the two overlap, exactly as the coarse vertices are.
-          else { const nr = world.near(x, z); y = world.groundY(x, z, nr) - (nr.d < BAND + CELL ? 0.12 : 0); }
+          else { const nr = world.near(x, z); y = world.groundY(x, z, nr) - (nr.d < UNDER ? 0.12 : 0); }
           ids.push(addV(x, y, z, dist[a]));
         }
       }
@@ -674,7 +822,6 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
     for (const v of cidx) idx.push(v);
     for (const v of sidx) idx.push(v);
   }
-  void coarseCell;
   const coarseTris = idx.length / 3;
   for (let k = 0; k < fidx.length; k++) idx.push(fidx[k]);
 
@@ -685,7 +832,7 @@ export function buildSkirt(track, look, sky, world, hole, plateCell = 0) {
   g.setAttribute('uv', new THREE.BufferAttribute(allUv, 2));
   g.setAttribute('uv1', new THREE.BufferAttribute(allUv, 2));
   g.setAttribute('color', new THREE.BufferAttribute(cat(col, fcol), 3));
-  buildSkirt.stats = { coarse: CELL, fine: FINE, fineR: FINE_R, fineTris: fidx.length / 3, coarseTris, split: split.size };
+  buildSkirt.stats = { coarse: CELL, fine: FINE, fineR: FINE_R, fineTris: fidx.length / 3, coarseTris, split: split.size, steps, fsplit: fsplit.size };
   g.setIndex(idx);
   g.computeVertexNormals();
 

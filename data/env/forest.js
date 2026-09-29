@@ -27,11 +27,13 @@ export const FOREST = {
   // run-off on 79% of the lap's two sides (OSM: 34%).
   monza:       { kinds: ['forest'], conifer: 0.12, depth: 60, density: 1, scrub: true, cover: true },
   // Suzuka's woods are Japanese cedar and pine on the hills.
-  suzuka:      { kinds: ['forest'], conifer: 0.72, depth: 50, density: 1, scrub: true },
+  // Satellite: trees within 40 m of the run-off on 44% of the lap's sides (OSM 22%).
+  suzuka:      { kinds: ['forest'], conifer: 0.72, depth: 50, density: 1, scrub: true, cover: true },
   // The Eifel: spruce right up to the fences.
   nurburgring: { kinds: ['forest'], conifer: 0.92, depth: 60, density: 1, scrub: true },
   // Dune pines behind the sand, low scrub everywhere else.
-  zandvoort:   { kinds: ['forest'], conifer: 0.75, depth: 45, density: 0.85, scrub: true },
+  // Satellite: 15% within 40 m (OSM 2%) — the dune woods behind the scrub.
+  zandvoort:   { kinds: ['forest'], conifer: 0.75, depth: 45, density: 0.85, scrub: true, cover: true },
   // Aleppo pine and holm oak on the rock; the gardens are parks.
   monaco:      { kinds: ['forest', 'park'], conifer: 0.4, depth: 30, density: 0.8, scrub: true },
   // Seaside boulevard planting: broadleaf, and not deep.

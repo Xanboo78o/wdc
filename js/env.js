@@ -456,13 +456,17 @@ function treeMesh(pts, geo, world) {
 
 // ---------------------------------------------------------------------------
 function flatMesh(polys, look, spec, world) {
-  const b = new Builder();
-  for (const poly of polys) {
-    const p = poly.p || poly;
-    if (p.length < 3) continue;
-    b.fan(p.map(q => [q[0], Z(q[1])]), spec.y, null);
+  let g;
+  if (world && world.on) g = drapeGeometry(polys, spec.y, world);
+  else {
+    const b = new Builder();
+    for (const poly of polys) {
+      const p = poly.p || poly;
+      if (p.length < 3) continue;
+      b.fan(p.map(q => [q[0], Z(q[1])]), spec.y, null);
+    }
+    g = b.geometry();
   }
-  const g = b.geometry();
   if (!g) return null;
   const mat = spec.tex
     ? look.mat(spec.tex, {
@@ -478,10 +482,71 @@ function flatMesh(polys, look, spec, world) {
       color: spec.col, roughness: 0.22, metalness: 0.4, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4,
     });
-  if (world) world.liftGround(g);
+  if (world && !g.userData.draped) world.liftGround(g);
   const m = new THREE.Mesh(g, mat);
   m.receiveShadow = true;
   return m;
+}
+
+// DRAPED, not lifted. A cover polygon used to be triangulated as it came
+// from the survey — triangles hundreds of metres across — and then lifted at
+// its corners, so across any real relief it was a flat plate slicing through
+// the land: at Zandvoort a sports-pitch polygon hung 1.3 m over Scheivlak and
+// hid the whole circuit, and at Suzuka one stood 2 m over the main straight.
+// Each triangle is now split (four ways, at its edge midpoints) until its
+// chord lies within DRAPE_TOL of the ground under it, and every vertex sits
+// on World.groundY — the same surface the grass skirt is built on.
+const DRAPE_TOL = 0.15, DRAPE_MIN = 8, DRAPE_MAX = 200;
+function drapeGeometry(polys, y0, world) {
+  const pos = [], uv = [];
+  const gy = (x, z) => world.groundY(x, z) + y0;
+  const tri = (a, b, c, depth) => {
+    const e = Math.max(Math.hypot(a[0] - b[0], a[2] - b[2]), Math.hypot(b[0] - c[0], b[2] - c[2]), Math.hypot(c[0] - a[0], c[2] - a[2]));
+    const mid = (p, q) => { const x = (p[0] + q[0]) / 2, z = (p[2] + q[2]) / 2; return [x, gy(x, z), z]; };
+    let split = depth < 9 && e > DRAPE_MIN && e > DRAPE_MAX;
+    let ab, bc, ca;
+    if (!split && depth < 9 && e > DRAPE_MIN) {
+      ab = mid(a, b); bc = mid(b, c); ca = mid(c, a);
+      const cx = (a[0] + b[0] + c[0]) / 3, cz = (a[2] + b[2] + c[2]) / 3;
+      const miss = Math.max(
+        Math.abs(ab[1] - (a[1] + b[1]) / 2), Math.abs(bc[1] - (b[1] + c[1]) / 2), Math.abs(ca[1] - (c[1] + a[1]) / 2),
+        Math.abs(gy(cx, cz) - (a[1] + b[1] + c[1]) / 3));
+      // Tight where you drive past it, looser where you only see it across
+      // the landscape (the dunes at Zandvoort took 426k triangles at 15 cm).
+      const dn = world.near(cx, cz).d;
+      split = dn < 320 && miss > (dn < 150 ? DRAPE_TOL : DRAPE_TOL * 3);
+    }
+    if (split) {
+      ab = ab || mid(a, b); bc = bc || mid(b, c); ca = ca || mid(c, a);
+      tri(a, ab, ca, depth + 1); tri(ab, b, bc, depth + 1); tri(ca, bc, c, depth + 1); tri(ab, bc, ca, depth + 1);
+      return;
+    }
+    for (const p of [a, b, c]) { pos.push(p[0], p[1], p[2]); uv.push(p[0], p[2]); }
+  };
+  for (const poly of polys) {
+    const p0 = poly.p || poly;
+    if (p0.length < 3) continue;
+    let ring = p0.map(q => [q[0], Z(q[1])]);
+    let sa = 0;
+    for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; sa += p[0] * q[1] - q[0] * p[1]; }
+    if (sa > 0) ring = ring.slice().reverse();
+    let tris;
+    try { tris = THREE.ShapeUtils.triangulateShape(ring.map(p => new THREE.Vector2(p[0], p[1])), []); } catch { continue; }
+    const V = ring.map(([x, z]) => [x, gy(x, z), z]);
+    for (const t of tris) {
+      let [a, b, c] = [V[t[0]], V[t[1]], V[t[2]]];
+      // Face up: counter-clockwise seen from above.
+      if ((b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]) > 0) [b, c] = [c, b];
+      tri(a, b, c, 0);
+    }
+  }
+  if (!pos.length) return null;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.computeVertexNormals();
+  g.userData.draped = true;
+  return g;
 }
 
 // ---------------------------------------------------------------------------
@@ -550,7 +615,11 @@ export function buildEnv(scene, env, track, look, corridor = null, world = null)
   if (!env) return added;
 
   if (env.sea && env.sea.length) {
-    const m = flatMesh(env.sea, look, { col: COVER.water.col, y: -0.055, tex: null, size: 8 }, null);
+    // At the WATER LINE, not at zero: heights are relative to the lap's mean,
+    // and with Monaco's real elevation the harbour road runs 11.7 m below it —
+    // a sea at -0.055 flooded the tunnel exit by nine metres.
+    const seaY = world && world.on ? world.seaY : -0.055;
+    const m = flatMesh(env.sea, look, { col: COVER.water.col, y: seaY, tex: null, size: 8 }, null);
     if (m) { scene.add(m); added.sea = env.sea.length; }
   }
 
