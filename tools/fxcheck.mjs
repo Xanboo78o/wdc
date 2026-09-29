@@ -45,7 +45,7 @@ const { track, spec } = loadTrack(a[0] || 'monaco', a[1] || 'f1');
 
 function rig() {
   const view = {
-    scene: { add() {} }, track, world: { trackYAt: () => 0, groundY: () => -0.3 }, bank: null,
+    scene: { add() {}, children: [] }, track, world: { trackYAt: () => 0, groundY: () => -0.3 }, bank: null,
     camera: new THREE.PerspectiveCamera(), renderer: { info: { programs: [] } }, wx: null,
   };
   const fx = new Fx(view, null);
