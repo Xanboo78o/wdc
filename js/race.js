@@ -40,11 +40,68 @@ const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
 const LEASH_FROM = 2.5, LEASH_SLOPE = 0.15, LEASH_MIN = 0.62;
 const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
 
+// ---- THE DUEL (Adam, 2026-09-28) -------------------------------------------
+// "its more like flying at the same speed fighting for inches, building,
+// building, then FINALLY overtaking and its a celebration ... but still they
+// shouldnt fly away from u bc a missed brake point".
+//
+// The cars AROUND you drive at YOUR pace. Not a speed multiplier: a grip
+// fraction, re-solved, exactly as difficulty always has been — so a car that
+// stays with you is a car braking where you brake and carrying what you carry
+// through the corner. Each of the DUEL_N cars either side of you keeps a gap
+// to you in mind (DUEL_GAP for the next one, DUEL_STEP more per car after) and
+// trims its grip toward holding it:
+//   too far up the road  -> eases quickly (K_WAIT) — nobody escapes a mistake
+//   you are closing       -> firms up slowly (K_FIRM) — you EARN the gap back
+//   too far behind you    -> digs in (K_CHASE) — the mirrors fill up again
+// and inside DUEL_FREEZE of you it stops adjusting altogether. Close up it is
+// racecraft, the tow, DRS and nerve that decide it, never the band.
+//
+// MEASURED, tools/battlecheck.mjs --car f1 --battle medium --you casual,
+// Monza/Suzuka/Zandvoort x 4 seeds, --duel 0 (before) vs 1 (after), ± SE:
+//   places swapped with you / race   15.2 ± 1.8  ->  5.5 ± 1.3
+//   car ahead within 1 s             72 ± 5 %    ->  85 ± 2 %
+//   car behind within 1 s            50 ± 7 %    ->  77 ± 4 %
+//   your contacts                     8.3 ± 1.8  ->  2.2 ± 0.9
+//   held passes celebrated / race      —         ->  1.4 ± 0.4
+// fieldcheck (22 cars, MEDIUM, nobody at the wheel): retired 3.6 ± 0.6 ->
+// 2.0 ± 0.5, passes 100 -> 70, contacts 167 -> 96. `duel: false` reproduces
+// the old race byte for byte.
+const DUEL_N = 3, DUEL_GAP = 0.55, DUEL_STEP = 0.75, DUEL_FREEZE = 0.45;
+const K_WAIT = 0.022, K_FIRM = 0.005, K_CHASE = 0.012;
+// Outside SUPERCASUAL's OVERTAKES window the tiers keep their meaning: a
+// neighbour may only trim its OWN grip, by this much down and this much up.
+const DUEL_DOWN = 0.05, DUEL_UP = 0.025;
+// After YOUR mistake: a neighbour more than DUEL_SLACK s past the gap it
+// wants may drop DUEL_DOWN_FAR below the window, and it is leashed from there.
+const DUEL_SLACK = 1.0, DUEL_DOWN_FAR = 0.12;
+// "Building, building": an attacker sits in the car ahead's tow, within
+// 0.8 s, for BUILD_T * (1.5 - aggression) seconds before it commits — pulls
+// out of the slipstream, goes for the inside, lunges. Until then it follows,
+// on the line, in the tow, which is the building. A committed attempt that
+// has not put it alongside within TRY_T is over: tuck back in, build again.
+// Measured first (tools/_duelwhy.mjs classifies every swap): in a 12-car
+// train everybody is always within 0.8 s, so a gate that only filled was
+// always open. It has to EMPTY on an attempt.
+const BUILD_T = 16, TRY_T = 9;
+// DRS: within DRS_GAP s of the car ahead at a zone's detection line opens the
+// flap for that zone, from the start of lap DRS_FROM_LAP + 1, never behind the
+// safety car. Only for a car whose spec has one (physics.js CARS.f1.drs).
+const DRS_GAP = 1.0, DRS_FROM_LAP = 1;
+// Celebrate the pass: YOUR overtake counts once the car is behind you for
+// CHEER_HOLD s and you are clear of it by half a car.
+const CHEER_HOLD = 2.0;
+
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
                 tier = 'medium', seed = 1, player = true, pits = true, noDnf = false, order = null,
-                battle = null }) {
+                battle = null, duel = true, drs = true }) {
     this.track = track; this.lines = lines; this.spec = spec;
+    // The 2026-09-28 racecraft (see DUEL above). `duel: false` is the
+    // previous behaviour exactly, kept for tools/battlecheck.mjs --duel 0.
+    this.duel = !!duel;
+    this.drsRule = !!drs && !!duel && !!spec.drs;
+    this.cheers = [];
     // NO DNF (Adam): YOUR car cannot retire. The bots still can.
     this.noDnf = noDnf;
     this.laps = laps; this.peak = peakSlip(spec);
@@ -102,8 +159,13 @@ export class Race {
         contacts: 0, retired: false, finished: false, finishTime: null, bump: null,
         pitRequest: false, inPit: false, pitTimer: 0, pitStops: 0, stuck: 0,
         recover: null,
+        // the duel: grip trim, how long it has been building on the car
+        // ahead, which straight it is on and on which it last moved, DRS
+        duelF: null, build: 0, seg: 0, moveSeg: -1, inZone: false,
+        drsFor: null, drsOk: false,
       });
     }
+    this.me = this.entries.find(e => e.isPlayer) || null;
     if (this.battle) {
       const B = this.battle, rng = mulberry(seed * 977 + 5);
       for (const e of this.entries) {
@@ -125,6 +187,8 @@ export class Race {
       }
       this.band();
     }
+    // Pace matching around you happens in every tier when you are racing.
+    this.duelOn = this.duel && !!this.me;
     this.order();
   }
 
@@ -134,16 +198,42 @@ export class Race {
   // bottom, level with you in the middle. Saturated, so the whole field is
   // drawn toward the fight rather than only the car nearest it.
   band() {
-    const B = this.battle, me = this.entries.find(e => e.isPlayer);
+    const B = this.battle, me = this.me;
     const pMe = me && !me.retired ? this.progress(me) : null;
+    // Who is next to you, counted outward: +1 is the car directly ahead, -1
+    // the car directly behind. Only these get the duel trim.
+    const duel = this.duelOn && pMe != null && this.state === 'green' && this.time > 8;
+    if (duel) this.rankAroundMe(pMe);
     for (const e of this.entries) {
       const d = e.driver;
       if (!d || e.retired || d.ceiling == null) continue;
+      if (!B) {
+        // MEDIUM, HARD, CASUAL: only the neighbours are touched, and only
+        // inside their own grip, so the tier still means what it says.
+        if (duel && e.rank && Math.abs(e.rank) <= DUEL_N && !e.inPit) {
+          const own = d.grip / d.ceiling;
+          if (e.duelF == null) e.duelF = own;
+          this.duelTrim(e, own - DUEL_DOWN, Math.min(1.0, own + DUEL_UP));
+          d.gripNow = d.ceiling * e.duelF;
+        } else if (d.gripNow != null) { d.gripNow = null; e.duelF = null; }
+        continue;
+      }
       const behindYou = pMe == null ? 0 : pMe - this.progress(e);
       const f = Math.max(0, Math.min(1, 0.5 + behindYou / (2 * B.band)));
       // The band sets WHERE in the window; the car and the driver still set
       // the order inside it. Without paceMul the band erased the teams.
-      d.gripNow = d.ceiling * (B.lo + (B.hi - B.lo) * f) * (d.paceMul ?? 1);
+      let frac = B.lo + (B.hi - B.lo) * f;
+      // Near you the distance band hands over to the duel: the window is the
+      // same, what picks the spot in it is the gap you are fighting over.
+      if (duel && e.rank && Math.abs(e.rank) <= DUEL_N && !e.inPit) {
+        if (e.duelF == null) e.duelF = frac;
+        // A car that got away because YOU erred may go further down than
+        // the window, until the gap is back (DUEL_SLACK past what it wants).
+        const far = e.rank > 0 && e.gapMe > DUEL_GAP + DUEL_STEP * (e.rank - 1) + DUEL_SLACK;
+        this.duelTrim(e, B.lo - (far ? DUEL_DOWN_FAR : DUEL_DOWN), B.hi);
+        frac = e.duelF;
+      } else e.duelF = null;
+      d.gripNow = d.ceiling * frac * (d.paceMul ?? 1);
       // THE LEASH (Adam, 2026-09-24: "you're never more than 5 secs behind
       // everyone ... it feels like missing a brake point and auto losing").
       // Grip alone cannot keep a field near you: it only acts in corners, and
@@ -155,8 +245,41 @@ export class Race {
       // Measured before: worst gap to the leader after a 4 s blunder a lap
       // was 40 s (tools/battlecheck.mjs --blunder 4).
       const aheadT = pMe == null ? 0 : -behindYou / this.vRef;
-      e.hold = aheadT > LEASH_FROM ? Math.max(LEASH_MIN, 1 - (aheadT - LEASH_FROM) * LEASH_SLOPE) : 1;
+      // THE DUEL'S LEASH is shorter: the car you were fighting waits from
+      // DUEL_SLACK past its gap, not from 2.5 s, so a missed braking point
+      // costs you the fight for a while, not the fight for good.
+      const from = duel && e.rank > 0 && e.rank <= DUEL_N
+        ? Math.min(LEASH_FROM, DUEL_GAP + DUEL_STEP * (e.rank - 1) + DUEL_SLACK) : LEASH_FROM;
+      e.hold = aheadT > from ? Math.max(LEASH_MIN, 1 - (aheadT - from) * LEASH_SLOPE) : 1;
     }
+  }
+
+  // Rank every live rival by where it is relative to you: e.rank = +1 for the
+  // car directly ahead, -1 directly behind, 0 for nobody near enough to count
+  // (pit lane, retired). e.gapMe is the signed gap in seconds at the circuit's
+  // mean racing-line speed, + = up the road from you.
+  rankAroundMe(pMe) {
+    const up = [], down = [];
+    for (const e of this.entries) {
+      e.rank = 0;
+      if (e.isPlayer || e.retired || e.inPit || e.finished) continue;
+      e.gapMe = (this.progress(e) - pMe) / this.vRef;
+      (e.gapMe > 0 ? up : down).push(e);
+    }
+    up.sort((a, b) => a.gapMe - b.gapMe).forEach((e, k) => { e.rank = k + 1; });
+    down.sort((a, b) => b.gapMe - a.gapMe).forEach((e, k) => { e.rank = -(k + 1); });
+  }
+
+  // One step of the duel trim on e.duelF, kept inside [lo, hi]. See DUEL.
+  duelTrim(e, lo, hi) {
+    const k = e.rank, gap = e.gapMe;
+    const want = Math.sign(k) * (DUEL_GAP + DUEL_STEP * (Math.abs(k) - 1));
+    const err = Math.max(-2, Math.min(2, gap - want));   // + = further up the road than wanted
+    if (Math.abs(gap) > DUEL_FREEZE) {
+      const rate = k > 0 ? (err > 0 ? K_WAIT : K_FIRM) : (err < 0 ? K_CHASE : K_FIRM);
+      e.duelF -= rate * err * BAND_EVERY;
+    }
+    e.duelF = Math.max(lo, Math.min(hi, e.duelF));
   }
 
   // Which way the next real corner turns within `look` metres: +1 left,
@@ -324,10 +447,32 @@ export class Race {
     const moveGap = d.moveGap ?? 3.5;
     let want = 0, lunge = 0, pressure = 0;
     const reach = this.battle ? 1.8 : 1.4;
+    const dtR = NEIGH_EVERY * FIXED_DT;
+    // Which straight this is: a new one begins every time a braking zone ends.
+    // The defender's one move is counted per straight (see defence).
+    const zoneNow = this.brakingZone(e.proj.s, 150);
+    if (!zoneNow && e.inZone) e.seg++;
+    e.inZone = zoneNow;
+    // BUILDING. Time spent within striking distance of THIS car ahead fills
+    // it; out of range drains it twice as fast; a new car ahead starts over.
+    if (e.ahead !== e.buildOn) { e.buildOn = e.ahead; e.build = 0; e.tryT = 0; }
+    if (e.ahead && e.aheadGapT < 0.8) e.build += dtR;
+    else if (!e.ahead || e.aheadGapT > 1.5) e.build = Math.max(0, e.build - 2 * dtR);
     if (!pitting && e.ahead && e.aheadGapT < reach && !e.inPit) {
       const o = e.ahead;
       const ds = t.gap(o.proj.s, e.proj.s);
       const braking = this.brakingZone(e.proj.s, 130);
+      // Nose alongside already: it is a fight for the corner, not a dive.
+      const alongside = ds < L * 1.2 && Math.abs(o.proj.lat - e.proj.lat) > 1.6;
+      // Ready to commit a move into a braking zone: built up long enough, or
+      // alongside already because the tow or DRS put it there. Until then an
+      // attacker tucks back in behind for the corner and tries again.
+      // A backmarker being lapped, or a car limping, is not a duel.
+      const lapping = this.progress(e) - this.progress(o) > t.length * 0.5 || o.car.speed < e.car.speed * 0.7 || !!o.recover;
+      let ready = !this.duel || alongside || lapping || e.build > BUILD_T * (1.5 - d.aggression);
+      if (this.duel && ready && !alongside && (e.tryT = (e.tryT || 0) + dtR) > TRY_T) {
+        e.build = 0; e.tryT = 0; ready = false;
+      }
       // Re-plan every 2.5 s, on a new target, or the moment the defender shuts
       // the door on the side already chosen — that last one is the switchback.
       const shut = e.atkOn === o && o.proj.lat * e.atkSide > 1.4 && Math.abs(o.proj.lat - e.proj.lat) < 1.6;
@@ -340,12 +485,14 @@ export class Race {
       }
       // Out of the slipstream late, not from a second back: sit in the tow
       // down the straight, then pull out once there is nothing left to gain.
-      const pull = braking ? 0.75 + 0.5 * d.aggression
+      const pull = !ready ? 0 : braking ? 0.75 + 0.5 * d.aggression
                  : ds < 30 ? 0.55 + 0.4 * d.aggression : 0.35;
       want += e.atkSide * pull * Math.max(0.8, t.w[i] - 2.2) * Math.min(1, (reach - e.aheadGapT) / 1.0);
       // The dive: brake later than the line says, once you are out of their
       // wake and nearly alongside. The tyres decide whether it sticks.
-      if (braking && ds < L * 2.2 && Math.abs(o.proj.lat - e.proj.lat) > 1.2) {
+      // In the duel "nearly" means your front wing at their sidepod, not a
+      // car and a bit back — a lunge from further out is a torpedo.
+      if (braking && ready && ds < L * (this.duel ? 1.3 : 2.2) && Math.abs(o.proj.lat - e.proj.lat) > 1.2) {
         lunge = (d.lungeMax ?? 0.02) * d.aggression;
       }
       if (ds < 25) pressure = 0.6;
@@ -370,11 +517,25 @@ export class Race {
       let move = 0;
       if (braking) move = this.insideAhead(e.proj.s, 220) || -Math.sign(lineOff) || 1;
       else if (d.defence > 0.5 && ds > L * 1.05 && ds < 28 && Math.abs(dl) > 0.9) move = Math.sign(dl);
-      if (move && move !== e.lastMove && this.time - e.movedAt > moveGap) {
-        e.lastMove = move; e.movedAt = this.time;
+      // THE DUEL'S DEFENCE: one move per straight, and the inside into every
+      // braking zone. A defender that has already moved on this straight
+      // holds that line, whatever the car behind does — the weave the short
+      // OVERTAKES `moveGap` allowed is gone, and so is the reason an attacker
+      // could never predict anything.
+      const mayMove = this.duel
+        ? (braking || e.moveSeg !== e.seg) && this.time - e.movedAt > 1.0
+        : this.time - e.movedAt > moveGap;
+      if (move && move !== e.lastMove && mayMove) {
+        e.lastMove = move; e.movedAt = this.time; e.moveSeg = e.seg;
       }
       if (move || this.time - e.movedAt < 1.2) {
         want += e.lastMove * d.defence * Math.max(0.6, t.w[i] - 2.4) * 0.85;
+      }
+      // ...and brake a touch later on the inside when someone is right there,
+      // which is how a defender makes a dive not quite work. A fraction of the
+      // attacker's own lunge, so the better-placed car still wins it.
+      if (this.duel && braking && ds < 22 && e.lastMove === move) {
+        lunge = Math.max(lunge, 0.45 * (d.lungeMax ?? 0.02) * d.defence);
       }
       pressure = Math.max(pressure, Math.min(1, 1 - e.behindGapT / defendT));
     }
@@ -539,7 +700,7 @@ export class Race {
 
     // Neighbours and racecraft change slowly compared with 400 Hz, and they are
     // the O(n^2) part. A quarter of the rate is invisible and four times cheaper.
-    if (this.battle && this.time - this.bandAt > BAND_EVERY) { this.bandAt = this.time; this.band(); }
+    if ((this.battle || this.duelOn) && this.time - this.bandAt > BAND_EVERY) { this.bandAt = this.time; this.band(); }
     if (this.sub++ % NEIGH_EVERY === 0) {
       this.neighbours();
       for (const e of this.entries) if (!e.isPlayer && !e.retired) this.racecraft(e);
@@ -552,8 +713,14 @@ export class Race {
         const inp = playerInput || { wheel: 0, throttle: 0, brake: 0 };
         car.throttle = inp.throttle; car.brake = inp.brake;
         car.delta = inp.delta ?? car.delta;
+        // DRS is a rule, not a button: the flap stays shut outside a zone you
+        // earned at its detection line, however many times it is pressed.
+        if (this.drsRule && !e.drsOk) car.drsOpen = false;
       } else if (e.drive) {
         e.drive(car, e.proj, dt, e.ctx);
+        // A rival opens it the moment it is allowed and shuts it for the
+        // brakes and for any real steering, as the driver's thumb would.
+        if (this.drsRule) car.drsOpen = e.drsOk && car.brake < 0.05 && Math.abs(car.delta) < 0.06;
         // Safety car. Applied AFTER the driver for the same reason the pit
         // controller is: a driver that runs second simply writes its own
         // throttle back over the cap every substep.
@@ -645,6 +812,7 @@ export class Race {
       // substep, so eight samples either side is already absurdly generous.
       e.proj = t.project(e.car.x, e.car.y, e.hint, 8);
       e.hint = e.proj.i;
+      if (this.drsRule) this.drsTick(e, prev, racing);
 
       if (e.proj.s > t.length * 0.42 && e.proj.s < t.length * 0.62) e.pastHalf = true;
       const crossed = prev > t.length * 0.8 && e.proj.s < t.length * 0.2;
@@ -724,8 +892,56 @@ export class Race {
     if (this.safety > 0) this.safety = Math.max(0, this.safety - dt);
 
     this.order();
+    if (this.duel && this.me && racing) this.cheerTick();
     if (this.state === 'finish' && this.entries.every(e => e.finished || e.retired)) this.state = 'over';
     if (this.state === 'finish' && this.time - (this.finishAt || (this.finishAt = this.time)) > 30) this.state = 'over';
+  }
+
+  // ---- DRS: detection line, then the zone ----------------------------------
+  // Within DRS_GAP of the car ahead as you cross a zone's detection line and
+  // the flap is yours for that zone, and only that zone. Everyone, you
+  // included, from lap DRS_FROM_LAP + 1, never under the safety car. The flap
+  // itself is physics (physics.js: drsCl/drsCd on a spec with `drs`); this is
+  // only who may use it where. e.drsFor = the zone earned, e.drsOk = in it now.
+  drsTick(e, prev, racing) {
+    const t = this.track, s = e.proj.s;
+    if (!racing || this.safety > 0 || e.inPit || e.finished || e.retired) { e.drsFor = null; e.drsOk = false; return; }
+    for (const z of t.drs || []) {
+      const a = t.gap(z.detect, prev), b = t.gap(z.detect, s);
+      if (a > 0 && b <= 0 && a < 50) {
+        e.drsFor = e.lap >= DRS_FROM_LAP && e.ahead && e.aheadGapT < DRS_GAP ? z : null;
+      }
+    }
+    if (e.drsFor && t.drsZoneAt(s) === e.drsFor) e.drsOk = true;
+    else { if (e.drsOk) e.drsFor = null; e.drsOk = false; }
+  }
+
+  // ---- celebrate the pass --------------------------------------------------
+  // YOUR overtakes, and only the ones that stuck: a rival that went from ahead
+  // of you to behind you and STAYED there CHEER_HOLD seconds, with daylight of
+  // half a car. A car crawling to the pits or beached is a place, not a pass.
+  // race.cheers is read by main.js (radio call, the tower, the crowd).
+  cheerTick() {
+    const me = this.me;
+    if (me.retired || me.finished || me.inPit || this.time < 6) return;
+    const pMe = this.progress(me), half = this.track.length / 2, L = this.spec.bodyL;
+    const cand = this._cand || (this._cand = new Map());
+    for (const o of this.entries) {
+      if (o === me) continue;
+      const d = this.progress(o) - pMe;                    // + = they are ahead of you
+      const was = o.aheadOfMe;
+      o.aheadOfMe = d > 0;
+      if (o.retired || o.inPit || o.recover || Math.abs(d) > half) { cand.delete(o); continue; }
+      if (was === true && d <= 0) cand.set(o, this.time);
+      else if (d > 0) cand.delete(o);
+      const t0 = cand.get(o);
+      if (t0 != null && this.time - t0 >= CHEER_HOLD && -d > L * 0.5) {
+        cand.delete(o);
+        if (o.car.speed < me.car.speed * 0.6) continue;
+        this.cheers.push({ t: this.time, at: t0, idx: o.idx, name: o.name, pos: me.pos, lap: me.lap + 1 });
+        this.log('pass', `YOU PASS ${o.name} FOR P${me.pos}`, me);
+      }
+    }
   }
 
   // Only test pairs that are actually near each other. Twenty-two cars is 231

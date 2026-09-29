@@ -36,7 +36,7 @@ const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[
 // afternoon on 2026-09-18 in `tools/shot.mjs`, which took only the FIRST
 // `--q` and quietly discarded the rest — every screenshot came back looking
 // normal and photographing the wrong thing.
-const KNOWN = new Set(['tracks', 'seeds', 'laps', 'grid', 'tier', 'car', 'pits']);
+const KNOWN = new Set(['tracks', 'seeds', 'laps', 'grid', 'tier', 'car', 'pits', 'duel']);
 for (const a of args) {
   if (!a.startsWith('--')) continue;
   const name = a.slice(2);
@@ -57,12 +57,15 @@ const GRID = +flag('grid', 22);
 const TIER = flag('tier', 'medium');
 const CLS = flag('car', 'f1');
 const PITS = flag('pits', '1') !== '0';
+// --duel 0: the pre-2026-09-28 racecraft (js/race.js DUEL), for an A/B.
+const DUEL = flag('duel', '1') !== '0';
 
 function one(track, lines, spec, seed) {
   const race = new Race({
     track, lines, spec, slots: gridSlots(track, GRID), laps: LAPS, grid: GRID,
-    tier: TIER, seed, player: false, pits: PITS,
+    tier: TIER, seed, player: false, pits: PITS, duel: DUEL,
   });
+  if (race.duel !== DUEL) { console.error('fieldcheck: Race ignored --duel'); process.exit(2); }
   const maxT = LAPS * 260 + 90;
   let t = 0, k = 0, lineErr = 0, offLine = 0, nLine = 0;
   const lo = lines.race.off;
@@ -126,7 +129,7 @@ for (const key of TRACKS) {
   const runs = [];
   for (let s = 0; s < SEEDS; s++) runs.push(one(track, lines, spec, 7 + s * 101));
   rows.push({
-    key, retiredRuns: runs.map(r => r.retired),
+    key, retiredRuns: runs.map(r => r.retired), passRuns: runs.map(r => r.passes),
     retired: mean(runs.map(r => r.retired)),
     worst: Math.max(...runs.map(r => r.retired)),
     lap1: mean(runs.map(r => r.lap1)),
@@ -141,7 +144,7 @@ for (const key of TRACKS) {
   });
 }
 
-console.log(`${GRID} cars · ${LAPS} laps · ${TIER} · ${CLS} · ${SEEDS} seeds each · pit stops ${PITS ? 'ON' : 'OFF'}\n`);
+console.log(`${GRID} cars · ${LAPS} laps · ${TIER} · ${CLS} · ${SEEDS} seeds each · pit stops ${PITS ? 'ON' : 'OFF'} · duel ${DUEL ? 'ON' : 'OFF'}\n`);
 console.log('CIRCUIT      RETIRED  WORST  IN FIRST 30s  NO FRONT WING  ...OF THEM RETIRED  PIT STOPS  CONTACTS  PASSES  BEST vs IDEAL  LINE ERR  >1.5m OFF');
 for (const r of rows) {
   console.log([
@@ -162,7 +165,7 @@ for (const r of rows) {
 
 const allRetired = rows.flatMap(r => r.retiredRuns);
 console.log(`\nacross all circuits:  ${mean(allRetired).toFixed(2)} ± ${se(allRetired).toFixed(2)} retired of ${GRID}` +
-  `  ·  ${mean(rows.map(r => r.passes)).toFixed(0)} passes` +
+  `  ·  ${mean(rows.map(r => r.passes)).toFixed(0)} passes (± ${se(rows.flatMap(r => r.passRuns)).toFixed(1)} per race)` +
   `  ·  ${mean(rows.map(r => r.contacts)).toFixed(0)} contacts` +
   `  ·  ${mean(rows.map(r => r.wings)).toFixed(2)} cars lost a front wing` +
   `  ·  ${mean(rows.map(r => r.stops)).toFixed(2)} pit stops`);

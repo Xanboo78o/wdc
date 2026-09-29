@@ -79,6 +79,7 @@ export class Engineer {
     this.gapWas = null;
     this.pending = [];                                // [time, fn] — stewards take a moment
     this.stoppedFor = -1;                             // the pitStops count we called a box for
+    this.lastCheer = -99; this.cheers = 0;            // your passes that stuck (cheer)
   }
 
   // ------------------------------------------------------------ every frame
@@ -292,10 +293,39 @@ export class Engineer {
           this.call(`${nice(e.name)} has five seconds for hitting us.`);
         }
       }
+      if (ev.kind === 'pass' && e.isPlayer) {
+        const c = r.cheers && r.cheers.find(x => x.t === ev.t);
+        if (c) this.cheer(c);
+      }
       if (ev.kind === 'crash' && / RETIRES$/.test(ev.text) && !e.isPlayer && this.ready('retire', 20)) {
         this.call(`${nice(e.name)} is out of the race.`);
       }
     }
+  }
+
+  // THE PASS THAT STUCK (race.js cheerTick). Adam, 2026-09-28: "FINALLY
+  // overtaking and its a celebration". An engineer who has watched you sit on
+  // someone's gearbox for two laps does not say "position gained" — he loses
+  // it a little. Two in quick succession get a short one, not a speech.
+  cheer(c) {
+    const t = this.race.time, name = nice(c.name);
+    const again = t - (this.lastCheer ?? -99) < 8;
+    this.lastCheer = t;
+    this.cheers = (this.cheers || 0) + 1;
+    let line;
+    if (c.pos === 1) line = again ? 'And that is the lead! P1!' : `YES! P1! Get in there, you are leading the race!`;
+    else if (again) line = [`And another one! P${c.pos}.`, `Two in a row! P${c.pos}.`][this.cheers % 2];
+    else {
+      const lines = [
+        `YES! Get in there! Great move on ${name}. P${c.pos}.`,
+        `Mega, mega. ${name} done, P${c.pos}.`,
+        `That's it! Beautiful, beautiful move. P${c.pos}.`,
+        `Yes mate! ${name} is behind you. P${c.pos}, keep it clean.`,
+        `Get in! You earned that one. P${c.pos}.`,
+      ];
+      line = lines[this.cheers % lines.length];
+    }
+    this.call(line);
   }
 
   // Which car is nearest to `e` — the one it most likely hit.

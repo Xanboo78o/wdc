@@ -12,6 +12,7 @@ import { makeAero } from './aero.js';
 import { Hands, steerLock } from './input.js';
 import { FFB } from './ffb.js';
 import { Engineer } from './engineer.js';
+import { cheer } from './cheer.js';
 import { startRadio, ptt, say } from './radio.js';
 import { View } from './render.js';
 import { loadEnv } from './env.js';
@@ -1091,6 +1092,14 @@ function loop(now) {
   if (state.race) {
     if (engineer.race !== state.race) engineer.begin(state.race);
     engineer.tick(frame);
+    // Celebrate the pass (js/race.js cheerTick): the crowd goes up and the
+    // tower flashes you. The radio call is the engineer's, from the same event.
+    const cz = state.race.cheers, c = cz && cz[cz.length - 1];
+    if (c && c !== state.cheerSeen) {
+      state.cheerSeen = c; state.passFlash = { race: state.race, t: c.t }; cheer({ big: c.pos === 1 });
+      // For the replay director: the moment the pass happened, not the moment it was confirmed.
+      if (state.marks) state.marks.push({ t: (state.simT || 0) - (state.race.time - c.at), kind: 'pass', held: true });
+    }
   }
   // 360-degree sound (js/spatial.js, the audio session's): every engine where
   // it is, heard from where the camera is.
@@ -1302,6 +1311,8 @@ function hud(over, rough) {
   $('lapNo').textContent = Math.max(1, state.lap);
   $('tCur').className = state.invalid ? 'bad' : '';
   $('drsLight').classList.toggle('on', car.drsOpen);
+  // In a race DRS is earned (race.js drsTick): dim until you may open it.
+  $('drsLight').style.opacity = state.race && state.race.drsRule && !car.drsOpen && !(state.me && state.me.drsOk) ? '0.35' : '';
   $('padLight').style.display = hands.usingPad ? '' : 'none';
   inputReadout(hands, car);
 }
@@ -1508,6 +1519,10 @@ function raceHud(dt) {
       r.gap.textContent = gap;
       r.gap.className = cls;
       r.d.className = 'trow' + (e.isPlayer ? ' me' : '') + (e.retired ? ' out' : '');
+      // Your row flashes green for the pass that stuck (race.cheers).
+      const pf = state.passFlash;
+      r.d.style.background = e.isPlayer && pf && pf.race === race && race.time - pf.t < 2.6
+        && (race.time * 6 | 0) % 2 ? '#1fbf5f' : '';
     }
   }
 
