@@ -381,6 +381,96 @@ function plate(pts, thick, z) {
   return g;
 }
 
+// THE BROKEN NOSE: what is left on the car when the front wing and the nose
+// tip have been torn off. A nose box fails as a crash structure is meant to —
+// the paint skin splits back in a ragged line and the carbon laminate under it
+// sticks out further in splinters, round a dark hollow core. Two wing pylons
+// stay bolted under it with their feet snapped.
+//
+// Every piece is built INSIDE the intact tip (`tip` is its two loft stations),
+// shrunk to the tip's own taper, so while the tip is on the car you cannot see
+// any of it and nothing has to switch it on. Measured against the tip's skin
+// at each tooth, not guessed: a tooth longer than the taper allows would poke
+// through the paint of an undamaged car.
+function brokenNose(tip, carbon, paint, dark) {
+  const [a, b] = tip[0].x > tip[1].x ? [tip[1], tip[0]] : [tip[0], tip[1]];   // a = root (2.30), b = point
+  const at = x => {
+    const t = Math.max(0, Math.min(1, (x - a.x) / (b.x - a.x)));
+    return { y: a.y + (b.y - a.y) * t, w: a.w + (b.w - a.w) * t, h: a.h + (b.h - a.h) * t, n: a.n + (b.n - a.n) * t };
+  };
+  const SEG = 28;
+  const rnd = i => { const s = Math.sin(i * 12.9898 + 4.1414) * 43758.5453; return s - Math.floor(s); };
+  // A ragged shell: a ring well inside the body, a ring at the break, and a
+  // ring of teeth whose length alternates short/long with noise.
+  function shell(k, reach, seed) {
+    const pos = [], idx = [];
+    const x0 = a.x - 0.10;
+    const teeth = [];
+    const bend = [];
+    for (let i = 0; i < SEG; i++) {
+      // Every other vertex is a notch; the rest are teeth of very uneven
+      // length, and the long ones curl in toward the axis the way a splinter
+      // of laminate hangs off a broken tube.
+      const r = rnd(i + seed), r2 = rnd(i * 7 + seed);
+      const len = i % 2 ? 0.004 + 0.018 * r : 0.02 + reach * (r2 > 0.55 ? r : r * r * 0.4);
+      teeth.push(a.x + len);
+      bend.push(1 - Math.min(0.35, len * 1.6));
+    }
+    const rows = [
+      Array(SEG).fill(x0),
+      Array(SEG).fill(a.x),
+      teeth,
+    ];
+    rows.forEach((row, ri) => {
+      for (let i = 0; i < SEG; i++) {
+        const x = row[i], s = at(x);
+        const kk = ri === 2 ? k * bend[i] : k;
+        const [z, y] = ring(s.w * kk, s.h * kk, s.n, SEG)[i];
+        pos.push(x, s.y + y, z);
+      }
+    });
+    for (let r = 0; r < rows.length - 1; r++) {
+      const o = r * SEG, p = (r + 1) * SEG;
+      for (let i = 0; i < SEG; i++) {
+        const j = (i + 1) % SEG;
+        idx.push(o + i, p + i, p + j, o + i, p + j, o + j);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const uv = [];
+    for (let n = 0; n < pos.length; n += 3) uv.push(pos[n], ((n / 3) % SEG) * 0.025);   // metres, like loft()
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }
+  const out = [
+    { geo: shell(0.93, 0.10, 3), mat: paint, cast: true },     // the paint skin, split back
+    { geo: shell(0.85, 0.22, 17), mat: carbon, cast: true },   // the laminate, splintered further
+  ];
+  // The hollow: a dark disc recessed inside the laminate, so the bare end
+  // reads as a torn tube and not as a painted cap.
+  const s0 = at(a.x);
+  const pts = ring(s0.w * 0.82, s0.h * 0.82, s0.n, SEG);
+  const cap = [];
+  for (let i = 0; i < SEG; i++) {
+    const [z1, y1] = pts[i], [z2, y2] = pts[(i + 1) % SEG];
+    cap.push(a.x - 0.03, s0.y, 0, a.x - 0.03, s0.y + y1, z1, a.x - 0.03, s0.y + y2, z2);
+  }
+  const capG = new THREE.BufferGeometry();
+  capG.setAttribute('position', new THREE.Float32BufferAttribute(cap, 3));
+  capG.computeVertexNormals();
+  out.push({ geo: capG, mat: dark, cast: false });
+  // Wing pylons, feet snapped: plates in side view with a jagged bottom edge.
+  // Their tops are inside the tip; their feet stood on the main plane.
+  for (const side of [1, -1]) {
+    out.push({ geo: plate([[2.31, 0.150], [2.45, 0.140], [2.455, 0.112], [2.43, 0.101], [2.415, 0.114],
+      [2.39, 0.096], [2.365, 0.110], [2.34, 0.099], [2.315, 0.118]], 0.010, side * 0.048), mat: carbon, cast: true });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // THE SINGLE-SEATER (F1, and F4 on the same body).
 //
@@ -446,11 +536,38 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
   };
   const at = (geo, x, y, z) => { geo.translate(x, y, z); return geo; };
   const mirrors = [];
+  // What each piece IS, for the damage: which end of the car it folds with,
+  // and what it becomes when it leaves (js/dent.js crushParts, js/debris.js).
+  // Tagged here rather than guessed from where a mesh sits, because every mesh
+  // on this car sits at the origin — its shape is translated INTO the geometry
+  // — and binning by `position` put all of them in no bin at all: the region
+  // fold had silently stopped folding anything.
+  // +Z is the car's RIGHT (geom.js), and collide.js's 'left' is +ly, so a
+  // part at +z is binned 'right'.
+  const tag = (m, bin, role, side = 0) => { m.userData.dmg = { bin, role, side }; return m; };
 
   // --- the body ------------------------------------------------------------
   // The nose now runs all the way down to the wing (2022 rules), low and wide.
-  const body = loft([
+  //
+  // THE NOSE TIP IS ITS OWN PIECE. On a real car the front wing hangs off the
+  // nose box, and when the wing goes the tip goes with it: what is left is a
+  // torn stub of crash structure. With the tip lofted into the body, losing
+  // the wing left a long, smooth, bald nose poking at nothing (Adam: "a goofy
+  // bald nose"). So the tip is lofted alone and rides in `wings.front`, and
+  // the broken end below lives INSIDE it — hidden by the tip's own skin while
+  // the car is whole, bared the instant the tip is gone. No visibility flag to
+  // own, and nothing for the frame loop to get wrong.
+  const TIP = [
     { x: 2.66, y: 0.165, w: 0.090, h: 0.048, n: 2.6 },
+    { x: 2.30, y: 0.190, w: 0.118, h: 0.068, n: 2.8 },
+  ];
+  const noseTip = add(loft(TIP, 32), paint);
+  noseTip.userData.dmg = { bin: 'front', role: 'tip' };
+  for (const m of brokenNose(TIP, carbon, paint, black)) {
+    const mm = add(m.geo, m.mat, m.cast);
+    mm.userData.dmg = { bin: 'front', role: 'stub' };
+  }
+  const body = loft([
     { x: 2.30, y: 0.190, w: 0.118, h: 0.068, n: 2.8 },
     { x: 1.90, y: 0.215, w: 0.145, h: 0.098, n: 3.0 },
     { x: 1.45, y: 0.250, w: 0.185, h: 0.140, n: 3.3 },
@@ -492,27 +609,29 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
   // the back, and daylight under the front of it — the undercut, which is the
   // shape every 2022+ car is recognised by.
   for (const side of [1, -1]) {
-    add(loft([
+    const bin = side > 0 ? 'right' : 'left';
+    tag(add(loft([
       { x: 0.64, y: 0.455, z: side * 0.585, w: 0.150, h: 0.090, n: 5.0 },
       { x: 0.35, y: 0.420, z: side * 0.660, w: 0.225, h: 0.140, n: 4.6 },
       { x: -0.15, y: 0.405, z: side * 0.680, w: 0.235, h: 0.155, n: 4.2 },
       { x: -0.65, y: 0.360, z: side * 0.610, w: 0.205, h: 0.140, n: 3.8 },
       { x: -1.15, y: 0.300, z: side * 0.470, w: 0.125, h: 0.105, n: 3.2 },
       { x: -1.62, y: 0.255, z: side * 0.335, w: 0.050, h: 0.060, n: 2.6 },
-    ], 28), paint);
+    ], 28), paint), bin, 'pod', side);
     // the inlet mouth
-    add(at(new THREE.BoxGeometry(0.012, 0.15, 0.27), 0.640, 0.455, side * 0.585), black, false);
+    tag(add(at(new THREE.BoxGeometry(0.012, 0.15, 0.27), 0.640, 0.455, side * 0.585), black, false), bin, 'pod', side);
     // MIRRORS, where a driver can see them: either side of the cockpit, just
     // inside the field of view from the driver's eyes. The glass is its own
     // mesh, facing back at the driver, so the renderer can put a real
     // reflection in it (render.js, _carMirrors).
-    add(rod([0.46, 0.55, side * 0.28], [0.36, 0.625, side * 0.41], 0.010, 0.6), carbon);
-    add(at(new THREE.BoxGeometry(0.06, 0.065, 0.15), 0.37, 0.635, side * 0.44), paint);
+    tag(add(rod([0.46, 0.55, side * 0.28], [0.36, 0.625, side * 0.41], 0.010, 0.6), carbon), bin, 'mirror', side);
+    tag(add(at(new THREE.BoxGeometry(0.06, 0.065, 0.15), 0.37, 0.635, side * 0.44), paint), bin, 'mirror', side);
     const glass = new THREE.PlaneGeometry(0.13, 0.05);
     glass.rotateY(-Math.PI / 2 - side * 0.28);   // faces back, turned in toward the driver
     const gm = add(at(glass, 0.338, 0.635, side * 0.44), mirrorMat, false);
     gm.name = side > 0 ? 'mirror.R' : 'mirror.L';
     gm.userData.mirror = side;
+    tag(gm, bin, 'mirror', side);
     mirrors.push(gm);
   }
 
@@ -528,7 +647,7 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
   add(floorGeo, carbon);
   for (const side of [1, -1]) {
     // the edge wing curling up at the floor's outer lip
-    add(rod([0.40, 0.10, side * 0.80], [-1.05, 0.10, side * 0.88], 0.022, 0.35), carbon);
+    tag(add(rod([0.40, 0.10, side * 0.80], [-1.05, 0.10, side * 0.88], 0.022, 0.35), carbon), side > 0 ? 'right' : 'left', 'edge', side);
   }
 
   // --- wings ---------------------------------------------------------------
@@ -536,27 +655,29 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
   // Four elements. The flaps rise outboard and meet the endplate high; that
   // sweep is the one line on a modern front wing everyone recognises.
   wings.front.push(
-    add(at(wing(0.99, 0.46, 0.034, 0.030, -0.10, 0.030), 2.53, 0.085, 0), carbon),
-    add(at(wing(0.97, 0.26, 0.030, 0.030, -0.30, 0.100), 2.40, 0.140, 0), paint),
-    add(at(wing(0.95, 0.20, 0.026, 0.025, -0.40, 0.150), 2.31, 0.185, 0), carbon),
-    add(at(wing(0.92, 0.15, 0.022, 0.020, -0.50, 0.185), 2.23, 0.225, 0), paint2));
+    tag(add(at(wing(0.99, 0.46, 0.034, 0.030, -0.10, 0.030), 2.53, 0.085, 0), carbon), 'front', 'fw'),
+    tag(add(at(wing(0.97, 0.26, 0.030, 0.030, -0.30, 0.100), 2.40, 0.140, 0), paint), 'front', 'fw'),
+    tag(add(at(wing(0.95, 0.20, 0.026, 0.025, -0.40, 0.150), 2.31, 0.185, 0), carbon), 'front', 'fw'),
+    tag(add(at(wing(0.92, 0.15, 0.022, 0.020, -0.50, 0.185), 2.23, 0.225, 0), paint2), 'front', 'fw'));
   for (const side of [1, -1]) {
-    wings.front.push(add(plate([[2.82, 0.05], [2.22, 0.05], [2.16, 0.16], [2.24, 0.40],
-      [2.44, 0.44], [2.64, 0.31], [2.80, 0.18]], 0.014, side * 0.985), paint));
+    wings.front.push(tag(add(plate([[2.82, 0.05], [2.22, 0.05], [2.16, 0.16], [2.24, 0.40],
+      [2.44, 0.44], [2.64, 0.31], [2.80, 0.18]], 0.014, side * 0.985), paint), 'front', 'fep', side));
   }
+  // The tip leaves with the wing; its torn stub (inside it) stays.
+  wings.front.push(noseTip);
 
   // Rear: main plane and a DRS flap that really opens, endplates that roll
   // over into the wing tips, a beam wing below, swan necks, a rain light.
-  const drs = add(at(wing(0.50, 0.19, 0.028, 0.045, 0, 0), -2.60, 0.945, 0), carbon);
-  wings.rear.push(add(at(wing(0.52, 0.30, 0.036, 0.05, 0, 0), -2.44, 0.845, 0), paint), drs);
+  const drs = tag(add(at(wing(0.50, 0.19, 0.028, 0.045, 0, 0), -2.60, 0.945, 0), carbon), 'rear', 'rw');
+  wings.rear.push(tag(add(at(wing(0.52, 0.30, 0.036, 0.05, 0, 0), -2.44, 0.845, 0), paint), 'rear', 'rw'), drs);
   for (const side of [1, -1]) {
-    wings.rear.push(add(plate([[-2.22, 0.58], [-2.25, 0.92], [-2.34, 1.01], [-2.62, 1.03],
-      [-2.77, 0.97], [-2.81, 0.70], [-2.70, 0.56]], 0.018, side * 0.53), paint));
-    add(rod([-2.10, 0.40, side * 0.07], [-2.40, 0.80, side * 0.07], 0.016, 0.5), carbon);
+    wings.rear.push(tag(add(plate([[-2.22, 0.58], [-2.25, 0.92], [-2.34, 1.01], [-2.62, 1.03],
+      [-2.77, 0.97], [-2.81, 0.70], [-2.70, 0.56]], 0.018, side * 0.53), paint), 'rear', 'rep', side));
+    tag(add(rod([-2.10, 0.40, side * 0.07], [-2.40, 0.80, side * 0.07], 0.016, 0.5), carbon), 'rear', 'neck');
   }
-  add(at(wing(0.42, 0.18, 0.028, 0.035, 0, 0.02), -2.30, 0.380, 0), carbon);
-  add(at(wing(0.40, 0.13, 0.022, 0.030, 0, 0.02), -2.42, 0.445, 0), carbon);
-  add(at(new THREE.BoxGeometry(0.03, 0.05, 0.12), -2.335, 0.33, 0), rainLight, false);
+  tag(add(at(wing(0.42, 0.18, 0.028, 0.035, 0, 0.02), -2.30, 0.380, 0), carbon), 'rear', 'beam');
+  tag(add(at(wing(0.40, 0.13, 0.022, 0.030, 0, 0.02), -2.42, 0.445, 0), carbon), 'rear', 'beam');
+  tag(add(at(new THREE.BoxGeometry(0.03, 0.05, 0.12), -2.335, 0.33, 0), rainLight, false), 'rear', 'beam');
 
   // --- halo, cockpit, driver ----------------------------------------------
   // THE HALO, OVER THE DRIVER'S HEAD. Adam, 2026-09-25, after two wrong
@@ -714,10 +835,22 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
     [livery.cells.title, [1.24, 0.258, 0.198], [0.52, 0.09], [0, 0.22, 1], [1, 0, 0]],
     [livery.cells.nose, [1.24, 0.258, -0.198], [0.52, 0.09], [0, 0.22, -1], [-1, 0, 0]],
   ];
+  // A sticker belongs to the panel it is stuck on. The rear-wing and endplate
+  // stickers used to stay behind in mid-air when the wing they were on was
+  // torn off, and the sidepod ones did not move when the pod caved in.
+  const stickTo = (m, at) => {
+    const [x, , z] = at;
+    if (x < -2.2) {
+      const side = Math.abs(z) > 0.3 ? Math.sign(z) : 0;
+      tag(m, 'rear', side ? 'rep' : 'rw', side);
+      wings.rear.push(m);
+    } else if (Math.abs(z) > 0.8) tag(m, z > 0 ? 'right' : 'left', 'pod', Math.sign(z));
+  };
   for (const [cell, at, size, n, along] of stickers) {
     const m = new THREE.Mesh(decal(livery, cell, at, size, n, along, false), decalMat);
     m.renderOrder = 2;
     g.add(m);
+    stickTo(m, at);
   }
   // Numbers: the roundel lying on the nose, read from in front, and the bare
   // number low on each rear-wing endplate, where a real car carries it.
@@ -731,6 +864,7 @@ export function buildCar(look, colour = 0xd8352a, chassis = null, opts = {}) {
     const m = new THREE.Mesh(geo, numMat);
     m.renderOrder = 2;
     g.add(m);
+    stickTo(m, at);
   }
 
   // ---- an imported chassis ------------------------------------------------
