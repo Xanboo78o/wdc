@@ -72,6 +72,15 @@ const K_WAIT = 0.05, K_FIRM = 0.005, K_CHASE = 0.012;
 // Outside SUPERCASUAL's OVERTAKES window the tiers keep their meaning: a
 // neighbour may only trim its OWN grip, by this much down and this much up.
 const DUEL_DOWN = 0.05, DUEL_UP = 0.025;
+// ...for CASUAL/MEDIUM/HARD (no OVERTAKES window) the neighbours' own-grip
+// window. Swept 2026-09-29, MEDIUM, 22 cars, you at MEDIUM from P12, 24 races
+// a side: 0.05/0.025 -> 0.11/0.05 took "any rival within 1 s" 50 +- 3% ->
+// 63 +- 4% (2.6 SE) and the car ahead within 1 s 39 -> 50%; swaps with you
+// 3.9 -> 3.3, your contacts 2.5 -> 1.4, rivals out 0.8 -> 0.6 (all noise-level
+// or better). Only the three cars either side move, and only within their
+// own grip +-: the field's pace is still the tier's (rivals' median best lap
+// 107.5 -> 108.8 s, +-2.6, not resolved).
+const TIER_DOWN = 0.11, TIER_UP = 0.05;
 // After YOUR mistake: a neighbour more than DUEL_SLACK s past the gap it
 // wants may drop DUEL_DOWN_FAR below the window, and it is leashed from there.
 // Swept 2026-09-29 (battlecheck --blunder 3, 24 races a side): K_WAIT 0.022
@@ -225,7 +234,7 @@ export class Race {
         if (duel && e.rank && Math.abs(e.rank) <= DUEL_N && !e.inPit) {
           const own = d.grip / d.ceiling;
           if (e.duelF == null) e.duelF = own;
-          this.duelTrim(e, own - DUEL_DOWN, Math.min(1.0, own + DUEL_UP));
+          this.duelTrim(e, own - TIER_DOWN, Math.min(1.0, own + TIER_UP));
           d.gripNow = d.ceiling * e.duelF;
         } else if (d.gripNow != null) { d.gripNow = null; e.duelF = null; }
         continue;
