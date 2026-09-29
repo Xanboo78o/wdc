@@ -109,17 +109,25 @@ export class Post {
       void main() {
         vec3 c = texture(tSrc, vUv).rgb;
         float l = dot(max(c, vec3(0.0)), ${LUM});
-        fragColour = vec4(log(max(l, 1e-4)), 0.0, 0.0, 1.0);
+        // WHERE YOU LOOK. The eye adapts to what the fovea is on — the road
+        // ahead — not to the whole visual field. Metering the whole frame
+        // meant that from the cockpit the dark tub (half the screen) drove
+        // the exposure up until the sky burned white at two in the
+        // afternoon. Weight the middle of the view, a little above centre.
+        vec2 d = vUv - vec2(0.5, 0.56);
+        float w = exp(-(d.x * d.x * 5.0 + d.y * d.y * 9.0));
+        fragColour = vec4(log(max(l, 1e-4)) * w, w, 0.0, 1.0);
       }`, { tSrc: u(null) });
 
     this.halve = new Pass(`
       uniform sampler2D tSrc; uniform vec2 uTexel;
       void main() {
-        float a = texture(tSrc, vUv + uTexel * vec2(-0.5, -0.5)).r;
-        float b = texture(tSrc, vUv + uTexel * vec2( 0.5, -0.5)).r;
-        float c = texture(tSrc, vUv + uTexel * vec2(-0.5,  0.5)).r;
-        float d = texture(tSrc, vUv + uTexel * vec2( 0.5,  0.5)).r;
-        fragColour = vec4((a + b + c + d) * 0.25, 0.0, 0.0, 1.0);
+        vec2 a2 = texture(tSrc, vUv + uTexel * vec2(-0.5, -0.5)).rg;
+        vec2 b2 = texture(tSrc, vUv + uTexel * vec2( 0.5, -0.5)).rg;
+        vec2 c2 = texture(tSrc, vUv + uTexel * vec2(-0.5,  0.5)).rg;
+        vec2 d2 = texture(tSrc, vUv + uTexel * vec2( 0.5,  0.5)).rg;
+        vec2 m = (a2 + b2 + c2 + d2) * 0.25;
+        fragColour = vec4(m, 0.0, 1.0);
       }`, { tSrc: u(null), uTexel: u(new THREE.Vector2()) });
 
     // EYES ARE SLOWER INTO THE DARK THAN OUT OF IT. Adam picked ~1.2 s
@@ -131,7 +139,8 @@ export class Post {
     this.adaptPass = new Pass(`
       uniform sampler2D tLum, tPrev; uniform float uUp, uDown, uDt;
       void main() {
-        float target = exp(texture(tLum, vec2(0.5)).r);
+        vec2 lw = texture(tLum, vec2(0.5)).rg;
+        float target = exp(lw.x / max(lw.y, 1e-4));
         float prev = texture(tPrev, vec2(0.5)).r;
         if (prev <= 0.0) prev = target;
         // brighter world -> exposure must drop -> the FAST direction
@@ -181,7 +190,7 @@ export class Post {
     // actually reaches the camera. Drive down the Monza tree avenue and the
     // rays strobe through the trunks without anything being told about trees.
     this.ray = new Pass(`
-      uniform sampler2D tSrc; uniform vec2 uSun; uniform float uDensity, uDecay, uWeight, uCut;
+      uniform sampler2D tSrc; uniform vec2 uSun; uniform float uDensity, uDecay, uWeight, uCut, uAspect;
       void main() {
         vec2 d = (vUv - uSun) * uDensity / 24.0;
         vec2 p = vUv;
@@ -194,13 +203,18 @@ export class Post {
         // are the SUN cut by geometry; the sky is not a light source for them.
         for (int i = 0; i < 24; i++) {
           p -= d;
-          acc += max(texture(tSrc, p).rgb - uCut, 0.0) * fall;
+          // and only from near the sun: a glint of sun on the sidepod is as
+          // bright as the sky around the disc, and marching it drew red
+          // dotted streaks across the cockpit (Street/Nürburgring onboard)
+          vec2 ds = (p - uSun) * vec2(uAspect, 1.0);
+          float nearSun = 1.0 - smoothstep(0.22, 0.55, length(ds));
+          acc += max(texture(tSrc, p).rgb - uCut, 0.0) * fall * nearSun;
           fall *= uDecay;
         }
         fragColour = vec4(acc * uWeight / 24.0, 1.0);
       }`, {
       tSrc: u(null), uSun: u(new THREE.Vector2(0.5, 0.5)),
-      uDensity: u(1.0), uDecay: u(0.96), uWeight: u(1.0), uCut: u(4.0),
+      uDensity: u(1.0), uDecay: u(0.96), uWeight: u(1.0), uCut: u(4.0), uAspect: u(1.78),
     });
 
     // ---- composite --------------------------------------------------------
@@ -323,6 +337,7 @@ export class Post {
       const g = this.ray.mat.uniforms;
       g.tSrc.value = this.bloomRT[0].texture;
       g.uSun.value.copy(this.sunScreen);
+      g.uAspect.value = this.bw / Math.max(1, this.bh);
       this.ray.to(r, this.rayRT);
     }
 

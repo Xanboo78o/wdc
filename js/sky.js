@@ -72,7 +72,7 @@ void main() {
   vec3 mieB = MIE * (0.10 + uTurb * 0.09);
   vec3 beta = RAY * (1.0 + uTurb * 0.12) + mieB;
   vec3 ins = 1.0 - exp(-beta * (air + 0.6) * 9.0);
-  vec3 phase = (RAY * (1.0 + uTurb * 0.12) * rayleighPhase(cosT) + mieB * miePhase(cosT, 0.76) * 2.4) / beta;
+  vec3 phase = (RAY * (1.0 + uTurb * 0.12) * rayleighPhase(cosT) + mieB * miePhase(cosT, 0.82) * 0.9) / beta;
   vec3 col = ins * phase * skyTint * 15.0;
   col += through * 0.02;                       // a floor, so the zenith is never black by day
 
