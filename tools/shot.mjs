@@ -346,7 +346,7 @@ try {
   fs.writeFileSync(file, Buffer.from(shot.data, 'base64'));
 
   console.log(`\n${file}`);
-  console.log(`  ${target}${photo ? `  photo ${photo}` : ''}   ${fps != null ? fps + ' fps (swiftshader, not a real GPU)' : ''}`);
+  console.log(`  ${target}${photo ? `  photo ${photo}` : ''}   ${fps != null ? fps + (GPU ? ' fps (GPU)' : ' fps (swiftshader, not a real GPU)') : ''}`);
   if (stats) console.log('  world: ' + JSON.stringify(stats));
   else console.log('  WORLD NEVER BUILT — window.__wdc is still undefined');
 

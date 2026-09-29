@@ -688,7 +688,9 @@ export class View {
       geo.computeBoundingBox();
       const c = geo.boundingBox.getCenter(new THREE.Vector3());
       const n = new THREE.Vector3().fromBufferAttribute(geo.attributes.normal, 0).normalize();
-      const cam = new THREE.PerspectiveCamera(16, 320 / 120, 0.05, 600);
+      // 220 m: past that a car is two pixels tall on a 320-wide glass, and
+      // every metre of far plane is scenery drawn a second time for nothing.
+      const cam = new THREE.PerspectiveCamera(16, 320 / 120, 0.05, 220);
       this.carMirrors.push({ glass, rt, cam, c, n });
     }
     this._mi = 0;
@@ -699,6 +701,11 @@ export class View {
     if (!this.carMirrors || !this.carMirrors.length || this.photo) return;
     const rig = RIGS_NAMES[this.mode];
     if (rig !== 'ONBOARD' && rig !== 'NOSE') return;
+    // FRAME BUDGET (2026-09-28, 50 fps floor): the extra scene renders take
+    // turns — virtual mirror on one frame, one car mirror on the next — so a
+    // frame never pays for more than ONE of them. Measured at Monaco with 22
+    // cars before this: 1494 draw calls a frame, 734 with mirrors off.
+    if (this.mirrorOn && (this._mFrame & 1) === 0) return;
     const m = this.carMirrors[this._mi++ % this.carMirrors.length];
     const car = this.car;
     car.updateWorldMatrix(true, false);
@@ -743,7 +750,7 @@ export class View {
     this.mirMount.position.set(rear - 0.55, 0.98, 0);
     this.mirTarget.position.set(rear - 60, 0.55, 0);
     this.car.add(this.mirMount, this.mirTarget);
-    this.mirCam = new THREE.PerspectiveCamera(34, 4.2, 0.4, 700);
+    this.mirCam = new THREE.PerspectiveCamera(34, 4.2, 0.4, 320);
     this.mirRT = new THREE.WebGLRenderTarget(640, 152, { samples: 2 });
     // Brightened: the main view goes through post.js's eye adaptation and this
     // does not, so at dusk the raw pass came out a stop and a half darker than
@@ -770,19 +777,26 @@ export class View {
   _drawMirror() {
     if (!this.mirrorOn || this.photo || RIGS_NAMES[this.mode] === 'TV') return;
     const r = this.renderer;
+    // Redraw the reflection on even frames only (see _drawCarMirrors); the
+    // quad is still composited EVERY frame from the last reflection, so the
+    // mirror never flickers — it just updates at half rate, as ACC's does.
+    const fresh = (this._mFrame & 1) === 0 || !this._mirFresh;
+    this._mirFresh = true;
     this.car.updateWorldMatrix(true, false);
     this.mirMount.getWorldPosition(this._v0);
     this.mirTarget.getWorldPosition(this._v1);
     this.mirCam.up.set(0, 1, 0);
     this.mirCam.position.copy(this._v0);
     this.mirCam.lookAt(this._v1);
-    const sm = r.shadowMap.autoUpdate;
-    r.shadowMap.autoUpdate = false;
-    r.setRenderTarget(this.mirRT);
-    r.clear();
-    r.render(this.scene, this.mirCam);
-    r.shadowMap.autoUpdate = sm;
-    r.setRenderTarget(null);
+    if (fresh) {
+      const sm = r.shadowMap.autoUpdate;
+      r.shadowMap.autoUpdate = false;
+      r.setRenderTarget(this.mirRT);
+      r.clear();
+      r.render(this.scene, this.mirCam);
+      r.shadowMap.autoUpdate = sm;
+      r.setRenderTarget(null);
+    }
     // Top centre, a third of the screen wide, with a dark frame round it.
     const size = r.getSize(this._mirSize || (this._mirSize = new THREE.Vector2()));
     const w = Math.round(Math.min(size.x * 0.34, 560)), h = Math.round(w / 4.2);
@@ -903,6 +917,7 @@ export class View {
     this._lastT = now;
     this._weather(dt);
     this._sky(now);
+    this._mFrame = (this._mFrame || 0) + 1;
     this._drawCarMirrors();
     if (this.built) {
       this.built.look.tick(now);
