@@ -611,6 +611,23 @@ export class View {
         return rc.intersectObjects(this.scene.children, true).slice(0, 5)
           .map(h => `${h.object.name || h.object.type} @ ${h.distance.toFixed(1)}m`);
       };
+      // The same, but naming the MATERIAL — for "what is this lilac thing"
+      // questions, where the mesh has no name and the answer is in how it is
+      // shaded. shot.mjs --eval "__wdcProbeMat(u, v)".
+      window.__wdcProbeMat = (u = 0, v = 0) => {
+        const rc = new THREE.Raycaster();
+        rc.setFromCamera(new THREE.Vector2(u, v), this.camera);
+        return rc.intersectObjects(this.scene.children, true).slice(0, 4).map(h => {
+          const m = Array.isArray(h.object.material) ? h.object.material[0] : h.object.material;
+          return {
+            d: +h.distance.toFixed(2), name: h.object.name, type: m.type,
+            col: m.color && m.color.getHexString(), tr: m.transparent, op: m.opacity,
+            map: !!m.map, side: m.side, cc: m.clearcoat, rough: m.roughness, metal: m.metalness,
+            key: m.customProgramCacheKey ? m.customProgramCacheKey() : '',
+            n: h.face ? h.face.normal.toArray().map(x => +x.toFixed(2)) : null,
+          };
+        });
+      };
       this._published = true;
     }
 

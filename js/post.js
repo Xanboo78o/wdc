@@ -181,21 +181,26 @@ export class Post {
     // actually reaches the camera. Drive down the Monza tree avenue and the
     // rays strobe through the trunks without anything being told about trees.
     this.ray = new Pass(`
-      uniform sampler2D tSrc; uniform vec2 uSun; uniform float uDensity, uDecay, uWeight;
+      uniform sampler2D tSrc; uniform vec2 uSun; uniform float uDensity, uDecay, uWeight, uCut;
       void main() {
         vec2 d = (vUv - uSun) * uDensity / 24.0;
         vec2 p = vUv;
         float fall = 1.0;
         vec3 acc = vec3(0.0);
+        // Only light far brighter than the sky may cast a shaft. With the
+        // bright pass as the source, a plain blue sky above bloom threshold
+        // fed the march too, and with the sun high and ahead the whole frame
+        // disappeared under a milky veil (Suzuka onboard, 2026-09-28). Rays
+        // are the SUN cut by geometry; the sky is not a light source for them.
         for (int i = 0; i < 24; i++) {
           p -= d;
-          acc += texture(tSrc, p).rgb * fall;
+          acc += max(texture(tSrc, p).rgb - uCut, 0.0) * fall;
           fall *= uDecay;
         }
         fragColour = vec4(acc * uWeight / 24.0, 1.0);
       }`, {
       tSrc: u(null), uSun: u(new THREE.Vector2(0.5, 0.5)),
-      uDensity: u(1.0), uDecay: u(0.96), uWeight: u(1.0),
+      uDensity: u(1.0), uDecay: u(0.96), uWeight: u(1.0), uCut: u(4.0),
     });
 
     // ---- composite --------------------------------------------------------
