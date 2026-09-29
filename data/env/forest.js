@@ -30,7 +30,9 @@ export const FOREST = {
   // Satellite: trees within 40 m of the run-off on 44% of the lap's sides (OSM 22%).
   suzuka:      { kinds: ['forest'], conifer: 0.72, depth: 50, density: 1, scrub: true, cover: true },
   // The Eifel: spruce right up to the fences.
-  nurburgring: { kinds: ['forest'], conifer: 0.92, depth: 60, density: 1, scrub: true },
+  // Satellite: trees within 40 m of the run-off on 13% of the lap's sides
+  // (OSM 9%); within 100 m, 34% (OSM 22%). The GP loop is open, the Eifel isn't.
+  nurburgring: { kinds: ['forest'], conifer: 0.92, depth: 60, density: 1, scrub: true, cover: true },
   // Dune pines behind the sand, low scrub everywhere else.
   // Satellite: 15% within 40 m (OSM 2%) — the dune woods behind the scrub.
   zandvoort:   { kinds: ['forest'], conifer: 0.75, depth: 45, density: 0.85, scrub: true, cover: true },

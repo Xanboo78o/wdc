@@ -143,6 +143,10 @@ const TUNNELS = { monaco: [[1440, 1860]] };
 // crossover is NOT levelled there: the deck really is 6 m up.
 const BRIDGES = { suzuka: [[4656, 4720]] };
 
+// Circuits on SRTM through a city: the width (m) of the opening that takes
+// the rooftops out of the road's profile. See the SRTM bake.
+const OPEN = { baku: 60 };
+
 // The water line, metres above mean sea level. The Caspian is 28 m below it.
 const SEA_ASL = { baku: -28 };
 
@@ -274,6 +278,18 @@ async function bake(key, force) {
       const t = d / span;
       raw[(i0 + d) % n] = h0 + (h1 - h0) * (t * t * (3 - 2 * t));
     }
+  }
+  // AN OPENING for a city circuit on SRTM (no bare-earth survey answers for
+  // Baku): radar reads rooftops, so the road rose and fell with the blocks
+  // beside it — 37.5 m of range against the 26.8 m formula1.com gives. A
+  // morphological opening (the lowest post within ±W, then the highest of
+  // those within ±W) removes every bump narrower than 2W and keeps the
+  // hillside the old city stands on.
+  if (OPEN[key]) {
+    const W = Math.round(OPEN[key] / ds), L = raw.length;
+    const lo = raw.map((_, i) => { let m = Infinity; for (let o = -W; o <= W; o++) m = Math.min(m, raw[(i + o + L) % L]); return m; });
+    for (let i = 0; i < L; i++) { let m = -Infinity; for (let o = -W; o <= W; o++) m = Math.max(m, lo[(i + o + L) % L]); raw[i] = m; }
+    console.log(`\n  opening of ±${OPEN[key]} m applied (rooftops out of the profile)`);
   }
   const prof = smooth(raw, 24);
 
