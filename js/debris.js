@@ -311,7 +311,9 @@ export class Debris {
   // (World.groundY). See wdc-ground-surface.
   _ground(p, simY) {
     const v = this.view, t = v.track, w = v.world;
-    const pr = t.project(p.pos.x, simY, p.hint);
+    // A piece moves a metre or two a frame: search a few samples round its
+    // last position, not the default ninety.
+    const pr = t.project(p.pos.x, simY, p.hint, p.hint == null ? 45 : 6);
     p.hint = pr.i;
     const lim = pr.w + pr.run;
     const out = Math.abs(pr.lat) - lim;
@@ -361,7 +363,12 @@ export class Debris {
 
     // Corner contacts against the ground plane, sequential impulses.
     let hitV = 0, touching = 0;
-    for (let pass = 0; pass < 4; pass++) {
+    // Clearly in the air: no corner can be touching, skip the solver. Most of
+    // a flight is this, and it was most of the cost.
+    const reach = p.half.x + p.half.y + p.half.z;
+    if (p.pos.y - reach > p.gy) return 0;
+    const passes = p.kind.def && p.kind.def.shard ? 2 : 4;   // a splinter needs less care
+    for (let pass = 0; pass < passes; pass++) {
       for (const c of CORNERS) {
         _r.set(c.x * p.half.x, c.y * p.half.y, c.z * p.half.z).applyQuaternion(p.q);
         const depth = p.gy - (p.pos.y + _r.y);
@@ -427,6 +434,40 @@ export class Debris {
     return j;
   }
 
+  // How upright the piece's thinnest axis is (1 = lying flat).
+  _thinUp(p) {
+    const h = p.half;
+    const ax = h.y <= h.x && h.y <= h.z ? _t.set(0, 1, 0) : h.x <= h.z ? _t.set(1, 0, 0) : _t.set(0, 0, 1);
+    return Math.abs(ax.applyQuaternion(p.q).y);
+  }
+
+  // A flat piece skating on the ground: Coulomb friction in the plane, a yaw
+  // spin that dies away, the barrier still in play. No corners.
+  _slide(p, dt) {
+    const sp = Math.hypot(p.vel.x, p.vel.z);
+    const dec = p.mu * G * dt;
+    const k = sp > dec ? (sp - dec) / sp : 0;
+    p.vel.x *= k; p.vel.z *= k; p.vel.y = 0;
+    p.w.x = 0; p.w.z = 0; p.w.y *= Math.max(0, 1 - 3 * dt);
+    p.pos.x += p.vel.x * dt; p.pos.z += p.vel.z * dt;
+    _q2.setFromAxisAngle(_t2.set(0, 1, 0), p.w.y * dt);
+    p.q.premultiply(_q2);
+    // and it keeps easing flat, as the full solver's settle would have
+    const h0 = p.half;
+    const ax = h0.y <= h0.x && h0.y <= h0.z ? _t.set(0, 1, 0) : h0.x <= h0.z ? _t.set(1, 0, 0) : _t.set(0, 0, 1);
+    ax.applyQuaternion(p.q);
+    if (ax.y < 0) ax.negate();
+    _q2.setFromUnitVectors(ax, _t2.set(0, 1, 0)).multiply(p.q);
+    p.q.slerp(_q2, Math.min(1, 4 * dt));
+    // rest on its thin half-extent above the surface
+    const h = p.half;
+    p.pos.y = p.gy + Math.min(h.x, h.y, h.z);
+    if (p.wall && p.wall.out > 0 && p.pos.y < p.wall.base + BARRIER_H) {
+      p.slide = false;                           // back to the full solver for the hit
+    }
+    return 1;
+  }
+
   update(dt, cars) {
     if (!this.all.length) return;
     dt = Math.min(dt, 1 / 20);
@@ -445,7 +486,7 @@ export class Debris {
           // into the car's frame
           const lx = dx * c.cs - dz * c.sn, ly = dx * c.sn + dz * c.cs;
           if (Math.abs(lx) > 2.9 || Math.abs(ly) > 1.05) continue;
-          p.asleep = false; p.sleep = 0;
+          p.asleep = false; p.sleep = 0; p.slide = false;
           p.vel.set(c.vx * (0.5 + Math.random() * 0.5), 0.8 + Math.random() * 2.5 * Math.min(1, c.speed / 30), c.vz * (0.5 + Math.random() * 0.5));
           p.vel.x += (Math.random() - 0.5) * 3; p.vel.z += (Math.random() - 0.5) * 3;
           p.w.set((Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25);
@@ -454,9 +495,21 @@ export class Debris {
         }
       }
       if (p.asleep) continue;
-      this._ground(p, -p.pos.z);
+      // a puck on the road barely changes height: look again every 3rd frame
+      if (!p.slide || (p.gt = (p.gt || 0) + 1) % 3 === 0) this._ground(p, -p.pos.z);
       let touch = 0;
-      for (let t = 0; t < dt - 1e-6; t += SUB) touch = this._step(p, Math.min(SUB, dt - t));
+      if (p.slide) touch = this._slide(p, dt);
+      else {
+        const sub = p.kind.def && p.kind.def.shard ? SUB * 2 : SUB;
+        for (let t = 0; t < dt - 1e-6; t += sub) touch = this._step(p, Math.min(sub, dt - t));
+        // Landed flat and skating: from here it is a puck on the road. The
+        // corner solver on a piece lying flat was most of the cost of a big
+        // accident (200 pieces: 2.5 ms a frame, most of it sliding).
+        if (touch && Math.abs(p.vel.y) < 0.6 && p.w.x * p.w.x + p.w.z * p.w.z < 4) {
+          const up = this._thinUp(p);
+          if (up > 0.985) p.slide = true;
+        }
+      }
       // Settled? Slow, on the ground, for a while — then it sleeps until a
       // car wakes it. Gravity must be the thing holding it (DESIGN.md 23).
       // Measured by what it DID this frame, not by its velocity: a plate at
