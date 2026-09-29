@@ -58,9 +58,22 @@ void main() {
   vec3 through = exp(-(RAY * uTurb + MIE) * air * 12.0);
   vec3 sunTint = exp(-(RAY * (1.0 + uTurb * 0.35) + MIE * 0.6) * (1.0 / max(sunUp + 0.08, 0.02)) * 9.0);
 
-  vec3 rayl = RAY * rayleighPhase(cosT) * 42.0;
-  vec3 mie = MIE * miePhase(cosT, 0.76) * 26.0 * (0.4 + uTurb * 0.2);
-  vec3 col = (rayl + mie) * air * sunTint * 0.55;
+  // IN-SCATTER THAT SATURATES (2026-09-28). The old sky summed scattering
+  // linearly in air mass, so the horizon (38 atmospheres) came out ~38x the
+  // zenith and the zenith sat a dead slate-navy at two in the afternoon —
+  // the "stormy noon" every clear-day screenshot showed. Real air also
+  // EXTINGUISHES along the view ray, so each colour's in-scatter climbs as
+  // 1 - exp(-depth) and stops: the horizon whitens because red finally
+  // saturates too, and the zenith keeps a deep but LIT blue. The +0.6 on the
+  // air mass stands in for multiple scattering, which is what lifts a real
+  // zenith to a third or so of the horizon rather than a fortieth; more
+  // than that and the zenith greys out, because red saturates as well.
+  vec3 skyTint = exp(-(RAY * (1.0 + uTurb * 0.35) + MIE * 0.6) * (1.0 / max(sunUp + 0.08, 0.02)) * 2.0);
+  vec3 mieB = MIE * (0.10 + uTurb * 0.09);
+  vec3 beta = RAY * (1.0 + uTurb * 0.12) + mieB;
+  vec3 ins = 1.0 - exp(-beta * (air + 0.6) * 9.0);
+  vec3 phase = (RAY * (1.0 + uTurb * 0.12) * rayleighPhase(cosT) + mieB * miePhase(cosT, 0.76) * 2.4) / beta;
+  vec3 col = ins * phase * skyTint * 15.0;
   col += through * 0.02;                       // a floor, so the zenith is never black by day
 
   // THE SUN ITSELF. A hard disc with a soft limb, and brighter than anything

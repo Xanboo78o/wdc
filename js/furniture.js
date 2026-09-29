@@ -134,13 +134,15 @@ export function signAtlas(track) {
     cells.boards[n] = A.cell((g, w, h) => {
       g.fillStyle = '#0b0d10'; g.fillRect(0, 0, w, h);
       const s = h, x0 = (w - s) / 2;
-      g.fillStyle = '#e8e8e6'; g.fillRect(x0, 0, s, s);
-      g.fillStyle = '#101014';
-      g.font = '900 78px Inter, Helvetica, Arial, sans-serif';
+      // The number IS the board: black on white, as big as the panel allows,
+      // nothing else on it. "METRES" underneath was unreadable at any speed
+      // a board is read at, and a real board does not say it either. A
+      // yellow cap on the last one (50) — the board you brake AT.
+      g.fillStyle = '#f2f2ee'; g.fillRect(x0, 0, s, s);
+      g.fillStyle = n === 50 ? '#f5c518' : '#101014'; g.fillRect(x0, 0, s, 12);
+      g.fillStyle = '#0c0d10';
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(String(n), x0 + s / 2, s / 2 - 6);
-      g.font = '700 22px Inter, Helvetica, Arial, sans-serif';
-      g.fillText('METRES', x0 + s / 2, s - 22);
+      fitText(g, String(n), x0 + s / 2, s / 2 + 7, s * 0.9, s * 0.72, { colour: '#0c0d10', weight: 900 });
     });
   }
 
@@ -394,12 +396,19 @@ export function buildBoards(scene, track, line, look, sign, world = null) {
   const legs = new Builder();
   let any = false;
 
+  let lastEnd = -1e9;
   for (const c of t.corners || []) {
     const iApex = t.idx(c.s);
     const vApex = line.v[iApex];
     let vMax = vApex;
     for (let s = c.s0 - 380; s < c.s0; s += t.ds) vMax = Math.max(vMax, line.v[t.idx(s)]);
     if (vMax - vApex < 22) continue;              // not a braking zone
+    // The second half of a chicane is not a braking zone of its own: its
+    // 380 m look-back finds the first half's straight. Without this every
+    // chicane had two sets of boards, one on each side of the road.
+    const boarded = c.s0 - lastEnd < 160;
+    lastEnd = c.s1;
+    if (boarded) continue;
     any = true;
 
     // Boards stand on the OUTSIDE of the coming corner, where a driver is
@@ -409,21 +418,40 @@ export function buildBoards(scene, track, line, look, sign, world = null) {
     for (const d of marks) {
       const i = t.idx(c.s0 - d);
       const run = side > 0 ? t.runL[i] : t.runR[i];
-      const lat = barrierLat(t, i, side) - side * Math.min(1.6, run * 0.25);
+      // ON THE VERGE, a few metres off the white line, where a real board
+      // stands — not against a barrier that is 20 m away across Monza's
+      // run-off, where it had shrunk to a dozen pixels and nobody could find
+      // it. Only where there is no room (a street circuit) does it go back
+      // against the wall.
+      const w = side > 0 ? t.w[i] : t.w[i];
+      const lat = run > 5
+        ? side * (w + Math.max(2.6, Math.min(5.5, run * 0.35)))
+        : barrierLat(t, i, side) - side * Math.min(1.6, run * 0.25);
       const p = at(t, i, lat);
       const h = t.hdg[i];
       const inw = side > 0 ? [Math.sin(h), 0, Math.cos(h)] : [-Math.sin(h), 0, -Math.cos(h)];
       // The panel faces back down the track at the oncoming car, not across it.
-      const fx = Math.cos(h), fz = -Math.sin(h);
-      const half = 0.62;
-      const a = [p[0] - fx * half, p[1] - fz * half];
-      const e = [p[0] + fx * half, p[1] + fz * half];
-      const y0 = 0.95, y1 = y0 + 1.24;
-      const uv = sign.atlas.uv(sign.cells.boards[d], true);
-      b.quadN([e[0], y0, e[1]], [a[0], y0, a[1]], [a[0], y1, a[1]], [e[0], y1, e[1]], uv);
+      // It used to span ALONG the track (fwd), i.e. face across it, and
+      // carried the whole 4:1 atlas cell squashed onto a square — a board seen
+      // edge-on with its number crushed to a quarter width. It spans ACROSS
+      // the track now, square to the oncoming car, turned 20 degrees toward
+      // the racing line, and samples only the square middle of its cell.
+      const lx = -Math.sin(h), lz = -Math.cos(h);            // the car's left
+      const tw = -side * 0.35;                               // toe toward the road
+      const qx = lx + Math.cos(h) * tw, qz = lz - Math.sin(h) * tw;
+      const qn = Math.hypot(qx, qz), ux = qx / qn, uz = qz / qn;
+      const half = 0.75;
+      const a = [p[0] + ux * half, p[1] + uz * half];         // left end, seen from the car
+      const e = [p[0] - ux * half, p[1] - uz * half];
+      const y0 = 0.62, y1 = y0 + 1.5;
+      const full = sign.atlas.uv(sign.cells.boards[d], false);
+      const u0 = full[0][0] + (full[1][0] - full[0][0]) * 0.375, u1 = full[0][0] + (full[1][0] - full[0][0]) * 0.625;
+      const uv = [[u0, full[0][1]], [u1, full[1][1]], [u1, full[2][1]], [u0, full[3][1]]];
+      b.quadN([a[0], y0, a[1]], [e[0], y0, e[1]], [e[0], y1, e[1]], [a[0], y1, a[1]], uv);
       void inw;
-      legs.box(p[0] - fx * 0.42, y0 / 2, p[1] - fz * 0.42, 0.09, y0, 0.09, h, 0x2a2e34, 1);
-      legs.box(p[0] + fx * 0.42, y0 / 2, p[1] + fz * 0.42, 0.09, y0, 0.09, h, 0x2a2e34, 1);
+      const lh = Math.atan2(-uz, ux);
+      legs.box(p[0] + ux * 0.5, y0 / 2, p[1] + uz * 0.5, 0.09, y0, 0.09, lh, 0x2a2e34, 1);
+      legs.box(p[0] - ux * 0.5, y0 / 2, p[1] - uz * 0.5, 0.09, y0, 0.09, lh, 0x2a2e34, 1);
     }
 
     // The corner's real name, on the barrier at its entry.

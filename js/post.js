@@ -81,6 +81,10 @@ export class Post {
     // Adam's dawn "looks like night" was really night looking like nothing.
     // A real eye and a real camera stop adapting; so does this.
     this.lumFloor = 0.05;
+    // The grade (see the composite). ?sat= ?warm= ?lift= in render.js.
+    this.sat = 1.18;
+    this.warm = 0.035;
+    this.lift = 0.012;
     this.adapt = { up: 0.40, down: 1.20 };   // see below — asymmetric on purpose
     this.sun = new THREE.Vector3(0, 1, 0);
     this.sunUp = 0;              // 0 when the sun is behind you or below the horizon
@@ -197,7 +201,7 @@ export class Post {
     // ---- composite --------------------------------------------------------
     this.comp = new Pass(`
       uniform sampler2D tScene, tBloom, tRays, tAdapt;
-      uniform float uKey, uBloom, uRays, uSunUp, uFloor;
+      uniform float uKey, uBloom, uRays, uSunUp, uFloor, uSat, uWarm, uLift;
 
       // ACES, the fitted curve. The renderer used to do this; it happens here
       // now because everything above has to run in LINEAR light and tone
@@ -211,6 +215,17 @@ export class Post {
         c += texture(tBloom, vUv).rgb * uBloom;
         c += texture(tRays, vUv).rgb * uRays * uSunUp;
         c = aces(c);
+        // THE GRADE — broadcast colour, Mario Kart warmth (LOOK.md amendment).
+        // In display-linear, after the curve, so it cannot push anything past
+        // white. Saturation around the pixel's own luminance, a warm lean in
+        // the highlights and a cool one in the shade (sunlit vs skylit, which
+        // is what real light does anyway), and a lifted toe so nothing on
+        // screen is ever pitch black: soft, rich, clean.
+        float gl = dot(c, ${LUM});
+        c = max(mix(vec3(gl), c, uSat), 0.0);
+        vec3 warm = mix(vec3(1.0 - uWarm * 0.6, 1.0, 1.0 + uWarm * 0.9), vec3(1.0 + uWarm, 1.0 + uWarm * 0.2, 1.0 - uWarm * 0.9), smoothstep(0.02, 0.45, gl));
+        c *= warm;
+        c = uLift + c * (1.0 - uLift);
         // linear -> sRGB by hand: a RawShaderMaterial gets no colour-space
         // conversion from three, so doing it here is the only way it happens.
         c = mix(c * 12.92, 1.055 * pow(max(c, 1e-5), vec3(1.0 / 2.4)) - 0.055,
@@ -219,6 +234,7 @@ export class Post {
       }`, {
       tScene: u(null), tBloom: u(null), tRays: u(null), tAdapt: u(null),
       uKey: u(0.22), uBloom: u(0.85), uRays: u(0.75), uSunUp: u(0.0), uFloor: u(1e-4),
+      uSat: u(1.18), uWarm: u(0.035), uLift: u(0.012),
     });
 
     // Bloom and rays run at a quarter of the width. Nobody has ever noticed a
@@ -322,6 +338,7 @@ export class Post {
     c.uKey.value = this.exposureKey; c.uFloor.value = this.lumFloor;
     c.uBloom.value = this.bloom;
     c.uRays.value = this.rays;
+    c.uSat.value = this.sat; c.uWarm.value = this.warm; c.uLift.value = this.lift;
     c.uSunUp.value = this.sunUp;
     this.comp.to(r, null);
 

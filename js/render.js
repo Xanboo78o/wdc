@@ -30,7 +30,7 @@ import { makeDeformer, crushParts, applyCrush } from './dent.js';
 import { Fx } from './fx.js';
 import { loadChassis, chassisGeometry } from './mesh.js';
 import { World, loadElev } from './world.js';
-import { loadSurface, defaultSurface, KERB_SHAPE } from './surface.js';
+import { loadSurface, defaultSurface, KERB_SHAPE, KERB_PAINT } from './surface.js';
 import { buildPath } from './build/path.js';
 import { Ground } from './build/ground.js';
 import { buildRoad, buildRunoff, buildLandmarks, buildGround as buildBuiltGround } from './build/meshes.js';
@@ -80,13 +80,48 @@ function roadSurface(track, line, bank) {
   // up black.
   const colourAt = (i, lat) => {
     const d = Math.abs(lat - line.off[i]);
-    // rubbered band, a transition, then pale tarmac nobody has cleaned
-    let k = d < 1.5 ? 0.74 : d < 3.2 ? 0.74 + (d - 1.5) * 0.41 : 1.44;
+    // rubbered band, a transition, then pale tarmac nobody has cleaned. The
+    // scan under it (Asphalt015) is a clean grey race surface at 0.45, so the
+    // clean side sits just above as-scanned and the line is a polished darker
+    // band — no longer a black stripe across a whitewashed road.
+    let k = d < 1.1 ? 0.66 : d < 2.8 ? 0.66 + (d - 1.1) * 0.2 : 1.0;
     // slow variation along the lap: real asphalt is patched and re-laid in
     // sections, and a perfectly uniform road is the tell that it is not one.
     k *= 0.95 + 0.1 * Math.sin(i * t.ds * 0.0037) + 0.04 * Math.sin(i * t.ds * 0.031);
     return [k, k, k];
   };
+
+  // BRAKING MARKS. Every braking zone on a real circuit is written on the
+  // road in black: streaks of rubber laid by locked and nearly-locked fronts,
+  // densest just before the turn-in and sitting on the racing line. They are
+  // the most readable thing on a circuit you have never seen — a driver finds
+  // the braking point by the marks before he finds the board. Where they go
+  // is read off the solved speed profile (deceleration above ~0.8 g), never
+  // placed by hand, so they cannot disagree with where the car really brakes.
+  // Carried to the shader as one float per vertex; the streaks themselves
+  // are drawn there (macroTarmac).
+  const brake = new Float32Array(n);
+  if (line.v) {
+    for (let i = 0; i < n; i++) {
+      const v0 = line.v[i], v1 = line.v[(i + 1) % n];
+      const dec = (v0 * v0 - v1 * v1) / (2 * t.ds);
+      brake[i] = Math.max(0, Math.min(1, (dec - 7) / 14));
+    }
+    // smear forward and back a few metres: marks start a touch early and
+    // run on to the turn-in
+    const sm = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let m = 0;
+      for (let k = -4; k <= 8; k++) m = Math.max(m, brake[(i + k + n) % n] * (1 - Math.abs(k) / 10));
+      sm[i] = m;
+    }
+    brake.set(sm);
+  }
+  const skidAt = (i, lat) => {
+    const d = (lat - line.off[i]) / 1.5;
+    return brake[i] * Math.exp(-d * d);
+  };
+  b.skid = [];
 
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
@@ -112,6 +147,7 @@ function roadSurface(track, line, bank) {
         [0, 1, 0],
         [[li0, foldV(i * t.ds)], [li1, foldV(i * t.ds)], [lj1, foldV(j * t.ds)], [lj0, foldV(j * t.ds)]],
         cols);
+      b.skid.push(skidAt(i, li0), skidAt(i, li1), skidAt(j, lj1), skidAt(j, lj0));
     }
   }
   return b;
@@ -136,6 +172,107 @@ function roadSurface(track, line, bank) {
 // 24, 32 and 48.
 const FOLD = 96;
 const foldV = s => FOLD - Math.abs((s % (2 * FOLD)) - FOLD);
+
+// ---------------------------------------------------------------------------
+// Real-scale grain needs a second scale on top of it, or it tiles.
+//
+// A one-metre asphalt photograph is right up close and wrong at 30 m, where
+// the eye stops seeing stones and starts seeing a one-metre wallpaper. Real
+// tarmac is patched, re-laid and weathered in lanes and blotches metres
+// across, so the pale-asphalt scan (apron) is sampled at 23 m and at 7.3 m —
+// two sizes that share no factor, so their repeats never line up — and used
+// as a gentle brightness map around its own mean. No new texture, no new
+// draw: two extra samples in the road's fragment shader.
+// ---------------------------------------------------------------------------
+//
+// The same pass draws two more things a real circuit has written on it:
+//   * braking marks, from the per-vertex `skid` roadSurface() computes —
+//     thin black streaks a few centimetres wide, laid along the lap in
+//     lanes, broken up along their length the way rubber really goes down;
+//   * paving joints, the faint seams a paver leaves every ~4.5 m across the
+//     road, antialiased by their own screen footprint so they fade to
+//     nothing rather than crawl at distance.
+// ---------------------------------------------------------------------------
+// The same idea for the run-off. `amp` is the metre-scale patchiness; for
+// grass, `stripes` is the mown banding every televised circuit has: 6 m bands
+// ACROSS the lap, alternately lighter and darker as the mower went out and
+// back. From the cockpit they strobe past at speed, which is one more rung on
+// the speed ruler; from a TV tower they are the broadcast look itself.
+function groundDetail(mat, look, size, { amp = 0.35, stripes = 0 } = {}) {
+  const src = look.maps.apron && look.maps.apron.c;
+  if (!mat.map || !src) return mat;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uMacro = { value: src };
+    sh.uniforms.uGSize = { value: size };
+    sh.uniforms.uGAmp = { value: amp };
+    sh.uniforms.uStripe = { value: stripes };
+    sh.fragmentShader = 'uniform sampler2D uMacro;\nuniform float uGSize, uGAmp, uStripe;\n' +
+      sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    vec2 mw = vMapUv * uGSize;
+    float a = texture2D(uMacro, mw / 19.0 + vec2(0.21, 0.07)).r;
+    float b = texture2D(uMacro, mw / 6.1 + vec2(0.53, 0.29)).r;
+    float f = 1.0 + uGAmp * ((a * 0.6 + b * 0.4) / 0.19 - 1.0);
+    if (uStripe > 0.0) {
+      float ph = mw.y / 12.0;
+      float w = fwidth(ph) * 1.5 + 0.02;
+      float band = smoothstep(0.5 - w, 0.5 + w, abs(fract(ph) - 0.5) * 2.0);
+      f *= 1.0 + uStripe * (band * 2.0 - 1.0);
+    }
+    diffuseColor.rgb *= clamp(f, 0.55, 1.5);
+  }`);
+  };
+  mat.customProgramCacheKey = () => 'ground-detail-' + (stripes > 0 ? 's' : 'p');
+  return mat;
+}
+
+function macroTarmac(mat, look, size, amp = 0.55) {
+  const src = look.maps.apron && look.maps.apron.c;
+  if (!mat.map || !src) return mat;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uMacro = { value: src };
+    sh.uniforms.uMacroSize = { value: size };
+    sh.uniforms.uMacroAmp = { value: amp };
+    sh.vertexShader = 'attribute float skid;\nvarying float vSkid;\n' +
+      sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSkid = skid;');
+    sh.fragmentShader = 'uniform sampler2D uMacro;\nuniform float uMacroSize;\nuniform float uMacroAmp;\nvarying float vSkid;\n' +
+      sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    vec2 mw = vMapUv * uMacroSize;
+    float a = texture2D(uMacro, mw / 23.0).r;
+    float b = texture2D(uMacro, mw / 7.3 + vec2(0.37, 0.61)).r;
+    // the scan's linear mean is ~0.19; express both as a ratio to it
+    float f = 1.0 + uMacroAmp * ((a * 0.6 + b * 0.4) / 0.19 - 1.0);
+    diffuseColor.rgb *= clamp(f, 0.6, 1.45);
+
+    // braking marks: lanes 9 cm wide, one in three carrying rubber, each
+    // broken along its length by a slow noise so it reads as streaks
+    if (vSkid > 0.01) {
+      // two lane grids of unrelated pitch (7.7 cm and 13.7 cm), so the
+      // marks never line up into a comb; each lane's rubber is switched on
+      // and off along its length by a slow noise, so they run in dashes
+      float l1 = floor(mw.x * 13.0), l2 = floor(mw.x * 7.3 + 0.4);
+      float h1 = fract(sin(l1 * 12.9898) * 43758.5453);
+      float h2 = fract(sin(l2 * 78.233 + 4.1) * 43758.5453);
+      float a1 = texture2D(uMacro, vec2(l1 * 0.1375, mw.y / (14.0 + 9.0 * h1))).r;
+      float a2 = texture2D(uMacro, vec2(l2 * 0.2113 + 0.5, mw.y / (19.0 + 7.0 * h2))).r;
+      float streak = max(step(0.66, h1) * smoothstep(0.18, 0.24, a1),
+                         step(0.72, h2) * smoothstep(0.19, 0.25, a2) * 0.8);
+      float wide = fwidth(mw.x) * 13.0;        // fade when a lane is under a pixel
+      float k = vSkid * (0.22 + 0.78 * mix(streak, 0.3, clamp(wide, 0.0, 1.0)));
+      diffuseColor.rgb *= 1.0 - 0.7 * k;
+    }
+
+    // paving joints every 4.5 m across, 3 cm wide, antialiased
+    float jx = abs(fract(mw.x / 4.5 + 0.5) - 0.5) * 4.5;
+    float jw = fwidth(mw.x) + 0.015;
+    float joint = 1.0 - smoothstep(0.0, jw, jx);
+    diffuseColor.rgb *= 1.0 - 0.10 * joint * clamp(0.03 / jw, 0.0, 1.0);
+  }`);
+  };
+  mat.customProgramCacheKey = () => 'macro-tarmac';
+  return mat;
+}
 
 function ribbon(track, innerAt, outerAt, y, bank = null) {
   const t = track, n = t.n;
@@ -207,46 +344,80 @@ function kerbs(track, bank, surf) {
   const t = track;
   const b = new Builder({ color: true });
   const turfB = new Builder();
-  const side = new Int8Array(t.n);
+  // WHERE: the OUTSIDE of every corner, from the tagged data (entry to exit,
+  // where a car runs wide) — and, new, the INSIDE at the apex, which is the
+  // kerb a driver actually aims at and the single most readable thing in a
+  // corner. The physics already treats the 1.2 m past either white line as
+  // kerb (main.js), so the inside kerb is drawn where it is already driven.
+  const side = new Int8Array(t.n), inside = new Int8Array(t.n), inType = new Uint8Array(t.n);
   for (const c of t.corners || []) {
-    for (let s = c.s0 - 6; s <= c.s1 + 6; s += t.ds) side[t.idx(s)] = c.dir < 0 ? 1 : -1;
+    const out = c.dir < 0 ? 1 : -1;
+    for (let s = c.s0 - 6; s <= c.s1 + 6; s += t.ds) side[t.idx(s)] = out;
+    // the apex kerb: the middle of the corner, a little either side of the
+    // geometric apex, and never on a kink too gentle to have one
+    if ((c.turn || 0) < 12) continue;
+    const len = c.s1 - c.s0;
+    const a0 = Math.min(c.s, c.s0 + len * 0.25) - 8, a1 = Math.max(c.s, c.s1 - len * 0.2) + 6;
+    const typ = c.R < 30 ? 3 : c.R < 90 ? 2 : 1;
+    for (let s = a0; s <= a1; s += t.ds) { const k = t.idx(s); inside[k] = -out; inType[k] = typ; }
   }
-  for (let i = 0; i < t.n; i++) {
-    const j = (i + 1) % t.n;
-    const type = surf.kerb[i];
-    if (!type || surf.kerb[j] !== type || !side[i] || side[i] !== side[j]) continue;
-    // Shape comes from the TYPE, which comes from the corner's radius. A
-    // hairpin kerb and a fast-corner kerb are not the same object: one is
-    // there to punish you, one is there to be used every lap.
-    const K = KERB_SHAPE[type] || KERB_SHAPE[2];
-    const sg = side[i];
+  const paint = KERB_PAINT[t.key] || KERB_PAINT.default;
+
+  // One kerb run between samples i and j on side sg, cut into real-length
+  // blocks. The colour flips on the DISTANCE ROUND THE LAP, so the stripes
+  // run continuously through sample boundaries at their true length (about a
+  // metre; the old 2.0-3.1 m blocks were twice the size of any real kerb).
+  const lay = (i, j, sg, K, withTurf) => {
     const hi = t.hdg[i], hj = t.hdg[j];
     const P = (h, x, y, lat) => [x - Math.sin(h) * lat, Z(y + Math.cos(h) * lat)];
-    const L = (lat) => [P(hi, t.x[i], t.y[i], sg * lat), P(hj, t.x[j], t.y[j], sg * lat)];
-    const Y = (lat, k) => bankY(bank, t, k ? j : i, sg * lat);
-    const col = (Math.floor(i * t.ds / K.block) % 2) ? 0xc7382c : 0xe4e4e0;
     const w0 = t.w[i] - 0.10, w1 = t.w[i], w2 = t.w[i] + K.w, w3 = t.w[i] + K.w + 0.14;
-    const [i0, j0] = L(w0), [i1, j1] = L(w1), [i2, j2] = L(w2), [i3, j3] = L(w3);
-    // inner chamfer, flat top, outer chamfer
-    b.quadN([i0[0], Y(w0, 0), i0[1]], [j0[0], Y(w0, 1), j0[1]],
-      [j1[0], Y(w1, 1) + K.h, j1[1]], [i1[0], Y(w1, 0) + K.h, i1[1]],
-      [[0, 0], [t.ds, 0], [t.ds, 0.12], [0, 0.12]], col);
-    b.quadN([i1[0], Y(w1, 0) + K.h, i1[1]], [j1[0], Y(w1, 1) + K.h, j1[1]],
-      [j2[0], Y(w2, 1) + K.h, j2[1]], [i2[0], Y(w2, 0) + K.h, i2[1]],
-      [[0, 0], [t.ds, 0], [t.ds, K.w], [0, K.w]], col);
-    b.quadN([i2[0], Y(w2, 0) + K.h, i2[1]], [j2[0], Y(w2, 1) + K.h, j2[1]],
-      [j3[0], Y(w3, 1), j3[1]], [i3[0], Y(w3, 0), i3[1]],
-      [[0, 0], [t.ds, 0], [t.ds, 0.15], [0, 0.15]], col);
-
+    const m = Math.max(1, Math.round(t.ds / K.block));
+    const sub = t.ds / m;
+    for (let q = 0; q < m; q++) {
+      const f0 = q / m, f1 = (q + 1) / m;
+      const L = (lat, f) => {
+        const a = P(hi, t.x[i], t.y[i], sg * lat), c = P(hj, t.x[j], t.y[j], sg * lat);
+        return [a[0] + (c[0] - a[0]) * f, a[1] + (c[1] - a[1]) * f];
+      };
+      const Y = (lat, f) => bankY(bank, t, i, sg * lat) * (1 - f) + bankY(bank, t, j, sg * lat) * f;
+      const sAt = i * t.ds + (f0 + 0.5 / m) * t.ds;
+      const col = (Math.floor(sAt / K.block) % 2) ? paint[0] : paint[1];
+      const pts = [w0, w1, w2, w3].map(w => [L(w, f0), L(w, f1)]);
+      const V = (k, e, up) => { const p = pts[k][e]; return [p[0], Y([w0, w1, w2, w3][k], e ? f1 : f0) + up, p[1]]; };
+      // inner chamfer, flat top, outer chamfer
+      b.quadN(V(0, 0, 0), V(0, 1, 0), V(1, 1, K.h), V(1, 0, K.h),
+        [[0, 0], [sub, 0], [sub, 0.12], [0, 0.12]], col);
+      b.quadN(V(1, 0, K.h), V(1, 1, K.h), V(2, 1, K.h), V(2, 0, K.h),
+        [[0, 0], [sub, 0], [sub, K.w], [0, K.w]], col);
+      b.quadN(V(2, 0, K.h), V(2, 1, K.h), V(3, 1, 0), V(3, 0, 0),
+        [[0, 0], [sub, 0], [sub, 0.15], [0, 0.15]], col);
+    }
     // Astroturf outside the kerb on corner EXITS, which is where cars run
     // wide — and which is the strip that actually decides whether running wide
     // costs you anything.
-    if (surf.turf[i] && surf.turf[j]) {
+    if (withTurf) {
+      const Lw = (lat) => [P(hi, t.x[i], t.y[i], sg * lat), P(hj, t.x[j], t.y[j], sg * lat)];
+      const Yw = (lat, k) => bankY(bank, t, k ? j : i, sg * lat);
       const w4 = w3 + 1.25;
-      const [i4, j4] = L(w4);
-      turfB.quadN([i3[0], Y(w3, 0) + 0.012, i3[1]], [j3[0], Y(w3, 1) + 0.012, j3[1]],
-        [j4[0], Y(w4, 1) + 0.012, j4[1]], [i4[0], Y(w4, 0) + 0.012, i4[1]],
+      const [i3, j3] = Lw(w3), [i4, j4] = Lw(w4);
+      turfB.quadN([i3[0], Yw(w3, 0) + 0.012, i3[1]], [j3[0], Yw(w3, 1) + 0.012, j3[1]],
+        [j4[0], Yw(w4, 1) + 0.012, j4[1]], [i4[0], Yw(w4, 0) + 0.012, i4[1]],
         [[0, i * t.ds], [t.ds, i * t.ds], [t.ds, 1.25], [0, 1.25]]);
+    }
+  };
+
+  for (let i = 0; i < t.n; i++) {
+    const j = (i + 1) % t.n;
+    if (t.open && j === 0) continue;
+    // Shape comes from the TYPE, which comes from the corner's radius. A
+    // hairpin kerb and a fast-corner kerb are not the same object: one is
+    // there to punish you, one is there to be used every lap.
+    const type = surf.kerb[i];
+    if (type && surf.kerb[j] === type && side[i] && side[i] === side[j]) {
+      lay(i, j, side[i], KERB_SHAPE[type] || KERB_SHAPE[2], surf.turf[i] && surf.turf[j]);
+    }
+    if (inside[i] && inside[i] === inside[j] && inside[i] !== (type ? side[i] : 0)) {
+      lay(i, j, inside[i], KERB_SHAPE[inType[i]] || KERB_SHAPE[2], false);
     }
   }
   return { kerb: b, turf: turfB };
@@ -398,7 +569,7 @@ export class View {
     // Tuning knobs, because every number in post.js is a judgement about
     // light and I cannot see the screen. ?key=0.12&bloom=0.85&rays=0.75
     const qp = new URLSearchParams(location.search);
-    for (const [k, f] of [['key', 'exposureKey'], ['bloom', 'bloom'], ['rays', 'rays'], ['thresh', 'threshold'], ['lumfloor', 'lumFloor']]) {
+    for (const [k, f] of [['key', 'exposureKey'], ['bloom', 'bloom'], ['rays', 'rays'], ['thresh', 'threshold'], ['lumfloor', 'lumFloor'], ['sat', 'sat'], ['warm', 'warm'], ['lift', 'lift']]) {
       if (qp.has(k) && this.post.on) this.post[f] = +qp.get(k);
     }
     if (typeof window !== 'undefined') window.__wdcPost = this.post;
@@ -995,10 +1166,17 @@ export class View {
     // gravel only where a car leaving the road would actually land. The tags
     // come from data/surf/, so the rules live in one readable place rather
     // than as conditionals in here.
+    // REAL-SCALE DETAIL (2026-09-28, "make details smaller"). Each scan is
+    // laid at the size its grains really are: Gravel023's pebbles measure
+    // 10-20 px of 512, so at the old 2.4 m they were fist-sized cobbles and a
+    // trap is 1-3 cm stone -> 0.9 m. Grass005's blades were 13 cm long at
+    // 3.4 m -> 1.7 m. Asphalt031 -> 1.6 m, matching the racing surface's
+    // grain. What the smaller tile loses — variation at the scale of metres —
+    // groundDetail() puts back, and the grass gets its mowing stripes.
     const RUNMAT = [
-      look.mat('gravel', { size: 2.4, tint: 0xb6a487, roughness: 1, side: THREE.DoubleSide, normalScale: 1.5 }),
-      look.mat('apron', { size: 3.2, tint: 0x83858a, roughness: 0.97, side: THREE.DoubleSide, normalScale: 1.4 }),
-      look.mat('grass', { size: 3.4, tint: 0x6d7a45, roughness: 1, side: THREE.DoubleSide, normalScale: 1.2 }),
+      groundDetail(look.mat('gravel', { size: 0.9, tint: 0xb9aa8e, roughness: 1, side: THREE.DoubleSide, normalScale: 1.5 }), look, 0.9, { amp: 0.45 }),
+      groundDetail(look.mat('apron', { size: 1.6, tint: 0x8a8b8e, roughness: 0.97, side: THREE.DoubleSide, normalScale: 1.2 }), look, 1.6, { amp: 0.4 }),
+      groundDetail(look.mat('grass', { size: 1.7, tint: 0x74864a, roughness: 1, side: THREE.DoubleSide, normalScale: 1.2 }), look, 1.7, { amp: 0.35, stripes: 0.13 }),
       look.mat('concrete', { size: 3.0, tint: 0xb8b6b0, roughness: 0.95, side: THREE.DoubleSide }),
     ];
     for (const [side, tag] of [[1, this.surf.runL], [-1, this.surf.runR]]) {
@@ -1010,10 +1188,24 @@ export class View {
       }
     }
 
-    const road = roadSurface(t, this.line, bank).mesh(look.mat('tarmac', {
-      size: 3.0, roughness: 0.94, metalness: 0.0, side: THREE.DoubleSide,
-      vertexColors: true, env: 0.8, normalScale: 1.05,
-    }), { shadow: false });
+    // Asphalt015 (tools/gettex.mjs says why) laid at 1.4 m, not the 1.0 its
+    // stones measure: at a driver's eye a true-size stone is under a pixel
+    // from three metres out and the road averages to a flat grey sheet; 1.4
+    // keeps the grain alive to ~15 m while still reading as fine aggregate
+    // rather than the old half-metre blotches. The tint brings the scan (0.45
+    // sRGB, pale for a race surface) down to charcoal, and macroTarmac() lays
+    // metre-scale patching, braking marks and paving joints over it.
+    const roadB = roadSurface(t, this.line, bank);
+    const road = roadB.mesh(macroTarmac(look.mat('tarmac', {
+      size: 1.4, tint: 0xc8c4bd, roughness: 0.92, metalness: 0.0, side: THREE.DoubleSide,
+      vertexColors: true, env: 0.4, normalScale: 0.9,
+    }), look, 1.4), { shadow: false });
+    {
+      const nv = road.geometry.attributes.position.count;
+      const sk = new Float32Array(nv);
+      if (roadB.skid && roadB.skid.length === nv) sk.set(roadB.skid);
+      road.geometry.setAttribute('skid', new THREE.BufferAttribute(sk, 1));
+    }
     this.world.lift(road.geometry);
     S.add(road);
     this.road = road;

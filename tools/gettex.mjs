@@ -43,7 +43,16 @@ const SETS = {
   // cardboard, and the whole point of texturing the road was to give the eye
   // something to measure speed against. Asphalt016 measures 15/255 at the same
   // brightness: real, visible aggregate.
-  tarmac:   { id: 'Asphalt016',        res: 1024, why: 'the racing surface — dark asphalt with visible aggregate' },
+  //
+  // Asphalt016 was then the wrong choice in the other direction (2026-09-28):
+  // it is a broken, patched car-park surface — slabs of crumbling binder with
+  // pale scabs between them, each blotch half a metre across once laid at
+  // the 3 m it needed. On a racing surface it read as flagstones. Asphalt015
+  // is what a circuit is actually paved with: a fine, even stone-mastic
+  // aggregate, stones of ~5-10 px at 1K. Real SMA stones are 8-11 mm, so the
+  // photograph covers about ONE metre (render.js lays it at 1.0), and its
+  // colour map measures 26/255 of pure grain rather than blotch.
+  tarmac:   { id: 'Asphalt015',        res: 1024, nres: 1024, why: 'the racing surface — fine stone-mastic race asphalt, ~1 m across' },
   apron:    { id: 'Asphalt031',        res: 512,  why: 'lighter asphalt: modern run-off and the pit apron' },
   gravel:   { id: 'Gravel023',         res: 512,  why: 'Monza/Suzuka gravel traps — light pebbles, not dirt' },
   grass:    { id: 'Grass005',          res: 512,  why: 'mown trackside grass, not meadow' },
@@ -127,7 +136,8 @@ function build(name, spec, force) {
     // A normal map is not a picture: chroma subsampling on it produces visible
     // banding in the lighting, so this one keeps full chroma even though the
     // file is bigger for it.
-    sh('magick', [normal, '-resize', '512x512', '-quality', '86',
+    const nr = spec.nres || 512;
+    sh('magick', [normal, '-resize', `${nr}x${nr}`, '-quality', '86',
       '-sampling-factor', '1:1:1', '-strip', nOut]);
   }
 

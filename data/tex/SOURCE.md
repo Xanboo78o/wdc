@@ -9,7 +9,7 @@ Refetch or change any of them with `node tools/gettex.mjs [name|all] [--force]`.
 
 | file | ambientCG asset | used for |
 |---|---|---|
-| `tarmac-*.jpg` | [Asphalt016](https://ambientcg.com/view?id=Asphalt016) | the racing surface — dark asphalt with visible aggregate |
+| `tarmac-*.jpg` | [Asphalt015](https://ambientcg.com/view?id=Asphalt015) | the racing surface — fine stone-mastic race asphalt, ~1 m across |
 | `apron-*.jpg` | [Asphalt031](https://ambientcg.com/view?id=Asphalt031) | lighter asphalt: modern run-off and the pit apron |
 | `gravel-*.jpg` | [Gravel023](https://ambientcg.com/view?id=Gravel023) | Monza/Suzuka gravel traps — light pebbles, not dirt |
 | `grass-*.jpg` | [Grass005](https://ambientcg.com/view?id=Grass005) | mown trackside grass, not meadow |
