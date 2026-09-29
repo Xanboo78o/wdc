@@ -167,8 +167,14 @@ export function crushParts(group, wheels) {
   for (const w of Object.values(wheels || {})) if (w) w.traverse(o => skip.add(o));
   const out = { front: [], rear: [], left: [], right: [] };
   const box = new THREE.Box3(), c = new THREE.Vector3();
+  // A car whose parts are named folds ONLY its named parts. Guessing the rest
+  // from where they sit put the front suspension in the 'front' bin and
+  // folded it back through the tyres.
+  let named = false;
+  group.traverse(m => { if (m.isMesh && m.userData.dmg) named = true; });
   group.traverse(m => {
     if (!m.isMesh || skip.has(m) || !m.geometry) return;
+    if (named && !m.userData.dmg) return;
     if (m.userData.imported) return;
     if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
     box.copy(m.geometry.boundingBox);

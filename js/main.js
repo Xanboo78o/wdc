@@ -581,6 +581,8 @@ async function start() {
       const [k, v] = bit.split(':');
       if (k in state.car.crush) state.car.crush[k] = Math.max(0, Math.min(1, parseFloat(v) || 0));
     }
+    // ...and what that much crush would have torn off (collide.js shed(): 0.72)
+    state.car.lost = { frontWing: state.car.crush.front > 0.72, rearWing: state.car.crush.rear > 0.72 };
   }
   // Debug: throw the car in the air on load, so a flight can be photographed
   // without having to arrange a 260 km/h spin first.  ?launch=6  (metres/second
@@ -1134,6 +1136,7 @@ function loop(now) {
     state.field.frame(race.entries, frame);
     state.field.smoke(race.entries, state.peak);
   }
+  if (view.fx) view.fx.link(race ? race.entries : null, state.engine);   // debris, sparks, smoke (js/fx.js)
   // ---- gears and engine note --------------------------------------------
   // Read off the speed the car already has. gearbox.js changes no forces, so
   // every validated lap time is untouched — see the header of that file.

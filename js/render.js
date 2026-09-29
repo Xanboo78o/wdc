@@ -27,6 +27,7 @@ import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar, buildGT3, liveryAtlas } from './car.js';
 import { makeDeformer, crushParts, applyCrush } from './dent.js';
+import { Fx } from './fx.js';
 import { loadChassis, chassisGeometry } from './mesh.js';
 import { World, loadElev } from './world.js';
 import { loadSurface, defaultSurface, KERB_SHAPE } from './surface.js';
@@ -594,6 +595,7 @@ export class View {
     this._q = new THREE.Quaternion(); this._up = new THREE.Vector3(0, 1, 0);
     this.tvI = 0;
     this._smoke();
+    this.fx = new Fx(this, car);   // debris, sparks, tyre smoke (js/fx.js)
 
     addEventListener('resize', () => this.resize());
     this.resize();
@@ -1161,6 +1163,7 @@ export class View {
   }
 
   puff(x, z, vx, vz, force, baseY = 0) {
+    if (this.fx && this.fx.on) return this.fx.puff(x, z, vx, vz, force, baseY);   // js/smoke.js
     const p = this.smoke[this.smokeI];
     this.smokeI = (this.smokeI + 1) % this.smokeMax;
     p.life = 1;
@@ -1279,6 +1282,9 @@ export class View {
     // that is the only reason the car is faster on the straight.
     if (this.drs) this.drs.rotation.z = car.drsOpen ? -1.0 : 0;
 
+    // Debris, sparks and lit tyre smoke for every car (js/fx.js); the old
+    // point-sprite puffs below remain only for ?fx=0.
+    if (this.fx && this.fx.on) { this.fx.update(car, dt, surfaceY); this.smokePts.visible = false; } else {
     // smoke, fired by REAL slip past the tyre's peak, never by "a key is held"
     const over = hud.slipOver || 0;
     if (over > 0 && car.speed > 6) {
@@ -1303,6 +1309,7 @@ export class View {
     }
     pa.needsUpdate = true;
     this.smokePts.material.opacity = 0.45;
+    }
 
     // ---- camera -------------------------------------------------------------
     //
@@ -1489,6 +1496,7 @@ export class View {
       this.camera.rotateX(sk.p); this.camera.rotateY(sk.y); this.camera.rotateZ(sk.r);
       fov = rig.fov + Math.min(20, car.speed * 0.22) * rig.kick * this._fovKick + gKick;
     }
+    if (this.fx && this.fx.orbit) fov = this.fx.orbit(this.camera, this.car, fov);   // ?fxcam=
     if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
 
     // The sun's DIRECTION never changes — it is wherever it is in the sky
