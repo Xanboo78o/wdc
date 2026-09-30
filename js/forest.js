@@ -161,7 +161,7 @@ export function assemble(parts) {
 // ---------------------------------------------------------------------------
 // The two species.
 // ---------------------------------------------------------------------------
-function trunkGeometry(rBase, rTop, h, { sides = 6, lean = 0 } = {}) {
+function trunkGeometry(rBase, rTop, h, { sides = 6, lean = 0, shade = 0.62 } = {}) {
   const g = new THREE.CylinderGeometry(rTop, rBase, h, sides, 1, false);
   g.translate(0, h / 2, 0);
   if (lean) g.rotateZ(lean);
@@ -173,7 +173,7 @@ function trunkGeometry(rBase, rTop, h, { sides = 6, lean = 0 } = {}) {
   g.setAttribute('aSway', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
   // A trunk in a wood stands in shadow. Flat-lit bark is most of why a
   // low-poly tree reads as a lamp post with a bush on top.
-  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(0.62), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(shade), 3));
   return g;
 }
 
@@ -211,7 +211,7 @@ function broadBranches(h, crown, seed) {
   return out;
 }
 
-function broadFoliage(rects, { h = 9.5, crown = 3.6, cards = 13, seed = 11 } = {}) {
+function broadFoliage(rects, { h = 9.5, crown = 3.6, cards = 13, seed = 11, leaf = crown } = {}) {
   const r = rng(seed), parts = [];
   for (let k = 0; k < cards; k++) {
     const rect = rects[k % rects.length];
@@ -219,7 +219,7 @@ function broadFoliage(rects, { h = 9.5, crown = 3.6, cards = 13, seed = 11 } = {
     const yaw = k * 2.3999 + r() * 0.3;
     const up = 0.28 + 0.78 * Math.sin(t * Math.PI * 1.6 + r() * 0.5);
     const out = crown * (0.42 + r() * 0.72) * Math.max(0.35, Math.sin(up * Math.PI * 0.85));
-    const size = crown * (0.78 + r() * 0.55);
+    const size = leaf * (0.78 + r() * 0.55);
     // The outside of a crown catches the sun; the middle and underside never do.
     const shade = 0.16 + 0.84 * Math.min(1, (out / crown) * 0.55 + up * 0.7);
     parts.push(card(rect, size, size * 0.92, {
@@ -508,7 +508,12 @@ function bakeBanner(renderer, kit, { width, height, seed, tall }) {
 // bark(), cutouts(name). The builder passes its own; the race game makes one
 // from the game's Look (see js/env.js).
 // ---------------------------------------------------------------------------
-export function makeKit(renderer, plants, { conifer = 0.5 } = {}) {
+// `tall` grows the trees themselves, not a stretched copy of them: 1 is the
+// builder's 9.5 m broadleaf and 15 m fir; the Parco di Monza's planes and oaks
+// are 20-30 m (tall 2.3). The crown widens a little slower than the tree
+// rises, the sprays of leaves stay leaf-sized and there are more of them, so a
+// tall tree is a bigger tree and not a magnified one.
+export function makeKit(renderer, plants, { conifer = 0.5, tall = 1 } = {}) {
   const needleRects = plants.cutouts('needle'), leafRects = clusters(plants.cutouts('leaf'));
   if (!needleRects.length || !leafRects.length) return null;
   const mat = {
@@ -520,17 +525,29 @@ export function makeKit(renderer, plants, { conifer = 0.5 } = {}) {
   };
   if (!mat.needle || !mat.leaf) return null;
   for (const m of [mat.needle, mat.leaf, mat.bark]) m.vertexColors = true;
-  const kit = { mat, rects: { needle: needleRects, leaf: leafRects }, conifer };
+  const kit = { mat, rects: { needle: needleRects, leaf: leafRects }, conifer, grow: tall };
 
+  const hB = 9.5 * tall, crown = 3.6 * Math.pow(tall, 0.85), leaf = 3.6 * Math.pow(tall, 0.45);
+  // A 22 m trunk is a little stouter, not 2.3 times as stout: the first tall
+  // wood stood on a colonnade of pale pillars. And it stands in deeper shade,
+  // under a canopy four storeys up.
+  const hC = 15 * Math.pow(tall, 0.8), girth = Math.pow(tall, 0.4), bark = 0.62 / Math.pow(tall, 0.7);
   const species = {
     conifer: {
-      trunk: trunkGeometry(0.34, 0.1, 15),
-      foliage: coniferFoliage(needleRects, { h: 15, spread: 3.0, whorls: 16, perWhorl: 2, seed: 3 }),
+      trunk: trunkGeometry(0.34 * girth, 0.1, hC, { shade: bark }),
+      foliage: coniferFoliage(needleRects, {
+        h: hC, spread: 3.0 * Math.pow(tall, 0.55), whorls: Math.round(16 * Math.pow(tall, 0.6)), perWhorl: 2, seed: 3,
+      }),
       mat: mat.needle,
     },
     broad: {
-      trunk: mergeGeoms([trunkGeometry(0.42, 0.22, 9.5), ...broadBranches(9.5, 3.5, 12)]),
-      foliage: broadFoliage(leafRects, { h: 9.5, crown: 3.6, cards: 20, seed: 11 }),
+      trunk: mergeGeoms([trunkGeometry(0.42 * girth, 0.22 * girth, hB, { shade: bark }), ...broadBranches(hB, crown * 0.97, 12)]),
+      foliage: broadFoliage(leafRects, {
+        h: hB, crown, leaf, seed: 11,
+        // As many sprays as it takes to clothe the bigger crown: crown area
+        // over spray area, so a 22 m plane is as leafy as a 9.5 m one.
+        cards: Math.min(64, Math.round(20 * (crown / 3.6) ** 2 / (leaf / 3.6) ** 2)),
+      }),
       mat: mat.leaf,
     },
   };
@@ -562,7 +579,11 @@ export function makeKit(renderer, plants, { conifer = 0.5 } = {}) {
     return { mat: m, width: spec.width, height: spec.height };
   };
   kit.short = banner({ width: 16, height: SHORT_H, seed: 71, tall: false });
-  kit.tall = banner({ width: 24, height: TALL_H, seed: 97, tall: true });
+  // The saplings behind row 3 grow with the wood, or a 25 m canopy stands on
+  // 6 m of undergrowth and the trunks between read as a see-through fence.
+  const lift = Math.pow(tall, 0.75);
+  kit.lift = lift;
+  kit.tall = banner({ width: 24 * lift, height: TALL_H * lift, seed: 97, tall: true });
 
   // Lambert for the same reason as the banners: no sheen of sky on the black.
   // Transparent only for the fade; it writes depth, because the wall and its
@@ -829,7 +850,8 @@ export class Forest {
       while (far > 4 && !this.clear(ix + p.nx * far, iz + p.nz * far)) far -= 4;
       const ox = ix + p.nx * far, oz = iz + p.nz * far;
       const hi = this.ground(ix, iz), ho = this.ground(ox, oz);
-      const here = { in: [ix, hi - 0.5, iz], top: [ix, hi + WALL_H, iz], out: [ox, ho + 0.8, oz], x: ix, z: iz };
+      const wallH = WALL_H * (this.kit.lift || 1);
+      const here = { in: [ix, hi - 0.5, iz], top: [ix, hi + wallH, iz], out: [ox, ho + 0.8, oz], x: ix, z: iz };
       if (prev) {
         const step = Math.hypot(ix - prev.x, iz - prev.z);
         if (step > 0.05 && step < 25) {

@@ -15,6 +15,11 @@
 //   scrub     true = scrub polygons get a scatter of small real trees
 //   singles   most loose trees planted (default 2100); papers: most far paper
 //             trees (default 7000)
+//   tall      how tall the trees grow: 1 = a 9.5 m broadleaf and a 15 m fir,
+//             2.3 = the 22 m planes of a royal park (see makeKit in forest.js)
+//   bridge    metres: a gap in the treeline up to this long, wooded at both
+//             ends and with nothing built behind the barrier, is planted closed
+//             (the satellite reads a lawn by the fence as a hole in the wood)
 //   cover     true = ALSO plant the woods ESA WorldCover measured from orbit
 //             (data/env/cover, tools/getcover.mjs), not only OSM's polygons.
 //             Switched on circuit by circuit as each is checked by eye.
@@ -25,7 +30,13 @@ export const FOREST = {
   // The Parco di Monza: oak, hornbeam and plane, a royal park's woodland.
   // OSM maps a third of it; the satellite sees trees within 40 m of the
   // run-off on 79% of the lap's two sides (OSM: 34%).
-  monza:       { kinds: ['forest'], conifer: 0.12, depth: 60, density: 1, scrub: true, cover: true },
+  // The park's planes, oaks and horse chestnuts are 20-30 m: tall 2.3 grows
+  // the 9.5 m model to ~22 m, and the rows' own 0.7-1.3 spread makes 15-29 m.
+  // Adam: "make SUPER thick forest around the track". Deeper, denser, and
+  // lawn gaps up to 400 m beside the fence planted closed (never where
+  // anything is built: see `bridge` in woods.js).
+  monza:       { kinds: ['forest'], conifer: 0.12, depth: 90, density: 1.3, scrub: true, cover: true, tall: 2.3,
+                 bridge: 400 },
   // Suzuka's woods are Japanese cedar and pine on the hills.
   // Satellite: trees within 40 m of the run-off on 44% of the lap's sides (OSM 22%).
   suzuka:      { kinds: ['forest'], conifer: 0.72, depth: 50, density: 1, scrub: true, cover: true },

@@ -31,6 +31,11 @@ const FAR_CLEAR = 30;     // m from any run-off before a lone paper tree may sta
 // floating 12 m (median) and up to 70 m at Monaco. Beyond this, the horizon's
 // own tree masses are the woods.
 const REACH = 215;
+const HOLE = 12;          // m of open ground a wood may have in it and still be one wood
+const OPEN_BAND = 45;     // m behind the run-off checked for buildings before a gap is planted
+const BRIDGE_NEAR = 14;   // m: a planted gap's treeline stands no further than this off the run-off
+const BRIDGE_DEEP = 45;   // m: and is no deeper than this
+const FAR_GAP = 40;       // m: a wood further than this behind the run-off leaves the fence open
 
 // ---------------------------------------------------------------------------
 // Two spatial lookups, because both questions are asked a hundred thousand
@@ -135,8 +140,16 @@ function coverIndex(c, base) {
       box: [x0 + x0c * cell, x0 + (x1c + 1) * cell, y0 + y0c * cell, y0 + (y1c + 1) * cell],
     });
   }
+  const raw = new Uint8Array(nx * ny);
+  k = 0;
+  for (const run of c.rle.split(';')) { const [v, n] = run.split(','); raw.fill(+v, k, k + +n); k += +n; }
   return {
     patches,
+    // The raw class under (x, y): 10 tree, 30 grass, 50 built... (-1 outside).
+    cls(x, y) {
+      const i = Math.floor((x - x0) / cell), j = Math.floor((y - y0) / cell);
+      return i < 0 || j < 0 || i >= nx || j >= ny ? -1 : raw[j * nx + i];
+    },
     at(x, y) {
       const i = Math.floor((x - x0) / cell), j = Math.floor((y - y0) / cell);
       if (i < 0 || j < 0 || i >= nx || j >= ny) return -1;
@@ -156,7 +169,7 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
   if (!flora) return null;
   const plants = new BuildLook(renderer, look, flora, {});
   const spec = { ...FOREST._, ...(FOREST[env.key] || FOREST[track.key] || {}) };
-  const kit = makeKit(renderer, plants, { conifer: spec.conifer });
+  const kit = makeKit(renderer, plants, { conifer: spec.conifer, tall: spec.tall || 1 });
   if (!kit) return null;
 
   const slack = slackIndex(track);
@@ -173,7 +186,12 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
     const e = 3, gx = world.groundY(x + e, z) - world.groundY(x - e, z), gz = world.groundY(x, z + e) - world.groundY(x, z - e);
     return Math.hypot(gx, gz) / (2 * e) > 0.9;
   };
-  const clear = (x, z) => { const k = slack(x, -z); return k >= CLEAR && k <= REACH && !inPits(x, -z) && !steep(x, z); };
+  // No tree stands inside a building. The treelines never asked, because the
+  // satellite does not see trees on a roof; a closed gap or a deeper stack can
+  // reach one, and a plane growing through a grandstand is not the park.
+  const inBuilding = polygonIndex((env.buildings || []).filter(b => b.p && b.p.length >= 3)
+    .map(b => ({ p: b.p })));
+  const clear = (x, z) => { const k = slack(x, -z); return k >= CLEAR && k <= REACH && !inPits(x, -z) && !steep(x, z) && inBuilding(x, -z) < 0; };
   const forest = new Forest(kit, {
     ground, clear, shadows: renderer.shadowMap.enabled, name: 'env.woods', seed: 7,
     skip: (new URLSearchParams(location.search).get('woods') || '').split(',')
@@ -199,14 +217,18 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
   if (cover) woods.push(...cover.patches);
   const reached = new Set();
   const di = Math.max(1, Math.round(STEP / track.ds));
+  // Where each treeline sample found its wood, metres beyond the run-off
+  // (-1: none). tools/woodscheck.mjs reads this: coverage per side, and where
+  // the gaps a driver can see through actually are.
+  const edges = { di, ds: track.ds, L: [], R: [], bridged: 0, blockL: '', blockR: '' };
   for (const side of [1, -1]) {
-    let line = [], prev = null;
-    const end = () => { if (line.length >= 2) forest.line(line); line = []; prev = null; };
+    // Pass 1: walk out from the run-off at every sample.
+    const samp = [];
     for (let i = 0; i < track.n; i += di) {
       const h = track.hdg[i];
       const lx = -Math.sin(h) * side, ly = Math.cos(h) * side;       // out of the circuit, this side
       const edge = track.w[i] + (side > 0 ? track.runL[i] : track.runR[i]) + CLEAR;
-      let start = null, k = -1, deep = 0;
+      let start = null, k = -1, deep = 0, miss = 0;
       for (let d = edge; d < edge + SEARCH + spec.depth + BEHIND; d += MARCH) {
         const x = track.x[i] + lx * d, y = track.y[i] + ly * d;
         const onRoad = slack(x, y) < CLEAR;
@@ -221,11 +243,68 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
           // road gets its own half: the other one plants the rest from its side.
           deep = Math.max(0, (d - start) / 2 - 3);
           break;
-        } else if (here < 0 || d - start > spec.depth + BEHIND) break;
-        else deep = d - start;
+        } else if (d - start > spec.depth + BEHIND) break;
+        else if (here < 0) {
+          // A path or a clearing one pixel wide is still the same wood: the
+          // 10 m raster reads every bridle path in the park as open ground,
+          // and the stack used to stop dead at the first of them.
+          miss += MARCH;
+          if (miss > HOLE) break;
+        } else { miss = 0; deep = d - start; }
       }
-      if (start == null || (prev != null && Math.abs(start - prev) > JUMP)) { end(); if (start == null) continue; }
-      reached.add(k);
+      // Is the ground just behind the run-off something that must stay open?
+      // A surveyed building or grandstand ('B') is. The satellite's BUILT
+      // class ('c') is recorded but does NOT hold a gap open: beside a
+      // circuit it is paved run-off, service roads and gravel, and it was
+      // holding Curva Grande and the back straight open as lawn.
+      let blocked = false;
+      for (let d = edge; d <= edge + OPEN_BAND && !blocked; d += 4) {
+        const x = track.x[i] + lx * d, y = track.y[i] + ly * d;
+        blocked = inBuilding(x, y) >= 0 ? 'B' : (cover && cover.cls(x, y) === 50) ? 'c' : false;
+      }
+      samp.push({ i, lx, ly, edge, start, k, deep, blocked: blocked === 'B', why: blocked || '.' });
+    }
+    // Pass 2: close the gaps. The Parco di Monza is a wood with lawns, paths
+    // and gravel traps in it, and at 10 m the satellite reads a lawn beside
+    // the fence as a hole in the treeline: from the car, that hole was a
+    // window onto open grass and the town beyond, which is exactly the
+    // "field with buildings" Adam saw. A gap no longer than `bridge` metres,
+    // wooded at BOTH ends, and with nothing built behind the barrier, is
+    // planted as the woods either side of it. Grandstands, the paddock and
+    // every surveyed building are never planted over.
+    const bridge = spec.bridge || 0;
+    const stepM = di * track.ds;
+    // A gap is no wood at all, or a wood so far back (past FAR_GAP) that the
+    // ground by the fence reads as open lawn from the car.
+    const gap = q => q.start == null || q.start - q.edge > FAR_GAP;
+    for (let a = 0; a < samp.length;) {
+      if (!gap(samp[a])) { a++; continue; }
+      let b = a;
+      while (b < samp.length && gap(samp[b])) b++;
+      const L = samp[a - 1], R = samp[b];
+      const len = (b - a + 1) * stepM;
+      if (bridge && L && R && len <= bridge && !samp.slice(a, b).some(q => q.blocked)) {
+        const oL = L.start - L.edge, oR = R.start - R.edge;
+        for (let m = a; m < b; m++) {
+          const t = (m - a + 1) / (b - a + 1), q = samp[m];
+          // Stood close to the fence, where a park's edge trees stand.
+          q.start = q.edge + Math.min(BRIDGE_NEAR, oL + (oR - oL) * t);
+          q.deep = Math.min(BRIDGE_DEEP, Math.max(30, L.deep, R.deep));
+          q.k = -1; q.bridged = true;
+          edges.bridged++;
+        }
+      }
+      a = b;
+    }
+    edges[side > 0 ? 'blockL' : 'blockR'] = samp.map(q => q.why).join('');
+    // Pass 3: plant.
+    let line = [], prev = null;
+    const end = () => { if (line.length >= 2) forest.line(line); line = []; prev = null; };
+    for (const q of samp) {
+      const { i, lx, ly, edge, start, k, deep } = q;
+      (side > 0 ? edges.L : edges.R).push(start == null ? -1 : Math.round(start - edge + CLEAR));
+      if (start == null || (prev != null && Math.abs(start - prev) > JUMP && !q.bridged)) { end(); if (start == null) continue; }
+      if (k >= 0) reached.add(k);
       prev = start;
       const d = Math.min(spec.depth, deep);
       line.push({
@@ -300,6 +379,6 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
   forest.group.add(tick);
   scene.add(forest.group);
   const s = forest.stats();
-  window.__wdcWoods = { ...s, single, far };
+  window.__wdcWoods = { ...s, single, far, edges };
   return s.trees + s.paper;
 }
