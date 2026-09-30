@@ -272,3 +272,5 @@ body.replaying #hud{display:none}
    does (Adam, 2026-09-30: "only what a driver sees, speed, gear and inputs").
    The panel still updates for tools; ?slip=1 in the URL is not wired, on purpose. */
 #slip{display:none}
+/* ...and no G meter: speed, gear and your inputs, nothing else (Adam, 2026-09-30) */
+#dash .glat{display:none}
