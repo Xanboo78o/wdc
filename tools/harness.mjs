@@ -17,6 +17,24 @@ export function loadTrack(key, cls) {
 }
 
 // Surface under the car, from its lateral offset. Same rule the game uses.
+// WDC_SLOPE=1 drives on the surveyed gradient (data/elev/<key>.json), the way
+// the game does; unset, every harness stays flat and byte-identical.
+const _elev = new Map();
+export function slopeFor(track, proj, car) {
+  if (!process.env.WDC_SLOPE) return 0;
+  const key = track.key;
+  if (!_elev.has(key)) {
+    let e = null;
+    try { e = JSON.parse(fs.readFileSync(new URL(`../data/elev/${key}.json`, import.meta.url), 'utf8')); } catch { /* none */ }
+    _elev.set(key, e);
+  }
+  const e = _elev.get(key);
+  if (!e || !e.s) return 0;
+  const n = e.s.length, ds = e.ds || track.ds;
+  const at = s => { const f = ((s / ds) % n + n) % n, i = Math.floor(f), k = f - i; return e.s[i] * (1 - k) + e.s[(i + 1) % n] * k; };
+  return (at(proj.s + 4) - at(proj.s - 4)) / 8 * Math.cos(car.hdg - track.hdg[proj.i]);
+}
+
 export function surfaceAt(proj) {
   const al = Math.abs(proj.lat);
   if (al > proj.w + proj.run) return SURFACE.grass;
@@ -53,7 +71,8 @@ export function runLaps({ track, lines, spec, laps = 3, tier = 'hard', seed = 1,
     hint = proj.i;
     const surface = surfaceAt(proj);
     const info = drive(car, proj, FIXED_DT);
-    step(car, FIXED_DT, { surface, bank: proj.bank, bankDir: Math.sign(proj.curv) });
+    step(car, FIXED_DT, { surface, bank: proj.bank, bankDir: Math.sign(proj.curv),
+                          slope: slopeFor(track, proj, car) });
 
     if (surface < SURFACE.track) offT += FIXED_DT;
     worstLat = Math.max(worstLat, Math.abs(proj.lat) - proj.w);

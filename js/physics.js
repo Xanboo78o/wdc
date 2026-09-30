@@ -917,9 +917,18 @@ export function step(car, dt, env = {}) {
     bankF = (S.m * g + DFf + DFr) * Math.sin(th) * (env.bankDir || 0);
   }
 
+  // ---- gravity along the road -------------------------------------------
+  // Adam, 2026-09-29: downhill should actually carry you. env.slope is the
+  // road's gradient (rise over run) along the car's own heading, + uphill;
+  // the component of weight along it pushes the car back up a climb and
+  // on down a descent. Absent (every harness, every flat circuit) it is
+  // exactly zero and nothing below moves.
+  let gradeF = 0;
+  if (env.slope && !car.airborne) gradeF = -S.m * g * env.slope / Math.sqrt(1 + env.slope * env.slope);
+
   // ---- equations of motion ------------------------------------------------
   const cd = Math.cos(steer), sd = Math.sin(steer);
-  const Fx = FxR + FxF * cd - Fyf * sd - drag * Math.sign(car.vx || 1);
+  const Fx = FxR + FxF * cd - Fyf * sd - drag * Math.sign(car.vx || 1) + gradeF;
   const Fy = Fyf * cd + Fyr + FxF * sd + bankF;
   const Mz = S.a * (Fyf * cd + FxF * sd) - S.b * Fyr;
 

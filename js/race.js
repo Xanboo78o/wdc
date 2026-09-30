@@ -825,7 +825,10 @@ export class Race {
       else if (al > pr.w) surface = SURFACE.kerb;
 
       step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv),
-                      dirty: car.dirty, tow: car.tow, rollMul: dragFor(surface) });
+                      dirty: car.dirty, tow: car.tow, rollMul: dragFor(surface),
+                      // gravity on slopes: main.js hands the session the surveyed
+                      // gradient; the harnesses do not, so they stay flat
+                      slope: this.slopeAt ? this.slopeAt(pr.s) * Math.cos(car.hdg - t.hdg[pr.i]) : 0 });
       // The barrier test asks how far this car is from the centreline, and for
       // a car in the pit lane the answer is seventeen metres — so running it
       // would shove the car back onto the racing line mid-stop.

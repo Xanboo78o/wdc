@@ -1695,7 +1695,7 @@ export class View {
     const bankA = Math.abs(bankRoll(this.bank, this.track, proj.i, 0) || 0);
     const sk = this.speedShake.step(dt, car.speed || 0, rig.mount, {
       rough: hud.rough || 0, kerb: kType, gLong: this._acc / 9.81,
-      gVert: Math.abs(latG) * Math.sin(bankA) });
+      gVert: Math.abs(latG) * Math.sin(bankA), gLat: latG });
     // FIXED LENS. Adam, 2026-09-29: "no fov resizing, this is for a simrig".
     // On a rig the screen is a window at a real distance from your eyes; a lens
     // that widens with speed or breathes with acceleration is a camera doing
@@ -1732,6 +1732,7 @@ export class View {
       this.camera.position.addScaledVector(this._v2, sk.h);
       this.camera.lookAt(this._v1);
       this.camera.rotateX(sk.p); this.camera.rotateY(sk.y); this.camera.rotateZ(sk.r);
+      this.camera.translateX(sk.x || 0);   // the head pushed to the outside of a corner
       fov = rig.fov + Math.min(16, car.speed * 0.17) * rig.kick * this._fovKick + gKick;
     } else if (rig.kind === 'tv') {
       const cam = this._pickTvCamera(proj.s);

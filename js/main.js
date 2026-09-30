@@ -845,6 +845,14 @@ function startQualiRace() {
   toast(`P${order.indexOf(-1) + 1} ON THE GRID`);
 }
 
+// The surveyed road gradient at lap distance s (rise over run along +s), for
+// gravity on slopes (physics.js env.slope). Zero on a circuit with no survey.
+function gradeAt(s) {
+  const w = state.view && state.view.world;
+  if (!w || !w.on) return 0;
+  return (w.trackYAt(s + 4) - w.trackYAt(s - 4)) / 8;
+}
+
 function resetCar() {
   const { track, line, car } = state;
   const i = track.idx(0);
@@ -927,6 +935,8 @@ function loop(now) {
       state.tapeKey = key; state.simT = 0; state.marks = [];
     }
   }
+  // Gravity on slopes for every car in the session (race.js env.slope).
+  if (state.race && !state.race.slopeAt) state.race.slopeAt = gradeAt;
   if (!state.tape.playing && Q.has('replay') && !state._replayQ) { state._replayQ = true; replayStart(+Q.get('replay') || 15); }
   if (!state.tape.playing && hands.tapped('KeyI')) replayStart();
   if (state.tape.playing) { replayFrame(frame); hands.endFrame(); acc = 0; return; }
@@ -1035,6 +1045,7 @@ function loop(now) {
     if (car.brake > 0.05) car.drsOpen = false;   // DRS shuts under braking
 
     step(car, FIXED_DT, { surface, bank: proj.bank, bankDir: Math.sign(proj.curv),
+                          slope: gradeAt(proj.s) * Math.cos(car.hdg - track.hdg[proj.i]),
                           rollMul: dragFor(surface) });
 
     // ---- barrier: real rigid-body contact, resolved at the bodywork corners

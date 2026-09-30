@@ -59,7 +59,9 @@ export const SFX = {
 const MOUNTS = {
   // dive/squat: degrees of pitch per g braking/accelerating; sink: metres of
   // heave per g of load (and per 4 g of braking, the head going forward).
-  onboard: { buzzP: 0.075, buzzY: 0.035, buzzR: 0.03, roadP: 0.16, roadR: 0.10, heave: 0.004, kerb: 0.9, dive: 0.18, squat: 0.08, sink: 0.02 },
+  // latM / latR: the driver's HEAD in a corner — metres pushed toward the
+  // outside, and degrees of tilt, per g of lateral load. Only a head has them.
+  onboard: { buzzP: 0.075, buzzY: 0.035, buzzR: 0.03, roadP: 0.16, roadR: 0.10, heave: 0.004, kerb: 0.9, dive: 0.18, squat: 0.08, sink: 0.02, latM: 0.010, latR: 0.30 },
   tcam:    { buzzP: 0.16, buzzY: 0.045, buzzR: 0.05, roadP: 0.14, roadR: 0.12, heave: 0.005, kerb: 1.1, dive: 0.12, squat: 0.05, sink: 0.015 },
   nose:    { buzzP: 0.12, buzzY: 0.05, buzzR: 0.04, roadP: 0.20, roadR: 0.08, heave: 0.006, kerb: 1.2, sink: 0.006 },
   chase:   { buzzP: 0.025, buzzY: 0.015, buzzR: 0.0, roadP: 0.06, roadR: 0.03, heave: 0.012, kerb: 0.35, sink: 0.03 },
@@ -86,8 +88,8 @@ export class SpeedShake {
   step(dt, speed, mount, f = {}) {
     const o = this.out;
     const M = MOUNTS[mount];
-    if (!SFX.on || !M || SFX.shake <= 0) { o.p = o.y = o.r = o.h = 0; return o; }
-    const { rough = 0, kerb = 0, gLong = 0, gVert = 0 } = f;
+    if (!SFX.on || !M || SFX.shake <= 0) { o.p = o.y = o.r = o.h = o.x = 0; return o; }
+    const { rough = 0, kerb = 0, gLong = 0, gVert = 0, gLat = 0 } = f;
     dt = Math.min(0.1, Math.max(0, dt));
     const v = Math.max(0, speed);
     const k = v / 97.2;                                 // 1.0 at 350 km/h
@@ -132,9 +134,19 @@ export class SpeedShake {
     // LOAD: a banked corner or a compression presses you into the seat.
     this._gv = (this._gv || 0) + (Math.max(0, Math.min(3, gVert)) - (this._gv || 0)) * Math.min(1, dt * 5);
 
+    // THE HEAD IN A CORNER (Adam: "realism as though you're the driver").
+    // At 5 g the neck loses a few centimetres to the outside and the helmet
+    // tips with it; a spring (w 9, damping 0.6) so it lags into the corner
+    // and settles back out of it the way a neck does, not the way a camera does.
+    const lt = Math.max(-6, Math.min(6, gLat));
+    this._lv = (this._lv || 0) + (81 * (lt - (this._lx || 0)) - 2 * 0.6 * 9 * (this._lv || 0)) * dt;
+    this._lx = (this._lx || 0) + this._lv * dt;
+    o.x = (M.latM || 0) * this._lx * SFX.shake;
+    const headRoll = -(M.latR || 0) * this._lx;
+
     o.p = (M.buzzP * (b + ride * 2.2) * this._hf.p + M.roadP * road + kk * rnd() * 0.9 + dive - 0.25 * this._gv) * D2R;
     o.y = (M.buzzY * (b + ride) * this._hf.y + kk * rnd() * 0.25) * D2R;
-    o.r = (M.buzzR * (b + ride * 2.5) * this._hf.r + M.roadR * roll + kk * rnd() * 0.5) * D2R;
+    o.r = (M.buzzR * (b + ride * 2.5) * this._hf.r + M.roadR * roll + kk * rnd() * 0.5 + headRoll * SFX.shake) * D2R;
     o.h = M.heave * (road + 0.5 * (b + ride) * this._hf.p) + 0.01 * kk * rnd()
       - (M.sink || 0) * (this._gv + Math.max(0, -g) * 0.25);
     return o;
