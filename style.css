@@ -268,3 +268,7 @@ body.mirror #startLights,body.mirror #msg{top:calc(min(34vw,560px) / 4.2 + 26px)
 .tpKeys{margin-top:18px;font-size:10.5px;letter-spacing:.14em;color:color-mix(in srgb,var(--ink) 38%,var(--bg))}
 .tpKeys b{color:var(--dim)}
 body.replaying #hud{display:none}
+/* A driver does not see tyre slip, temperature or pressure — the engineer
+   does (Adam, 2026-09-30: "only what a driver sees, speed, gear and inputs").
+   The panel still updates for tools; ?slip=1 in the URL is not wired, on purpose. */
+#slip{display:none}
