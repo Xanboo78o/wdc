@@ -303,7 +303,11 @@ export function resolveBarrier(car, track, hint = null) {
   // on the body decides how the car rotates out of the impact.
   let worst = null;
   for (const c of corners(car)) {
-    const p = track.project(c.x, c.y, hint);
+    // A corner is within 3 m of the car and the hint is the car's own sample from
+    // this substep, so 8 samples (16 m) either side is generous. The default 45
+    // made this 360 distance tests per car per substep: a third of the whole
+    // race tick at 22 cars (profiled 2026-10-03).
+    const p = track.project(c.x, c.y, hint, hint == null ? undefined : 8);
     const limit = p.w + p.run;
     const depth = Math.abs(p.lat) - limit;
     if (depth > 0 && (!worst || depth > worst.depth)) {

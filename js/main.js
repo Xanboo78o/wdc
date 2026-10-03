@@ -34,6 +34,7 @@ import { liveryFor } from './livery.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 import { TRACKS } from './tracks.js';
 import { makeDirector } from './attract.js';
+import { Governor } from './perfgov.js';
 import { THEMES, hasTheme, defaultTheme, setTheme, sayFor, loadingLine, pauseLine, resultMood, MUSIC_LEVELS, hasLevel, menuMusic, mountChrome, mood, boardNo } from './menuui.js';
 
 const $ = id => document.getElementById(id);
@@ -43,6 +44,8 @@ const $ = id => document.getElementById(id);
 // wheel and never makes a noise. ?from=home sends "back to the menu" there.
 const ATTRACT = new URLSearchParams(location.search).has('attract');
 const FROM_HOME = new URLSearchParams(location.search).get('from') === 'home';
+// ms of simulation a frame may spend before it drops the backlog (see loop)
+const SIM_BUDGET = (v => v == null ? 12 : +v || 0)(new URLSearchParams(location.search).get('simbudget'));
 const toMenu = () => { if (FROM_HOME) location.href = './home.html'; else location.reload(); };
 if (ATTRACT) document.body.classList.add('attract');
 const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
@@ -626,7 +629,12 @@ async function start() {
       team: TEAMS[pickTeams[pickCar]] || null,
     });
     // chase to begin with (TV sat behind trees); js/attract.js cuts between cameras and stages the incidents
-    if (ATTRACT) { state.view.setMode(1); if (state.race) state.director = makeDirector(state.race, state.view, state.me); }
+    // ?director=0&cam=N: the bot drives but nothing is staged and the camera stays put, which is
+    // what a performance run wants (tools measure YOUR view of a race, not the show's).
+    if (ATTRACT) {
+      state.view.setMode(q.has('cam') ? +q.get('cam') || 0 : 1);
+      if (state.race && q.get('director') !== '0') state.director = makeDirector(state.race, state.view, state.me);
+    }
   } else {
     location.reload(); return;          // changing circuit rebuilds the world
   }
@@ -704,6 +712,8 @@ async function start() {
   }
 
   $('load').classList.add('hidden');
+  // Hold 60 by resolution (js/perfgov.js). ?res=0 switches it off; ?fps=1 shows the numbers.
+  if (q.get('res') !== '0') state.gov = new Governor(state.view, { show: q.has('fps') });
   state.started = true;
   requestAnimationFrame(loop);
 }
@@ -1005,7 +1015,17 @@ function loop(now) {
   let rough = 0;
   let steps = 0;
   const race = state.race;
+  // THE SIMULATION HAS A BUDGET. When a step turns expensive (a pile-up, a
+  // loaded machine) the old loop still ran every step it owed, which made the
+  // frame longer, which made it owe more: frames of 300 ms and a slideshow
+  // that never recovered. Past SIM_BUDGET the backlog is DROPPED instead: the
+  // race runs slow for a moment and the picture stays smooth. ?simbudget=0
+  // is the old behaviour, for tools that want every step.
+  const simT0 = performance.now();
   while (acc >= FIXED_DT && steps < 240) {
+    if (SIM_BUDGET && steps >= 4 && (steps & 1) === 0 && performance.now() - simT0 > SIM_BUDGET) {
+      acc = 0; state.simDropped = (state.simDropped || 0) + 1; break;
+    }
     acc -= FIXED_DT; steps++;
 
     // ---- race: the session steps every car, including yours ---------------
@@ -1096,6 +1116,7 @@ function loop(now) {
     state.sPrev = s;
     state.lapT += FIXED_DT;
   }
+  state._simMs = performance.now() - simT0;
   hands.endFrame();
   state.simT = (state.simT || 0) + steps * FIXED_DT;
   state.tape.record(state.simT);
@@ -1212,7 +1233,19 @@ function loop(now) {
       });
     }
   }
+  const drawT0 = performance.now();
   view.frame(car, frame, { slipOver: over, rough });
+  // What this frame cost, split the only way that matters: the simulation, the
+  // drawing, and everything else in this function. Published for tools/ and
+  // for ?fps=1; smoothed, because one frame's number is noise.
+  {
+    const now2 = performance.now(), P = state.perf || (state.perf = { sim: 0, draw: 0, frame: 0, steps: 0 });
+    const k = 0.1;
+    P.sim += (state._simMs - P.sim) * k; P.draw += (now2 - drawT0 - P.draw) * k;
+    P.frame += (frame * 1000 - P.frame) * k; P.steps += (steps - P.steps) * k;
+    P.dropped = state.simDropped || 0;
+    if (state.gov) state.gov.tick(P, frame, state.paused);
+  }
   // Republish what the LAST frame actually cost. render.js publishes this once,
   // on the first frame, which is honest for a static world and useless for a
   // grid: on frame one the camera has not been placed yet, so every rival is
@@ -1221,6 +1254,7 @@ function loop(now) {
   if (typeof window !== 'undefined' && window.__wdc) {
     const info = view.renderer.info.render;
     window.__wdc.draws = info.calls;
+    window.__wdc.perf = state.perf;
     window.__wdc.tris = info.triangles;
     if (state.field) window.__wdc.carsDrawn = state.field.drawn;
     // Gear, revs and the state of the engine audio, published for the
