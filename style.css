@@ -396,3 +396,8 @@ html.themed .tpPips i{border-radius:2px}
 
 /* the race behind home.html (?attract=1): a picture, nothing on top of it */
 body.attract #hud,body.attract .screen,body.attract #pauseMenu{display:none !important}
+
+/* Started from home.html (?auto=, class set by the inline script in index.html):
+   the old menu must not flash up while the modules load. */
+html.auto #menu,html.auto #teamPick{display:none !important}
+html.auto[data-theme=light] body{background:#f3ecdc}

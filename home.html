@@ -144,8 +144,24 @@ svg .car{fill:var(--red);stroke:var(--ink)}
   display:flex;align-items:center;justify-content:center;font-family:var(--loud);font-size:27px}
 .stamp{position:absolute;z-index:1;right:12px;bottom:12px;padding:4px 11px 3px;border-radius:7px;background:#121212;color:#fff;font-family:var(--loud);font-size:15px;letter-spacing:.05em;transform:rotate(-3deg)}
 
+/* SETUP: the circuit as the first row, then the settings */
+.strip{flex:none;display:flex;align-items:center;gap:16px;padding:9px 12px}
+.strip.on{background:var(--card);color:var(--ink);transform:none;box-shadow:0 5px 0 var(--red);border-width:3px}
+.strip.on small,.strip.on i{opacity:1 !important}
+.strip .frame{width:170px;height:96px;flex:none}
+.strip .no{width:46px;height:46px;border-radius:50%;border:2.5px solid var(--line);background:var(--yell);color:#121212;flex:none;
+  display:flex;align-items:center;justify-content:center;font-family:var(--loud);font-size:20px;transform:rotate(-7deg)}
+.strip .stext{flex:1;min-width:0}
+.strip small{display:block;font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--soft)}
+.strip b{display:block;font-family:var(--loud);font-weight:normal;font-size:44px;line-height:1.02;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strip i{font-style:normal;font-size:12px;font-weight:600}
+.strip .arrow{width:50px;height:50px;font-size:24px}
+.dots{display:flex;gap:4px;flex:none}
+.dots u{width:7px;height:7px;border-radius:50%;background:color-mix(in srgb,var(--ink) 22%,var(--card))}
+.dots u.on{background:var(--red);transform:scale(1.5)}
+
 /* session + settings: a card per setting, its values as buttons */
-.grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;align-content:safe center;overflow:auto;padding:8px 6px 12px}
+.grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:9px;align-content:safe center;overflow:auto;padding:8px 6px 12px}
 .opt{padding:9px 12px 11px}
 .opt.on{background:var(--card);color:var(--ink);transform:none;box-shadow:0 5px 0 var(--red);border-width:3px}
 .opt.on small{opacity:1 !important;color:var(--red) !important}

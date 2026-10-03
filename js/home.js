@@ -5,7 +5,8 @@
 // "i definitely dont like my team and league being in the same page as track
 // selection" — so:
 //
-//   HOME ──RACE──▶ CIRCUIT ──▶ SESSION ──▶ index.html (the real game)
+//   HOME ──RACE──▶ index.html (the real game), one press, last settings
+//     ├─ SETUP     circuit + every race setting on one page
 //     ├─ GARAGE    league + team, your identity, nowhere near the track
 //     └─ SETTINGS  theme + music
 //
@@ -100,7 +101,7 @@ async function drawMap(svg, id, car = true) {
   const p = cls => `<path class="${cls}" d="${o.d}" vector-effect="non-scaling-stroke"/>`;
   svg.innerHTML = p('casing') + p('tarmac') + (car
     ? `<circle class="car" r="${(o.size * 0.016).toFixed(1)}" stroke-width="${(o.size * 0.005).toFixed(1)}"><animateMotion dur="9s" repeatCount="indefinite" path="${o.d}"/></circle>` : '');
-  const km = svg.closest('.card,.next')?.querySelector('[data-km]');
+  const km = svg.closest('.card,.next,.strip')?.querySelector('[data-km]');
   if (km && o.len) km.textContent = (o.len / 1000).toFixed(3) + ' KM';
 }
 
@@ -191,6 +192,13 @@ function dayChips() {
 }
 const nowPlaying = () => { const n = menuMusic.title(); return n ? `<span class="eq"><i></i><i></i><i></i></span>${n}` : 'MUSIC OFF'; };
 
+// Go racing, now, with what is saved. No team in this league yet = the garage first.
+function lightsOut() {
+  if (!S.teams[S.car]) { show('garage'); say('pick a team first. then we race.'); return; }
+  save(); menuMusic.fadeOut(0.4);
+  setTimeout(() => { location.href = `./index.html?auto=${S.track}:${S.car}&from=home`; }, 420);
+}
+
 const PAGES = {
   // ------------------------------------------------------------ HOME
   home() {
@@ -206,13 +214,13 @@ const PAGES = {
     const dock = h(`<div class="dock">
       <div class="chunk next"><small>NEXT UP</small><div class="frame"><svg></svg></div><b>${t[1]}</b><small>${t[2]} · <span data-km></span></small></div>
       <div class="tiles"></div>
-      <button class="chunk go race">${FLAG}<div>RACE<small>${S.mode === 'race' ? `${S.laps} LAPS · ${S.grid} CARS` : 'HOT LAP'}</small></div>${FLAG}</button></div>`);
+      <button class="chunk go race">${FLAG}<div>RACE<small>${S.mode === 'race' ? `${S.laps} LAPS · ${S.grid} CARS` : 'HOT LAP'} · ${t[1].toUpperCase()}</small></div>${FLAG}</button></div>`);
     page.append(dock);
     drawMap(dock.querySelector('svg'), S.track);
     const tiles = dock.querySelector('.tiles');
     const tile = (cls, icon, label, ok) => { const b = h(`<button class="chunk tile ${cls}">${ICON[icon]}${label}</button>`); tiles.append(b); return [b, ok]; };
     const list = [
-      tile('', 'circuit', 'CIRCUIT', () => show('circuit')),
+      tile('', 'circuit', 'SETUP', () => show('setup')),
       tile('', 'garage', 'GARAGE', () => show('garage')),
       tile('', 'showroom', 'SHOWROOM', () => { location.href = `./carview.html${tk ? '?team=' + tk : ''}`; }),
       tile('', 'builder', 'BUILDER', () => { location.href = './build.html'; }),
@@ -221,34 +229,50 @@ const PAGES = {
       tile('', 'settings', 'SETTINGS', () => show('settings')),
     ];
     // RACE is first in focus order: it is what you came for
-    item(dock.querySelector('.race'), { ok: () => show('circuit') });
-    item(dock.querySelector('.next'), { ok: () => show('circuit') });
+    // RACE is ONE press: it goes racing with exactly what the cards say (Adam:
+    // "takes too long to get to a race"). Changing anything is the SETUP page.
+    item(dock.querySelector('.race'), { ok: lightsOut });
+    item(dock.querySelector('.next'), { ok: () => show('setup') });
     for (const [b, ok] of list) item(b, { ok });
     item(mid.querySelector('.me'), { ok: () => show('garage') });
     startLive();
   },
 
-  // ------------------------------------------------------------ CIRCUIT
-  circuit() {
-    const n = TRACKS.length, i = TRACKS.findIndex(t => t[0] === S.track);
-    const tAt = k => TRACKS[(k + n) % n];
-    const step = d => { S.track = tAt(i + d)[0]; show('circuit'); say(sayFor('CIRCUIT', S.track)); };
-    page.append(h(`<div class="top"><div class="title">PICK A CIRCUIT</div><div class="grow"></div>${sayBox()}</div>`));
-    const st = STATIONS.find(s => s.id === S.track);
+  // ------------------------------------------------------------ SETUP
+  // The circuit and every race setting on ONE page (it was two, and a NEXT
+  // between them). The circuit is the first row: left/right steps it, like
+  // every other row. START / G goes racing from anywhere on the page.
+  setup() {
+    const n = TRACKS.length, i = TRACKS.findIndex(t => t[0] === S.track), t = TRACKS[i];
+    const step = d => { S.track = TRACKS[(i + d + n) % n][0]; show('setup', 0); say(sayFor('CIRCUIT', S.track)); };
+    const st = STATIONS.find(x => x.id === S.track);
     const songs = st ? st.songs.map(id => SONGS[id].name).join(' · ') : '';
-    const side = (t, c) => `<div class="chunk card side ${c}"><div class="frame"><svg></svg></div><b>${t[1]}</b><small>${t[2]}</small></div>`;
-    const t = tAt(i);
-    const body = h(`<div class="body"><button class="chunk grey arrow" data-l>‹</button><div class="cards">${side(tAt(i - 1), 'l')}
-      <div class="chunk card main in"><div class="no">${String(i + 1).padStart(2, '0')}</div><div class="frame"><svg></svg></div><b>${t[1]}</b>
-        <small>${t[2]} · <span data-km></span></small>${songs ? `<i>♪ ${songs}</i>` : ''}</div>${side(tAt(i + 1), 'r')}</div><button class="chunk grey arrow" data-r>›</button></div>`);
-    page.append(body);
-    const [l, m, r] = body.querySelectorAll('.card');
-    drawMap(l.querySelector('svg'), tAt(i - 1)[0], false); drawMap(m.querySelector('svg'), t[0]); drawMap(r.querySelector('svg'), tAt(i + 1)[0], false);
-    l.onclick = body.querySelector('[data-l]').onclick = () => step(-1);
-    r.onclick = body.querySelector('[data-r]').onclick = () => step(1);
-    item(m, { ok: () => show('session'), left: () => step(-1), right: () => step(1) });
-    foot('NEXT', () => show('session'), '← → CIRCUIT · ENTER / A NEXT · ESC / B BACK');
-    at = 0;
+    page.append(h(`<div class="top"><div class="title">RACE SETUP</div><div class="chunk chip yell"><small>${TEAMS[S.teams[S.car]] ? TEAMS[S.teams[S.car]].name : 'NO TEAM'}</small>${CARS[S.car].full.toUpperCase()}</div><div class="grow"></div>${sayBox()}</div>`));
+    const strip = h(`<div class="chunk strip"><button class="chunk arrow" data-l>‹</button>
+      <div class="no">${String(i + 1).padStart(2, '0')}</div><div class="frame"><svg></svg></div>
+      <div class="stext"><small>${t[2]} · <span data-km></span></small><b>${t[1]}</b>${songs ? `<i>♪ ${songs}</i>` : ''}</div>
+      <div class="dots">${TRACKS.map((_, k) => `<u${k === i ? ' class="on"' : ''}></u>`).join('')}</div>
+      <button class="chunk arrow" data-r>›</button></div>`);
+    page.append(strip);
+    drawMap(strip.querySelector('svg'), t[0]);
+    strip.querySelector('[data-l]').onclick = e => { e.stopPropagation(); step(-1); };
+    strip.querySelector('[data-r]').onclick = e => { e.stopPropagation(); step(1); };
+    item(strip, { left: () => step(-1), right: () => step(1), ok: () => focus(at + 1) });
+
+    const onoff = [[false, 'OFF'], [true, 'ON']], up = a => a.map(k => [k, String(k).toUpperCase()]);
+    const rows = [['MODE', 'mode', [['hotlap', 'HOT LAP'], ['race', 'RACE']]]];
+    if (S.mode === 'race') {
+      rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]],
+        ['GRID', 'grid', [[6, '6'], [12, '12'], [16, '16'], [22, '22']]],
+        ['RIVALS', 'tier', Object.keys(TIERS).map(k => [k, TIERS[k].name])]);
+      if (S.tier === 'supercasual') rows.push(['OVERTAKES', 'battle', Object.keys(BATTLE).map(k => [k, BATTLE[k].name])]);
+      rows.push(['YOU START', 'start', [['pole', 'POLE'], ['front', 'FRONT ROW'], ['mid', 'MIDFIELD'], ['back', 'LAST']]],
+        ['QUALIFYING', 'quali', onoff], ['RETIREMENT', 'noDnf', [[false, 'NORMAL'], [true, 'NO DNF']]]);
+      if (S.car === 'f1') rows.push(['FIELD', 'field', Object.entries(FIELDS)]);
+    }
+    rows.push(['TIME', 'time', [['live', 'LIVE'], ...up(TIME_PHASES)]], ['WEATHER', 'weather', [['live', 'LIVE'], ...up(WEATHER_KINDS), ['changing', 'CHANGING']]]);
+    optGrid(rows, 'setup');
+    foot(S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', lightsOut, '↑ ↓ MOVE · ← → CHANGE · START / G = LIGHTS OUT');
   },
 
   // ------------------------------------------------------------ GARAGE
@@ -281,31 +305,6 @@ const PAGES = {
     foot(S.teams[L] === k ? 'DONE' : 'JOIN', S.teams[L] === k ? () => show('home') : join, '↑ LEAGUE · ← → TEAM · ENTER / A JOIN');
   },
 
-  // ------------------------------------------------------------ SESSION
-  session() {
-    back = () => show('circuit');
-    const onoff = [[false, 'OFF'], [true, 'ON']], up = a => a.map(k => [k, String(k).toUpperCase()]);
-    const rows = [['MODE', 'mode', [['hotlap', 'HOT LAP'], ['race', 'RACE']]]];
-    if (S.mode === 'race') {
-      if (S.car === 'f1') rows.push(['FIELD', 'field', Object.entries(FIELDS)]);
-      rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]],
-        ['GRID', 'grid', [[6, '6 CARS'], [12, '12'], [16, '16'], [22, '22 CARS']]],
-        ['RIVALS', 'tier', Object.keys(TIERS).map(k => [k, TIERS[k].name])]);
-      if (S.tier === 'supercasual') rows.push(['OVERTAKES', 'battle', Object.keys(BATTLE).map(k => [k, BATTLE[k].name])]);
-      rows.push(['YOU START', 'start', [['pole', 'POLE'], ['front', 'FRONT ROW'], ['mid', 'MIDFIELD'], ['back', 'LAST']]],
-        ['QUALIFYING', 'quali', onoff], ['RETIREMENT', 'noDnf', [[false, 'NORMAL'], [true, 'NO DNF']]]);
-    }
-    rows.push(['TIME', 'time', [['live', 'LIVE'], ...up(TIME_PHASES)]], ['WEATHER', 'weather', [['live', 'LIVE'], ...up(WEATHER_KINDS), ['changing', 'CHANGING']]]);
-    const t = track();
-    page.append(h(`<div class="top"><div class="title">${t[1].toUpperCase()}</div><div class="chunk chip yell"><small>${TEAMS[S.teams[S.car]] ? TEAMS[S.teams[S.car]].name : 'NO TEAM'}</small>${CARS[S.car].full.toUpperCase()}</div><div class="grow"></div>${sayBox()}</div>`));
-    optGrid(rows, 'session');
-    foot(S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', () => {
-      if (!S.teams[S.car]) { show('garage'); return; }
-      save(); menuMusic.fadeOut(0.4);
-      setTimeout(() => { location.href = `./index.html?auto=${S.track}:${S.car}&from=home`; }, 420);
-    }, '↑ ↓ MOVE · ← → CHANGE · ENTER / A NEXT');
-  },
-
   // ------------------------------------------------------------ SETTINGS
   settings() {
     page.append(h(`<div class="top"><div class="title">SETTINGS</div><div class="grow"></div>${sayBox()}</div>`));
@@ -334,6 +333,7 @@ function input(what) {
   menuMusic.wake();
   const it = items[at];
   if (what === 'back') { if (back) back(); return; }
+  if (what === 'go') { if (current === 'home' || current === 'setup') lightsOut(); return; }
   if (!it) return;
   if (what === 'ok') { if (it.ok) it.ok(); return; }
   if (what === 'left' || what === 'right') {
@@ -344,7 +344,7 @@ function input(what) {
   focus(at + (what === 'up' ? -1 : 1));
 }
 addEventListener('keydown', e => {
-  const m = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok', Space: 'ok', Escape: 'back', Backspace: 'back' }[e.code];
+  const m = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok', Space: 'ok', Escape: 'back', Backspace: 'back', KeyG: 'go' }[e.code];
   if (!m) return;
   e.preventDefault();
   input(m);
@@ -364,6 +364,7 @@ function poll() {
   hands._readPad();
   for (const n of ['up', 'down', 'left', 'right']) if (hands.wheelHeld(n)) down.add(n);
   if (hands.wheelHeld('confirm')) down.add('ok');
+  if (hands.wheelHeld('pause')) down.add('go');
   for (const p of (navigator.getGamepads ? navigator.getGamepads() : [])) {
     if (!p || p.mapping !== 'standard') continue;
     const b = i => !!(p.buttons[i] && p.buttons[i].pressed), ax = p.axes[0] || 0, ay = p.axes[1] || 0;
@@ -373,13 +374,14 @@ function poll() {
     if (b(15) || ax > 0.6) down.add('right');
     if (b(0)) down.add('ok');
     if (b(1)) down.add('back');
+    if (b(9)) down.add('go');
   }
   hands.endFrame();
   const now = performance.now();
   for (const n of down) {
     const t = held.get(n);
     if (t === undefined) { held.set(n, now + 380); input(n); }
-    else if (now >= t && n !== 'ok' && n !== 'back') { held.set(n, now + 120); input(n); }
+    else if (now >= t && n !== 'ok' && n !== 'back' && n !== 'go') { held.set(n, now + 120); input(n); }
   }
   for (const n of [...held.keys()]) if (!down.has(n)) held.delete(n);
 }
