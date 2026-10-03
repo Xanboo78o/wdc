@@ -185,8 +185,8 @@ function foot(nextLabel, next, hint = '') {
 function dayChips() {
   const now = new Date(), d0 = new Date(2026, 9, 3);
   const day = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - d0) / 864e5) + 1;
-  let s = day >= 1 ? `<div class="chunk chip sun"><small>CHASING THE WDC</small>DAY ${day}</div>` : '';
-  if (now.getMonth() === 9) s += `<div class="chunk chip hot"><small>RACETOBER</small>DAY ${now.getDate()}</div>`;
+  let s = day >= 1 ? `<div class="chunk chip yell"><small>CHASING THE WDC</small>DAY ${day}</div>` : '';
+  if (now.getMonth() === 9) s += `<div class="chunk chip dark"><small>RACETOBER</small>DAY ${now.getDate()}</div>`;
   return s;
 }
 const nowPlaying = () => { const n = menuMusic.title(); return n ? `<span class="eq"><i></i><i></i><i></i></span>${n}` : 'MUSIC OFF'; };
@@ -195,8 +195,8 @@ const PAGES = {
   // ------------------------------------------------------------ HOME
   home() {
     const t = track(), tk = teamKey(), team = TEAMS[tk], drv = tk ? driversOf(tk) : [];
-    page.append(h(`<div class="top"><div class="chunk logo">${FLAG}<div>CHASING WDC<small>"Racing for all"</small></div>${FLAG}</div>${dayChips()}<div class="grow"></div>
-      <div class="chunk chip cool" id="np"><small>ON THE RADIO</small><span>${nowPlaying()}</span></div></div>`));
+    page.append(h(`<div class="top"><div class="chunk logo">${FLAG}<div>CHASING <span>WDC</span><small>Racing for all</small></div></div>${dayChips()}<div class="grow"></div>
+      <div class="chunk chip" id="np"><small>ON THE RADIO</small><span>${nowPlaying()}</span></div></div>`));
     page.append(h(sayBox()));
     const mid = h(`<div class="mid">
       <div class="chunk me"><div class="no">${drv[0] ? drv[0].num ?? '' : '?'}</div><small>${team ? LEAGUES[team.league] + ' · YOU DRIVE FOR' : 'NO TEAM YET'}</small>
@@ -212,13 +212,13 @@ const PAGES = {
     const tiles = dock.querySelector('.tiles');
     const tile = (cls, icon, label, ok) => { const b = h(`<button class="chunk tile ${cls}">${ICON[icon]}${label}</button>`); tiles.append(b); return [b, ok]; };
     const list = [
-      tile('grey', 'circuit', 'CIRCUIT', () => show('circuit')),
-      tile('grey', 'garage', 'GARAGE', () => show('garage')),
-      tile('grey', 'showroom', 'SHOWROOM', () => { location.href = `./carview.html${tk ? '?team=' + tk : ''}`; }),
-      tile('grey', 'builder', 'BUILDER', () => { location.href = './build.html'; }),
-      tile('grey', 'jukebox', 'JUKEBOX', () => { location.href = './ost.html'; }),
-      tile('grey', 'dash', 'iPAD DASH', () => { location.href = './dash.html'; }),
-      tile('grey', 'settings', 'SETTINGS', () => show('settings')),
+      tile('', 'circuit', 'CIRCUIT', () => show('circuit')),
+      tile('', 'garage', 'GARAGE', () => show('garage')),
+      tile('', 'showroom', 'SHOWROOM', () => { location.href = `./carview.html${tk ? '?team=' + tk : ''}`; }),
+      tile('', 'builder', 'BUILDER', () => { location.href = './build.html'; }),
+      tile('', 'jukebox', 'JUKEBOX', () => { location.href = './ost.html'; }),
+      tile('', 'dash', 'iPAD DASH', () => { location.href = './dash.html'; }),
+      tile('', 'settings', 'SETTINGS', () => show('settings')),
     ];
     // RACE is first in focus order: it is what you came for
     item(dock.querySelector('.race'), { ok: () => show('circuit') });
@@ -297,7 +297,7 @@ const PAGES = {
     }
     rows.push(['TIME', 'time', [['live', 'LIVE'], ...up(TIME_PHASES)]], ['WEATHER', 'weather', [['live', 'LIVE'], ...up(WEATHER_KINDS), ['changing', 'CHANGING']]]);
     const t = track();
-    page.append(h(`<div class="top"><div class="title">${t[1].toUpperCase()}</div><div class="chunk chip sun"><small>${TEAMS[S.teams[S.car]] ? TEAMS[S.teams[S.car]].name : 'NO TEAM'}</small>${CARS[S.car].full.toUpperCase()}</div><div class="grow"></div>${sayBox()}</div>`));
+    page.append(h(`<div class="top"><div class="title">${t[1].toUpperCase()}</div><div class="chunk chip yell"><small>${TEAMS[S.teams[S.car]] ? TEAMS[S.teams[S.car]].name : 'NO TEAM'}</small>${CARS[S.car].full.toUpperCase()}</div><div class="grow"></div>${sayBox()}</div>`));
     optGrid(rows, 'session');
     foot(S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', () => {
       if (!S.teams[S.car]) { show('garage'); return; }
