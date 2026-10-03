@@ -12,6 +12,11 @@ import { CIRCUIT as c6 } from './ost/kate.js';
 import { CIRCUIT as c7 } from './ost/street.js';
 import { CIRCUIT as c8 } from './ost/adam1.js';
 
+// Adam, 2026-10-03: "swap em" — the fun songs trade circuits: WALLS plays at
+// Kate Mascoi and DOWN THE INSIDE on the Street Circuit.
+const swapFun = (a, b) => { const fa = a.songs[0]; a.songs = [b.songs[0], a.songs[1]]; b.songs = [fa, b.songs[1]]; };
+swapFun(c6, c7);
+
 const CIRCUITS = [c0, c1, c2, c3, c4, c5, c6, c7, c8];
 export const SONGS = {};
 for (const c of CIRCUITS) for (const s of c.songs) {
