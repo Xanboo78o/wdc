@@ -9,6 +9,7 @@ domain, no attribution required, safe on public GitHub Pages.
 | `clear.jpg` | [kloofendal_43d_clear_puresky](https://polyhaven.com/a/kloofendal_43d_clear_puresky) | dry, high sun, hard shadows |
 | `cloud.jpg` | [kloofendal_48d_partly_cloudy_puresky](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky) | broken cloud, the default racing sky |
 | `overcast.jpg` | [overcast_soil_puresky](https://polyhaven.com/a/overcast_soil_puresky) | flat North Sea light, almost no shadow |
+| `tropic.jpg` | [sunflowers_puresky](https://polyhaven.com/a/sunflowers_puresky) | fair-weather cumulus piling up, a humid afternoon |
 
 `skies.json` is the part that matters. For each sky it stores the **measured**
 sun direction and colour, the overhead sky colour and the horizon colour, all

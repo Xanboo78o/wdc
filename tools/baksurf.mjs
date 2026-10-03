@@ -126,7 +126,7 @@ function bake(key) {
 }
 
 const want = (process.argv[2] && process.argv[2] !== 'all')
-  ? [process.argv[2]] : ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco', 'nurburgring'];
+  ? [process.argv[2]] : ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco', 'nurburgring', 'sepang'];
 console.log('surface tags:');
 for (const k of want) bake(k);
 console.log('\ndata/surf/ — re-run after any change to the circuits or their corner lists');

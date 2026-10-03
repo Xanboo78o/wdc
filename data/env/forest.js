@@ -44,6 +44,11 @@ export const FOREST = {
   // Satellite: trees within 40 m of the run-off on 13% of the lap's sides
   // (OSM 9%); within 100 m, 34% (OSM 22%). The GP loop is open, the Eifel isn't.
   nurburgring: { kinds: ['forest'], conifer: 0.92, depth: 60, density: 1, scrub: true, cover: true },
+  // Sepang is cut out of oil-palm estate, with secondary rainforest on the
+  // low hills and ornamental palms round the paddock. `palm` puts palms in
+  // the firs' slot, so `conifer` here is the share of palms.
+  sepang:      { kinds: ['forest', 'park'], conifer: 0.7, palm: true, depth: 90, density: 1.2, scrub: true, cover: true,
+                 tall: 1.3, bridge: 200 },
   // Dune pines behind the sand, low scrub everywhere else.
   // Satellite: 15% within 40 m (OSM 2%) — the dune woods behind the scrub.
   zandvoort:   { kinds: ['forest'], conifer: 0.75, depth: 45, density: 0.85, scrub: true, cover: true },

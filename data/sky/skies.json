@@ -5,7 +5,8 @@
   "zandvoort": "overcast",
   "monaco": "clear",
   "baku": "clear",
-  "nurburgring": "overcast"
+  "nurburgring": "overcast",
+  "sepang": "tropic"
  },
  "skies": {
   "clear": {
@@ -49,6 +50,20 @@
    "punch": 0.348,
    "sky": "#cac9ca",
    "horizon": "#8d8986"
+  },
+  "tropic": {
+   "name": "tropic",
+   "slug": "sunflowers_puresky",
+   "why": "fair-weather cumulus piling up, a humid afternoon",
+   "sun": [
+    0.5904,
+    0.6824,
+    0.431
+   ],
+   "sunColour": "#ffc975",
+   "punch": 1,
+   "sky": "#808f9a",
+   "horizon": "#b9c4bf"
   }
  }
 }

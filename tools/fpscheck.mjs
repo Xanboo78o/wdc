@@ -26,7 +26,7 @@ for (let i = 0; i < args.length; i++) {
 }
 const grid = +flag('grid', 22), cam = +flag('cam', 0), floor = +flag('floor', 50);
 const named = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--')));
-const tracks = named.length ? named : ['monza', 'monaco', 'suzuka', 'zandvoort', 'baku', 'nurburgring', 'street', 'kate'];
+const tracks = named.length ? named : ['monza', 'monaco', 'suzuka', 'zandvoort', 'baku', 'nurburgring', 'sepang', 'street', 'kate'];
 
 let bad = 0;
 console.log(`  ${'circuit'.padEnd(12)} ${'fps'.padStart(6)} ${'draws'.padStart(6)} ${'tris'.padStart(9)}   (grid ${grid}, cam ${cam}, floor ${floor})`);

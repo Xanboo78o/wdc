@@ -164,7 +164,7 @@ async function bake(key) {
     `${cogs.size} file(s), ${[...cogs.values()].reduce((s, c) => s + c.cache.size, 0)} tiles, ${Math.round(fs.statSync(out).size / 1024)} KB`);
 }
 
-const all = ['monza', 'suzuka', 'zandvoort', 'monaco', 'baku', 'nurburgring', 'street'];
+const all = ['monza', 'suzuka', 'zandvoort', 'monaco', 'baku', 'nurburgring', 'sepang', 'street'];
 const want = !args[0] || args[0] === 'all' ? all : [args[0]];
 for (const k of want) { console.log(`=== ${k} ===`); await bake(k); }
 fs.writeFileSync(`${ROOT}data/env/cover/SOURCE.md`, `# Ground cover

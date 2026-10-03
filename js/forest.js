@@ -199,6 +199,26 @@ function coniferFoliage(rects, { h = 15, spread = 3.0, whorls = 16, perWhorl = 2
   return assemble(parts);
 }
 
+// A palm: a bare ringed trunk and one crown of long fronds at the very top,
+// the young ones standing up, the old ones hanging. It takes the fir's place in
+// the kit (see `palm` in makeKit), so on a tropical circuit `conifer` reads as
+// the share of palms. The sprigs of the needle atlas, drawn long and narrow,
+// are the leaflets of a frond.
+function palmFoliage(rects, { h = 11, frond = 4.8, fronds = 20, seed = 5 } = {}) {
+  const r = rng(seed), parts = [];
+  for (let k = 0; k < fronds; k++) {
+    const t = k / (fronds - 1);
+    const yaw = k * 2.3999 + r() * 0.35;
+    const len = frond * (0.75 + r() * 0.4) * (0.7 + 0.3 * Math.sin(t * Math.PI));
+    parts.push(card(rects[k % rects.length], len * 0.34, len, {
+      rows: 4, tilt: 0.35 + t * 1.25 + r() * 0.2, yaw, cross: true,
+      droop: len * (0.18 + 0.42 * t), shade: 0.95 - 0.45 * t,
+      at: [0, h - 0.25, 0],
+    }));
+  }
+  return assemble(parts);
+}
+
 // A broadleaf gets real branches, and the clusters hang on the ends of them.
 function broadBranches(h, crown, seed) {
   const r = rng(seed), out = [];
@@ -473,7 +493,8 @@ function bakeBanner(renderer, kit, { width, height, seed, tall }) {
       const n = 1 + Math.floor(r() * 3), top = height * (0.35 + Math.pow(r(), 0.6) * 0.65);
       for (let k = 0; k < n; k++, x += 0.9 + r() * 1.1) {
         const h = top * (0.7 + r() * 0.3);
-        if (r() < kit.conifer) sapling(x, h, 0.85 + r() * 0.15);
+        // Under palms the undergrowth is broadleaf scrub, not young firs.
+        if (!kit.palm && r() < kit.conifer) sapling(x, h, 0.85 + r() * 0.15);
         else bush(x, h, 0.85 + r() * 0.15);
       }
       x += 1.8 + r() * 2.6;                       // the gap
@@ -513,7 +534,7 @@ function bakeBanner(renderer, kit, { width, height, seed, tall }) {
 // are 20-30 m (tall 2.3). The crown widens a little slower than the tree
 // rises, the sprays of leaves stay leaf-sized and there are more of them, so a
 // tall tree is a bigger tree and not a magnified one.
-export function makeKit(renderer, plants, { conifer = 0.5, tall = 1 } = {}) {
+export function makeKit(renderer, plants, { conifer = 0.5, tall = 1, palm = false } = {}) {
   const needleRects = plants.cutouts('needle'), leafRects = clusters(plants.cutouts('leaf'));
   if (!needleRects.length || !leafRects.length) return null;
   const mat = {
@@ -525,7 +546,7 @@ export function makeKit(renderer, plants, { conifer = 0.5, tall = 1 } = {}) {
   };
   if (!mat.needle || !mat.leaf) return null;
   for (const m of [mat.needle, mat.leaf, mat.bark]) m.vertexColors = true;
-  const kit = { mat, rects: { needle: needleRects, leaf: leafRects }, conifer, grow: tall };
+  const kit = { mat, rects: { needle: needleRects, leaf: leafRects }, conifer, grow: tall, palm };
 
   const hB = 9.5 * tall, crown = 3.6 * Math.pow(tall, 0.85), leaf = 3.6 * Math.pow(tall, 0.55);
   // A 22 m trunk is a little stouter, not 2.3 times as stout: the first tall
@@ -551,6 +572,16 @@ export function makeKit(renderer, plants, { conifer = 0.5, tall = 1 } = {}) {
       mat: mat.leaf,
     },
   };
+  // The tropics: the fir's slot grows palms instead. An oil palm in an estate
+  // stands 8-12 m with fronds 5 m long; the trunk is grey and barely tapers.
+  if (palm) {
+    const hP = 11 * Math.pow(tall, 0.8);
+    species.conifer = {
+      trunk: trunkGeometry(0.3 * girth, 0.22 * girth, hP, { sides: 7, lean: 0.03, shade: bark * 0.9 }),
+      foliage: palmFoliage(needleRects, { h: hP, frond: 4.8 * Math.pow(tall, 0.5), fronds: 20, seed: 5 }),
+      mat: mat.needle,
+    };
+  }
   // Past LOD_FULL a grown crown is drawn with half its sprays, each half as
   // big again: the same silhouette at 100 m and more, for half the triangles.
   // Measured on Monza with 22 cars: 50.3 fps with every spray at every range.

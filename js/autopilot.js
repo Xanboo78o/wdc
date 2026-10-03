@@ -52,6 +52,7 @@ const CEILING = {
   monaco:    { f4: 0.98, f1: 0.95 },
   baku:      { f4: 0.84, f1: 1.01 },
   nurburgring: { f4: 0.78, f1: 1.01 },
+  sepang:      { f4: 0.78, f1: 1.01 },
 };
 const ceilingFor = (track, spec) => CEILING[track.key]?.[spec.key] ?? 0.82;
 

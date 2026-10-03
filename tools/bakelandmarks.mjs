@@ -49,6 +49,9 @@ async function overpass(query, cacheFile) {
         method: 'POST',
         headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ data: query }),
+        // A mirror that accepts the connection and never answers would
+        // otherwise hold the bake forever (overpass.kumi.systems, 2026-10-03).
+        signal: AbortSignal.timeout(200000),
       });
       if (res.ok) {
         const txt = await res.text();
@@ -74,6 +77,7 @@ const QUERY = {
   zandvoort: `[out:json][timeout:120];(nwr["man_made"="tower"]["tower:type"="radar"](52.37,4.52,52.41,4.57);nwr["building"="grandstand"](52.37,4.52,52.41,4.57);way["name"~"Hugenholtzbocht|Arie Luyendykbocht|Tarzanbocht"](52.37,4.52,52.41,4.57););out body geom;`,
   baku: `[out:json][timeout:120];(way["place"="neighbourhood"]["material"="stone"](40.36,49.828,40.372,49.842);way["name"="Qız Qalası"](40.36,49.83,40.37,49.84);way["man_made"="tower"](40.36,49.83,40.37,49.84);way["landuse"]["name"="Flame Towers"](40.355,49.815,40.365,49.83);way["building"]["building:levels"](around:140,40.3595,49.8266);way["name"="Hökumət Evi"](40.37,49.84,40.38,49.86););out body geom;`,
   nurburgring: `[out:json][timeout:120];(way(around:200,50.3467,6.9535)["historic"];way(around:200,50.3467,6.9535)["man_made"="tower"];way(around:200,50.3467,6.9535)["building"];way["highway"="raceway"](50.31,6.91,50.35,6.97);way["building"="grandstand"](50.31,6.91,50.35,6.97););out body geom;`,
+  sepang: `[out:json][timeout:120];(way["building"="grandstand"](2.745,101.72,2.775,101.75););out body geom;`,
 };
 
 // ---------------------------------------------------------------------------
@@ -430,6 +434,11 @@ SPEC.nurburgring = (C, E) => {
   items.push({ type: 'ribbon', name: 'Nordschleife (Hatzenbach, Hocheichen, Hohenrain, Sabine-Schmitz-Kurve, T13)', src: 'OSM raceways ' + nords.map(w => `${w.id} ${w.tags.name}`).join('; ') + ' — resampled to 4 m, clipped 3 m clear of the GP circuit', width: 9, runs: runs.filter(r => r.length > 2) });
   return items;
 };
+
+// SEPANG. Nothing here: Sepang is a DLC circuit and its landmarks — the Main
+// Grandstand under its leaves, the paddock, the gantry — are built by its own
+// set (js/dlc/sepang/), not from this file.
+SPEC.sepang = () => [];
 
 async function bake(key) {
   if (!QUERY[key] || !SPEC[key]) { console.log(`  ${key}: no landmark spec yet`); return; }

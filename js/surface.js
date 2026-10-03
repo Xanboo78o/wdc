@@ -38,6 +38,7 @@ export const KERB_PAINT = {
   zandvoort: [0xcb2b2b, 0xefefea],
   baku: [0xc4252b, 0xeeeeea],
   nurburgring: [0xc6272d, 0xeeeeea],
+  sepang: [0xc8262c, 0xeeeeea],
 };
 
 export async function loadSurface(key) {

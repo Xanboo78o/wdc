@@ -106,6 +106,8 @@ const LOCAL = {
 // Mediterranean city and is almost entirely render. This one number per track
 // does more for "it actually looks like the area" than any amount of geometry.
 const BRICKINESS = { zandvoort: 0.78, monza: 0.42, suzuka: 0.2, monaco: 0.1, baku: 0.16, nurburgring: 0.25,
+  // Sepang: Tilke concrete, glass and steel, rendered pit buildings.
+  sepang: 0.06,
   // Pembroke, NH: painted clapboard houses, the odd brick mill building.
   street: 0.12 };
 

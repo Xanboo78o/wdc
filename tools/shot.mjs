@@ -88,7 +88,7 @@ const EVALS = flagAll('eval');
 const ALL = args.includes('--all');
 const positional = args.filter((a, i) => !a.startsWith('--') &&
   !(i > 0 && args[i - 1].startsWith('--') && VALUE_FLAGS.has(args[i - 1].slice(2))));
-const TRACKS = ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco', 'nurburgring'];
+const TRACKS = ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco', 'nurburgring', 'sepang'];
 const targets = ALL ? TRACKS.map(t => `${t}:f1`) : [positional[0] || 'monza:f1'];
 const target = targets[0];
 const photo = flag('photo');

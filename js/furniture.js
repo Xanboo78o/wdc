@@ -729,6 +729,22 @@ const FLAG_ART = {
   FRANCE: g => stripesV(g, ['#0055a4', '#ffffff', '#ef4135']),
   AUSTRIA: g => stripesH(g, ['#ed2939', '#ffffff', '#ed2939']),
   BELGIUM: g => stripesV(g, ['#000000', '#fdda24', '#ef3340']),
+  // Jalur Gemilang: fourteen red and white stripes (red at the top), a blue
+  // canton over the top eight stripes and half the fly, and in it a yellow
+  // crescent and fourteen-pointed star.
+  MALAYSIA: g => {
+    const w = g.canvas.width, h = g.canvas.height, c = h / 14;
+    for (let i = 0; i < 14; i++) { g.fillStyle = i % 2 ? '#ffffff' : '#cc0001'; g.fillRect(0, i * c, w, c + 1); }
+    g.fillStyle = '#010066'; g.fillRect(0, 0, w * 0.5, c * 8);
+    disc(g, 0.17, 4 / 14, 0.2, '#ffcc00'); disc(g, 0.195, 4 / 14, 0.17, '#010066');
+    const sx = 0.33 * w, sy = (4 / 14) * h, R = 0.19 * h, r = 0.08 * h;
+    g.fillStyle = '#ffcc00'; g.beginPath();
+    for (let k = 0; k < 28; k++) {
+      const a = -Math.PI / 2 + k * Math.PI / 14, d = k % 2 ? r : R;
+      g.lineTo(sx + Math.cos(a) * d, sy + Math.sin(a) * d);
+    }
+    g.fill();
+  },
 };
 function stripesH(g, cols) {
   const w = g.canvas.width, h = g.canvas.height;

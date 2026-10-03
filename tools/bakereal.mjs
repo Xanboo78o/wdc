@@ -1,6 +1,6 @@
 // bakereal.mjs — a REAL circuit, baked from survey data, the way the first five were.
 //
-//   node tools/bakereal.mjs <key> [--force]      (only: nurburgring)
+//   node tools/bakereal.mjs <key> [--force]      (nurburgring, sepang)
 //
 // Monza, Zandvoort, Suzuka, Monaco and Baku were baked by DIRTY AIR's
 // tools/bake.mjs, and data/tracks/monza.json is still byte-identical to what
@@ -44,6 +44,7 @@ const ENDPOINTS = [
 
 export const CIRCUITS = {
   nurburgring: { id: 'de-1927', name: 'Nürburgring', full: 'Nürburgring Grand-Prix-Strecke' },
+  sepang: { id: 'my-1999', name: 'Sepang', full: 'Sepang International Circuit' },
 };
 
 // Per-circuit authored layer, same meaning as DIRTY AIR's SPEC. `w` is HALF
@@ -63,6 +64,19 @@ export const SPEC = {
     // is the Nordschleife's tourist-drive lane on the other side of the
     // complex and must not be picked up.
     pitName: /^Boxengasse$/i,
+  },
+  sepang: {
+    aiPace: 0.8,
+    // Hermann Tilke's 1999 template: very wide (16 m on the straights, up to
+    // 25 m at the hairpins), paved and gravel run-off everywhere, 5.543 km.
+    country: 'MALAYSIA', w: 8, runoff: 20, wall: 'gravel', startOff: 0,
+    drs: 2, corner: [200, 14, 24, 40],
+    notCorner: /pit|North|South|connection|link|kart/i,
+    pitName: /pit/i,
+    // Both straights run past the Main Grandstand. Widen only the PIT side for
+    // the pit lane, and bring the barrier in front of the surveyed stands —
+    // or the wall a car hits stands inside the seats (found 2026-10-03).
+    pitSideOnly: true, standsClear: 3,
   },
 };
 
@@ -325,9 +339,13 @@ export function bakeCircuit(key, meta, spec, osm, opt = {}) {
     const laps = ds.map(d => ((d.s - startOff) % length + length) % length);
     let name = w.tags['name:en'] || w.tags.name || null;
     if (name && spec.notCorner && spec.notCorner.test(name)) name = null;
+    // A bare number IS the corner number (Sepang's OSM ways are named "10",
+    // "12", "15"), not a name — or the tower would read "15" for Turn 15.
+    let num = w.tags['raceway:corner_number'] ? +w.tags['raceway:corner_number'] : null;
+    if (name && /^\d+$/.test(name)) { num = num ?? +name; name = null; }
     tagHits.push({
       name,
-      num: w.tags['raceway:corner_number'] ? +w.tags['raceway:corner_number'] : null,
+      num,
       width: w.tags.width ? +w.tags.width : null,
       bank: /(\d+)\s*graden/.exec(w.tags.description || '') ? +/(\d+)\s*graden/.exec(w.tags.description)[1] : 0,
       s0: Math.min(...laps), s1: Math.max(...laps), mid: laps[Math.floor(laps.length / 2)],
@@ -418,8 +436,41 @@ export function bakeCircuit(key, meta, spec, osm, opt = {}) {
       const inRange = pit.entryS <= pit.exitS
         ? (sp >= pit.entryS && sp <= pit.exitS)
         : (sp >= pit.entryS || sp <= pit.exitS);
-      if (inRange) { const v = Math.max(0, need - W[p.idx]); RUNL[p.idx] = Math.max(RUNL[p.idx], v); RUNR[p.idx] = Math.max(RUNR[p.idx], v); }
+      if (!inRange) continue;
+      const v = Math.max(0, need - W[p.idx]);
+      if (!spec.pitSideOnly || pit.side > 0) RUNL[p.idx] = Math.max(RUNL[p.idx], v);
+      if (!spec.pitSideOnly || pit.side < 0) RUNR[p.idx] = Math.max(RUNR[p.idx], v);
     }
+  }
+
+  // ---- the barrier stands in front of the grandstands -----------------------------
+  // `standsClear` metres between the barrier and the surveyed front of any
+  // grandstand (data/env/<key>.json, same projection) along the lateral.
+  const envFile = ROOT + `data/env/${key}.json`;
+  if (spec.standsClear && fs.existsSync(envFile)) {
+    const stands = JSON.parse(fs.readFileSync(envFile, 'utf8')).buildings.filter(bd => bd.k === 'grandstand');
+    const hit = (px, py, dx, dy, a, c) => {
+      const ex = c[0] - a[0], ey = c[1] - a[1], den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-9) return null;
+      const t = ((a[0] - px) * ey - (a[1] - py) * ex) / den, u = ((a[0] - px) * dy - (a[1] - py) * dx) / den;
+      return t > 0 && u >= 0 && u <= 1 ? t : null;
+    };
+    let moved = 0;
+    for (let k = 0; k < sorted.length; k++) {
+      const p = sorted[k], q = sorted[(k + 1) % sorted.length];
+      const h = Math.atan2(q.y - p.y, q.x - p.x), lx = -Math.sin(h), ly = Math.cos(h);
+      for (const [sd, RUNS] of [[1, RUNL], [-1, RUNR]]) {
+        let d = Infinity;
+        for (const st of stands) for (let j = 0; j < st.p.length; j++) {
+          const t = hit(p.x, p.y, lx * sd, ly * sd, st.p[j], st.p[(j + 1) % st.p.length]);
+          if (t != null && t < d) d = t;
+        }
+        if (d > 80) continue;
+        const cap = Math.max(1.5, d - W[p.idx] - spec.standsClear);
+        if (cap < RUNS[p.idx]) { RUNS[p.idx] = cap; moved++; }
+      }
+    }
+    log.push(`   barrier brought in front of the grandstands at ${moved} samples`);
   }
 
   const b = bbox(center);
@@ -465,6 +516,9 @@ async function overpass(query, cacheFile, force) {
         method: 'POST',
         headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ data: query }),
+        // A mirror that accepts the connection and never answers would
+        // otherwise hold the bake forever (overpass.kumi.systems, 2026-10-03).
+        signal: AbortSignal.timeout(200000),
       });
       if (res.ok) {
         const txt = await res.text();

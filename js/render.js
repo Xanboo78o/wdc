@@ -39,6 +39,7 @@ import { signAtlas, buildBarriers, buildTyreWalls, buildBoards, buildStartFinish
 import { carLamps, buildCourseLights, LightTrails } from './lamps.js';
 import { buildGrandstands } from './crowd.js';
 import { placeLandmarks } from './landmarks.js';
+import { dlcFor } from './dlc.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar, buildGT3, liveryAtlas } from './car.js';
@@ -1346,21 +1347,26 @@ export class View {
     // The pit complex is laid out BEFORE the city so the city can be told to
     // keep out of its way.
     const corridor = pitCorridor(t);
+    // A DLC circuit (js/dlc.js) brings its own set and leaves out the shared
+    // pieces it replaces; the buildings it rebuilds by hand leave the env here.
+    const dlc = dlcFor(t.key), skip = dlc ? dlc.replaces : new Set();
+    if (dlc && env) dlc.prepareEnv(env, t);
     stats.landmarks = placeLandmarks(this, env);   // js/landmarks.js: before the city, which it may clear over a tunnel
     stats.env = buildEnv(S, env, t, look, corridor, this.world);
     this.corridor = corridor;
 
     const sign = signAtlas(t);
     this.sign = sign;
-    buildBarriers(S, t, look, sign, corridor, this.world);
-    buildTyreWalls(S, t, look, this.world);
-    buildBoards(S, t, this.line, look, sign, this.world);
-    buildStartFinish(S, t, look, sign, this.world);
-    buildMarshalPosts(S, t, look, this.world);
-    buildFlagpoles(S, t, this.world);
+    if (!skip.has('barriers')) buildBarriers(S, t, look, sign, corridor, this.world);
+    if (!skip.has('tyreWalls')) buildTyreWalls(S, t, look, this.world);
+    if (!skip.has('boards')) buildBoards(S, t, this.line, look, sign, this.world);
+    if (!skip.has('startFinish')) buildStartFinish(S, t, look, sign, this.world);
+    if (!skip.has('marshals')) buildMarshalPosts(S, t, look, this.world);
+    if (!skip.has('flagpoles')) buildFlagpoles(S, t, this.world);
     this.courseLights = buildCourseLights(S, t, this.world);
     stats.stands = buildGrandstands(S, t, env, look, this.world, sign);
     stats.pit = buildPitLane(S, t, look, sign, this.world);
+    if (dlc) stats.dlc = dlc.build(this, { S, t, env, look, sign, world: this.world, corridor, line: this.line });
     this.tvCams = this._tvCameras();
     stats.tvCams = this.tvCams.length;
 

@@ -8,6 +8,7 @@ import { CIRCUIT as c2 } from './ost/monaco.js';
 import { CIRCUIT as c3 } from './ost/zandvoort.js';
 import { CIRCUIT as c4 } from './ost/baku.js';
 import { CIRCUIT as c5 } from './ost/nurburgring.js';
+import { CIRCUIT as c9 } from './ost/sepang.js';
 import { CIRCUIT as c6 } from './ost/kate.js';
 import { CIRCUIT as c7 } from './ost/street.js';
 import { CIRCUIT as c8 } from './ost/adam1.js';
@@ -17,7 +18,7 @@ import { CIRCUIT as c8 } from './ost/adam1.js';
 const swapFun = (a, b) => { const fa = a.songs[0]; a.songs = [b.songs[0], a.songs[1]]; b.songs = [fa, b.songs[1]]; };
 swapFun(c6, c7);
 
-const CIRCUITS = [c0, c1, c2, c3, c4, c5, c6, c7, c8];
+const CIRCUITS = [c0, c1, c2, c3, c4, c5, c9, c6, c7, c8];
 export const SONGS = {};
 for (const c of CIRCUITS) for (const s of c.songs) {
   if (SONGS[s.id]) throw new Error('duplicate song id ' + s.id);

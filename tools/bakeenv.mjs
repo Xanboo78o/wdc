@@ -30,7 +30,7 @@ const ENDPOINTS = [
 // building sits 40 m from where it belongs.
 const CIRCUITS = {
   suzuka: 'jp-1962', zandvoort: 'nl-1948', monaco: 'mc-1929',
-  monza: 'it-1922', baku: 'az-2016', nurburgring: 'de-1927',
+  monza: 'it-1922', baku: 'az-2016', nurburgring: 'de-1927', sepang: 'my-1999',
 };
 const PAD = 600;        // metres of world to fetch beyond the track's bounding box
 
@@ -98,6 +98,9 @@ async function overpass(query, cacheFile, force) {
         method: 'POST',
         headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ data: query }),
+        // A mirror that accepts the connection and never answers would
+        // otherwise hold the bake forever (overpass.kumi.systems, 2026-10-03).
+        signal: AbortSignal.timeout(200000),
       });
       if (res.ok) {
         const txt = await res.text();

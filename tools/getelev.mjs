@@ -513,7 +513,7 @@ async function bakeDTM(key, src, srcKey, track, env, toLL, out) {
 }
 
 const want = (process.argv[2] && process.argv[2] !== 'all')
-  ? [process.argv[2]] : ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco', 'nurburgring'];
+  ? [process.argv[2]] : ['monza', 'zandvoort', 'suzuka', 'baku', 'monaco', 'nurburgring', 'sepang'];
 const force = process.argv.includes('--force');
 for (const key of want) await bake(key, force);
 

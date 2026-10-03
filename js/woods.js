@@ -169,7 +169,7 @@ export async function plantWoods(scene, env, track, look, corridor = null, world
   if (!flora) return null;
   const plants = new BuildLook(renderer, look, flora, {});
   const spec = { ...FOREST._, ...(FOREST[env.key] || FOREST[track.key] || {}) };
-  const kit = makeKit(renderer, plants, { conifer: spec.conifer, tall: spec.tall || 1 });
+  const kit = makeKit(renderer, plants, { conifer: spec.conifer, tall: spec.tall || 1, palm: !!spec.palm });
   if (!kit) return null;
 
   const slack = slackIndex(track);

@@ -79,6 +79,7 @@ const TRACKS = [
   ['baku', 'Baku', 'AZERBAIJAN'],
   ['monaco', 'Monaco', 'MONACO'],
   ['nurburgring', 'Nürburgring', 'GERMANY'],
+  ['sepang', 'Sepang', 'MALAYSIA'],
 ];
 let pickTrack = 'monza', pickCar = 'f4';
 // Race settings. `pickGrid` counts EVERY car including yours, so 22 is the real
