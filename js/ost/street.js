@@ -19,15 +19,19 @@ const SC = ['Eb', 'Bb', 'F', 'Gm'];
 const KICK = { f0: 180, f1: 50, sweep: 0.05, dec: 0.22, drive: 1.3, click: 0.6 };
 const BOUNCE = [[2, 0, 1, 0.9], [6, 0, 1, 0.9], [10, 0, 1, 0.9], [14, 0, 1, 0.9]];
 const BOUNCE_O = { cut: 1200, q: 2.2, fdec: 0.09 };
-const CHUG = [0, 2, 3, 6, 8, 10, 11, 14].map((s, i) => [s, 0, 1, i % 4 === 0 ? 0.95 : 0.7, { mute: true }]);
+// the chugs jab on a 3-3-2 tresillo, not the four-square rally bounce Kate's song uses
+const CHUG = [0, 3, 6, 8, 11, 14].map((s, i) => [s, 0, 1, i % 4 === 0 ? 0.95 : 0.7, { mute: true }]);
 const OPEN = [[0, 0, 3, 0.95], [3, 0, 3, 0.8], [6, 0, 4, 0.9], [10, 0, 2, 0.75], [12, 0, 4, 0.9]];
-// the riff: Morse-code staccato on the organ, one bar
-const RIFF = [[0, 'F5'], [2, 'F5'], [3, 'D5'], [6, 'F5'], [8, 'G5'], [10, 'F5'], [11, 'D5'], [14, 'C5']];
-const riff = (vel, cut) => N('m1', RIFF.map(([s, n]) => [s, [midi(n), midi(n) - 12], 1, vel, cut ? { cut } : undefined]), 16);
-const CM = [[0, 'G5', 2], [2, 'G5', 2], [4, 'Bb5', 4], [8, 'G5', 2], [10, 'F5', 2], [12, 'Eb5', 4],
-  [16, 'D5', 2], [18, 'F5', 2], [20, 'F5', 4], [24, 'D5', 2], [26, 'Bb4', 2], [28, 'D5', 4],
-  [32, 'C5', 2], [34, 'F5', 2], [36, 'A5', 4], [40, 'G5', 2], [42, 'F5', 2], [44, 'C5', 4],
-  [48, 'D5', 8], [56, 'Bb4', 4], [60, 'G4', 4]];
+// the riff: two bars of jabs on a 3-3-3-3-4 grid, boxed in — a high question
+// hammering between the walls, a low answer that climbs back out
+const RIFF = [[0, 'D6'], [3, 'D6'], [6, 'C6'], [9, 'Bb5'], [12, 'C6'],
+  [16, 'F5'], [19, 'F5'], [22, 'G5'], [25, 'Bb5'], [28, 'A5'], [30, 'F5']];
+const riff = (vel, cut) => N('m1', RIFF.map(([s, n]) => [s, [midi(n), midi(n) - 12], 1, vel, cut ? { cut } : undefined]), 32);
+// the chorus: long notes pushed off the beat, every bar leaning into the next
+const CM = [[0, 'G5', 6], [6, 'F5', 2], [8, 'Eb5', 3], [11, 'F5', 5],
+  [16, 'D5', 3], [19, 'F5', 3], [22, 'Bb5', 6], [28, 'A5', 2], [30, 'Bb5', 2],
+  [32, 'C6', 6], [38, 'A5', 2], [40, 'F5', 3], [43, 'G5', 3], [46, 'A5', 2],
+  [48, 'G5', 10], [58, 'D5', 3], [61, 'F5', 3]];
 // a twin: one slam, the downshift, the exhaust, and the throttle back on
 const twin = (side, pan) => ({
   stab: mel('stab', 16, [[0, ['Bb3', 'F4', 'Bb4', 'D5'], 3, 1]]),
