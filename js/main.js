@@ -33,6 +33,7 @@ import { driverAt, teamOf, TEAMS, FIELDS, setField, LEAGUES, teamsIn, driversOf,
 import { liveryFor } from './livery.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 import { TRACKS } from './tracks.js';
+import { makeDirector } from './attract.js';
 import { THEMES, hasTheme, defaultTheme, setTheme, sayFor, loadingLine, pauseLine, resultMood, MUSIC_LEVELS, hasLevel, menuMusic, mountChrome, mood, boardNo } from './menuui.js';
 
 const $ = id => document.getElementById(id);
@@ -624,7 +625,8 @@ async function start() {
       livery: liveryFor(pickTeams[pickCar], TEAMS[pickTeams[pickCar]]),
       team: TEAMS[pickTeams[pickCar]] || null,
     });
-    if (ATTRACT) state.view.setMode(1);   // chase: behind the bot, the rival ahead in shot (TV sat behind trees)
+    // chase to begin with (TV sat behind trees); js/attract.js cuts between cameras and stages the incidents
+    if (ATTRACT) { state.view.setMode(1); if (state.race) state.director = makeDirector(state.race, state.view, state.me); }
   } else {
     location.reload(); return;          // changing circuit rebuilds the world
   }
@@ -986,7 +988,9 @@ function loop(now) {
   // Ask for a pit stop. The lane controller in js/pitstop.js takes the car over
   // once it commits, the way every racing game does it — the interesting
   // decision is WHEN to come in, not whether you can drive at 80 km/h.
-  if (state.race && hands.tapped('KeyP')) {
+  // On the wheel it is 'w:pit', assigned in pad.html — before that a driver
+  // on the rig had no way to pit at all.
+  if (state.race && (hands.tapped('KeyP') || hands.tapped('w:pit'))) {
     const me = state.me;
     me.pitRequest = !me.pitRequest;
     toast(me.pitRequest ? 'BOX THIS LAP' : 'PIT CANCELLED');
@@ -1123,6 +1127,7 @@ function loop(now) {
   ptt(hands.wheelHeld('radio'));
   if (state.race) {
     if (engineer.race !== state.race) engineer.begin(state.race);
+    if (state.director) state.director(frame);
     if (!ATTRACT) engineer.tick(frame);
     // Celebrate the pass (js/race.js cheerTick): the crowd goes up and the
     // tower flashes you. The radio call is the engineer's, from the same event.

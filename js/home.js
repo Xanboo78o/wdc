@@ -114,24 +114,33 @@ const live = $('#live');
 // SUPERCASUAL + HARD overtakes is the mode that keeps a rival within reach.
 const SMALL = ['adam1', 'monaco'];
 let liveKey = null, liveTrack = null;
+let _evAt = 0;
 function startLive() {
   if (new URLSearchParams(location.search).has('nolive')) return;   // ?nolive=1: no race behind (a slow machine, or a screenshot)
   if (liveKey === S.car) return;
   liveKey = S.car;
   liveTrack = SMALL[Math.floor(Math.random() * SMALL.length)];
   live.classList.remove('up');
-  live.src = `./index.html?auto=${liveTrack}:${S.car}&race=1&grid=2&start=2&laps=30&tier=supercasual&battle=hard&nodnf=1&attract=1&ffb=0&sound=0&lo=1&mirror=0&seed=${Date.now() % 9973}`;
+  live.src = `./index.html?auto=${liveTrack}:${S.car}&race=1&grid=2&start=2&laps=30&tier=supercasual&battle=hard&nodnf=1&attract=1&ffb=0&sound=0&lo=1&mirror=0&time=${['day', 'morning', 'evening', 'sunset'][Math.floor(Math.random() * 4)]}&seed=${Date.now() % 9973}`;
 }
 // the iframe fades in once the race is really running, and the tower reads it
 setInterval(() => {
   let t = null;
   try { t = live.contentWindow.__attract && live.contentWindow.__attract(); } catch { /* still loading */ }
   live.classList.toggle('up', !!(t && t.tower));
+  // something just happened out there: shout it (js/attract.js), then let the bubble go back to talking
+  let ev = null;
+  try { ev = live.contentWindow.__attractEvent; } catch { /* loading */ }
+  if (ev && ev.at !== _evAt && current === 'home') {
+    _evAt = ev.at;
+    const el = $('.say');
+    if (el) { el.textContent = ev.text; el.classList.remove('in', 'shout'); void el.offsetWidth; el.classList.add('shout'); setTimeout(() => { if ($('.say') === el) { el.classList.remove('shout'); el.textContent = _say; } }, 4200); }
+  }
   const box = $('#tower');
   if (!box) return;
   if (!t || !t.tower) { box.innerHTML = `<small>LIVE · WARMING UP…</small>`; return; }
   box.innerHTML = `<small><u>●</u> LIVE · ${(TRACKS.find(t => t[0] === liveTrack) || ['', ''])[1].toUpperCase()} · LAP ${t.lap}/${t.laps}</small>`
-    + t.tower.slice(0, 7).map(e => `<div class="trow"><b>${e.p}</b><i style="background:${e.col}"></i><span>${e.you ? 'THE BOT IN YOUR SEAT' : e.n}</span><em>${e.g}</em></div>`).join('');
+    + t.tower.slice(0, 7).map(e => `<div class="trow"><b>${e.p}</b><i style="background:${e.col}"></i><span>${e.you ? 'YOUR SEAT (BOT)' : e.n}</span><em>${e.g}</em></div>`).join('');
 }, 700);
 
 // ---------------------------------------------------------------- pages
