@@ -542,6 +542,8 @@ async function start() {
       playerGrid: slot, tier, player: true, battle,
       noDnf: q.has('nodnf') ? q.get('nodnf') === '1' : pickNoDnf,
       seed: +q.get('seed') || (1 + Math.floor(Math.random() * 9973)),
+      // behind home.html a bot sits in your seat: give it racecraft (attack, defend, a ctx), not a blind lap
+      standIn: ATTRACT,
     });
     state.me = state.race.entries.find(e => e.isPlayer);
     state.car = state.me.car;
