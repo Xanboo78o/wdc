@@ -409,7 +409,9 @@ export class Field {
 
       const latG = Math.max(-5, Math.min(5, (car.vx * car.r) / 9.81));
       const grounded = car.airborne ? 0 : 1;
-      rig.tilt.rotation.x = (car.roll || 0) + latG * 0.030
+      // No cornering lean on the ground (Adam, 2026-10-03) — camber only, and
+      // the true attitude once airborne. Same rule as your own car in render.js.
+      rig.tilt.rotation.x = (car.roll || 0) * (1 - grounded)
         + bankRoll(view.bank, t, proj.i, proj.lat) * grounded;
       rig.tilt.rotation.z = (car.pitch || 0) + car.gLong * 0.022 + slopePitch(view.world, t, proj, car) * grounded;
 

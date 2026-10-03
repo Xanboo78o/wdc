@@ -1516,8 +1516,12 @@ export class View {
     // at pi — so the exaggeration has to go away, and it has to go away
     // smoothly or the car snaps upright the instant it takes off.
     this.leanK += ((car.airborne ? 1 : this.soften) - this.leanK) * Math.min(1, dt * 6);
-    this.car.rotation.x = (car.roll || 0) * this.leanK
-      + bankRoll(this.bank, this.track, proj.i, proj.lat) * grounded;
+    // NO CORNERING LEAN (Adam, 2026-10-03: "the car doesnt lean in turns, only
+    // my pov should and just a teeny"). On the ground the body takes only the
+    // camber of the road; the spring roll goes to the driver's eye instead
+    // (`this.headLean`, used by the bolted cameras below). Airborne, the true
+    // attitude is handed back in full, as before.
+    this.headLean = (car.roll || 0) * this.leanK * grounded;
     this.car.rotation.z = (car.pitch || 0) * this.leanK + slopePitch(this.world, this.track, proj, car) * grounded;
     // The wheels move in their arches. 60 mm of travel is a lot of visible
     // movement at this scale, and it is the cue that reads as "this is a
@@ -1761,6 +1765,16 @@ export class View {
       // at 0 it is a chase camera that happens to be close.
       this._v2.set(0, 1, 0).applyQuaternion(this.car.getWorldQuaternion(this._q))
         .lerp(this._up, 1 - (rig.roll ?? 0.6)).normalize();
+      // The body no longer leans in a corner; the eye does, a TEENY bit —
+      // 12% of what the chassis used to show, about 1 deg at full load.
+      // Rotated about the car's own nose axis, so it is the same lean the
+      // body had, only smaller. ?headlean=0 removes it, ?headlean=0.3 more.
+      if (this._headK === undefined) { const hq = new URLSearchParams(location.search).get('headlean'); this._headK = hq != null && hq !== '' && Number.isFinite(+hq) ? +hq : 0.12; }
+      if (this.headLean && this._headK) {
+        this._v3 = this._v3 || new THREE.Vector3();
+        this._v3.set(1, 0, 0).applyQuaternion(this._q);
+        this._v2.applyAxisAngle(this._v3, this.headLean * this._headK);
+      }
       this.camera.up.copy(this._v2);
       this.camera.position.copy(this._v0).addScaledVector(this._v2, 0);
       this.camera.position.x += jx * amp; this.camera.position.y += jy * amp; this.camera.position.z += jz * amp;
