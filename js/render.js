@@ -1686,16 +1686,36 @@ export class View {
     const sfxOn = SFX.on && SFX.shake > 0;
     const buzz = sfxOn ? 0 : (0.0016 + car.speed * 0.00017) * (rig.kick || 0);
     const grassRough = (car.surface ?? 1) < 0.5 ? (hud.rough || 0) : 0;
-    this.shake = Math.max(this.shake * (1 - dt * 6),
-      grassRough * 0.05 + Math.max(0, Math.abs(latG) - 7) * 0.006);
+    // A crash is a sudden loss of speed far past anything the brakes can do
+    // (an F1 car brakes at ~6 g; a wall is tens of g). latG above is clamped
+    // to 5 g, so it can never say "crash" on its own.
+    // Only a LOSS of speed, only from real speed (over 30 km/h), and only over
+    // a real frame: standing still, the speed wobbles by hair-widths and a
+    // tiny dt turned that into a fake 50 g "crash" — the car had a seizure
+    // parked on the track (Adam, 2026-10-03).
+    const spdNow = Math.abs(car.speed || 0), spdWas = this._crSpd;
+    const dvG = dt >= 0.008 && spdWas != null && spdWas > 8 ? Math.max(0, spdWas - spdNow) / dt / 9.81 : 0;
+    this._crSpd = spdNow;
+    const crash = dvG > 12 ? Math.min(0.06, 0.015 + (dvG - 12) * 0.0015) : 0;
+    this.shake = Math.max(this.shake * (1 - dt * 6), grassRough * 0.05 + crash);
     const ja = Math.min(1, dt * 18), J = this._jit || (this._jit = { x: 0, y: 0, z: 0 });
     J.x += (Math.random() - 0.5 - J.x) * ja; J.y += (Math.random() - 0.5 - J.y) * ja; J.z += (Math.random() - 0.5 - J.z) * ja;
     const jx = J.x, jy = J.y, jz = J.z;
     const amp = this.shake * (sfxOn ? 0.35 : 1) + buzz;
     if (!this.speedShake) this.speedShake = new SpeedShake();
     // Acceleration, smoothed, from the speed alone (a replay sets only that).
-    const acc = dt > 0 && this._lastSpd != null ? ((car.speed || 0) - this._lastSpd) / dt : 0;
-    this._lastSpd = car.speed || 0;
+    // Measured over a 0.1 s WINDOW, not one frame, and zero below 11 km/h.
+    // Per frame, a hair of speed wobble (parked, on a slope or a kerb) over a
+    // short frame read as +-6 g flipping every frame, and the dive spring and
+    // seat sink bounced the camera up and down — Adam, parked at the second
+    // chicane: "the car is having a seizure ... photosensitive ppl".
+    const spdA = car.speed || 0;
+    if (this._accT == null || this._lastSpd == null) { this._accT = 0; this._lastSpd = spdA; }
+    this._accT += Math.max(0, dt);
+    let acc = this._accHeld || 0;
+    if (this._accT >= 0.1) { acc = (spdA - this._lastSpd) / this._accT; this._lastSpd = spdA; this._accT = 0; }
+    if (Math.abs(spdA) < 3) acc = 0;
+    this._accHeld = acc;
     this._acc = (this._acc || 0) + (Math.max(-60, Math.min(60, acc)) - (this._acc || 0)) * Math.min(1, dt * 4);
     // Which kerb the wheels are on (surface.js KERB: 1 flat, 2 standard,
     // 3 high), and the extra load of a banked corner: |lateral g| times the
