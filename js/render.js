@@ -10,6 +10,7 @@
 // becomes rotation.y = h on a mesh built pointing along +X. Nothing outside
 // this file should ever have to know that.
 import * as THREE from 'three';
+const _swing = new THREE.Matrix4(), _rot = new THREE.Matrix4(), _back = new THREE.Matrix4();
 import { Z, Builder } from './geom.js';
 import { Look, sunRig } from './tex.js';
 import { Post } from './post.js';
@@ -741,6 +742,25 @@ export class View {
     this.susp = hb ? [hb.fl, hb.fr, hb.rl, hb.rr] : null;
     this.suspY = this.susp ? this.susp.map(h => h ? h.position.y : 0) : null;
     this.suspZ0 = null;   // static deflection, captured on the first frame
+    // The four suspension corners (car.js 'susFL'..'susRR': both wishbones
+    // and the pushrod, merged). Each swings about its chassis pick-ups so its
+    // outboard end stays on the upright — see frame().
+    this.arms = [];
+    if (this.susp) {
+      const order = { susFL: 0, susFR: 1, susRL: 2, susRR: 3 };
+      this.car.traverse(m => {
+        const k = m.isMesh ? order[m.userData.part] : undefined;
+        if (k === undefined) return;
+        const hub = this.susp[k];
+        const side = Math.sign(hub.position.z) || 1;
+        // car.js: inboard pick-ups at |z| 0.16 front / 0.26 rear, outboard
+        // ball joints at hubZ - 0.08 = 0.72 / 0.64 — so the arm spans 0.56 /
+        // 0.38 m across the car, and that is the radius the swing uses.
+        const pz = side * (k < 2 ? 0.16 : 0.26);
+        this.arms.push({ m, k, py: 0.27, pz, L: k < 2 ? 0.56 : 0.38, side,
+          base: new THREE.Matrix4(), wrote: new THREE.Matrix4(), has: false });
+      });
+    }
     // An imported chassis carries its own wings in its geometry, so the
     // procedural ones must stay hidden. They cannot just be set invisible at
     // build time: the frame loop below sets `m.visible = !lost.frontWing`
@@ -1526,9 +1546,19 @@ export class View {
     // its goofy"). Same rule as the roll above: on the ground the body follows
     // the road's gradient only; airborne it takes its true attitude.
     this.car.rotation.z = (car.pitch || 0) * this.leanK * (1 - grounded) + slopePitch(this.world, this.track, proj, car) * grounded;
-    // The wheels move in their arches. 60 mm of travel is a lot of visible
-    // movement at this scale, and it is the cue that reads as "this is a
-    // machine with springs" from the chase camera and from onboard.
+    // THE SUSPENSION (Adam, 2026-10-03: "the wheels arent actually connected
+    // to the hinges ... the downforce pushes the body down, and the hinges
+    // just go on down below the wheels"). It used to move the WHEELS, six
+    // times the real travel (up to 36 cm), up into a body that stayed put,
+    // with the wishbones welded to the chassis. Now it is the right way up:
+    // the wheels stay on the road, the BODY settles toward it by the mean
+    // spring deflection (x SUSP_K, so 2-3 cm of real squat at speed is
+    // visible), and every wishbone swings on its chassis pick-ups so it stays
+    // on its upright (below, after the damage pose). Airborne, each wheel
+    // droops on its own as before.
+    const SUSP_K = 1.5;
+    this.hubRel = this.hubRel || [0, 0, 0, 0];
+    let heave = 0;
     if (car.wheelZ && this.susp) {
       // Show the CHANGE from the car's resting deflection, not the absolute
       // compression — otherwise every wheel starts 12 mm into its arch.
@@ -1539,12 +1569,16 @@ export class View {
       // few centimetres, never metres: airborne heights are clamped to droop.
       if (!this.suspZ0 && !car.airborne) this.suspZ0 = car.wheelZ.slice();
       const z0 = this.suspZ0 || [0, 0, 0, 0];
+      const ds = [0, 1, 2, 3].map(i => Math.max(-0.09, Math.min(0.06, car.wheelZ[i] - z0[i])));
+      heave = car.airborne ? 0 : Math.max(-0.05, Math.min(0.03, (ds[0] + ds[1] + ds[2] + ds[3]) / 4 * SUSP_K));
       for (let i = 0; i < 4; i++) {
         const h = this.susp[i];
-        const d = Math.max(-0.09, Math.min(0.06, car.wheelZ[i] - z0[i]));
-        if (h) h.position.y = this.suspY[i] - d * this.leanK;
+        // hub height RELATIVE TO THE BODY: up when the body has settled
+        this.hubRel[i] = -heave - (car.airborne ? ds[i] : 0);
+        if (h) h.position.y = this.suspY[i] + this.hubRel[i];
       }
     }
+    this.car.position.y = heave;
 
     // Bodywork that is no longer attached should not be drawn. physics.js
     // already reads `car.lost` — losing the front wing costs 56% of front
@@ -1556,6 +1590,22 @@ export class View {
     }
     // Bodywork damage, straight off the contact impulses in collide.js.
     applyCrush(this.crushParts, car.crush);
+    // Swing each wishbone set about its inboard pick-ups by the angle that
+    // keeps its outboard end on the hub. ON TOP of whatever pose the damage
+    // code gave it this frame: if nobody re-posed the mesh since we last
+    // wrote it, swing from the base we kept; otherwise its new pose is the
+    // base. So a bent wishbone still swings, and nothing accumulates.
+    for (const a of this.arms) {
+      const m = a.m;
+      m.updateMatrix();
+      if (!a.has || !m.matrix.equals(a.wrote)) { a.base.copy(m.matrix); a.has = true; }
+      const ang = -a.side * Math.asin(Math.max(-0.5, Math.min(0.5, this.hubRel[a.k] / a.L)));
+      _swing.makeTranslation(0, a.py, a.pz).multiply(_rot.makeRotationX(ang)).multiply(_back.makeTranslation(0, -a.py, -a.pz));
+      _swing.multiply(a.base);
+      _swing.decompose(m.position, m.quaternion, m.scale);
+      m.updateMatrix();
+      a.wrote.copy(m.matrix);
+    }
     // Cheap: returns immediately unless the dent set actually changed, which
     // only happens on contact.
     if (this.deformer) this.deformer.apply(this.presetDents || car.dents);
