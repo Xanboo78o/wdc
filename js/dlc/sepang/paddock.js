@@ -30,11 +30,12 @@
 // boxes with the crews and the tyres in them (races use those), and this
 // builds the 346 m of building around and above them — closed 8 m boxes to
 // either side, the clubs, the suite, the rooftop and the raised roof.
+import { resampleLane as resample, BOX_PITCH, MAX_BOXES } from '../../pitstop.js';
 import * as THREE from 'three';
 import { Builder } from '../../geom.js';
 
 // pit.js's own numbers, so the facade lands on its garages to the centimetre.
-const LANE_BOX = 6.6, GARAGE_DEPTH = 13.0, GARAGE_H = 6.4, BOX_PITCH = 14.4, MAX_BOXES = 11;
+const LANE_BOX = 6.6, GARAGE_DEPTH = 13.0, GARAGE_H = 6.4;
 
 // The buildings rebuilt here, by the centroid of their OSM footprint in the
 // circuit's metres (bakeenv's projection). prepareEnv lifts them out of the
@@ -66,30 +67,8 @@ export function prepareEnv(env) {
 }
 
 // ---------------------------------------------------------------------------
-// The same resample pit.js uses (step 2 m, three 1-2-1 passes), so lane metre
-// m here is pit.js's sample m/2.
-function resample(pts, step = 2) {
-  const out = [];
-  let carry = 0;
-  for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1], b = pts[i];
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (len < 1e-6) continue;
-    for (let d = carry; d < len; d += step) {
-      const f = d / len;
-      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
-    }
-    carry = (carry - len) % step;
-    if (carry < 0) carry += step;
-  }
-  out.push(pts[pts.length - 1].slice());
-  for (let pass = 0; pass < 3; pass++) {
-    for (let i = 1; i < out.length - 1; i++) {
-      out[i] = [(out[i - 1][0] + 2 * out[i][0] + out[i + 1][0]) / 4, (out[i - 1][1] + 2 * out[i][1] + out[i + 1][1]) / 4];
-    }
-  }
-  return out;
-}
+// pit.js's own lane resample and garage numbers (js/pitstop.js), so the open
+// garages here are exactly where the race stops each car.
 
 // One atlas of words, four rows: the building names. Drawn, because text is
 // the one thing that cannot be a photograph (same rule as furniture.js).

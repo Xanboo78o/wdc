@@ -14,6 +14,8 @@ import { makeAutopilot, makeDriver, BATTLE } from './autopilot.js';
 import { resolveBarrier, resolveCars } from './collide.js';
 import { wakeAt, newWake } from './aero.js';
 import { makeLane, shouldPit, updateStop } from './pitstop.js';
+// Race control — safety car, VSC, red flag, restarts, flags (2026-09-30).
+import { Director } from './safetycar.js';
 
 // Module-level scratch for the wake sample. neighbours() is single-threaded and
 // reads the result immediately, so one object serves the whole grid rather than
@@ -25,13 +27,11 @@ const W = newWake();
 
 const PIT_LIMIT = 80 / 3.6;
 const NEIGH_EVERY = 4;        // substeps between neighbour/racecraft updates
-// Safety car. Deployed when marshals have to stand on a live circuit to push a
-// beached car out, which is the only thing that deploys it — there is no
-// scripted caution. An opening-lap one was built, measured over N circuits x N
-// seeds and deleted: it changed nothing (7.25 -> 7.13 retired of 22) and cost a
-// fifth of the overtaking (104 -> 85 passes). See the note further down.
-const SAFETY_TIME = 30;       // s the car stays out once it is called
-const SAFETY_SPEED = 80 / 3.6;
+// The safety car, the VSC and the red flag live in js/safetycar.js now, and
+// only ever for a reason on the circuit — there is still no scripted caution.
+// An opening-lap one was built, measured over N circuits x N seeds and
+// deleted: it changed nothing (7.25 -> 7.13 retired of 22) and cost a fifth of
+// the overtaking (104 -> 85 passes). See the note further down.
 const PUSH_TIME = 8;          // s for a crew to heave a car back to the tarmac
 const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
 // SUPERCASUAL's leash, in seconds at the circuit's mean racing-line speed: a
@@ -122,8 +122,14 @@ const CHEER_HOLD = 2.0;
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
                 tier = 'medium', seed = 1, player = true, pits = true, noDnf = false, order = null,
-                battle = null, duel = true, drs = true }) {
+                battle = null, duel = true, drs = true, rules = true, standIn = false }) {
     this.track = track; this.lines = lines; this.spec = spec;
+    // STAND-IN: a bot at YOUR wheel (a harness, the home page's backdrop).
+    // Racecraft then runs for your car too, so `me.ctx` carries the traffic,
+    // the pit approach and race control's limits; your pedals still come in
+    // through tick()'s playerInput. Without it the stand-in drove blind and
+    // rear-ended its way out on lap one (tools/rulescheck.mjs [speeding]).
+    this.standIn = !!standIn;
     // The 2026-09-28 racecraft (see DUEL above). `duel: false` is the
     // previous behaviour exactly, kept for tools/battlecheck.mjs --duel 0.
     this.duel = !!duel;
@@ -138,6 +144,7 @@ export class Race {
     // box per car, not a lateral offset. js/pitstop.js owns all of it; the race
     // only decides WHEN, and then keeps its hands off a car whose `inPit` is set.
     this.lane = makeLane(track, Math.min(grid, slots.length));
+    this.slots = slots;          // the grid, again, for a standing restart
     // Off for a sprint, and off for measuring what pit stops actually cost —
     // see tools/fieldcheck.mjs --pits 0.
     this.pits = pits;
@@ -162,7 +169,7 @@ export class Race {
       // WHO this is, WHAT they drive, and HOW they drive it — one table.
       const prof = driverAt(who);
       const team = teamOf(prof);
-      const driver = isPlayer ? null
+      const driver = isPlayer ? (standIn ? makeDriver(seed * 17 + 3, tier, track.corners.length || 24) : null)
         : applyProfile(makeDriver(seed * 131 + who, tier, track.corners.length || 24), prof, team);
       this.entries.push({
         car, driver, isPlayer, idx: k, box: k,
@@ -192,6 +199,27 @@ export class Race {
         drsFor: null, drsOk: false,
       });
     }
+    // THE GARAGES (js/pitstop.js garageLayout). A team's two cars share its
+    // garage, one mark each, in the order the teams first appear on the grid.
+    // YOU are nobody's teammate: you get the spare garage at the end of the
+    // row, or, on a lane too short for one, your car's old team's.
+    if (this.lane.garages) {
+      const G = this.lane.garages, garageOf = new Map(), used = new Map();
+      for (const e of this.entries) {
+        if (e.isPlayer) continue;
+        const key = e.team ? e.team.name : e.name;
+        if (!garageOf.has(key)) garageOf.set(key, garageOf.size % G);
+        const g = garageOf.get(key), j = used.get(g) || 0;
+        used.set(g, j + 1);
+        e.box = g * 2 + (j % 2);
+      }
+      const me = this.entries.find(e => e.isPlayer);
+      if (me) {
+        const spare = garageOf.size < G ? garageOf.size : G - 1;
+        me.box = spare * 2 + (used.get(spare) ? 1 : 0);
+        me.garage = spare;
+      }
+    }
     this.me = this.entries.find(e => e.isPlayer) || null;
     if (this.battle) {
       const B = this.battle, rng = mulberry(seed * 977 + 5);
@@ -217,6 +245,9 @@ export class Race {
     // Pace matching around you happens in every tier when you are racing.
     this.duelOn = this.duel && !!this.me;
     this.order();
+    // RACE CONTROL (js/safetycar.js). `rules: false` is the race before it:
+    // no safety car, no VSC, no flags, no red — for an A/B, and ?sc=0.
+    this.rc = new Director(this, { on: rules, rng: mulberry(seed * 7919 + 11) });
   }
 
   // ---- the OVERTAKES band --------------------------------------------------
@@ -339,8 +370,8 @@ export class Race {
     return Math.abs(turn) > 0.35 ? Math.sign(turn) : 0;
   }
 
-  log(kind, text, e = null) {
-    this.events.push({ t: this.time, kind, text, car: e ? e.idx : null });
+  log(kind, text, e = null, code = null) {
+    this.events.push({ t: this.time, kind, text, car: e ? e.idx : null, code });
     if (this.events.length > 300) this.events.shift();
   }
 
@@ -478,8 +509,16 @@ export class Race {
     // it as the car in front at all, which is the actual mechanism that keeps
     // the cars behind out of the back of it.
     const pitting = e.pitPhase === 'approach';
+    // Over to the pit side for the entry: three quarters of the way, eased in
+    // over the last 350 m. It was 1.5x the half-width, at once — the clamp
+    // then held the car on the very edge at 200 km/h, and at Suzuka it ran
+    // onto the grass, spun across the road and pinned itself on the far wall.
+    let pitBias = 0;
     if (pitting && this.lane) {
-      bias += (Math.sign(this.lane.off) || 1) * lim * 1.5;
+      const to = t.wrap(this.lane.entryS - e.proj.s);
+      const ramp = Math.max(0, Math.min(1, (350 - to) / 250));
+      pitBias = (Math.sign(this.lane.off) || 1) * lim * 0.75 * ramp;
+      bias += pitBias;
     }
 
     // ---- attack -------------------------------------------------------------
@@ -504,7 +543,11 @@ export class Race {
     if (e.ahead !== e.buildOn) { e.buildOn = e.ahead; e.build = 0; e.tryT = 0; }
     if (e.ahead && e.aheadGapT < 0.8) e.build += dtR;
     else if (!e.ahead || e.aheadGapT > 1.5) e.build = Math.max(0, e.build - 2 * dtR);
-    if (!pitting && e.ahead && e.aheadGapT < reach && !e.inPit) {
+    // Under a safety car, a VSC, a red flag, a yellow — or before the control
+    // line on a restart — nobody attacks, and nobody defends against a car
+    // that is not allowed to attack (js/safetycar.js).
+    const noAtk = this.rc.noAttack(e), noDef = this.rc.noDefend(e);
+    if (!pitting && !noAtk && e.ahead && e.aheadGapT < reach && !e.inPit) {
       const o = e.ahead;
       const ds = t.gap(o.proj.s, e.proj.s);
       const braking = this.brakingZone(e.proj.s, 130);
@@ -555,7 +598,7 @@ export class Race {
     // below makes sure of that whatever this block asks for.
     // A car on its way to the pits does not defend. It has somewhere to be.
     const defendT = this.battle ? 1.0 : 0.75;
-    if (!pitting && e.behind && e.behindGapT < defendT && !e.inPit) {
+    if (!pitting && !noDef && e.behind && e.behindGapT < defendT && !e.inPit) {
       const o = e.behind;
       const ds = t.gap(e.proj.s, o.proj.s);          // + : they are behind me
       const dl = o.proj.lat - e.proj.lat;
@@ -590,10 +633,13 @@ export class Race {
     // move. (The pit peel-off above is added unsmoothed, as it always was.)
     // Off the grid, a car eases across to the line over the first few hundred
     // metres rather than snapping onto it; on the grid it holds its box.
-    if (e.merge && (Math.abs(e.biasS) < 0.3 || this.time > 40)) e.merge = false;
+    if (e.merge && (Math.abs(e.biasS) < 0.3 || this.time - (this.greenT || 0) > 40)) e.merge = false;
     const slew = e.merge
       ? (this.state === 'green' ? MERGE_RATE * NEIGH_EVERY * FIXED_DT : 0)
       : (3.0 + 2.5 * d.aggression) * NEIGH_EVERY * FIXED_DT;
+    // Race control's say on the lane: the racing line in a queue, out of the
+    // queue to unlap, off the line for a blue flag.
+    want = this.rc.wantBias(e, want, lineOff, lim);
     bias += e.biasS + Math.max(-slew, Math.min(slew, want - e.biasS));
 
     // DO NOT DRIVE INTO SOMEONE WHO IS ALONGSIDE.
@@ -797,8 +843,8 @@ export class Race {
     bias = Math.max(-lim - off, Math.min(lim - off, bias));
     // What the slew starts from next time is where the car was ALLOWED to go,
     // pit bias excluded (it is re-added fresh each pass).
-    e.biasS = bias - (pitting && this.lane ? (Math.sign(this.lane.off) || 1) * lim * 1.5 : 0);
-    e.ctx = { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: e.hold ?? 1, obstDs, obstV };
+    e.biasS = bias - pitBias;
+    e.ctx = this.rc.limit(e, { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: e.hold ?? 1, obstDs, obstV });
   }
 
   // ---- one substep --------------------------------------------------------
@@ -809,6 +855,7 @@ export class Race {
       this.lights -= dt;
       if (this.lights <= 0) {
         this.state = 'green';
+        this.greenT = this.time;
         this.log('flag', 'LIGHTS OUT');
         for (const e of this.entries) e.lapStart = this.time;
       }
@@ -822,7 +869,7 @@ export class Race {
       const me = this.me;
       if (me && !me.retired && !me.inPit && me.proj && Math.abs(me.proj.lat) > me.proj.w + 1.0) this.meOffAt = this.time;
       this.neighbours();
-      for (const e of this.entries) if (!e.isPlayer && !e.retired) this.racecraft(e);
+      for (const e of this.entries) if ((!e.isPlayer || this.standIn) && !e.retired) this.racecraft(e);
     }
 
     for (const e of this.entries) {
@@ -840,15 +887,9 @@ export class Race {
         // A rival opens it the moment it is allowed and shuts it for the
         // brakes and for any real steering, as the driver's thumb would.
         if (this.drsRule) car.drsOpen = e.drsOk && car.brake < 0.05 && Math.abs(car.delta) < 0.06;
-        // Safety car. Applied AFTER the driver for the same reason the pit
-        // controller is: a driver that runs second simply writes its own
-        // throttle back over the cap every substep.
-        if (this.safety > 0 && !e.inPit) {
-          if (car.speed > SAFETY_SPEED) {
-            car.throttle = 0;
-            car.brake = Math.max(car.brake, Math.min(0.45, (car.speed - SAFETY_SPEED) * 0.10));
-          } else car.throttle = Math.min(car.throttle, 0.32);
-        }
+        // The old safety car was a flat 80 km/h cap written over the pedals
+        // here. Race control now sets each car's speed through its ctx
+        // (js/safetycar.js limit): the delta, the queue, the restart.
       }
       // A car being pushed is not driving, whoever is nominally at its wheel.
       if (e.recover) { car.throttle = 0; car.brake = 0; }
@@ -872,10 +913,11 @@ export class Race {
           this.log('flag', `${e.name} WILL PIT`, e);
         }
         const wasIn = e.inPit;
-        if (updateStop(e, t, this.lane, e.proj, dt, this.peak)) {
+        if (updateStop(e, t, this.lane, e.proj, dt, this.peak, this.entries)) {
           this.log('flag', `${e.name} SERVED — ${(e.pitJobs || []).join(' + ')}`, e);
+          this.rc.released(e);
         }
-        if (e.inPit && !wasIn) this.log('flag', `${e.name} PITS`, e);
+        if (e.inPit && !wasIn) { this.log('flag', `${e.name} PITS`, e); this.rc.pitEntry(e); }
       }
 
       if (!racing) { car.throttle = 0; car.brake = 1; car.delta = 0; }
@@ -914,13 +956,18 @@ export class Race {
           this.log('crash', `${e.name} BACK ON FOUR WHEELS`, e);
         }
       }
-      if (car.damage >= 1 && !e.retired) { e.retired = true; this.log('crash', `${e.name} RETIRES`, e); }
+      // Debris: a wing on the road (js/safetycar.js decides yellow or more).
+      const wingNow = !!(car.lost && (car.lost.frontWing || car.lost.rearWing));
+      if (wingNow && !e.wingWas) this.rc.incident('debris', e);
+      e.wingWas = wingNow;
+      if (car.damage >= 1 && !e.retired) { e.retired = true; this.log('crash', `${e.name} RETIRES`, e); this.rc.incident('retired', e); }
       // A car on its roof is not rejoining. Retire it once it has stopped
       // sliding, or it keeps being classified and crawls round for the rest of
       // the race: measured, an upside-down car dragged the field spread from
       // 12 s to 162 s because its "best lap" was still being counted.
       if (!e.retired && car.onRoof && car.speed < 8) {
         e.retired = true; this.log('crash', `${e.name} IS UPSIDE DOWN`, e);
+        this.rc.incident('roof', e);
       }
     }
 
@@ -989,8 +1036,22 @@ export class Race {
           const lp = t.point(s0, this.lines.race.off[t.idx(s0)] || 0);
           e.recover = { t: 0, x0: e.car.x, y0: e.car.y, h0: e.car.hdg, to: lp };
           e.stuck = 0;
-          this.safety = Math.max(this.safety, SAFETY_TIME);
+          // People on a live circuit: race control decides what that needs.
+          this.rc.incident('beached', e);
         }
+        // STOPPED ON THE TRACK, on the tarmac, not being pushed and not in
+        // its box: eight seconds of that and it is a safety car.
+        // A car standing nose-to-tail behind another stopped car is TRAFFIC —
+        // the lap-one jam at the first chicane, a safety-car queue bunching up
+        // — not an incident. Called as one, it threw a dozen "CAR STOPPED ON
+        // TRACK" at Monza's Rettifilo and Alboreto and a safety car for each.
+        const inTraffic = e.ahead && !e.ahead.retired && e.ahead.car.speed < 6
+          && t.gap(e.ahead.proj.s, e.proj.s) > 0 && t.gap(e.ahead.proj.s, e.proj.s) < 30;
+        if (!e.recover && !e.inPit && !e.retired && e.car.speed < 2 && Math.abs(e.proj.lat) <= e.proj.w
+            && !inTraffic && this.time - (this.greenT || 0) > 10) {
+          e.stopT = (e.stopT || 0) + dt;
+          if (e.stopT > 8 && !e.stopCalled) { e.stopCalled = true; this.rc.incident('stopped', e); }
+        } else { e.stopT = 0; if (e.car.speed > 8) e.stopCalled = false; }
         if (e.recover) {
           const R = e.recover;
           R.t += dt;
@@ -1011,7 +1072,10 @@ export class Race {
       }
     }
 
-    if (this.safety > 0) this.safety = Math.max(0, this.safety - dt);
+    this.rc.tick(dt);
+    // `safety` is what the rest of the game has always read (the HUD's SC
+    // light, the dash, DRS, the cheer): non-zero while the race is neutralised.
+    this.safety = this.rc.neutral ? 1 : 0;
 
     this.order();
     if (this.duel && this.me && racing) this.cheerTick();
@@ -1031,7 +1095,7 @@ export class Race {
     for (const z of t.drs || []) {
       const a = t.gap(z.detect, prev), b = t.gap(z.detect, s);
       if (a > 0 && b <= 0 && a < 50) {
-        e.drsFor = e.lap >= DRS_FROM_LAP && e.ahead && e.aheadGapT < DRS_GAP ? z : null;
+        e.drsFor = e.lap >= DRS_FROM_LAP && e.lap >= this.rc.drsFrom && e.ahead && e.aheadGapT < DRS_GAP ? z : null;
       }
     }
     const inZone = e.drsFor && t.drsZoneAt(s) === e.drsFor;
@@ -1099,6 +1163,7 @@ export class Race {
         // car pinned to a racing car's `s` at the lane offset, guard or no
         // guard. The hazard is real-sounding and the code already handles it.
         const hit = resolveCars(live[i].car, live[j].car);
+
         if (hit && (live[i].isPlayer || live[j].isPlayer) && hit.closing > 2) {
           const you = live[i].isPlayer ? live[i] : live[j];
           you.bump = { what: 'car', closing: hit.closing, harm: hit.harm, by: live[i].isPlayer ? live[j] : live[i] };
@@ -1119,6 +1184,19 @@ export class Race {
               `(closing ${hit.closing.toFixed(1)} m/s, ${dl < 2.2 ? 'nose-to-tail' : 'side by side'}, lap ${behind.lap + 1})`,
               behind);
           }
+        }
+      }
+    }
+    // The safety car is solid. Driven, not stepped, so what the contact does
+    // to it is overwritten next substep; what it does to YOU is not.
+    const sc = this.rc.sc;
+    if (sc.out && !sc.inLane) {
+      for (const e of live) {
+        if (Math.abs(t.gap(e.proj.s, sc.s)) > 8) continue;
+        const hit = resolveCars(e.car, sc.car);
+        if (hit) {
+          this.rc.scHits = (this.rc.scHits || 0) + 1;
+          if (e.isPlayer && hit.closing > 2) e.bump = { what: 'car', closing: hit.closing, harm: hit.harm };
         }
       }
     }

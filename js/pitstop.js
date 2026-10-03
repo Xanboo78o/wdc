@@ -36,6 +36,66 @@ export const SERVICE = { tyres: 2.4, nose: 11.5, floor: 7.5 };
 // ---------------------------------------------------------------------------
 // The lane.
 // ---------------------------------------------------------------------------
+// ---- THE GARAGES --------------------------------------------------------------
+// One layout, used by BOTH the race (where a car stops) and the renderer (where
+// js/pit.js draws the garages and the crews). They were two layouts: pit.js
+// drew up to eleven garages in a block in the middle of the lane, and the race
+// stopped 22 cars at 22 evenly spread points over the middle half of it — so
+// a car stopped wherever its grid slot fell, rarely at its own garage, and
+// YOU (no team) in front of nobody's. Now each team has a garage, its two cars
+// stop at its two marks, and you have a garage of your own: the spare one.
+export const BOX_PITCH = 14.4;      // metres of lane per garage
+export const MAX_BOXES = 12;        // eleven teams (2026) and a spare for you
+const MARK = 3.6;                   // a teammate's mark, either side of centre
+
+// The lane polyline resampled to 2 m and lightly smoothed (pit.js draws on it).
+export function resampleLane(pts, step = 2) {
+  const out = [];
+  let carry = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len < 1e-6) continue;
+    for (let d = carry; d < len; d += step) {
+      const f = d / len;
+      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+    }
+    carry = (carry - len) % step;
+    if (carry < 0) carry += step;
+  }
+  out.push(pts[pts.length - 1].slice());
+  // three passes of a 1-2-1 kernel: enough to take the corners off the joins
+  // without pulling the lane away from where it was surveyed.
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 1; i < out.length - 1; i++) {
+      out[i] = [
+        (out[i - 1][0] + 2 * out[i][0] + out[i + 1][0]) / 4,
+        (out[i - 1][1] + 2 * out[i][1] + out[i + 1][1]) / 4,
+      ];
+    }
+  }
+  return out;
+}
+
+// Garages sit in the middle of the lane: its ends are the entry and exit
+// tapers and nothing is parked on them. `s[k]` is garage k's centre as
+// distance along the lap, for the race.
+export function garageLayout(track) {
+  const pit = track.pit;
+  if (!pit || !pit.pts || pit.pts.length < 3) return null;
+  const P = resampleLane(pit.pts, 2);
+  const usable = (P.length - 1) * 2;
+  const n = Math.max(3, Math.min(MAX_BOXES, Math.floor((usable - 120) / BOX_PITCH)));
+  const startM = Math.max(30, (usable - n * BOX_PITCH) / 2);
+  const idxAt = m => Math.max(0, Math.min(P.length - 1, Math.round(m / 2)));
+  const s = [];
+  if (track.project) for (let k = 0; k < n; k++) {
+    const q = P[idxAt(startM + (k + 0.5) * BOX_PITCH)];
+    s.push(track.project(q[0], q[1]).s);
+  }
+  return { P, n, startM, idxAt, s };
+}
+
 export function makeLane(track, boxes = 22) {
   const p = track.pit || {};
   const entryS = p.entryS ?? 0;
@@ -45,11 +105,22 @@ export function makeLane(track, boxes = 22) {
   // was wrong on three circuits out of five.
   const off = p.offset ?? 0;
   const len = track.gap ? Math.abs(track.gap(exitS, entryS)) : Math.abs(exitS - entryS);
+  const G = garageLayout(track);
   return {
     entryS, exitS, off, len,
-    // Where each car stops. Boxes fill the middle of the lane, leaving room to
-    // slow down at one end and get going again at the other.
+    garages: G && G.s.length ? G.n : 0,
+    // Where each car stops: box = garage * 2 + mark (js/race.js assigns them).
+    // A lane too short for the garage layout falls back to an even spread.
     boxS(i) {
+      if (G && G.s.length) {
+        const g = Math.floor(i / 2) % G.n, j = i % 2;
+        return ((G.s[g] + (j - 0.5) * 2 * MARK) % track.length + track.length) % track.length;
+      }
+      return this.spreadS(i);
+    },
+    // The old even spread: boxes fill the middle of the lane, leaving room to
+    // slow down at one end and get going again at the other.
+    spreadS(i) {
       const t = boxes > 1 ? i / (boxes - 1) : 0.5;
       const from = 0.22 * len, to = 0.78 * len;
       const d = from + (to - from) * t;
@@ -66,7 +137,7 @@ export function makeLane(track, boxes = 22) {
 // — it slewed across the track and ended up 49.7 m off the centreline, out in
 // the scenery. Ramping in and out over the first and last stretch is what the
 // geometry actually does.
-function laneLat(lane, prog) {
+export function laneLat(lane, prog) {
   const IN = 0.10, OUT = 0.88;
   const ease = t => t * t * (3 - 2 * t);
   if (prog < IN) return lane.off * ease(Math.max(0, prog) / IN);
@@ -76,7 +147,7 @@ function laneLat(lane, prog) {
 
 // How far along the lane a car is, 0 at entry and 1 at exit. Wraps, because a
 // pit lane can and does straddle the start/finish line.
-function laneProgress(track, lane, s) {
+export function laneProgress(track, lane, s) {
   const L = track.length;
   const d = ((s - lane.entryS) % L + L) % L;
   return lane.len > 0 ? d / lane.len : 1;
@@ -109,7 +180,12 @@ export function serviceFor(car) {
 function drive(car, proj, targetLat, targetV, peak) {
   // Cross-track error and heading error, the two terms any lane-follower needs.
   const err = targetLat - proj.lat;
-  const head = ((car.hdg - proj.hdg + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  // car.hdg is never wrapped: it winds up over the laps (-10.9 rad after a
+  // few at Monza), and JavaScript's % keeps the sign of a negative number, so
+  // the old ((x + 3pi) % 2pi) - pi read a 0.05 rad error as -6.2 and the car
+  // went to full lock against it — the lane swerves of every stop since.
+  const dh = car.hdg - proj.hdg;
+  const head = Math.atan2(Math.sin(dh), Math.cos(dh));
   // Clamped to the front tyre's usable slip: a pit lane is walking pace and
   // there is never a reason to ask the front for more than it has.
   const want = Math.max(-peak, Math.min(peak, err * 0.10 - head * 1.35));
@@ -137,7 +213,7 @@ function drive(car, proj, targetLat, targetV, peak) {
 // One car's stop. `e` is a race entry: it owns pitRequest / inPit / pitTimer /
 // pitStops, which the race layer already carries and nothing else sets.
 // ---------------------------------------------------------------------------
-export function updateStop(e, track, lane, proj, dt, peak = 0.13) {
+export function updateStop(e, track, lane, proj, dt, peak = 0.13, others = null) {
   const car = e.car;
   if (!e.pitPhase) e.pitPhase = 'none';
   const prog = laneProgress(track, lane, proj.s);
@@ -145,6 +221,9 @@ export function updateStop(e, track, lane, proj, dt, peak = 0.13) {
   switch (e.pitPhase) {
     case 'none': {
       if (!e.pitRequest) return false;
+      // PIT ENTRY CLOSED (js/safetycar.js, an incident at the entry while the
+      // safety car is being deployed). A car already committed goes on in.
+      if (lane.closed) return false;
       // Only commit if the entry is genuinely ahead — asking to pit halfway
       // down the lane's length means you serve it NEXT lap, which is what
       // happens in life and stops a car turning across the track to get in.
@@ -167,10 +246,19 @@ export function updateStop(e, track, lane, proj, dt, peak = 0.13) {
       const to = track.wrap(lane.entryS - proj.s);
       // Aim a little UNDER the limit, so the limiter has nothing to catch and
       // the car is already legal as it crosses rather than a moment after.
+      // YOUR braking for the entry is yours (the rules, 2026-09-30): the
+      // limiter engages at the line, and a car that crosses it too fast is
+      // reported for speeding in the pit lane (js/safetycar.js pitEntry).
       const aim = PIT_SPEED * 0.94;
       const want = to > 500 ? Infinity : Math.sqrt(aim * aim + 2 * ENTRY_DECEL * to);
-      if (car.vx > want) { car.brake = Math.min(1, (car.vx - want) * 0.35); car.throttle = 0; }
-      if (to < 4 || (prog >= 0 && prog < 0.10)) { e.pitPhase = 'lane'; e.inPit = true; }
+      // It may only ADD braking. Replacing the driver's pedal with this gentle
+      // curve took away the braking for Suzuka's final chicane, which sits
+      // right before the entry, and the car spun into the wall there.
+      if (!e.isPlayer && car.vx > want) { car.brake = Math.max(car.brake, Math.min(1, (car.vx - want) * 0.35)); car.throttle = 0; }
+      // `penIn`: the penalties already given as it enters. One handed out on
+      // the way in (speeding at the line) is the stewards' decision of a
+      // minute later in life, and is served at the NEXT stop.
+      if (to < 4 || (prog >= 0 && prog < 0.10)) { e.pitPhase = 'lane'; e.inPit = true; e.entryV = car.vx; e.penIn = e.penalty; }
       return false;
     }
     case 'lane': {
@@ -181,6 +269,17 @@ export function updateStop(e, track, lane, proj, dt, peak = 0.13) {
       // that the crew is not jumped is the driver's problem in life and this
       // controller's problem here.
       const toBox = (laneProgress(track, lane, lane.boxS(e.box ?? e.i ?? 0)) - prog) * lane.len;
+      // A DRIVE-THROUGH is the lane at the limiter and out again, no stop.
+      // It is not served under a red flag (the lane is a car park then).
+      if (e.driveThru > 0 && !lane.hold) {
+        drive(car, proj, laneLat(lane, prog), PIT_SPEED, peak);
+        if (toBox < -8) {
+          e.driveThru--; e.pitRequest = false; e.pitPhase = 'exit';
+          e.pitJobs = ['DRIVE-THROUGH'];
+          return true;
+        }
+        return false;
+      }
       const v = toBox < 12 ? Math.max(0, PIT_SPEED * (toBox / 12)) : PIT_SPEED;
       drive(car, proj, laneLat(lane, prog), v, peak);
       if (toBox < 1.2 && car.speed < 0.6) {
@@ -188,6 +287,15 @@ export function updateStop(e, track, lane, proj, dt, peak = 0.13) {
         const svc = serviceFor(car);
         e.pitTimer = svc.time;
         e.pitJobs = svc.jobs;
+        // A TIME PENALTY is served here: the car stands for it before anybody
+        // may touch it. Never under a red flag.
+        const serve = Math.min(e.penalty, e.penIn ?? e.penalty);
+        if (serve > 0 && !lane.hold) {
+          e.pitTimer += serve;
+          e.pitJobs = [`${serve}s PENALTY`, ...svc.jobs];
+          e.penServed = (e.penServed || 0) + serve;
+          e.penalty -= serve;
+        }
       }
       return false;
     }
@@ -196,6 +304,28 @@ export function updateStop(e, track, lane, proj, dt, peak = 0.13) {
       car.throttle = 0; car.brake = 1; car.delta = 0;
       e.pitTimer -= dt;
       if (e.pitTimer > 0) return false;
+      // RED FLAG: the car waits in its box, and the work is free.
+      if (lane.hold) {
+        if (!e.redFixed) { repair(car, ['nose', 'floor', 'tyres']); e.redFixed = true; }
+        e.pitTimer = 0;
+        return false;
+      }
+      e.redFixed = false;
+      // THE RELEASE. The lollipop waits for a car coming down the fast lane
+      // within 25 m — except when it does not (1 time in 25), which is an
+      // UNSAFE RELEASE and the stewards' business (js/safetycar.js).
+      if (others) {
+        const me = laneProgress(track, lane, proj.s) * lane.len;
+        const near = others.some(o => o !== e && o.inPit && (o.pitPhase === 'lane' || o.pitPhase === 'exit')
+          && o.car.speed > 4 && me - laneProgress(track, lane, o.proj.s) * lane.len > 0
+          && me - laneProgress(track, lane, o.proj.s) * lane.len < 25);
+        if (near) {
+          const r = e.relRoll ?? (e.relRoll = (Math.sin(e.idx * 91.7 + (e.pitStops || 0) * 13.1) * 43758.5453) % 1);
+          if (Math.abs(r) > 0.04) return false;         // held: the crew waits
+          e.unsafe = true;
+        }
+      }
+      e.relRoll = undefined;
       repair(car, e.pitJobs);
       e.pitStops = (e.pitStops || 0) + 1;
       e.pitRequest = false;

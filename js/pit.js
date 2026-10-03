@@ -26,15 +26,14 @@ import * as THREE from 'three';
 import { Z, Builder } from './geom.js';
 import { peopleMesh } from './crowd.js';
 import { printMat } from './furniture.js';
+import { resampleLane as resample, BOX_PITCH, MAX_BOXES } from './pitstop.js';
 
 const LANE_TRACK = 5.6;      // metres of lane on the track side of the centreline
 const LANE_BOX = 6.6;        // metres on the garage side — the working lane
 const FAST_LANE = 3.8;       // the bit you are allowed to drive down
-const BOX_PITCH = 14.4;      // metres between pit boxes
 const GARAGE_DEPTH = 13.0;
 const GARAGE_H = 6.4;
 const DOOR_W = 9.2, DOOR_H = 4.3;
-const MAX_BOXES = 11;        // ten teams and a spare, i.e. a 22-car grid
 
 const CREW = [0xd8352a, 0x1b4fd8, 0xf5c518, 0x35d6a0, 0xe8eaee, 0xff6b1a, 0x7b2fd8];
 
@@ -44,34 +43,8 @@ const CREW = [0xd8352a, 0x1b4fd8, 0xf5c518, 0x35d6a0, 0xe8eaee, 0xff6b1a, 0x7b2f
 // over 737 m and Monaco's 146 over 562 — and geometry laid on that directly
 // has visible kinks where a 40 m straight meets a 3 m one.
 // ---------------------------------------------------------------------------
-function resample(pts, step = 2) {
-  const out = [];
-  let carry = 0;
-  for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1], b = pts[i];
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (len < 1e-6) continue;
-    for (let d = carry; d < len; d += step) {
-      const f = d / len;
-      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
-    }
-    carry = (carry - len) % step;
-    if (carry < 0) carry += step;
-  }
-  out.push(pts[pts.length - 1].slice());
-  // three passes of a 1-2-1 kernel: enough to take the corners off the joins
-  // without pulling the lane away from where it was surveyed.
-  for (let pass = 0; pass < 3; pass++) {
-    for (let i = 1; i < out.length - 1; i++) {
-      out[i] = [
-        (out[i - 1][0] + 2 * out[i][0] + out[i + 1][0]) / 4,
-        (out[i - 1][1] + 2 * out[i][1] + out[i + 1][1]) / 4,
-      ];
-    }
-  }
-  return out;
-}
-
+// The lane polyline and the garage numbers are js/pitstop.js's, so the garages
+// drawn here are exactly where the race stops each car (garageLayout).
 function headings(pts) {
   const h = new Float64Array(pts.length);
   for (let i = 0; i < pts.length; i++) {
