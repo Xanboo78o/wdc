@@ -1038,6 +1038,19 @@ export class View {
         if (m.envMap !== want) { m.envMap = want; m.envMapIntensity = 1.6; m.needsUpdate = true; }
       }
     }
+    // Sand and gravel: matt when dry (tex.js Look.DRY), glossy and darker
+    // only as they get wet.
+    if (this.look && this.look.loose) {
+      const w = raw.road || 0;
+      if (Math.abs(w - (this._looseW ?? -1)) > 0.005) {
+        this._looseW = w;
+        for (const lm of this.look.loose) {
+          const d = lm.userData.loose;
+          lm.roughness = d.r * (1 - 0.55 * w);
+          lm.color.copy(d.c).multiplyScalar(1 - 0.3 * w);
+        }
+      }
+    }
     if (wx.rain > 0.05 && !this.rain) this.rain = new Rain(this.scene);
     if (this.rain) this.rain.update(wx.rain, this.camera, dt);
   }

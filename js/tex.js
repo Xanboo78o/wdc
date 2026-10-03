@@ -64,6 +64,7 @@ export class Look {
     this.sky = null;             // the measured lighting for this circuit
     this.env = null;             // PMREM cube for image-based lighting
     this.on = false;             // false = textures unavailable, run flat
+    this.loose = [];             // sand + gravel materials, wetted by View._weather
   }
 
   // Load everything, in parallel, and never throw: a missing texture directory
@@ -151,6 +152,15 @@ export class Look {
     return out;
   }
 
+  // LOOSE GROUND IS MATT WHEN DRY (Adam, 2026-10-03: "sand is shiny sand
+  // should not be shiny only shiny when wet"). Measured: the scans' own
+  // roughness maps average 0.58 (Ground093A, the sand) and 0.47 (Gravel023)
+  // — photographed damp, so dry they glinted like wet ground. Each factor
+  // lifts the scan's mean to 0.95; the map's own variation survives and
+  // three clamps the top at 1. View._weather (render.js) scales these back
+  // down, and darkens them, as the circuit gets wet.
+  static DRY = { sand: 0.95 / 0.58, gravel: 0.95 / 0.47 };
+
   // The workhorse. `size` is how many metres across the photograph is; `tint`
   // multiplies the albedo, which is how one plaster scan becomes a whole
   // Mediterranean street.
@@ -193,6 +203,12 @@ export class Look {
     // scanned" and anything less dials the scan down.
     m.roughness = roughness ?? 1.0;
     m.metalness = metalness ?? (t.orm ? 1.0 : 0.0);
+    const dry = Look.DRY[name];
+    if (dry) {
+      m.roughness *= dry;
+      m.userData.loose = { r: m.roughness, c: m.color.clone() };
+      this.loose.push(m);
+    }
     return m;
   }
 }
