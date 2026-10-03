@@ -145,7 +145,14 @@ const BRIDGES = { suzuka: [[4656, 4720]] };
 
 // Circuits on SRTM through a city: the width (m) of the opening that takes
 // the rooftops out of the road's profile. See the SRTM bake.
-const OPEN = { baku: 60 };
+const OPEN = { baku: 60, sepang: 70 };
+// Sepang on SRTM reads the oil-palm canopy and the grandstands beside the
+// road: the first bake had the back straight climbing 10 m in 100 m and an
+// 18% grade at Turn 1. Published: ~18-22 m of elevation change, steepest
+// 3.7% up and 5.6% down, high ground at Turns 9-11. The opening takes the
+// canopy out; a longer smoothing window takes the rest of the radar noise.
+// Passes of a 1-2-1 filter on 2 m samples: 2400 is a Gaussian of ~70 m.
+const SMOOTH = { sepang: 2400 };
 
 // The water line, metres above mean sea level. The Caspian is 28 m below it.
 const SEA_ASL = { baku: -28 };
@@ -291,7 +298,7 @@ async function bake(key, force) {
     for (let i = 0; i < L; i++) { let m = -Infinity; for (let o = -W; o <= W; o++) m = Math.max(m, lo[(i + o + L) % L]); raw[i] = m; }
     console.log(`\n  opening of ±${OPEN[key]} m applied (rooftops out of the profile)`);
   }
-  const prof = smooth(raw, 24);
+  const prof = smooth(raw, SMOOTH[key] || 24);
 
   // --- the world grid ------------------------------------------------------
   const bb = env.bbox;
