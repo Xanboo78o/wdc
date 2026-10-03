@@ -1701,7 +1701,7 @@ export class View {
     const ja = Math.min(1, dt * 18), J = this._jit || (this._jit = { x: 0, y: 0, z: 0 });
     J.x += (Math.random() - 0.5 - J.x) * ja; J.y += (Math.random() - 0.5 - J.y) * ja; J.z += (Math.random() - 0.5 - J.z) * ja;
     const jx = J.x, jy = J.y, jz = J.z;
-    const amp = this.shake * (sfxOn ? 0.35 : 1) + buzz;
+    const amp = this.shake * (sfxOn ? 0.35 : 1);   // no idle buzz: only grass and crashes move the camera
     if (!this.speedShake) this.speedShake = new SpeedShake();
     // Acceleration, smoothed, from the speed alone (a replay sets only that).
     // Measured over a 0.1 s WINDOW, not one frame, and zero below 11 km/h.
@@ -1723,7 +1723,12 @@ export class View {
     // kerbs no longer shake (Adam: only grass and crashes)
     const kType = 0;
     const bankA = Math.abs(bankRoll(this.bank, this.track, proj.i, 0) || 0);
-    const sk = this.speedShake.step(dt, car.speed || 0, rig.mount, {
+    // Adam, 2026-10-03: "random shake when im on the track ... unplayable".
+    // The camera moves ONLY on grass or in a crash. Everywhere else every
+    // shake, buzz, dive and bob is zero.
+    const shakeOn = grassRough > 0 || this.shake > 0.003;
+    if (!this._skZero) this._skZero = { p: 0, y: 0, r: 0, h: 0, x: 0 };
+    const sk = !shakeOn ? this._skZero : this.speedShake.step(dt, car.speed || 0, rig.mount, {
       rough: grassRough * 0.12, kerb: kType, gLong: this._acc / 9.81,
       gVert: Math.abs(latG) * Math.sin(bankA), gLat: latG });
     // FIXED LENS. Adam, 2026-09-29: "no fov resizing, this is for a simrig".
