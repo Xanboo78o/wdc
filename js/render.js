@@ -1522,7 +1522,10 @@ export class View {
     // (`this.headLean`, used by the bolted cameras below). Airborne, the true
     // attitude is handed back in full, as before.
     this.headLean = (car.roll || 0) * this.leanK * grounded;
-    this.car.rotation.z = (car.pitch || 0) * this.leanK + slopePitch(this.world, this.track, proj, car) * grounded;
+    // NO BRAKING DIVE (Adam, 2026-10-03: "remove the full tilt when braking,
+    // its goofy"). Same rule as the roll above: on the ground the body follows
+    // the road's gradient only; airborne it takes its true attitude.
+    this.car.rotation.z = (car.pitch || 0) * this.leanK * (1 - grounded) + slopePitch(this.world, this.track, proj, car) * grounded;
     // The wheels move in their arches. 60 mm of travel is a lot of visible
     // movement at this scale, and it is the cue that reads as "this is a
     // machine with springs" from the chase camera and from onboard.

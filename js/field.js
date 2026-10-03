@@ -413,7 +413,7 @@ export class Field {
       // the true attitude once airborne. Same rule as your own car in render.js.
       rig.tilt.rotation.x = (car.roll || 0) * (1 - grounded)
         + bankRoll(view.bank, t, proj.i, proj.lat) * grounded;
-      rig.tilt.rotation.z = (car.pitch || 0) + car.gLong * 0.022 + slopePitch(view.world, t, proj, car) * grounded;
+      rig.tilt.rotation.z = (car.pitch || 0) * (1 - grounded) + slopePitch(view.world, t, proj, car) * grounded;
 
       // Everything below here is a moving part, and the merged car has none.
       // Skipping it is most of the point of having a merged car at all.

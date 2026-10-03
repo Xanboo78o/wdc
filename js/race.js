@@ -87,6 +87,12 @@ const TIER_DOWN = 0.11, TIER_UP = 0.05;
 // -> 0.05, SLACK 1.0 -> 0.6, DOWN_FAR 0.12 -> 0.18 took "still > 2 s behind
 // 20 s after a 3 s stop" from 32 +- 8% to 8 +- 5%; back within 1 s ~14 s.
 const DUEL_SLACK = 0.6, DUEL_DOWN_FAR = 0.18;
+// PUNISHMENT (Adam, 2026-10-03: "if im off track, the cars take ts, they
+// should launch forward past me and punish me"). While all four of your wheels
+// are off the road, and for PUNISH_T s after you rejoin, nobody waits for you:
+// every rival drives at the top of its window, with no leash. The duel's usual
+// patience comes back afterwards.
+const PUNISH_T = 4;
 // "Building, building": an attacker sits in the car ahead's tow, within
 // 0.8 s, for BUILD_T * (1.5 - aggression) seconds before it commits — pulls
 // out of the slipstream, goes for the inside, lunges. Until then it follows,
@@ -225,13 +231,20 @@ export class Race {
     // the car directly behind. Only these get the duel trim.
     const duel = this.duelOn && pMe != null && this.state === 'green' && this.time > 8;
     if (duel) this.rankAroundMe(pMe);
+    const punish = pMe != null && this.state === 'green' && this.time - (this.meOffAt ?? -1e9) < PUNISH_T;
     for (const e of this.entries) {
       const d = e.driver;
       if (!d || e.retired || d.ceiling == null) continue;
       if (!B) {
         // MEDIUM, HARD, CASUAL: only the neighbours are touched, and only
         // inside their own grip, so the tier still means what it says.
-        if (duel && e.rank && Math.abs(e.rank) <= DUEL_N && !e.inPit) {
+        if (punish && !e.inPit) {
+          // Off the road is an open door: everybody goes for it, flat out.
+          const own = d.grip / d.ceiling;
+          e.duelF = Math.min(1.0, own + TIER_UP);
+          d.gripNow = d.ceiling * e.duelF;
+          e.hold = 1;
+        } else if (duel && e.rank && Math.abs(e.rank) <= DUEL_N && !e.inPit) {
           const own = d.grip / d.ceiling;
           if (e.duelF == null) e.duelF = own;
           this.duelTrim(e, own - TIER_DOWN, Math.min(1.0, own + TIER_UP));
@@ -254,6 +267,7 @@ export class Race {
         this.duelTrim(e, B.lo - (far ? DUEL_DOWN_FAR : DUEL_DOWN), B.hi);
         frac = e.duelF;
       } else e.duelF = null;
+      if (punish && !e.inPit) { frac = B.hi; e.duelF = frac; }
       d.gripNow = d.ceiling * frac * (d.paceMul ?? 1);
       // THE LEASH (Adam, 2026-09-24: "you're never more than 5 secs behind
       // everyone ... it feels like missing a brake point and auto losing").
@@ -271,7 +285,7 @@ export class Race {
       // costs you the fight for a while, not the fight for good.
       const from = duel && e.rank > 0 && e.rank <= DUEL_N
         ? Math.min(LEASH_FROM, DUEL_GAP + DUEL_STEP * (e.rank - 1) + DUEL_SLACK) : LEASH_FROM;
-      e.hold = aheadT > from ? Math.max(LEASH_MIN, 1 - (aheadT - from) * LEASH_SLOPE) : 1;
+      e.hold = punish ? 1 : aheadT > from ? Math.max(LEASH_MIN, 1 - (aheadT - from) * LEASH_SLOPE) : 1;
     }
   }
 
@@ -631,7 +645,10 @@ export class Race {
     // 8 m ahead that was itself held back by the car in front of it, as the
     // merge to the racing line closed the columns — eight contacts in the
     // first two seconds of one Suzuka start.
-    const A = this.duel ? (this.laneAhead(e, this.brakingZone(e.proj.s, 140) ? Math.max(4.5, t.w[i] * 1.1) : 3.4) || e.ahead) : e.ahead;
+    let A = this.duel ? (this.laneAhead(e, this.brakingZone(e.proj.s, 140) ? Math.max(4.5, t.w[i] * 1.1) : 3.4) || e.ahead) : e.ahead;
+    // You, off the road, are not the car to follow — the guard below decides
+    // whether you are in the way, and off the road you are not.
+    if (A && A.isPlayer && Math.abs(A.proj.lat) > A.proj.w + 1.0) A = null;
     if (A && !e.inPit) {
       const ds = t.gap(A.proj.s, e.proj.s);
       const dl = Math.abs(A.proj.lat - e.proj.lat);
@@ -728,6 +745,50 @@ export class Race {
       }
     }
 
+    // NOBODY REAR-ENDS YOU (Adam, 2026-10-03: "if im slow asf, the cars behind
+    // me under no circumstances rear end me, they brake too, bc a car costs 82
+    // gazillion dollars"). Every mode with rivals runs through here: race,
+    // the race after quali, formation, safety car, lap one.
+    //
+    // The follow rule above treats you as one more rival: one car per lane,
+    // a 3.4 m gate, a closing run allowed for a pass. None of that is safe
+    // against a car that has stalled, spun or slowed to walking pace. So you
+    // get a rule of your own that no racecraft can switch off: if you are
+    // anywhere near this car's path, it plans to arrive no faster than your
+    // speed along the road, a car length plus a margin that grows with its
+    // own speed SHORT of your gearbox, and inside that it backs off below you.
+    // Slow, sliding or sideways on the road, the gate widens to most of the
+    // road, because a car in that state can end up anywhere across it.
+    {
+      const me = this.me;
+      if (me && me !== e && !me.retired && me.proj) {
+        const ds = t.gap(me.proj.s, e.proj.s);
+        if (ds > 0 && ds < 300) {
+          const mc = me.car, onRoad = Math.abs(me.proj.lat) <= me.proj.w + 1.0;
+          const vP = Math.max(0, mc.speed * Math.cos(mc.hdg - t.hdg[me.proj.i]));
+          const unsettled = onRoad && (vP < 20 || Math.abs(mc.vy || 0) > 2 || Math.abs(Math.sin(mc.hdg - t.hdg[me.proj.i])) > 0.35);
+          const gate = Math.max(this.brakingZone(e.proj.s, 140) ? Math.max(4.5, t.w[i] * 1.1) : 3.0, unsettled ? Math.max(5.5, t.w[i] * 1.2) : 0);
+          if (Math.abs(me.proj.lat - e.proj.lat) < gate) {
+            const v = e.car.speed;
+            const room = ds - this.spec.bodyL * 1.15 - 4 - v * 0.3;
+            if (obstDs == null || room < obstDs) { obstDs = Math.max(0, room); obstV = vP; }
+            const cap = room > 0 ? vP + Math.sqrt(2 * 9 * room) : vP * 0.7;
+            speedCap = Math.min(speedCap ?? Infinity, cap);
+          }
+        }
+        // Passing you, it keeps a car's width of air between you: centres at
+        // least 3.6 m apart while it is anywhere alongside. Measured first
+        // (tools/rearcheck.mjs, Suzuka): with only the rule above, rivals went
+        // by a crawling car 1.3 m clear and touched it as it drifted back to
+        // the line.
+        if (ds > -this.spec.bodyL * 1.6 && ds < this.spec.bodyL * 1.6) {
+          const off = this.lines.race.off[i], CLEAR = 3.6;
+          if (e.proj.lat >= me.proj.lat) bias = Math.max(bias, me.proj.lat + CLEAR - off);
+          else bias = Math.min(bias, me.proj.lat - CLEAR - off);
+        }
+      }
+    }
+
     // The yield goes on last, so the car-following cap above cannot undo it.
     // Backing out of a move you have no room for is not optional.
     if (yieldTo != null) speedCap = Math.min(speedCap ?? Infinity, yieldTo);
@@ -758,6 +819,8 @@ export class Race {
     // the O(n^2) part. A quarter of the rate is invisible and four times cheaper.
     if ((this.battle || this.duelOn) && this.time - this.bandAt > BAND_EVERY) { this.bandAt = this.time; this.band(); }
     if (this.sub++ % NEIGH_EVERY === 0) {
+      const me = this.me;
+      if (me && !me.retired && !me.inPit && me.proj && Math.abs(me.proj.lat) > me.proj.w + 1.0) this.meOffAt = this.time;
       this.neighbours();
       for (const e of this.entries) if (!e.isPlayer && !e.retired) this.racecraft(e);
     }
@@ -1038,7 +1101,7 @@ export class Race {
         const hit = resolveCars(live[i].car, live[j].car);
         if (hit && (live[i].isPlayer || live[j].isPlayer) && hit.closing > 2) {
           const you = live[i].isPlayer ? live[i] : live[j];
-          you.bump = { what: 'car', closing: hit.closing, harm: hit.harm };
+          you.bump = { what: 'car', closing: hit.closing, harm: hit.harm, by: live[i].isPlayer ? live[j] : live[i] };
         }
         if (hit && hit.harm > 1.2) {
           const a = live[i], b = live[j];
