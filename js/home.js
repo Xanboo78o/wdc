@@ -28,6 +28,23 @@ import { THEMES, hasTheme, MUSIC_LEVELS, hasLevel, menuMusic, sayFor, greeting }
 const $ = s => document.querySelector(s);
 const h = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
 
+// ---------------------------------------------------------------- icons
+// Drawn the way his own sprites are: flat fill, an outline in a darker shade
+// of the same colour, fat round strokes. The flag is the one from his GO! button.
+const svg = body => `<svg viewBox="0 0 64 64" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+const FLAG = svg(`<path d="M14 58 L22 8" stroke="#111" stroke-width="5" fill="none"/>
+  <path d="M22 9 L56 14 L52 38 L19 33 Z" fill="#fff" stroke="#111" stroke-width="3"/>
+  <path d="M22 9 L33 10.6 L31.6 18.6 L20.7 17 Z M44.6 12.3 L56 14 L54.7 22 L43.3 20.3 Z M31.6 18.6 L43.3 20.3 L42 28.3 L30.3 26.6 Z M19.4 25 L30.3 26.6 L29 34.6 L19 33 Z M42 28.3 L53.3 30 L52 38 L40.6 36.3 Z" fill="#111"/>`);
+const ICON = {
+  circuit: FLAG,
+  garage: svg(`<rect x="12" y="28" width="40" height="28" fill="#b98a4e" stroke="#7a4f1c" stroke-width="5"/><path d="M6 30 L32 10 L58 30" fill="none" stroke="#7a4f1c" stroke-width="7"/><rect x="24" y="38" width="16" height="18" fill="#8a5a22" stroke="#5c3a10" stroke-width="4"/>`),
+  showroom: svg(`<path d="M4 40 L14 38 L24 28 L40 28 L46 38 L60 41 L60 46 L4 46 Z" fill="#ff5a4f" stroke="#b52a22" stroke-width="4"/><circle cx="17" cy="46" r="8" fill="#333" stroke="#111" stroke-width="3"/><circle cx="48" cy="46" r="8" fill="#333" stroke="#111" stroke-width="3"/><circle cx="17" cy="46" r="2.5" fill="#bbb"/><circle cx="48" cy="46" r="2.5" fill="#bbb"/>`),
+  builder: svg(`<path d="M20 56 L38 24" stroke="#7a4f1c" stroke-width="8" fill="none"/><path d="M26 14 L52 28 L46 38 L20 24 Z" fill="#b5b5b5" stroke="#6e6e6e" stroke-width="4"/>`),
+  jukebox: svg(`<path d="M24 46 L24 14 L50 9 L50 40" fill="none" stroke="#1b6fb5" stroke-width="6"/><ellipse cx="17" cy="47" rx="9" ry="7" fill="#66b8ff" stroke="#1b6fb5" stroke-width="4"/><ellipse cx="43" cy="41" rx="9" ry="7" fill="#66b8ff" stroke="#1b6fb5" stroke-width="4"/>`),
+  dash: svg(`<rect x="8" y="14" width="48" height="36" fill="#e8e8e8" stroke="#8a8a8a" stroke-width="5"/><rect x="16" y="34" width="7" height="9" fill="#6fe38b" stroke="#3f9a58" stroke-width="2"/><rect x="28" y="26" width="7" height="17" fill="#f5d94a" stroke="#b8960f" stroke-width="2"/><rect x="40" y="20" width="7" height="23" fill="#ff5a4f" stroke="#b52a22" stroke-width="2"/>`),
+  settings: svg(`<path d="M10 18 H54 M10 32 H54 M10 46 H54" stroke="#8a8a8a" stroke-width="6" fill="none"/><circle cx="24" cy="18" r="7" fill="#f5d94a" stroke="#b8960f" stroke-width="4"/><circle cx="42" cy="32" r="7" fill="#6fe38b" stroke="#3f9a58" stroke-width="4"/><circle cx="20" cy="46" r="7" fill="#66b8ff" stroke="#1b6fb5" stroke-width="4"/>`),
+};
+
 // ---------------------------------------------------------------- the save
 const KEY = 'wdc.menu';
 const S = {
@@ -89,14 +106,21 @@ async function drawMap(svg, id, car = true) {
 
 // ---------------------------------------------------------------- the live race
 const live = $('#live');
-let liveKey = null;
+// Adam, 2026-10-03: the first backdrop (12 cars at the chosen circuit, TV
+// camera) was "laggy asf", boring, and behind trees most of the time. So: TWO
+// cars, on one of the SMALL circuits whatever is selected, seen from the chase
+// camera behind the bot in your seat (who starts second, so the fight is in
+// shot), shadows off, and drawn at 62% size and stretched (home.html #live).
+// SUPERCASUAL + HARD overtakes is the mode that keeps a rival within reach.
+const SMALL = ['adam1', 'monaco'];
+let liveKey = null, liveTrack = null;
 function startLive() {
   if (new URLSearchParams(location.search).has('nolive')) return;   // ?nolive=1: no race behind (a slow machine, or a screenshot)
-  const key = `${S.track}:${S.car}`;
-  if (liveKey === key) return;
-  liveKey = key;
+  if (liveKey === S.car) return;
+  liveKey = S.car;
+  liveTrack = SMALL[Math.floor(Math.random() * SMALL.length)];
   live.classList.remove('up');
-  live.src = `./index.html?auto=${key}&race=1&grid=12&laps=20&tier=medium&attract=1&ffb=0&sound=0&seed=${Date.now() % 9973}`;
+  live.src = `./index.html?auto=${liveTrack}:${S.car}&race=1&grid=2&start=2&laps=30&tier=supercasual&battle=hard&nodnf=1&attract=1&ffb=0&sound=0&lo=1&mirror=0&seed=${Date.now() % 9973}`;
 }
 // the iframe fades in once the race is really running, and the tower reads it
 setInterval(() => {
@@ -106,7 +130,7 @@ setInterval(() => {
   const box = $('#tower');
   if (!box) return;
   if (!t || !t.tower) { box.innerHTML = `<small>LIVE · WARMING UP…</small>`; return; }
-  box.innerHTML = `<small><u>●</u> LIVE · ${track()[1].toUpperCase()} · LAP ${t.lap}/${t.laps}</small>`
+  box.innerHTML = `<small><u>●</u> LIVE · ${(TRACKS.find(t => t[0] === liveTrack) || ['', ''])[1].toUpperCase()} · LAP ${t.lap}/${t.laps}</small>`
     + t.tower.slice(0, 7).map(e => `<div class="trow"><b>${e.p}</b><i style="background:${e.col}"></i><span>${e.you ? 'THE BOT IN YOUR SEAT' : e.n}</span><em>${e.g}</em></div>`).join('');
 }, 700);
 
@@ -142,7 +166,7 @@ let _say = greeting();
 function say(text) { if (!text) return; _say = text; const el = $('.say'); if (el) { el.textContent = text; el.classList.remove('in'); void el.offsetWidth; el.classList.add('in'); } }
 const sayBox = () => `<div class="chunk say in">${_say}</div>`;
 function foot(nextLabel, next, hint = '') {
-  const f = h(`<div class="foot"><button class="chunk" data-b>‹ BACK</button><span class="hint">${hint}</span><button class="chunk go" data-n>${nextLabel} ›</button></div>`);
+  const f = h(`<div class="foot"><button class="chunk grey" data-b>‹ BACK</button><span class="hint">${hint}</span><button class="chunk go" data-n>${nextLabel} ›</button></div>`);
   f.querySelector('[data-b]').onclick = () => back();
   page.append(f);
   item(f.querySelector('[data-n]'), { ok: next });
@@ -162,7 +186,7 @@ const PAGES = {
   // ------------------------------------------------------------ HOME
   home() {
     const t = track(), tk = teamKey(), team = TEAMS[tk], drv = tk ? driversOf(tk) : [];
-    page.append(h(`<div class="top"><div class="logo outline">CHASING <span>WDC</span></div>${dayChips()}<div class="grow"></div>
+    page.append(h(`<div class="top"><div class="chunk logo">${FLAG}<div>CHASING WDC<small>"Racing for all"</small></div>${FLAG}</div>${dayChips()}<div class="grow"></div>
       <div class="chunk chip cool" id="np"><small>ON THE RADIO</small><span>${nowPlaying()}</span></div></div>`));
     page.append(h(sayBox()));
     const mid = h(`<div class="mid">
@@ -171,21 +195,21 @@ const PAGES = {
       <div class="chunk tower" id="tower"><small>LIVE · WARMING UP…</small></div></div>`);
     page.append(mid);
     const dock = h(`<div class="dock">
-      <div class="chunk next"><small>NEXT UP</small><svg></svg><b>${t[1]}</b><small>${t[2]} · <span data-km></span></small></div>
+      <div class="chunk next"><small>NEXT UP</small><div class="frame"><svg></svg></div><b>${t[1]}</b><small>${t[2]} · <span data-km></span></small></div>
       <div class="tiles"></div>
-      <button class="chunk go race">RACE<small>${S.mode === 'race' ? `${S.laps} LAPS · ${S.grid} CARS` : 'HOT LAP'}</small></button></div>`);
+      <button class="chunk go race">${FLAG}<div>RACE<small>${S.mode === 'race' ? `${S.laps} LAPS · ${S.grid} CARS` : 'HOT LAP'}</small></div>${FLAG}</button></div>`);
     page.append(dock);
     drawMap(dock.querySelector('svg'), S.track);
     const tiles = dock.querySelector('.tiles');
-    const tile = (cls, icon, label, ok) => { const b = h(`<button class="chunk tile ${cls}"><em>${icon}</em>${label}</button>`); tiles.append(b); return [b, ok]; };
+    const tile = (cls, icon, label, ok) => { const b = h(`<button class="chunk tile ${cls}">${ICON[icon]}${label}</button>`); tiles.append(b); return [b, ok]; };
     const list = [
-      tile('', '🏁', 'CIRCUIT', () => show('circuit')),
-      tile('', '🧰', 'GARAGE', () => show('garage')),
-      tile('', '🚗', 'SHOWROOM', () => { location.href = `./carview.html${tk ? '?team=' + tk : ''}`; }),
-      tile('', '🛠️', 'BUILDER', () => { location.href = './build.html'; }),
-      tile('', '📻', 'JUKEBOX', () => { location.href = './ost.html'; }),
-      tile('', '📱', 'iPAD DASH', () => { location.href = './dash.html'; }),
-      tile('', '⚙️', 'SETTINGS', () => show('settings')),
+      tile('grey', 'circuit', 'CIRCUIT', () => show('circuit')),
+      tile('grey', 'garage', 'GARAGE', () => show('garage')),
+      tile('grey', 'showroom', 'SHOWROOM', () => { location.href = `./carview.html${tk ? '?team=' + tk : ''}`; }),
+      tile('grey', 'builder', 'BUILDER', () => { location.href = './build.html'; }),
+      tile('grey', 'jukebox', 'JUKEBOX', () => { location.href = './ost.html'; }),
+      tile('grey', 'dash', 'iPAD DASH', () => { location.href = './dash.html'; }),
+      tile('grey', 'settings', 'SETTINGS', () => show('settings')),
     ];
     // RACE is first in focus order: it is what you came for
     item(dock.querySelector('.race'), { ok: () => show('circuit') });
@@ -203,11 +227,11 @@ const PAGES = {
     page.append(h(`<div class="top"><div class="title">PICK A CIRCUIT</div><div class="grow"></div>${sayBox()}</div>`));
     const st = STATIONS.find(s => s.id === S.track);
     const songs = st ? st.songs.map(id => SONGS[id].name).join(' · ') : '';
-    const side = (t, c) => `<div class="chunk card side ${c}"><small>${t[2]}</small><svg></svg><b>${t[1]}</b></div>`;
+    const side = (t, c) => `<div class="chunk card side ${c}"><div class="frame"><svg></svg></div><b>${t[1]}</b><small>${t[2]}</small></div>`;
     const t = tAt(i);
-    const body = h(`<div class="body"><button class="chunk arrow" data-l>‹</button><div class="cards">${side(tAt(i - 1), 'l')}
-      <div class="chunk card main in"><div class="no">${String(i + 1).padStart(2, '0')}</div><small>${t[2]}</small><svg></svg><b>${t[1]}</b>
-        <i><span data-km></span>${songs ? ' &nbsp;·&nbsp; ♪ ' + songs : ''}</i></div>${side(tAt(i + 1), 'r')}</div><button class="chunk arrow" data-r>›</button></div>`);
+    const body = h(`<div class="body"><button class="chunk grey arrow" data-l>‹</button><div class="cards">${side(tAt(i - 1), 'l')}
+      <div class="chunk card main in"><div class="no">${String(i + 1).padStart(2, '0')}</div><div class="frame"><svg></svg></div><b>${t[1]}</b>
+        <small>${t[2]} · <span data-km></span></small>${songs ? `<i>♪ ${songs}</i>` : ''}</div>${side(tAt(i + 1), 'r')}</div><button class="chunk grey arrow" data-r>›</button></div>`);
     page.append(body);
     const [l, m, r] = body.querySelectorAll('.card');
     drawMap(l.querySelector('svg'), tAt(i - 1)[0], false); drawMap(m.querySelector('svg'), t[0]); drawMap(r.querySelector('svg'), tAt(i + 1)[0], false);
@@ -229,16 +253,16 @@ const PAGES = {
     const league = d => { const a = Object.keys(LEAGUES); S.car = a[(a.indexOf(L) + d + a.length) % a.length]; show('garage', 0); say(sayFor('CAR', S.car)); };
     page.append(h(`<div class="top"><div class="title">THE GARAGE</div><div class="grow"></div>${sayBox()}</div>`));
     const tabs = h(`<div class="tabs">${Object.entries(LEAGUES).map(([key, name]) =>
-      `<button class="chunk${key === L ? ' sel' : ''}" data-l="${key}">${name}<small>${S.teams[key] ? TEAMS[S.teams[key]].name : 'NO TEAM'}</small></button>`).join('')}</div>`);
+      `<button class="chunk grey${key === L ? ' sel' : ''}" data-l="${key}">${name}<small>${S.teams[key] ? TEAMS[S.teams[key]].name : 'NO TEAM'}</small></button>`).join('')}</div>`);
     page.append(tabs);
     for (const b of tabs.querySelectorAll('button')) b.onclick = () => { S.car = b.dataset.l; show('garage', 0); };
     item(tabs, { left: () => league(-1), right: () => league(1) });
     const drv = driversOf(k), names = drv.map(d => t.league === 'f1' && t.era !== 'classic' ? d.n : '#' + d.num).join(' · ');
-    const mini = (kk, c) => `<div class="chunk card side ${c}"><small>${LEAGUES[L]}</small><div class="livery" style="background:${cols(kk)[0]};--c2:${cols(kk)[1]}"></div><b>${TEAMS[kk].name}</b></div>`;
-    const body = h(`<div class="body"><button class="chunk arrow" data-l>‹</button><div class="cards">${mini(keys[(i - 1 + n) % n], 'l')}
-      <div class="chunk card main in"><small>${LEAGUES[L]} · ${CARS[L].full.toUpperCase()}</small>
+    const mini = (kk, c) => `<div class="chunk card side ${c}"><div class="livery" style="background:${cols(kk)[0]};--c2:${cols(kk)[1]}"></div><b>${TEAMS[kk].name}</b></div>`;
+    const body = h(`<div class="body"><button class="chunk grey arrow" data-l>‹</button><div class="cards">${mini(keys[(i - 1 + n) % n], 'l')}
+      <div class="chunk card main in">
         <div class="livery" style="background:${cols(k)[0]};--c2:${cols(k)[1]}"><div class="num">${drv[0] ? drv[0].num ?? '' : ''}</div>${S.teams[L] === k ? '<div class="stamp">YOUR TEAM</div>' : ''}</div>
-        <b>${t.name}</b><i>${names}</i></div>${mini(keys[(i + 1) % n], 'r')}</div><button class="chunk arrow" data-r>›</button></div>`);
+        <b>${t.name}</b><small>${LEAGUES[L]} · ${CARS[L].full}</small><i>${names}</i></div>${mini(keys[(i + 1) % n], 'r')}</div><button class="chunk grey arrow" data-r>›</button></div>`);
     page.append(body);
     const [l, m, r] = body.querySelectorAll('.card');
     l.onclick = body.querySelector('[data-l]').onclick = () => go(-1);

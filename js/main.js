@@ -624,7 +624,7 @@ async function start() {
       livery: liveryFor(pickTeams[pickCar], TEAMS[pickTeams[pickCar]]),
       team: TEAMS[pickTeams[pickCar]] || null,
     });
-    if (ATTRACT) state.view.setMode(3);   // the TV camera
+    if (ATTRACT) state.view.setMode(1);   // chase: behind the bot, the rival ahead in shot (TV sat behind trees)
   } else {
     location.reload(); return;          // changing circuit rebuilds the world
   }
