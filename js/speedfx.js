@@ -119,6 +119,9 @@ export class SpeedShake {
     const road = (0.5 * w2 + 0.3 * w1 + 0.2 * w3) * Math.min(1, k) * SFX.shake;
     const roll = (0.6 * Math.sin(d / 5.3 * 6.283 + 0.4) + 0.4 * w3) * Math.min(1, k) * SFX.shake;
     const kk = this.kick * M.kerb * SFX.shake;
+    // the hits' noise, smoothed: a fresh random every frame read as teleporting
+    this._kn = (this._kn || 0) + (rnd() - (this._kn || 0)) * Math.min(1, dt * 18);
+    const kn = this._kn;
 
     // THE DIVE. Braking at 5-6 g an F1 car's nose goes down and so does your
     // head, and a stiff car does it with a bounce as the brakes come off.
@@ -144,10 +147,10 @@ export class SpeedShake {
     o.x = (M.latM || 0) * this._lx * SFX.shake;
     const headRoll = -(M.latR || 0) * this._lx;
 
-    o.p = (M.buzzP * (b + ride * 2.2) * this._hf.p + M.roadP * road + kk * rnd() * 0.9 + dive - 0.25 * this._gv) * D2R;
-    o.y = (M.buzzY * (b + ride) * this._hf.y + kk * rnd() * 0.25) * D2R;
-    o.r = (M.buzzR * (b + ride * 2.5) * this._hf.r + M.roadR * roll + kk * rnd() * 0.5 + headRoll * SFX.shake) * D2R;
-    o.h = M.heave * (road + 0.5 * (b + ride) * this._hf.p) + 0.01 * kk * rnd()
+    o.p = (M.buzzP * (b + ride * 2.2) * this._hf.p + M.roadP * road + kk * kn * 0.9 + dive - 0.25 * this._gv) * D2R;
+    o.y = (M.buzzY * (b + ride) * this._hf.y + kk * kn * 0.25) * D2R;
+    o.r = (M.buzzR * (b + ride * 2.5) * this._hf.r + M.roadR * roll + kk * kn * 0.5 + headRoll * SFX.shake) * D2R;
+    o.h = M.heave * (road + 0.5 * (b + ride) * this._hf.p) + 0.01 * kk * kn
       - (M.sink || 0) * (this._gv + Math.max(0, -g) * 0.25);
     return o;
   }

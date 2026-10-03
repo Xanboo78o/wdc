@@ -1676,11 +1676,21 @@ export class View {
     // With speedfx on, the per-frame buzz is ANGULAR (SpeedShake, below) and
     // this positional term keeps only the hits — kerbs, grass, big lateral g —
     // at a third of its old size, because the angular kick now carries them.
+    // Adam, 2026-10-03, on the rig: on gravel "my car is just teleporting top
+    // to bottom ... scale shake like WAYYYYYYYY down ... only shake on grass and
+    // crash". So: grass is the only surface that shakes (gravel, run-off and
+    // kerbs do not), the g term starts at 7 g — an impact, not a fast corner,
+    // which an F1 car pulls 5 g through — everything is about a tenth of what it
+    // was, and the jitter is smoothed into a rumble instead of a new random
+    // position every frame (that was the teleporting).
     const sfxOn = SFX.on && SFX.shake > 0;
     const buzz = sfxOn ? 0 : (0.0016 + car.speed * 0.00017) * (rig.kick || 0);
+    const grassRough = (car.surface ?? 1) < 0.5 ? (hud.rough || 0) : 0;
     this.shake = Math.max(this.shake * (1 - dt * 6),
-      (hud.rough || 0) * 0.42 + Math.max(0, Math.abs(latG) - 1.8) * 0.045);
-    const jx = (Math.random() - 0.5), jy = (Math.random() - 0.5), jz = (Math.random() - 0.5);
+      grassRough * 0.05 + Math.max(0, Math.abs(latG) - 7) * 0.006);
+    const ja = Math.min(1, dt * 18), J = this._jit || (this._jit = { x: 0, y: 0, z: 0 });
+    J.x += (Math.random() - 0.5 - J.x) * ja; J.y += (Math.random() - 0.5 - J.y) * ja; J.z += (Math.random() - 0.5 - J.z) * ja;
+    const jx = J.x, jy = J.y, jz = J.z;
     const amp = this.shake * (sfxOn ? 0.35 : 1) + buzz;
     if (!this.speedShake) this.speedShake = new SpeedShake();
     // Acceleration, smoothed, from the speed alone (a replay sets only that).
@@ -1690,11 +1700,11 @@ export class View {
     // Which kerb the wheels are on (surface.js KERB: 1 flat, 2 standard,
     // 3 high), and the extra load of a banked corner: |lateral g| times the
     // sine of the bank, which is how hard the banking presses you down.
-    const onKerb = car.surface > 0.9 && car.surface < 1;
-    const kType = onKerb ? ((this.surf && this.surf.kerb && this.surf.kerb[proj.i]) || 1) : 0;
+    // kerbs no longer shake (Adam: only grass and crashes)
+    const kType = 0;
     const bankA = Math.abs(bankRoll(this.bank, this.track, proj.i, 0) || 0);
     const sk = this.speedShake.step(dt, car.speed || 0, rig.mount, {
-      rough: hud.rough || 0, kerb: kType, gLong: this._acc / 9.81,
+      rough: grassRough * 0.12, kerb: kType, gLong: this._acc / 9.81,
       gVert: Math.abs(latG) * Math.sin(bankA), gLat: latG });
     // FIXED LENS. Adam, 2026-09-29: "no fov resizing, this is for a simrig".
     // On a rig the screen is a window at a real distance from your eyes; a lens
