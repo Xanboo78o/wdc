@@ -32,8 +32,18 @@ import { TIME_PHASES, timeFor, WEATHER_KINDS } from './weather.js';
 import { driverAt, teamOf, TEAMS, FIELDS, setField, LEAGUES, teamsIn, driversOf, teamUI } from './drivers.js';
 import { liveryFor } from './livery.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
+import { TRACKS } from './tracks.js';
+import { THEMES, hasTheme, defaultTheme, setTheme, sayFor, loadingLine, pauseLine, resultMood, MUSIC_LEVELS, hasLevel, menuMusic, mountChrome, mood, boardNo } from './menuui.js';
 
 const $ = id => document.getElementById(id);
+// ?attract=1 — the race that plays BEHIND the home page (home.html): a bot at
+// your wheel, the TV camera, no HUD, no radio, no dash, and it starts again
+// when it ends. Always loaded with ffb=0 and sound=0, so it never moves the
+// wheel and never makes a noise. ?from=home sends "back to the menu" there.
+const ATTRACT = new URLSearchParams(location.search).has('attract');
+const FROM_HOME = new URLSearchParams(location.search).get('from') === 'home';
+const toMenu = () => { if (FROM_HOME) location.href = './home.html'; else location.reload(); };
+if (ATTRACT) document.body.classList.add('attract');
 const CAMS = ['ONBOARD', 'CHASE', 'NOSE', 'TV', 'T-CAM'];
 
 const state = {
@@ -59,28 +69,6 @@ const engineer = new Engineer({ say });
 // ---------------------------------------------------------------------------
 // menu
 // ---------------------------------------------------------------------------
-const TRACKS = [
-  // The hand-built one, baked out of data/build/pieces.js by
-  // tools/baketrack.mjs. It is first because it is the one being worked on,
-  // and because reaching it through the MENU is the only way to see the phone
-  // wheel's pairing code — ?auto=test:f1 skips the menu, which is why the
-  // phone would not connect to it.
-  ['test', 'The test map', 'HAND-BUILT'],
-  ['kate', 'Kate Mascoi Circuit', 'WIDE · FAST · BATTLES'],
-  // Adam's own, modelled outside this project and read in by
-  // tools/importtrack.mjs. Both carry real elevation in `z`, which nothing on
-  // this side reads yet — so they drive flat for now, and that is the next
-  // thing they want.
-  ['street', 'Street Circuit', "ADAM'S OWN"],
-  ['adam1', "Adam's first track", "ADAM'S OWN"],
-  ['monza', 'Monza', 'ITALY'],
-  ['zandvoort', 'Zandvoort', 'NETHERLANDS'],
-  ['suzuka', 'Suzuka', 'JAPAN'],
-  ['baku', 'Baku', 'AZERBAIJAN'],
-  ['monaco', 'Monaco', 'MONACO'],
-  ['nurburgring', 'Nürburgring', 'GERMANY'],
-  ['sepang', 'Sepang', 'MALAYSIA'],
-];
 let pickTrack = 'monza', pickCar = 'f4';
 // Race settings. `pickGrid` counts EVERY car including yours, so 22 is the real
 // thing and 6 is a sprint you can actually see all of.
@@ -96,6 +84,8 @@ let pickBattle = 'medium';
 // The team of the league you are driving paints the interface (applyTheme).
 const pickTeams = { f1: null, gt3: null, f4: null };
 let pickField = 'f1';   // F1's field: drivers.js FIELDS. GT3 and F4 race their own.
+// How the MENUS look and sound (js/menuui.js). Neither reaches the race.
+let pickTheme = defaultTheme(), pickMusic = 'on';
 
 // The menu remembers what you last picked (Adam: "save my previous race
 // settings"). Every value is checked against what exists NOW, so a circuit
@@ -122,13 +112,15 @@ function loadMenu() {
   if (m.teams) for (const L in pickTeams) if (TEAMS[m.teams[L]] && TEAMS[m.teams[L]].league === L) pickTeams[L] = m.teams[L];
   if (TEAMS[m.team] && TEAMS[m.team].league === 'f1' && !pickTeams.f1) pickTeams.f1 = m.team;   // the one-team save
   if (FIELDS[m.field]) pickField = m.field;
+  if (hasTheme(m.theme)) pickTheme = m.theme;
+  if (hasLevel(m.music)) pickMusic = m.music;
 }
 function saveMenu() {
   try {
     localStorage.setItem(MENU_KEY, JSON.stringify({
       track: pickTrack, car: pickCar, mode: pickMode, grid: pickGrid, tier: pickTier,
       laps: pickLaps, start: pickStart, noDnf: pickNoDnf, quali: pickQuali, time: pickTime, weather: pickWeather, battle: pickBattle,
-      teams: pickTeams, field: pickField,
+      teams: pickTeams, field: pickField, theme: pickTheme, music: pickMusic,
     }));
   } catch { /* private window: it just won't remember */ }
 }
@@ -164,6 +156,9 @@ function menuRows() {
   R.push(
     { g: 'CONDITIONS', k: 'TIME', opts: [['live', 'LIVE'], ...TIME_PHASES.map(k => [k, k.toUpperCase()])], get: () => pickTime, set: v => pickTime = v },
     { k: 'WEATHER', opts: [['live', 'LIVE'], ...WEATHER_KINDS.map(k => [k, k.toUpperCase()]), ['changing', 'CHANGING']], get: () => pickWeather, set: v => pickWeather = v },
+    // The menus' own settings: what they look like and whether the band plays.
+    { g: 'SETTINGS', k: 'THEME', opts: THEMES, get: () => pickTheme, set: v => pickTheme = v },
+    { k: 'MUSIC', opts: MUSIC_LEVELS, get: () => pickMusic, set: v => pickMusic = v },
   );
   return R;
 }
@@ -177,10 +172,16 @@ function stepRow(row, d) {
   const n = row.opts.length;
   row.set(row.opts[i < 0 ? 0 : (i + d + n) % n][0]);
   buildMenu();
+  mood(sayFor(row.k, row.get()));
 }
 
 function buildMenu() {
   applyTheme(themeKey());
+  setTheme(pickTheme);
+  mountChrome();
+  boardNo(Math.max(0, TRACKS.findIndex(t => t[0] === pickTrack)) + 1);
+  menuMusic.setLevel(pickMusic);
+  menuMusic.cue(pickTrack);
   const rows = menuRows();
   const box = $('rows');
   box.innerHTML = '';
@@ -283,6 +284,7 @@ function launch() {
   if (launching) return;
   launching = true;
   menuLive = false;
+  menuMusic.fadeOut();   // the grid is quiet
   const go = $('go'), lamps = go.querySelectorAll('.lamps i');
   go.classList.add('fire');
   lamps.forEach((l, i) => setTimeout(() => l.classList.add('on'), 140 * i));
@@ -326,6 +328,10 @@ function applyTheme(key) {
   r.setProperty('--pri', pri);
   r.setProperty('--sec', sec);
   r.setProperty('--onpri', inkOn(pri));
+  // the same two again under names a menu theme does not override: in a theme
+  // the team is a stripe, not the whole page (style.css, "menu themes")
+  r.setProperty('--team', pri);
+  r.setProperty('--team2', sec);
 }
 
 let picking = false, pickLeague = 'f1', pickAt = 0;
@@ -441,7 +447,8 @@ function startSlot(grid) {
 
 async function start() {
   menuLive = false;
-  startRadio({ engineer });
+  menuMusic.fadeOut();   // also the ?auto path, which never passes through launch()
+  if (!ATTRACT) startRadio({ engineer });
   setField(fieldFor());
   hands.endFrame();
   $('menu').classList.add('hidden');
@@ -462,6 +469,7 @@ async function start() {
     });
   }
   $('hud').classList.remove('hidden');
+  $('load').querySelector('.loadbox').textContent = loadingLine();
   $('load').classList.remove('hidden');
   // let the browser paint the loading line before the line solver blocks
   await new Promise(r => setTimeout(r, 30));
@@ -542,6 +550,10 @@ async function start() {
     // screenshot waits, it comes back at lap 0:00.7 with the grid still on the
     // grid. A photograph proves a thing RENDERS, never that a thing HAPPENS,
     // and this is what lets a photograph of a race in progress exist at all.
+    if (ATTRACT) {
+      state.attract = makeAutopilot(t, lines, spec, state.peak,
+        { driver: makeDriver(11, 'medium', t.corners.length || 24) });
+    }
     const spool = Math.max(0, Math.min(900, +q.get('spool') || 0));
     if (spool) {
       const ghost = makeAutopilot(t, lines, spec, state.peak,
@@ -612,6 +624,7 @@ async function start() {
       livery: liveryFor(pickTeams[pickCar], TEAMS[pickTeams[pickCar]]),
       team: TEAMS[pickTeams[pickCar]] || null,
     });
+    if (ATTRACT) state.view.setMode(3);   // the TV camera
   } else {
     location.reload(); return;          // changing circuit rebuilds the world
   }
@@ -995,7 +1008,10 @@ function loop(now) {
     if (race) {
       const inp = hands.update(FIXED_DT);
       if (spec.drs && (hands.tapped('Space') || hands.tapped('w:drs'))) car.drsOpen = !car.drsOpen;
-      race.tick(FIXED_DT, {
+      if (state.attract) {
+        state.attract(car, state.me.proj, FIXED_DT, state.me.ctx);
+        race.tick(FIXED_DT, { throttle: car.throttle, brake: car.brake, delta: car.delta });
+      } else race.tick(FIXED_DT, {
         throttle: inp.throttle, brake: inp.brake,
         delta: inp.wheel * steerLock(car.speed),
       });
@@ -1107,7 +1123,7 @@ function loop(now) {
   ptt(hands.wheelHeld('radio'));
   if (state.race) {
     if (engineer.race !== state.race) engineer.begin(state.race);
-    engineer.tick(frame);
+    if (!ATTRACT) engineer.tick(frame);
     // Celebrate the pass (js/race.js cheerTick): the crowd goes up and the
     // tower flashes you. The radio call is the engineer's, from the same event.
     const cz = state.race.cheers, c = cz && cz[cz.length - 1];
@@ -1119,7 +1135,7 @@ function loop(now) {
         // On the sound session's bus (limiter, master volume) once it exists.
         const en = state.engine;
         if (en && en.ctx && en.cans && state.cheerBus !== en.cans) { cheerRoute(en.ctx, en.cans); state.cheerBus = en.cans; }
-        if (!(en && en.muted)) cheer({ big: c.pos === 1, gain: en ? en.master : 0.78 });
+        if (!ATTRACT && !(en && en.muted)) cheer({ big: c.pos === 1, gain: en ? en.master : 0.78 });
       }
       // For the replay director: the moment the pass happened, not the moment it was confirmed.
       if (state.marks) state.marks.push({ t: (state.simT || 0) - (state.race.time - c.at), kind: 'pass', held: true });
@@ -1371,12 +1387,16 @@ const MENU_ITEMS = () => [
   ['CAMERA — ' + CAMS[state.view.mode], () => { state.view.setMode(state.view.mode + 1); drawMenu(); }],
   ['IDEAL LINE', () => { state.view.toggleLine(); drawMenu(); }],
   ['SOUND', () => { if (state.engine) state.engine.toggleMute(); drawMenu(); }],
-  ['QUIT TO MENU', () => location.reload()],
+  ['QUIT TO MENU', toMenu],
 ];
 let _menuBox = null;
 function setPaused(on) {
   state.paused = on;
-  if (on) state.menuAt = 0;
+  if (on) {
+    state.menuAt = 0;
+    const cr = state.car && state.car.crush;
+    state.pauseSay = pauseLine(!!cr && Math.max(0, ...Object.values(cr).filter(Number.isFinite)) > 0.3);
+  }
   if (!_menuBox) {
     _menuBox = document.createElement('div');
     _menuBox.id = 'pauseMenu';     // styled in style.css, like the main menu
@@ -1388,7 +1408,7 @@ function setPaused(on) {
 function drawMenu() {
   if (!_menuBox) return;
   const items = MENU_ITEMS();
-  _menuBox.innerHTML = '<div class="pbox"><div class="ph">PAUSED</div>'
+  _menuBox.innerHTML = `<div class="pbox"><div class="ph">PAUSED</div><div class="pq">${state.pauseSay || ''}</div>`
     + items.map(([label], i) => `<div class="pi${i === state.menuAt ? ' on' : ''}">${label}</div>`).join('')
     + '<div class="pk">D-PAD MOVE &middot; START SELECT &middot; HOME CLOSE</div></div>';
 }
@@ -1569,13 +1589,23 @@ function raceHud(dt) {
 }
 
 function showResults() {
+  if (ATTRACT) { location.reload(); return; }   // the backdrop race just runs again
   const race = state.race, me = state.me;
-  $('resTitle').innerHTML = me.retired ? 'RACE <span>OVER</span>' : 'CHEQUERED <span>FLAG</span>';
-  $('resSub').textContent = me.retired
+  // The mood is chosen ONCE (this runs twice a second to keep the table live):
+  // a title and a line that feel the way the race went, and that circuit's
+  // fun song or its less fun one to match (js/menuui.js).
+  if (!state.resMood) {
+    const m = state.resMood = resultMood(me.pos, race.entries.length, me.retired);
+    $('results').classList.add('mood-' + m.mood);
+    $('resTitle').innerHTML = m.title;
+    menuMusic.cue(pickTrack, m.mood === 'win' || m.mood === 'podium' || m.mood === 'good' ? 'fun' : 'sad');
+  }
+  const facts = me.retired
     ? 'you did not make the finish'
     : `P${me.pos} of ${race.entries.length}` +
       (me.bestLap ? ` · best lap ${fmt(me.bestLap)}` : '') +
       (me.penalty ? ` · ${me.penalty}s of penalties` : '');
+  $('resSub').innerHTML = `<b>${state.resMood.line}</b>${facts}`;
   $('resTable').innerHTML = race.standings.map((e, i) => {
     const [cls, gap] = rowText(race, e, i);
     const best = e.bestLap ? `<u style="color:#6c7687;font-size:10px">${fmt(e.bestLap)}</u>` : '';
@@ -1656,7 +1686,8 @@ function dashTelemetry() {
   return t;
 }
 
-startDash({ getTelemetry: dashTelemetry });
+if (ATTRACT) window.__attract = dashTelemetry;   // home.html reads the live tower off this
+else startDash({ getTelemetry: dashTelemetry });
 mountDashCard(document.querySelector('#menu .keys'));
 {
   let was = false;
@@ -1687,7 +1718,10 @@ $('go').onclick = launch;
 $('go').onmousemove = () => { if (menuAt !== 'GO') { menuAt = 'GO'; paintFocus(); } };
 // the rim's buttons need their map before the menu can read them
 hands.loadProfile('./').then(() => hands.loadButtons('./')).finally(menuPoll);
-$('resBack').onclick = () => location.reload();
+$('resBack').onclick = toMenu;
+// The band may only start on a real key or click (browser rule), so the first
+// one on the menu wakes it. A pad press does not count; the keyboard does.
+for (const ev of ['keydown', 'pointerdown']) addEventListener(ev, () => menuMusic.wake(), { capture: true });
 
 // Test hook: ?auto=monza:f1 boots straight into a session. It exists so a
 // headless browser can prove the page actually runs without a human clicking

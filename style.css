@@ -274,3 +274,125 @@ body.replaying #hud{display:none}
 #slip{display:none}
 /* ...and no G meter: speed, gear and your inputs, nothing else (Adam, 2026-09-30) */
 #dash .glat{display:none}
+
+/* ================= menu themes ================= */
+/* Adam, 2026-10-02: the MENUS get a look of their own (Settings → THEME) and
+   the race keeps its realism. So a theme is a set of variables scoped to the
+   full-screen pages and the pause menu; #hud never sees them and still wears
+   the team's colours off :root. In a theme the team is a stripe (--team,
+   --team2, set by applyTheme), not the whole page. THEME = TEAM is the old
+   look, untouched: none of the `html.themed` rules below apply to it.
+   Clean and quietly retro: upright rounded type, flat paper, a 1970s triple
+   stripe, a number roundel. The personality is in the words (js/menuui.js). */
+@font-face{font-family:"Rubik";src:url("data/fonts/rubik.woff2") format("woff2");font-weight:300 900;font-display:swap}
+:root{--team:var(--pri);--team2:var(--sec)}
+html[data-theme=light] :is(.screen,#pauseMenu){--bg:#f3ecdc;--ink:#1d1b18;--pri:#e2452a;--sec:#147a74;--onpri:#fff7e8}
+html[data-theme=dark] :is(.screen,#pauseMenu){--bg:#16171c;--ink:#f2e9d8;--pri:#ff6a3c;--sec:#ffc94d;--onpri:#16171c}
+html[data-theme=halloween] :is(.screen,#pauseMenu){--bg:#150d1a;--ink:#f5e8d4;--pri:#ff7a1a;--sec:#9be24f;--onpri:#150d1a}
+html.themed :is(.screen,#pauseMenu){
+  --dim:color-mix(in srgb,var(--ink) 58%,var(--bg));--line:color-mix(in srgb,var(--ink) 13%,var(--bg));
+  --font:"Rubik",ui-rounded,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);font-family:var(--font)}
+html.themed .screen,html.themed #menu,html.themed #teamPick{background:var(--bg)}
+html.themed :is(.screen,#pauseMenu) :is(.mark,.heroText b,.mrow .mv b,.go,#go b,.brand h1,.tpHead,.tpTabs button,.tpMid b,.ph,.pi){font-style:normal}
+
+/* the hero */
+html.themed .mark{letter-spacing:.12em}
+html.themed #map .casing{stroke:color-mix(in srgb,var(--ink) 9%,var(--bg))}
+html.themed #map .tarmac{stroke:var(--ink)}
+html.themed #map .car{fill:var(--pri);filter:none}
+html.themed #map .sf{stroke:var(--pri)}
+html.themed .heroText b{letter-spacing:-.02em}
+html.themed .heroText small{letter-spacing:.26em}
+/* the number board: this circuit's place on the list, in a roundel */
+#heroNo{display:none}
+html.themed #heroNo{display:flex;align-items:center;justify-content:center;width:52px;height:52px;margin-bottom:12px;
+  border-radius:50%;background:var(--ink);color:var(--bg);font:900 23px/1 var(--font);letter-spacing:-.02em}
+
+/* what the menu says back, in any theme */
+#moodLine{margin-top:10px;min-height:20px;font:500 14px/1.4 var(--font);letter-spacing:.01em;color:var(--dim)}
+#moodLine.in{animation:moodIn .32s cubic-bezier(.2,.9,.3,1.2) both}
+@keyframes moodIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+/* what the band is playing */
+#nowPlaying{margin-top:14px;padding-left:18px;min-height:14px;display:flex;align-items:flex-end;gap:3px;
+  font-size:10px;letter-spacing:.16em;color:var(--dim)}
+#nowPlaying b{margin-left:6px;color:var(--ink);font-weight:700}
+#nowPlaying i{display:block;width:3px;height:11px;background:var(--pri);transform-origin:bottom;animation:eq .9s ease-in-out infinite alternate}
+#nowPlaying i:nth-child(2){animation-duration:.6s}
+#nowPlaying i:nth-child(3){animation-duration:.75s}
+@keyframes eq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}
+
+/* the list: the stripe down its edge is the team */
+html.themed #menu .panel{position:relative;clip-path:none;padding-left:76px;background:color-mix(in srgb,var(--ink) 5%,var(--bg))}
+html.themed #menu .panel::before{content:'';position:absolute;left:0;top:0;bottom:0;width:36px;
+  background:linear-gradient(90deg,var(--team) 0 16px,var(--bg) 16px 20px,var(--team2) 20px 28px,var(--bg) 28px 32px,var(--ink) 32px 35px,transparent 35px)}
+html.themed .mgrp{color:var(--pri);letter-spacing:.28em}
+html.themed .mrow{border-radius:8px}
+html.themed .mrow + .mrow{box-shadow:none}
+html.themed .mrow .mv b{font-weight:800;letter-spacing:.03em}
+html.themed .mrow.on{background:var(--ink)}
+html.themed .mrow.on::before{display:none}
+html.themed .mrow.on .mk{color:color-mix(in srgb,var(--bg) 72%,var(--ink))}
+html.themed .mrow.on .mv b{color:var(--bg);animation:pop .16s ease-out}
+html.themed .mrow.on .mv small{color:color-mix(in srgb,var(--bg) 62%,var(--ink))}
+html.themed .mrow.on .ar{color:var(--bg)}
+html.themed .mrow .ar:hover{color:var(--pri)}
+html.themed .pips i{border-radius:2px;background:color-mix(in srgb,var(--bg) 28%,var(--ink))}
+html.themed .pips i.on{background:var(--pri)}
+@keyframes pop{from{transform:scale(1.07)}to{transform:none}}
+
+html.themed .go{clip-path:none;border-radius:10px;letter-spacing:.14em}
+html.themed #go{border-radius:12px;background:var(--ink);color:var(--bg)}
+html.themed #go.on{background:var(--pri);color:var(--onpri)}
+html.themed #go.fire{background:var(--ink);color:var(--bg)}
+html.themed #go b{letter-spacing:.14em}
+html.themed .phoneCard{border-top-color:var(--line);color:var(--dim)}
+html.themed .phoneCard b{color:var(--ink)}
+
+/* loading */
+html.themed .loadbox{font-size:13px;font-weight:600;letter-spacing:.14em}
+
+/* results: the line that says how it went, then the facts */
+#resSub b{display:block;margin-bottom:7px;font-size:16px;font-weight:600;letter-spacing:.01em;text-transform:none;color:var(--ink)}
+html.themed .brand h1{letter-spacing:.03em}
+html.themed #resTable{border-top:6px solid var(--team);border-radius:0 0 10px 10px}
+html.themed :is(.trow i,.tpSwatch,.tpPips i){transform:none}
+/* ...and the screen feels it. A win gets the stripes run out across the top
+   and a bounce; a DNF loses its colour and the title sinks. Nothing flashes. */
+#results.mood-win::before,#results.mood-podium::before{content:'';position:absolute;left:0;top:0;height:30px;width:100%;
+  background:linear-gradient(180deg,var(--team) 0 14px,transparent 14px 18px,var(--team2) 18px 25px,transparent 25px 28px,var(--ink) 28px);
+  transform-origin:left;animation:runOut .9s cubic-bezier(.2,.8,.2,1) both}
+#results.mood-win #resTitle{animation:bounce .8s cubic-bezier(.3,1.7,.5,1) both}
+#results.mood-podium #resTitle{animation:bounce .6s cubic-bezier(.3,1.4,.5,1) both}
+#results.mood-dnf{filter:grayscale(1)}
+#results.mood-dnf #resTitle{animation:sink 2.2s ease-out both}
+#results:is(.mood-last,.mood-dnf) #resSub b{font-style:italic}
+@keyframes runOut{from{transform:scaleX(0)}to{transform:none}}
+@keyframes bounce{from{transform:scale(.6) rotate(-3deg);opacity:0}to{transform:none;opacity:1}}
+@keyframes sink{from{transform:translateY(-18px);opacity:0;letter-spacing:.5em}to{transform:none;opacity:1}}
+
+/* pause: calm */
+#pauseMenu .pq{padding:0 28px 12px;font-size:12px;letter-spacing:.03em;color:var(--dim)}
+#pauseMenu .pq:empty{display:none}
+html.themed #pauseMenu .pbox{clip-path:none;border-radius:12px;border-top:8px solid var(--team);overflow:hidden}
+html.themed #pauseMenu .ph{padding-top:4px;letter-spacing:.1em}
+html.themed #pauseMenu .pi.on{background:var(--ink);color:var(--bg)}
+html.themed #pauseMenu .pi.on::before{display:none}
+
+/* team select */
+html.themed .tpHead{letter-spacing:.12em}
+html.themed .tpTabs button{clip-path:none;border-radius:8px}
+html.themed .tpSwatch{height:20px;border-radius:5px;overflow:hidden;box-shadow:0 0 0 2px var(--ink)}
+html.themed .tpPips i{border-radius:2px}
+
+@media (max-width:760px){
+  html.themed #menu .panel{padding-left:16px;padding-top:26px}
+  html.themed #menu .panel::before{left:0;right:0;top:0;bottom:auto;width:auto;height:12px;
+    background:linear-gradient(180deg,var(--team) 0 6px,var(--team2) 6px 10px,var(--ink) 10px)}
+}
+@media (prefers-reduced-motion:reduce){
+  #moodLine.in,#nowPlaying i,#results::before,#resTitle,.mrow.on .mv b{animation:none !important}
+}
+
+/* the race behind home.html (?attract=1): a picture, nothing on top of it */
+body.attract #hud,body.attract .screen,body.attract #pauseMenu{display:none !important}
