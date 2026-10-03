@@ -52,10 +52,6 @@
 import { Music } from './js/music.js';
 import { SONGS, STATIONS } from './js/ost.js';
 
-// Circuits still to be written, so the page shows the whole calendar.
-const COMING = [['suzuka', 'SUZUKA', 'Japan'], ['monaco', 'MONACO', 'Monaco'], ['zandvoort', 'ZANDVOORT', 'Netherlands'], ['baku', 'BAKU', 'Azerbaijan'],
-  ['nurburgring', 'NÜRBURGRING', 'Germany'], ['kate', 'KATE MASCOI', "Xander's own"], ['street', 'STREET CIRCUIT', "Xander's own"], ['adam1', "XANDER'S FIRST TRACK", "Xander's own"]];
-
 const q = new URLSearchParams(location.search);
 const music = new Music(SONGS, STATIONS);
 window.MUSIC = music;
@@ -76,12 +72,8 @@ function render() {
       const wav = document.createElement('button'); wav.className = 'ghost'; wav.textContent = 'DOWNLOAD WAV'; wav.onclick = () => exportWav(id, wav);
       row.append(play, wav); el.appendChild(row); grid.appendChild(el);
     }
+    if (!st.songs.length) grid.innerHTML = '<div class="soon">Two songs coming.</div>';
     c.appendChild(grid); list.appendChild(c);
-  }
-  for (const [, name, tag] of COMING) {
-    const c = document.createElement('section'); c.className = 'circuit'; c.style.setProperty('--c', '#3a3e48');
-    c.innerHTML = `<h2>${name}</h2><small>${tag}</small><div class="soon">Two songs coming.</div>`;
-    list.appendChild(c);
   }
 }
 music.onTrack = (song, st) => {

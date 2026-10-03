@@ -72,9 +72,14 @@ const DEFAULT_MIX = {
   mando:  { g: 0.5, pan: 0.25, send: { room: 0.3, hall: 0.25 }, lp: 6500 },
   twang:  { g: 0.55, pan: -0.2, send: { hall: 0.6, delay: 0.25 } },
   whistle:{ g: 0.42, send: { hall: 0.55, delay: 0.15 } },
+  koto:   { g: 0.55, pan: -0.2, send: { hall: 0.45 } }, tar: { g: 0.5, pan: 0.2, send: { room: 0.35 }, lp: 7000 },
+  shaku:  { g: 0.45, send: { hall: 0.6, delay: 0.12 } }, accordion: { g: 0.4, pan: 0.15, send: { room: 0.35 } },
+  fiddle: { g: 0.42, pan: -0.1, send: { hall: 0.45 } }, sax: { g: 0.45, pan: 0.1, send: { room: 0.3, hall: 0.2 } },
+  upright:{ g: 0.6, duck: 0.3, send: { room: 0.2 } }, brush: { g: 0.5, drum: true, send: { room: 0.25 } },
+  dist:   { g: 0.42, pan: -0.25, duck: 0.4, send: { room: 0.2 } }, dist2: { g: 0.42, pan: 0.25, duck: 0.4, send: { room: 0.2 } },
   vinyl:  { g: 1.0 },
 };
-const DRUM_INSTS = new Set(['kick', 'snare', 'clap', 'hat', 'ohat', 'ride', 'crash', 'rim', 'cowbell', 'conga', 'shaker', 'tom', 'antilag', 'flutter', 'boom']);
+const DRUM_INSTS = new Set(['brush', 'kick', 'snare', 'clap', 'hat', 'ohat', 'ride', 'crash', 'rim', 'cowbell', 'conga', 'shaker', 'tom', 'antilag', 'flutter', 'boom']);
 
 export class Music {
   constructor(songs, stations) {
@@ -126,7 +131,7 @@ export class Music {
     // shared buffers
     this.noise = this.makeNoise(2.5);
     this.vinylBuf = this.makeVinyl(4);
-    this.ks = new Map();
+    this.ksCache = new Map();
     this.channels = {};
     this.rng = mulberry(1);
     if (!this.offline) { this._timer = setInterval(() => this.tick(), 45); }
@@ -427,16 +432,16 @@ export class Music {
 
   // --- plucked strings: Karplus-Strong rendered into cached buffers ---
   pluckBuffer(kind, m) {
-    const key = kind + ':' + m; if (this.ks.has(key)) return this.ks.get(key);
+    const key = kind + ':' + m; if (this.ksCache.has(key)) return this.ksCache.get(key);
     const sr = this.ctx.sampleRate, f = freq(m), N = Math.max(2, Math.round(sr / f));
-    const T = { harp: 2.6, guitar: 1.5, twang: 2.4, mando: 0.7 }[kind] ?? 0.9, len = Math.floor(sr * T), b = this.ctx.createBuffer(1, len, sr), d = b.getChannelData(0);
+    const T = { harp: 2.6, guitar: 1.5, twang: 2.4, mando: 0.7, koto: 2.2, tar: 1.0 }[kind] ?? 0.9, len = Math.floor(sr * T), b = this.ctx.createBuffer(1, len, sr), d = b.getChannelData(0);
     const rho = Math.pow(0.015, 1 / (T * f)), r = mulberry(m * 131 + (kind === 'harp' ? 7 : 3));
     const blend = kind === 'harp' ? 0.5 : kind === 'guitar' ? 0.5 : 0.5;    // averaging = the string's own lowpass
-    let lp = 0; const bright = { harp: 0.9, guitar: 0.55, twang: 0.8, mando: 0.95 }[kind] ?? 0.3;
+    let lp = 0; const bright = { harp: 0.9, guitar: 0.55, twang: 0.8, mando: 0.95, koto: 0.85, tar: 0.97 }[kind] ?? 0.3;
     for (let i = 0; i < N; i++) { const w = r() * 2 - 1; lp += (w - lp) * bright; d[i] = lp; }
     for (let i = N; i < len; i++) d[i] = rho * (blend * d[i - N] + (1 - blend) * (i - N - 1 >= 0 ? d[i - N - 1] : 0));
     let peak = 0; for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(d[i])); if (peak > 0) for (let i = 0; i < len; i++) d[i] /= peak;
-    this.ks.set(key, b); return b;
+    this.ksCache.set(key, b); return b;
   }
   ks(kind, t, v, o) {
     const ch = this.channel(kind, this.song).inp, notes = o.notes || [o.note], strum = o.strum ?? (kind === 'guitar' ? 0.014 : 0.03);
@@ -473,6 +478,88 @@ export class Music {
         s.connect(g).connect(ch); s.start(t0); s.stop(t0 + s.buffer.duration);
       });
     }
+  }
+  // the koto: a bright silk string; o.bend = semitones pressed up behind the bridge and released
+  koto(t, v, o) {
+    const ch = this.channel('koto', this.song).inp, notes = o.notes || [o.note];
+    notes.forEach((n, i) => {
+      const t0 = t + i * (o.strum ?? 0.03), s = this.ctx.createBufferSource(); s.buffer = this.pluckBuffer('koto', n);
+      if (o.bend) { s.playbackRate.setValueAtTime(1, t0 + 0.08); s.playbackRate.linearRampToValueAtTime(Math.pow(2, o.bend / 12), t0 + 0.22); }
+      const g = this.gain(0); g.gain.setValueAtTime(v * 0.6, t0); if (o.dur) g.gain.setTargetAtTime(0.0001, t0 + o.dur + 0.3, 0.15);
+      s.connect(g).connect(ch); s.start(t0); s.stop(t0 + s.buffer.duration);
+    });
+  }
+  // the tar (Azerbaijan): mando's bright cousin, picked fast; o.trem like mando
+  tar(t, v, o) {
+    const ch = this.channel('tar', this.song).inp, notes = o.notes || [o.note], dur = o.dur, per = o.trem ?? 0;
+    const picks = per > 0 ? Math.max(1, Math.floor(dur / per)) : 1;
+    for (let k = 0; k < picks; k++) {
+      const tk = t + k * per, vk = v * (k % 2 ? 0.75 : 0.95) * (0.9 + this.rng() * 0.2);
+      for (const n of notes) {
+        const s = this.ctx.createBufferSource(); s.buffer = this.pluckBuffer('tar', n);
+        if (o.glide != null && k === 0) { s.playbackRate.setValueAtTime(Math.pow(2, (o.glide - n) / 12), tk); s.playbackRate.linearRampToValueAtTime(1, tk + 0.07); }
+        const g = this.gain(0); g.gain.setValueAtTime(vk * 0.55 / Math.sqrt(notes.length), tk); g.gain.setTargetAtTime(0.0001, tk + (per > 0 ? per * 1.5 : dur), 0.05);
+        s.connect(g).connect(ch); s.start(tk); s.stop(tk + s.buffer.duration);
+      }
+    }
+  }
+  // a blown or bowed voice: a source through a body filter, vibrato blooming, breath on top.
+  // kind: 'shaku' (shakuhachi: breathy, airy, scoops), 'fiddle' (kamancha: bowed, nasal), 'sax' (reedy, growls a little)
+  blown(kind, t, v, o) {
+    const ch = this.channel(kind, this.song).inp, f = freq(o.note), dur = o.dur, g = this.gain(0);
+    const atk = kind === 'fiddle' ? 0.09 : kind === 'shaku' ? 0.06 : 0.03;
+    const end = this.adsr(g, t, atk, 0, 1, kind === 'shaku' ? 0.2 : 0.12, dur, v * 0.45);
+    const src = this.osc(kind === 'shaku' ? 'triangle' : 'sawtooth', f, t, end);
+    const from = o.glide != null ? freq(o.glide) : f * Math.pow(2, (kind === 'shaku' ? -1 : -0.4) / 12);
+    src.frequency.setValueAtTime(from, t); src.frequency.exponentialRampToValueAtTime(f, t + (o.glide != null ? 0.12 : 0.07));
+    const lfo = this.osc('sine', kind === 'fiddle' ? 6.2 : 5, t, end), lg = this.gain(0);
+    lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(dur > 0.35 ? (kind === 'fiddle' ? 28 : 18) : 4, t + Math.min(0.5, dur)); lfo.connect(lg).connect(src.detune);
+    const body = kind === 'shaku' ? this.lpf(f * 3, 0.7) : kind === 'fiddle' ? this.bp(Math.min(2400, f * 2.2), 1.2) : this.bp(Math.min(1800, f * 1.8), 0.9);
+    src.connect(body).connect(g);
+    if (kind === 'sax') { const ws = this.ctx.createWaveShaper(); ws.curve = shaperCurve('tanh', 2.2); const lp = this.lpf(3500); src.connect(ws).connect(lp).connect(this.gain(0.25)).connect(g); }
+    if (kind === 'fiddle') { const b2 = this.bp(f * 4, 2); src.connect(b2).connect(this.gain(0.35)).connect(g); }
+    const br = this.noiseSrc(t, end), bf = this.bp(kind === 'shaku' ? f * 1.5 : 2500, kind === 'shaku' ? 1.5 : 1), bg = this.gain(kind === 'shaku' ? 0.5 : 0.06);
+    if (kind === 'shaku') { bg.gain.setValueAtTime(0.9, t); bg.gain.setTargetAtTime(0.35, t + 0.08, 0.1); }
+    br.connect(bf).connect(bg).connect(g);
+    g.connect(ch);
+  }
+  shaku(t, v, o) { this.blown('shaku', t, v, o); }
+  fiddle(t, v, o) { this.blown('fiddle', t, v, o); }
+  sax(t, v, o) { this.blown('sax', t, v, o); }
+  // the accordion: three reeds (one in tune, two a few cents either side — the musette wobble) and the bellows
+  accordion(t, v, o) {
+    const ch = this.channel('accordion', this.song).inp, notes = o.notes || [o.note], dur = o.dur, g = this.gain(0);
+    const end = this.adsr(g, t, 0.04, 0, 1, 0.08, dur, v * 0.4 / Math.sqrt(notes.length));
+    const flt = this.lpf(2600, 0.8), trem = this.gain(1); flt.connect(trem).connect(g); g.connect(ch);
+    for (const n of notes) { const f = freq(n); for (const [d, w] of [[0, 'square'], [-o.musette || -12, 'sawtooth'], [o.musette || 12, 'sawtooth']]) { const os = this.osc(w, f, t, end, d), og = this.gain(w === 'square' ? 0.35 : 0.3); os.connect(og).connect(flt); } }
+    const lfo = this.osc('sine', o.bellows ?? 4.5, t, end), lg = this.gain(0.12); lfo.connect(lg).connect(trem.gain);
+  }
+  // the upright bass: a thump and a woody body that dies away
+  upright(t, v, o) {
+    const ch = this.channel('upright', this.song).inp, f = freq(o.note), dur = Math.min(o.dur, 1.2);
+    const a = this.osc('sine', f, t, t + dur + 0.3), b = this.osc('triangle', f * 2, t, t + dur + 0.3), bg = this.gain(0.18), g = this.gain(0), lp = this.lpf(900);
+    if (o.glide != null) { a.frequency.setValueAtTime(freq(o.glide), t); a.frequency.exponentialRampToValueAtTime(f, t + 0.06); }
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v, t + 0.008); g.gain.setTargetAtTime(v * 0.45, t + 0.02, 0.15); g.gain.setTargetAtTime(0.0001, t + dur, 0.05);
+    a.connect(g); b.connect(bg).connect(g); g.connect(lp).connect(ch);
+    const n = this.noiseSrc(t, t + 0.03), nf = this.bp(700, 1.5), ng = this.gain(0); ng.gain.setValueAtTime(v * 0.25, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.025); n.connect(nf).connect(ng).connect(ch);
+  }
+  // jazz brushes: a swish (o.sweep seconds) or a tap
+  brush(t, v, o = {}) {
+    const ch = this.channel('brush', this.song).inp, len = o.sweep ?? 0.12, n = this.noiseSrc(t, t + len + 0.1), f = this.bp(o.f ?? 3500, 0.8), g = this.gain(0);
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v * 0.5, t + Math.min(0.03, len * 0.4)); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+    n.connect(f).connect(g).connect(ch);
+  }
+  // pop-punk guitar: a driven power chord (root, fifth, octave) through a cab; o.mute = palm-muted chug
+  dist(t, v, o) { this.guitarDist(o.side === 2 ? 'dist2' : 'dist', t, v, o); }
+  dist2(t, v, o) { this.guitarDist('dist2', t, v, o); }
+  guitarDist(name, t, v, o) {
+    const ch = this.channel(name, this.song).inp, notes = o.notes || [o.note, o.note + 7, o.note + 12], mute = !!o.mute;
+    const dur = mute ? Math.min(o.dur, 0.14) : o.dur, g = this.gain(0), pre = this.gain(1), ws = this.ctx.createWaveShaper(), cab = this.lpf(mute ? 1600 : 3800, 0.9), hp = this.hpf(90);
+    ws.curve = shaperCurve('tanh', o.drive ?? 6); ws.oversample = '2x';
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v * 0.32, t + 0.004); g.gain.setTargetAtTime(v * (mute ? 0.05 : 0.22), t + 0.01, mute ? 0.04 : 0.4); g.gain.setTargetAtTime(0.0001, t + dur, 0.03);
+    const end = t + dur + 0.2;
+    for (const n of notes) { const f = freq(n); for (const d of [-7, 6]) this.osc('sawtooth', f, t, end, d).connect(pre); }
+    pre.connect(ws).connect(hp).connect(cab).connect(g).connect(ch);
   }
   // the whistle: a near-sine with breath, scooping up into each note, vibrato blooming on long ones
   whistle(t, v, o) {
@@ -616,6 +703,7 @@ export class Music {
     const t = t0 + (local % 2 === 1 ? swing * sd : 0) + (song.human ? (this.rng() - 0.5) * song.human : 0);
     const inten = this.offline ? 1 : this._iSmooth;
     const fade = sec.fade ? Math.max(0.05, 1 - local / sec.steps) : 1;
+    if (sec.choke && local === 0) this.choke(sec, t0);
     for (const part of sec.parts) {
       if ((part.lvl || 0) > inten + 1e-6) continue;
       const inst = part.i;
@@ -642,6 +730,18 @@ export class Music {
         }
       }
     }
+  }
+
+  // A brake point (section.choke): a moment after the downbeat every channel the
+  // section does not play — and every reverb/delay tail — is cut, so the bar is
+  // the hit, near-silence and only its own parts; all of it returns on the next
+  // section's downbeat. section.choke may be a number: seconds before the cut.
+  choke(sec, t) {
+    const names = new Set(sec.parts.map(p => p.i === 'ohat' ? 'ohat' : p.i === 'strings' && p.o && p.o.pad ? 'pad' : p.i === 'oo' && p.o && p.o.chop ? 'oochop' : p.i));
+    const cut = t + (typeof sec.choke === 'number' ? sec.choke : 0.12), back = t + sec.steps * this.stepDur;
+    const duck = (param, to) => { param.cancelScheduledValues(cut); param.setTargetAtTime(0, cut, 0.03); param.setTargetAtTime(to, back - 0.005, 0.004); };
+    for (const name in this.channels) if (!names.has(name)) duck(this.channels[name].inp.gain, this.channels[name].m.g);
+    for (const k in this.fx) duck(this.fx[k].out.gain, k === 'delay' ? 0.8 : 1.0);
   }
 
   // ---------------------------------------------------------------- offline
