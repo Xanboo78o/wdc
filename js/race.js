@@ -462,6 +462,33 @@ export class Race {
     return vmin < v[i0] * 0.86;
   }
 
+  // ---- A WRECK KEEPS GOING ----------------------------------------------------
+  // Adam, 2026-10-04: "when i crash i keep rolling and hitting stuff untill im
+  // stationary". A car used to stop being simulated the instant it was marked
+  // retired — which is the instant of the impact, so it hung in the air at
+  // whatever speed it had (ffb.log: airborne, 49 m/s, for twenty seconds, and
+  // a dead wheel). Retired means nobody is driving it, not that physics has
+  // finished with it: it slides, tumbles and hits the barriers until it has
+  // really come to rest. Other cars do not collide with it (they cannot see a
+  // wreck yet, and a field ploughing into one is a pile-up by construction).
+  wreckStep(e, dt) {
+    const t = this.track, car = e.car;
+    car.throttle = 0; car.brake = 0.5;
+    e.proj = t.project(car.x, car.y, e.hint, 8); e.hint = e.proj.i;
+    const pr = e.proj, al = Math.abs(pr.lat);
+    let surface = SURFACE.track;
+    if (al > pr.w + pr.run) surface = SURFACE.grass;
+    else if (al > pr.w + 1.2) surface = SURFACE.runoff;
+    else if (al > pr.w) surface = SURFACE.kerb;
+    step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv), dirty: 0, tow: 0, rollMul: dragFor(surface),
+                    slope: this.slopeAt ? this.slopeAt(pr.s) * Math.cos(car.hdg - t.hdg[pr.i]) : 0 });
+    const hit = resolveBarrier(car, t, e.hint);
+    if (hit && e.isPlayer && hit.closing > 3.5) e.bump = { what: 'barrier', closing: hit.closing, harm: hit.harm, part: hit.part };
+    const still = car.speed < 0.6 && Math.abs(car.vz || 0) < 0.3 && Math.abs(car.pRate || 0) < 0.3 && Math.abs(car.rRate || 0) < 0.3;
+    e.restT = still ? (e.restT || 0) + dt : 0;
+    if (e.restT > 1.0) { e.atRest = true; car.vx = 0.0001; car.vy = 0; car.r = 0; car.vz = 0; car.pRate = 0; car.rRate = 0; }
+  }
+
   // ---- SIDE BY SIDE (Adam, 2026-10-03) ---------------------------------------
   // "more battles where we're speeding side by side through corners ... lead
   // up 60%, battle 35%, overtake 5%". Measured before this existed
@@ -812,6 +839,12 @@ export class Race {
     // You, off the road, are not the car to follow — the guard below decides
     // whether you are in the way, and off the road you are not.
     if (A && A.isPlayer && Math.abs(A.proj.lat) > A.proj.w + 1.0) A = null;
+    // ...and stopped or crawling you have a rule of your own below (NOBODY
+    // REAR-ENDS YOU), with its own gate. This one, in a braking zone, calls
+    // most of the road "your lane": at Suzuka, whose grid is in the braking
+    // zone for the first turn, a car 4 m to your side still "followed" you
+    // to a standstill and nine cars queued behind it.
+    if (A && A.isPlayer && A.car.speed < 20) A = null;
     if (A && !e.inPit) {
       const ds = t.gap(A.proj.s, e.proj.s);
       const dl = Math.abs(A.proj.lat - e.proj.lat);
@@ -930,11 +963,39 @@ export class Race {
         if (ds > 0 && ds < 300) {
           const mc = me.car, onRoad = Math.abs(me.proj.lat) <= me.proj.w + 1.0;
           const vP = Math.max(0, mc.speed * Math.cos(mc.hdg - t.hdg[me.proj.i]));
-          const unsettled = onRoad && (vP < 20 || Math.abs(mc.vy || 0) > 2 || Math.abs(Math.sin(mc.hdg - t.hdg[me.proj.i])) > 0.35);
-          const gate = Math.max(this.brakingZone(e.proj.s, 140) ? Math.max(4.5, t.w[i] * 1.1) : 3.0, unsettled ? Math.max(5.5, t.w[i] * 1.2) : 0);
+          // ERRATIC and SLOW are different things (Adam, 2026-10-04: "i completly
+          // stopped at the start, but im just holing up everyoen behnind ...
+          // everyone shhold pass me"). Sliding or sideways, you could end up
+          // anywhere across the road, and the gate is most of it. Stopped or
+          // crawling in a straight line you are a parked car: predictable, and
+          // the field goes ROUND you, on the side with more road. The wide gate
+          // for merely being slow is what queued twenty cars behind you.
+          const erratic = onRoad && (Math.abs(mc.vy || 0) > 2 || Math.abs(Math.sin(mc.hdg - t.hdg[me.proj.i])) > 0.35);
+          const slow = onRoad && !erratic && vP < Math.max(20, e.car.speed * 0.6);
+          if (slow && ds < 220) {
+            const lm = Math.max(0.3, me.proj.w - 1.0), PASS = 3.4;
+            const roomL = lm - me.proj.lat, roomR = me.proj.lat + lm;
+            // Already clear of you on one side: that is the side. Otherwise the
+            // side with more road. Decided once, not re-thought every tick.
+            const dlm = e.proj.lat - me.proj.lat;
+            if (e.goRound == null || this.time - (e.goRoundAt || 0) > 6) e.goRound = Math.abs(dlm) > 2.5 ? Math.sign(dlm) : roomL >= roomR ? 1 : -1;
+            e.goRoundAt = this.time;
+            // It only ever pushes AWAY from you. As a target it pulled a car that
+            // was 5 m clear in to 3.4 m, inside the gate, where it stopped dead.
+            if ((e.goRound > 0 ? roomL : roomR) >= PASS - 0.4) {
+              const tgt = me.proj.lat + e.goRound * PASS - this.lines.race.off[i];
+              bias = e.goRound > 0 ? Math.max(bias, tgt) : Math.min(bias, tgt);
+            }
+          }
+          const unsettled = erratic;
+          // Round a parked car the gate is a car's width and a bit, and the
+          // stand-off short: stopping 5 m back and needing 4 m sideways left
+          // the car behind you no room to steer out, and its whole grid column
+          // queued behind it (7 of 14 stuck at Monza from P8, 13 at Suzuka).
+          const gate = Math.max(slow ? 2.5 : this.brakingZone(e.proj.s, 140) ? Math.max(4.5, t.w[i] * 1.1) : 3.0, unsettled ? Math.max(5.5, t.w[i] * 1.2) : 0);
           if (Math.abs(me.proj.lat - e.proj.lat) < gate) {
             const v = e.car.speed;
-            const room = ds - this.spec.bodyL * 1.15 - 4 - v * 0.3;
+            const room = ds - this.spec.bodyL * 1.15 - (slow ? 1.5 : 4) - v * 0.3;
             if (obstDs == null || room < obstDs) { obstDs = Math.max(0, room); obstV = vP; }
             const cap = room > 0 ? vP + Math.sqrt(2 * 9 * room) : vP * 0.7;
             speedCap = Math.min(speedCap ?? Infinity, cap);
@@ -946,7 +1007,9 @@ export class Race {
         // by a crawling car 1.3 m clear and touched it as it drifted back to
         // the line.
         if (ds > -this.spec.bodyL * 1.6 && ds < this.spec.bodyL * 1.6) {
-          const off = this.lines.race.off[i], CLEAR = 3.6;
+          const off = this.lines.race.off[i];
+          // A metre of air past a parked you; a car's width past a moving one.
+          const CLEAR = me.car.speed < 12 ? 3.0 : 3.6;
           if (e.proj.lat >= me.proj.lat) bias = Math.max(bias, me.proj.lat + CLEAR - off);
           else bias = Math.min(bias, me.proj.lat - CLEAR - off);
         }
@@ -992,7 +1055,7 @@ export class Race {
     }
 
     for (const e of this.entries) {
-      if (e.retired) continue;
+      if (e.retired) { if (!e.atRest) this.wreckStep(e, dt); continue; }
       const car = e.car;
       if (e.isPlayer) {
         const inp = playerInput || { wheel: 0, throttle: 0, brake: 0 };

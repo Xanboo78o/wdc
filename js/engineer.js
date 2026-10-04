@@ -49,6 +49,29 @@ const DEFAULT_CODES = [
   { say: 'hammer time', means: 'push' },
 ];
 
+// WHOSE RADIO IS THIS? Yours. (Adam, 2026-10-04: "other driver's radios are
+// on mine ... when i crash into sum1, they say on my radio 'HE just crashed
+// into me!! look into that!!' like bro".) The other drivers' first-person
+// complaints and their engineers' "box box" used to be handed to the same
+// radio as a caption — and read exactly like your own side accusing somebody
+// of the thing you had just done. Only your engineer talks to you now; what
+// another car does reaches you as information from him, never as their voice.
+export const onMyRadio = who => who === 'ENGINEER' || who === 'YOU';
+
+// A collision the stewards have just penalised: what your engineer says, if
+// anything. Pure, so tools/radiocheck.mjs can ask it directly.
+//   fault   'me' | 'them'      whose penalty it is
+//   other   the other car's name (victim if it was you, culprit if it was them)
+//   hitUs   them at fault: was it US they hit? (false = somebody else's crash)
+export function collisionLines({ fault, other, hitUs }) {
+  if (fault === 'me') {
+    return [other ? `That contact with ${nice(other)} was on us. Five second penalty, causing a collision.`
+      : 'Five second penalty for us. Causing a collision.'];
+  }
+  if (fault === 'them' && hitUs) return [`${nice(other)} has five seconds for hitting us.`];
+  return [];                                   // not our incident: silence
+}
+
 export class Engineer {
   constructor({ say }) {
     this.say = say;
@@ -151,7 +174,7 @@ export class Engineer {
     return `${cap}, ${w}.`;
   }
 
-  call(text, who = 'ENGINEER') { this.say(text, who); }
+  call(text, who = 'ENGINEER') { if (onMyRadio(who)) this.say(text, who); }
   ready(key, gap) {
     const t = this.race.time;
     if (t < (this.cool[key] || -1e9)) return false;
@@ -255,11 +278,9 @@ export class Engineer {
       const e = this.race.entries[p.idx];
       if (!e || t > p.until) return false;
       if (!this.onTrack(e) && this.onTrack(me)) {
-        // It left the road next to you, and you did not. Its driver says so.
+        // It left the road next to you, and you did not. Its driver reports
+        // you — on ITS radio. What you hear is your engineer (stewards()).
         if (this.ready('complain' + p.idx, 40)) {
-          const line = ['He ran me off the road!', 'He pushed me off the track, that has to be a penalty!',
-            'Did you see that? He forced me off!'][p.idx % 3];
-          this.call(line, e.name);
           this.stewards(e, me, 9, 'FORCING ANOTHER DRIVER OFF THE TRACK', p.pos);
         }
         return false;
@@ -299,23 +320,21 @@ export class Engineer {
       const e = ev.car != null ? r.entries[ev.car] : null;
       if (!e) continue;
       if (ev.kind === 'flag' && / WILL PIT$/.test(ev.text) && !e.isPlayer) {
-        // Their engineer calls them in. The undercut threat is yours to hear.
-        // One of these every few seconds at most: a lap-one pile-up sent
-        // seven cars to the pits in two seconds and buried the screen.
-        if (this.ready('botradio', 4)) this.call('Box box, box box.', `${e.name} ENGINEER`);
+        // Their engineer calls them in on THEIR radio; what is yours to hear
+        // is the undercut threat, from your own engineer.
         const me = this.me;
         if (me && Math.abs(e.pos - me.pos) === 1 && this.ready('undercut', 60)) {
           this.call(e.pos < me.pos ? `${nice(e.name)} is pitting. Push now, we go long.` : `${nice(e.name)} is pitting behind. Watch the undercut.`);
         }
       }
       if (ev.kind === 'penalty' && /CAUSING A COLLISION/.test(ev.text)) {
-        if (e.isPlayer) {
-          const victim = this.closest();
-          if (victim) this.call('He just drove into me! That is a penalty!', victim.name);
-          this.call('Five second penalty for us. Causing a collision.');
-        } else if (this.near.get(e.idx) > r.time - 1.5 && this.closestTo(e) === this.me) {
-          this.call(`${nice(e.name)} has five seconds for hitting us.`);
-        }
+        // The penalty is logged against the car at FAULT. Yours: the engineer
+        // owns it. Theirs: only if it was us they hit.
+        const lines = e.isPlayer
+          ? collisionLines({ fault: 'me', other: this.closest()?.name })
+          : collisionLines({ fault: 'them', other: e.name,
+              hitUs: this.near.get(e.idx) > r.time - 1.5 && this.closestTo(e) === this.me });
+        for (const line of lines) this.call(line);
       }
       if (ev.kind === 'pass' && e.isPlayer) {
         const c = r.cheers && r.cheers.find(x => x.t === ev.t);
