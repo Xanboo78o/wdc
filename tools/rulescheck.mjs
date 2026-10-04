@@ -237,8 +237,11 @@ function caseRed(key, seed) {
   const inBox = live.filter(e => e.pitPhase === 'service').length;
   parked = inBox === live.length;
   check('every live car parked in the pit lane', parked, `${inBox}/${live.length} in their boxes after ${(race.time - race.rc.since).toFixed(0)} s`);
-  const fixed = live.every(e => !(e.car.lost && e.car.lost.frontWing) && (!e.car.tyre || e.car.tyre.wf === 0));
-  check('free tyres and repairs', fixed, '');
+  // The work takes as long as the work takes (2.4 s for tyres, 11.5 for a
+  // nose): asked the instant the last car stopped, its crew had not begun.
+  run(race, W, 14);
+  const notFixed = live.filter(e => (e.car.lost && e.car.lost.frontWing) || (e.car.tyre && e.car.tyre.wf > 0.001));
+  check('free tyres and repairs', notFixed.length === 0, notFixed.length ? `not done: ${notFixed.map(e => e.name).join(',')}` : `${live.length} cars on new tyres, noses on`);
   let grid = false;
   run(race, W, 120, () => (grid = race.state === 'grid'));
   const gridOrder = race.entries.filter(e => !e.retired).sort((a, b) => race.progress(b) - race.progress(a));

@@ -52,7 +52,28 @@ export class Track {
         if (d < bd) { bd = d; best = i; }
       }
       const hm = this.hdg[best];
-      const lat = -Math.sin(hm) * (mid[0] - this.x[best]) + Math.cos(hm) * (mid[1] - this.y[best]);
+      let lat = -Math.sin(hm) * (mid[0] - this.x[best]) + Math.cos(hm) * (mid[1] - this.y[best]);
+      // ...but ONE vertex is not the lane. At Sepang the middle vertex of the
+      // surveyed way sits on the entry road: it read 53.6 m out, the garages
+      // are drawn 13 m out, and the race drove every pit car through the
+      // paddock, 40 m from its garage (found 2026-10-04). The offset is where
+      // the GARAGES are: the median over the middle 40% of the lane's length.
+      {
+        const P = this.pit.pts, cum = [0];
+        for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+        const lats = [];
+        for (let f = 0.30; f <= 0.701; f += 0.05) {
+          const d = f * cum[cum.length - 1];
+          let k = 1; while (k < P.length - 1 && cum[k] < d) k++;
+          const u = (d - cum[k - 1]) / Math.max(1e-6, cum[k] - cum[k - 1]);
+          const px = P[k - 1][0] + (P[k][0] - P[k - 1][0]) * u, py = P[k - 1][1] + (P[k][1] - P[k - 1][1]) * u;
+          let b = 0, bd2 = Infinity;
+          for (let i = 0; i < n; i++) { const d2 = (this.x[i] - px) ** 2 + (this.y[i] - py) ** 2; if (d2 < bd2) { bd2 = d2; b = i; } }
+          lats.push(-Math.sin(this.hdg[b]) * (px - this.x[b]) + Math.cos(this.hdg[b]) * (py - this.y[b]));
+        }
+        lats.sort((a, b) => a - b);
+        if (lats.length) lat = lats[lats.length >> 1];
+      }
       this.pit.sideRaw = this.pit.side;
       this.pit.side = Math.sign(lat) || 1;      // +1 = left of travel
       this.pit.offset = lat;                    // how far out, in metres

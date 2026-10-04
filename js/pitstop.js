@@ -47,6 +47,7 @@ export const SERVICE = { tyres: 2.4, nose: 11.5, floor: 7.5 };
 export const BOX_PITCH = 14.4;      // metres of lane per garage
 export const MAX_BOXES = 12;        // eleven teams (2026) and a spare for you
 const MARK = 3.6;                   // a teammate's mark, either side of centre
+const BOX_SIDE = 3.3;               // metres from the fast lane's line to the box, garage side
 
 // The lane polyline resampled to 2 m and lightly smoothed (pit.js draws on it).
 export function resampleLane(pts, step = 2) {
@@ -216,7 +217,13 @@ function drive(car, proj, targetLat, targetV, peak) {
 export function updateStop(e, track, lane, proj, dt, peak = 0.13, others = null) {
   const car = e.car;
   if (!e.pitPhase) e.pitPhase = 'none';
-  const prog = laneProgress(track, lane, proj.s);
+  // A car a few metres BEFORE the entry line is at a small negative progress,
+  // not at 5.7 lane-lengths: read as that, the box was "behind" it and the
+  // lane controller stopped it dead on the entry line (Monaco, where the
+  // approach is slow enough to be caught there).
+  let prog = laneProgress(track, lane, proj.s);
+  const lapP = track.length / Math.max(1, lane.len);
+  if (prog > 1 + (lapP - 1) / 2) prog -= lapP;
 
   switch (e.pitPhase) {
     case 'none': {
@@ -281,7 +288,13 @@ export function updateStop(e, track, lane, proj, dt, peak = 0.13, others = null)
         return false;
       }
       const v = toBox < 12 ? Math.max(0, PIT_SPEED * (toBox / 12)) : PIT_SPEED;
-      drive(car, proj, laneLat(lane, prog), v, peak);
+      // THE BOX IS BESIDE THE FAST LANE, NOT ON IT. Every car used to stop on
+      // the lane's one driving line, which nobody noticed while a stop lasted
+      // 2.4 s — and which blocked the lane solid the first time cars PARKED
+      // (the cool-down lap: 3 of 8 home, the rest queued behind them). Over
+      // the last 28 m the car pulls over to the garage side.
+      const pull = Math.max(0, Math.min(1, (28 - toBox) / 20));
+      drive(car, proj, laneLat(lane, prog) + BOX_SIDE * (Math.sign(lane.off) || 1) * pull, v, peak);
       if (toBox < 1.2 && car.speed < 0.6) {
         e.pitPhase = 'service';
         const svc = serviceFor(car);

@@ -403,5 +403,97 @@ export function buildPitLane(scene, track, look, sign, world = null) {
   const crew = peopleMesh(crewSpots, { palette: CREW });
   if (crew) scene.add(crew);
 
-  return { boxes, points: P.length, crew: crewSpots.length, tyres: tyreSpots.length, teams: teams.length };
+  // ---- YOUR GARAGE ---------------------------------------------------------
+  // Adam, 2026-10-04: "make my pitbox show no matter the team". The race gives
+  // every team a garage and YOU the spare one (js/race.js `me.garage`), but the
+  // boards over the doors are the circuit's sponsors, so nothing said which
+  // door was yours. This is built before any race exists, so the marking is a
+  // call the game makes once it knows who you are and where you stop:
+  //
+  //   pit.markPlayer(me.garage, team ? team.name : null, team ? team.col : null,
+  //                  { fg: team && team.fg, mark: me.box % 2 })
+  //
+  // Your name board over the door (in front of the sponsor's), a light bar in
+  // your colour above it, your stop box painted on the lane where the car
+  // actually stops, and the lollipop at its nose. Call it again and the old
+  // marking is replaced; markPlayer(null) takes it away.
+  let mine = null;
+  const markPlayer = (garage, teamName = null, teamColour = null, { fg = null, mark = 0 } = {}) => {
+    if (mine) {
+      scene.remove(mine);
+      mine.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+      mine = null;
+    }
+    if (garage == null || !(garage >= 0)) return null;
+    const k = Math.min(boxes - 1, Math.floor(garage));
+    const col = new THREE.Color(teamColour || '#f2c230');
+    const lum = 0.2126 * col.r + 0.7152 * col.g + 0.0722 * col.b;      // linear
+    const ink = fg || (lum > 0.35 ? '#0b0d10' : '#ffffff');
+    const rgb = [col.r, col.g, col.b];
+    const m0 = startM + k * BOX_PITCH, pierW = (BOX_PITCH - DOOR_W) / 2;
+    const iMid = idxAt(m0 + BOX_PITCH / 2), G = inDir(iMid), F = fwdDir(iMid), ry = H[iMid];
+    const group = new THREE.Group();
+    group.name = 'pit.player';
+    const finish = (b, mat, name) => {
+      const m = b.mesh(mat, { shadow: false, receive: false });
+      if (!m) return;
+      if (world) world.lift(m.geometry);
+      m.name = 'pit.player.' + name;
+      group.add(m);
+    };
+
+    // -- the board: drawn once, the right way round from the lane --------------
+    const cv = document.createElement('canvas');
+    cv.width = 1024; cv.height = 128;
+    const g2 = cv.getContext('2d');
+    g2.fillStyle = '#' + col.getHexString(); g2.fillRect(0, 0, 1024, 128);
+    g2.fillStyle = ink; g2.fillRect(0, 0, 1024, 8); g2.fillRect(0, 120, 1024, 8);
+    const label = String(teamName || 'YOUR GARAGE').toUpperCase();
+    g2.textAlign = 'center'; g2.textBaseline = 'middle';
+    let px = 84;
+    do { g2.font = `900 ${px}px system-ui, "Helvetica Neue", Arial, sans-serif`; px -= 4; } while (g2.measureText(label).width > 940 && px > 28);
+    g2.fillText(label, 512, 68);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+    {
+      const a = at(idxAt(m0 + pierW + 0.3), LANE_BOX - 0.20), b = at(idxAt(m0 + pierW + DOOR_W - 0.3), LANE_BOX - 0.20);
+      // Seen from the lane, looking INTO the garage along G, your right hand
+      // is (-G.z, G.x). The text must start at whichever end is on your left,
+      // and which end that is depends on the side of the circuit the pits are.
+      const aOnRight = (a[0] - b[0]) * -G[2] + (a[1] - b[1]) * G[0] > 0;
+      const [l, r] = aOnRight ? [b, a] : [a, b];
+      const y0 = DOOR_H + 0.75, y1 = DOOR_H + 1.85;
+      const bd = new Builder();
+      bd.quadN([l[0], y0, l[1]], [r[0], y0, r[1]], [r[0], y1, r[1]], [l[0], y1, l[1]], [[0, 0], [1, 0], [1, 1], [0, 1]]);
+      finish(bd, new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false }), 'board');
+    }
+
+    // -- the light bar, the stop box and the lollipop, in your colour ----------
+    const bar = new Builder({ color: true });
+    const mid = at(iMid, LANE_BOX - 0.32);
+    bar.box(mid[0], DOOR_H + 2.06, mid[1], DOOR_W - 0.6, 0.22, 0.14, ry, rgb, 1);
+    // Where the car STOPS: on the lane centre, at its mark (js/pitstop.js puts
+    // a team's two cars 3.6 m either side of the garage centre).
+    const stopM = m0 + BOX_PITCH / 2 + (mark ? 3.6 : -3.6);
+    const c = at(idxAt(stopM), 0), HL = 3.1, HW = 1.35, T = 0.16;
+    const corner = (u, v) => [c[0] + F[0] * u + G[0] * v, c[1] + F[2] * u + G[2] * v];
+    const strip = (u0, v0, u1, v1) => bar.quadUp([corner(u0, v0), corner(u1, v0), corner(u1, v1), corner(u0, v1)], 0.014, rgb);
+    strip(-HL, -HW, HL, -HW + T); strip(-HL, HW - T, HL, HW);          // the two long sides
+    strip(-HL, -HW, -HL + T, HW); strip(HL - T, -HW, HL, HW);          // the two ends
+    strip(HL - 0.55, -HW, HL - 0.55 + T, HW);                          // the line your front axle stops on
+    // The lollipop: a pole beside the nose with the board turned to face you.
+    const lp = corner(HL + 0.5, HW + 0.55);
+    bar.box(lp[0], 1.0, lp[1], 0.06, 2.0, 0.06, ry, [0.12, 0.12, 0.13], 1);
+    bar.box(lp[0], 2.15, lp[1], 0.05, 0.62, 0.62, ry, rgb, 1);
+    finish(bar, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide, toneMapped: false,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -4,
+    }), 'marks');
+
+    scene.add(group);
+    mine = group;
+    return { garage: k, label, mark, at: { x: c[0], z: c[1] } };
+  };
+
+  return { boxes, points: P.length, crew: crewSpots.length, tyres: tyreSpots.length, teams: teams.length, markPlayer };
 }

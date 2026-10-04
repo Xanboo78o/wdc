@@ -302,14 +302,47 @@ function roundRobin(list) {
   return out;
 }
 export const FIELDS = { f1: '2026 GRID', classic: 'CLASSIC', fantasy: 'FANTASY', all: 'ALL ERAS' };
-let ACTIVE = DRIVERS;
+let BASE = DRIVERS, ACTIVE = DRIVERS;
 export function setField(kind) {
-  ACTIVE = kind === 'classic' ? roundRobin(LEAGUE_DRIVERS.f1classic)
+  BASE = ACTIVE = kind === 'classic' ? roundRobin(LEAGUE_DRIVERS.f1classic)
     : kind === 'fantasy' ? FANTASY_DRIVERS
     : kind === 'all' ? interleave(DRIVERS, roundRobin(LEAGUE_DRIVERS.f1classic), FANTASY_DRIVERS)
     : kind === 'gt3' ? roundRobin(LEAGUE_DRIVERS.gt3)
     : kind === 'f4' ? roundRobin(LEAGUE_DRIVERS.f4)
     : DRIVERS;
+}
+// YOUR SEAT, AND YOUR TEAMMATE (Adam, 2026-10-04: "make my teamate like a acc
+// teamate, and remove alpine for non 2026 grid teams").
+//
+// You drive FOR a team, so you take one of its two cars and the other one is
+// your teammate, in your colours, in your garage. Called after setField, with
+// the grid size; the roster it leaves is every OTHER car in the race, so the
+// race and qualifying index it 0..n-2.
+//   your team is on this grid   its second driver stands down, its first is
+//                               your teammate
+//   your team is not on it      Alpine makes way: both its cars leave, and
+//                               your team's lead driver comes in as teammate
+//   no team                     nothing changes
+// Returns the teammate's profile, or null.
+export function setPlayerTeam(key, n = 22) {
+  ACTIVE = BASE;
+  if (!key || !TEAMS[key]) return null;
+  let list = BASE.slice(), mate;
+  const mine = list.filter(d => d.t === key);
+  if (mine.length) {
+    mate = mine[0];
+    if (mine.length > 1) list.splice(list.lastIndexOf(mine[mine.length - 1]), 1);
+  } else {
+    mate = driversOf(key)[0] || { n: 'TEAMMATE', t: key, num: 2, agg: 0.70, def: 0.75, err: 1.0, sk: 1.0 };
+    const at = list.findIndex(d => d.t === 'rose');
+    if (at >= 0) { list = list.filter(d => d.t !== 'rose'); list.splice(Math.min(at, list.length), 0, mate); }
+    else list.splice(Math.min(list.length, Math.max(0, n - 2)), 0, mate);
+  }
+  // A short grid takes the first n-1 of the roster: the teammate is on it.
+  const mi = list.indexOf(mate);
+  if (mi > n - 2) { list.splice(mi, 1); list.splice(Math.max(0, n - 2), 0, mate); }
+  ACTIVE = list;
+  return mate;
 }
 export function driverAt(i) { return ACTIVE[((i % ACTIVE.length) + ACTIVE.length) % ACTIVE.length]; }
 /** Everyone who drives for a team, for the team screen. */

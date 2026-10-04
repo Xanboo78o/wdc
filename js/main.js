@@ -24,12 +24,13 @@ import { PropWorld } from './props.js';
 import { Objects } from './build/objects.js';
 import { TIERS, BATTLE, makeAutopilot, makeDriver } from './autopilot.js';
 import { Field } from './field.js';
+import { RaceVehicles } from './scview.js';
 import { Replay } from './replay.js';
 import { makeBox } from './gearbox.js';
 import { Engine } from './audio.js';
 import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
 import { TIME_PHASES, timeFor, WEATHER_KINDS } from './weather.js';
-import { driverAt, teamOf, TEAMS, FIELDS, setField, LEAGUES, teamsIn, driversOf, teamUI } from './drivers.js';
+import { driverAt, teamOf, TEAMS, FIELDS, setField, setPlayerTeam, LEAGUES, teamsIn, driversOf, teamUI } from './drivers.js';
 import { liveryFor } from './livery.js';
 import { startDash, mountDashCard, onDash } from './dash.js';
 import { TRACKS } from './tracks.js';
@@ -450,6 +451,13 @@ function startSlot(grid) {
   return Math.max(1, Math.round(grid * 0.55));
 }
 
+// YOUR GARAGE, marked whatever team you drive for (js/pit.js markPlayer): your
+// team's name over the door, your colour above it, your stop box on the lane.
+function markMyGarage() {
+  const pit = state.view && state.view.stats && state.view.stats.pit, me = state.me, tm = TEAMS[pickTeams[pickCar]];
+  if (pit && pit.markPlayer && me && me.garage != null) pit.markPlayer(me.garage, tm ? tm.name : null, tm ? tm.col : null, { fg: tm && tm.fg, mark: me.box % 2 });
+}
+
 async function start() {
   menuLive = false;
   menuMusic.fadeOut();   // also the ?auto path, which never passes through launch()
@@ -538,8 +546,12 @@ async function start() {
     const slot = Math.max(1, Math.min(grid, +q.get('start') || startSlot(grid)));
     $('load').innerHTML = `<div class="loadbox">BUILDING A GRID OF ${grid}…</div>`;
     await new Promise(r => setTimeout(r, 30));
+    // You take a seat in your team, and its other car is your teammate; if
+    // your team is not on this grid, Alpine makes way (js/drivers.js).
+    setPlayerTeam(ATTRACT ? null : pickTeams[pickCar], grid);
     state.race = new Race({
       track: t, lines, spec, slots: gridSlots(t, grid), laps, grid,
+      playerTeam: ATTRACT ? null : TEAMS[pickTeams[pickCar]] || null,
       playerGrid: slot, tier, player: true, battle,
       noDnf: q.has('nodnf') ? q.get('nodnf') === '1' : pickNoDnf,
       seed: +q.get('seed') || (1 + Math.floor(Math.random() * 9973)),
@@ -667,6 +679,8 @@ async function start() {
   }
   if (state.race) {
     state.field = new Field(state.view, state.race.entries, spec.key);
+    state.vehicles = new RaceVehicles(state.view, spec.key);   // the safety car, trucks, the medical car (js/scview.js)
+    markMyGarage();
     const c = state.field.cost();
     if (typeof window !== 'undefined' && window.__wdc) {
       window.__wdc.cars = c.cars + 1;
@@ -746,6 +760,7 @@ function qualiPlace() {
 
 function qualiBegin() {
   const c = state.qcfg, n = c.grid;
+  setPlayerTeam(pickTeams[pickCar], n);      // the same seat and teammate as the race
   // The field: the first n-1 drivers of the table, going out in a shuffled
   // order (seeded, so a replay of the same seed runs in the same order).
   const bots = [];
@@ -772,7 +787,7 @@ function qualiBegin() {
     };
     w.onerror = e => { const q = state.quali; if (q) { q.err = e.message || 'worker failed'; q.workerDone = true; } };
     w.postMessage({ base: new URL('../', import.meta.url).href, track: pickTrack, cls: pickCar,
-      tier: c.tier, seed: c.seed, drivers: bots, field: fieldFor(),
+      tier: c.tier, seed: c.seed, drivers: bots, field: fieldFor(), team: pickTeams[pickCar], grid: n,
       // quali starts before the weather does; a rain or storm session starts soaked
       wet: ['rain', 'storm'].includes(new URLSearchParams(location.search).get('weather') || pickWeather) ? 1 : 0 });
     state.qualiWorker = w;
@@ -860,12 +875,16 @@ function startQualiRace() {
   state.race = new Race({
     track: t, lines: state.lines, spec, slots: gridSlots(t, order.length), laps: c.laps,
     grid: order.length, playerGrid: order.indexOf(-1) + 1, tier: c.tier, player: true,
+    playerTeam: TEAMS[pickTeams[pickCar]] || null,
     battle: c.battle, noDnf: c.noDnf, seed: c.seed, order,
   });
   state.me = state.race.entries.find(e => e.isPlayer);
   state.car = state.me.car; state.car.aids = aids;
   if (state.view) state.view.hint = null;
   state.field = new Field(state.view, state.race.entries, spec.key);
+  if (state.vehicles) state.vehicles.dispose();
+  state.vehicles = new RaceVehicles(state.view, spec.key);
+    markMyGarage();
   for (const id of ['tower', 'startLights']) $(id).classList.remove('hidden');
   $('posRow').classList.remove('hidden');
   if (state.qualiWorker) { state.qualiWorker.terminate(); state.qualiWorker = null; }
@@ -1212,6 +1231,7 @@ function loop(now) {
   // pool, which view.frame then ages by one frame.
   if (state.field) {
     state.field.frame(race.entries, frame);
+    if (state.vehicles) state.vehicles.frame(race, frame);
     state.field.smoke(race.entries, state.peak);
   }
   if (view.fx) view.fx.link(race ? race.entries : null, state.engine);   // debris, sparks, smoke (js/fx.js)

@@ -122,7 +122,7 @@ const CHEER_HOLD = 2.0;
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
                 tier = 'medium', seed = 1, player = true, pits = true, noDnf = false, order = null,
-                battle = null, duel = true, drs = true, rules = true, standIn = false, sideLock = true, styles = true }) {
+                battle = null, duel = true, drs = true, rules = true, standIn = false, sideLock = true, styles = true, playerTeam = null }) {
     this.track = track; this.lines = lines; this.spec = spec;
     // STAND-IN: a bot at YOUR wheel (a harness, the home page's backdrop).
     // Racecraft then runs for your car too, so `me.ctx` carries the traffic,
@@ -166,7 +166,12 @@ export class Race {
       // QUALIFYING (js/quali.js) hands over `order`: grid slot -> driver index,
       // -1 for you. Without it the grid is the driver table in order, as ever.
       const isPlayer = order ? order[k] === -1 : player && k === Math.min(playerGrid, n) - 1;
-      const who = order ? Math.max(0, order[k]) : k;
+      // The roster (js/drivers.js) is everyone BUT you, so the cars behind
+      // your slot take the next driver along, not the one after: the driver
+      // who gives up a seat is the one setPlayerTeam chose, not whoever
+      // happened to be listed at your grid position.
+      const pIdx = !order && player ? Math.min(playerGrid, n) - 1 : -1;
+      const who = order ? Math.max(0, order[k]) : (pIdx >= 0 && k > pIdx ? k - 1 : k);
       const car = makeCar({ cls: spec.key });
       const p = track.point(slot.s, slot.lat);
       car.x = p.x; car.y = p.y; car.hdg = slot.hdg; car.vx = 0.001;
@@ -179,8 +184,10 @@ export class Race {
         car, driver, isPlayer, idx: k, box: k,
         name: isPlayer ? 'YOU' : prof.n,
         num: isPlayer ? 78 : prof.num,
-        col: isPlayer ? '#ffffff' : team.col,
-        team: isPlayer ? null : team,
+        col: isPlayer ? (playerTeam ? playerTeam.col : '#ffffff') : team.col,
+        team: isPlayer ? playerTeam : team,
+        // Your teammate: the other car of the team you drive for.
+        mate: !isPlayer && !!playerTeam && team === playerTeam,
         drive: isPlayer ? null : makeAutopilot(track, lines, spec, this.peak, { driver }),
         // Where this car sits relative to the racing line on the grid. Adam:
         // "when the cars start thry IMMEDIATLY go for the line, make them slowly
@@ -210,14 +217,16 @@ export class Race {
     if (this.lane.garages) {
       const G = this.lane.garages, garageOf = new Map(), used = new Map();
       for (const e of this.entries) {
-        if (e.isPlayer) continue;
+        if (e.isPlayer && !e.team) continue;
         const key = e.team ? e.team.name : e.name;
         if (!garageOf.has(key)) garageOf.set(key, garageOf.size % G);
         const g = garageOf.get(key), j = used.get(g) || 0;
         used.set(g, j + 1);
         e.box = g * 2 + (j % 2);
+        if (e.isPlayer) e.garage = g;
       }
-      const me = this.entries.find(e => e.isPlayer);
+      // With a team you share its garage with your teammate; without one...
+      const me = this.entries.find(e => e.isPlayer && !e.team);
       if (me) {
         const spare = garageOf.size < G ? garageOf.size : G - 1;
         me.box = spare * 2 + (used.get(spare) ? 1 : 0);
@@ -680,7 +689,8 @@ export class Race {
     // Under a safety car, a VSC, a red flag, a yellow — or before the control
     // line on a restart — nobody attacks, and nobody defends against a car
     // that is not allowed to attack (js/safetycar.js).
-    const noAtk = this.rc.noAttack(e), noDef = this.rc.noDefend(e);
+    // ...and nobody races after the flag.
+    const noAtk = this.rc.noAttack(e) || e.finished, noDef = this.rc.noDefend(e) || e.finished;
     if (!pitting && !noAtk && e.ahead && e.aheadGapT < reach && !e.inPit) {
       const o = e.ahead;
       const ds = t.gap(o.proj.s, e.proj.s);
@@ -719,6 +729,8 @@ export class Race {
         lunge = (d.lungeMax ?? 0.02) * d.aggression;
       }
       if (ds < 25) pressure = 0.6;
+      // ...and he never dives at you: he will pass if he is quicker, cleanly.
+      if (e.mate && o === this.me) lunge = 0;
     }
 
     // ---- defence ------------------------------------------------------------
@@ -732,7 +744,9 @@ export class Race {
     // below makes sure of that whatever this block asks for.
     // A car on its way to the pits does not defend. It has somewhere to be.
     const defendT = this.battle ? 1.0 : 0.75;
-    if (!pitting && !noDef && e.behind && e.behindGapT < defendT && !e.inPit) {
+    // YOUR TEAMMATE does not defend against you: no covering move, no late
+    // braking to keep you behind. He holds his line and lets you race him.
+    if (!pitting && !noDef && e.behind && e.behindGapT < defendT && !e.inPit && !(e.mate && e.behind === this.me)) {
       const o = e.behind;
       const ds = t.gap(e.proj.s, o.proj.s);          // + : they are behind me
       const dl = o.proj.lat - e.proj.lat;
@@ -1026,6 +1040,8 @@ export class Race {
     // pit bias excluded (it is re-added fresh each pass).
     e.biasS = bias - pitBias;
     if (sb && sb.cap != null) speedCap = Math.min(speedCap ?? Infinity, sb.cap);
+    // The cool-down lap is driven at two thirds of racing speed.
+    if (e.finished) speedCap = Math.min(speedCap ?? Infinity, this.lines.race.v[i] * 0.66);
     e.ctx = this.rc.limit(e, { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: e.hold ?? 1, obstDs, obstV });
   }
 
@@ -1085,21 +1101,44 @@ export class Race {
       // Asking to pit is the DRIVER's decision, not the rulebook's — this is
       // the one line of it the session owns, and it owns it only because
       // nothing else iterates the field.
-      if (racing && !e.finished && this.pits) {
+      if (racing && (!e.finished || e.cool) && this.pits) {
         // Their engineers call it on TYRES too, not only damage: past 0.8 wear
         // with two or more laps left to use a fresh set (Adam, 2026-09-25:
         // "bots also have a simulated radio engineer, like they strategize pits").
         const worn = car.tyre && Math.max(car.tyre.wf, car.tyre.wr) > 0.8 && this.laps - e.lap >= 2;
-        if (!e.isPlayer && !e.pitRequest && e.pitPhase !== 'service' && (shouldPit(car) || worn)) {
+        if (!e.finished && !e.isPlayer && !e.pitRequest && e.pitPhase !== 'service' && (shouldPit(car) || worn)) {
           e.pitRequest = true;
           this.log('flag', `${e.name} WILL PIT`, e);
         }
         const wasIn = e.inPit;
+        // Home after the flag: in its box, it is parked for good.
+        if (e.cool && e.pitPhase === 'service') { e.pitTimer = 5; e.parked = true; }
         if (updateStop(e, t, this.lane, e.proj, dt, this.peak, this.entries)) {
           this.log('flag', `${e.name} SERVED — ${(e.pitJobs || []).join(' + ')}`, e);
           this.rc.released(e);
         }
         if (e.inPit && !wasIn) { this.log('flag', `${e.name} PITS`, e); this.rc.pitEntry(e); }
+        // PUSHED BACK INTO THE GARAGE. A car that is staying — home after the
+        // flag, or held under a red flag — cannot stay on its mark: the marks
+        // are in the working lane, and the car for the next one along has to
+        // pull over across it (two bots wrecked in the lane on the first
+        // cool-down lap; under a red flag 5 of 14 never reached their boxes).
+        // So the crew rolls it back, as crews do: 3.5 s, nine and a half
+        // metres, nose still to the lane. It rolls out again for a restart.
+        const stay = e.pitPhase === 'service' && (e.cool || this.lane.hold);
+        if (stay && car.speed < 1) {
+          if (e.garageT == null) { e.garageT = 0; e.garageS = e.proj.s; e.garageLat = e.proj.lat; e.garageHdg = car.hdg; }
+          e.garageT = Math.min(3.5, e.garageT + dt);
+        } else if (e.garageT != null && !stay) {
+          e.garageT -= dt * 1.5;
+          if (e.garageT <= 0) e.garageT = null;
+        }
+        if (e.garageT != null) {
+          const k = e.garageT / 3.5, f = k * k * (3 - 2 * k);
+          const gp = t.point(e.garageS, e.garageLat + (Math.sign(this.lane.off) || 1) * 9.5 * f);
+          car.x = gp.x; car.y = gp.y; car.hdg = e.garageHdg;
+          car.vx = 0.0001; car.vy = 0; car.r = 0; car.throttle = 0; car.brake = 1;
+        }
       }
 
       if (!racing) { car.throttle = 0; car.brake = 1; car.delta = 0; }
@@ -1183,6 +1222,12 @@ export class Race {
           if (!e.bestLap || lt < e.bestLap) e.bestLap = lt;
           if (e.lap >= this.laps) {
             e.finished = true; e.finishTime = this.time;
+            // THE COOL-DOWN LAP (Adam, 2026-10-04: "when i finish i need to do 1
+            // lap then return to pit"). Past the flag everybody eases off,
+            // drives the lap round, and the pit lane takes them in to their
+            // garage — where they stay. The entry is behind the line, so the
+            // request made here is served a lap from now.
+            if (this.pits && this.lane && this.lane.len > 60) { e.cool = true; e.pitRequest = true; }
             this.log('flag', `${e.name} FINISHES P${e.pos}`, e);
             if (this.state !== 'finish') { this.state = 'finish'; this.log('flag', 'CHEQUERED FLAG'); }
           }
@@ -1261,8 +1306,13 @@ export class Race {
 
     this.order();
     if (this.duel && this.me && racing) this.cheerTick();
-    if (this.state === 'finish' && this.entries.every(e => e.finished || e.retired)) this.state = 'over';
-    if (this.state === 'finish' && this.time - (this.finishAt || (this.finishAt = this.time)) > 30) this.state = 'over';
+    // The race is over when everyone is home — and, if you took the flag, when
+    // YOU are back in your garage (or four minutes have gone and you are not
+    // coming). The results wait for you to park.
+    const me = this.me;
+    const coming = me && me.finished && me.cool && !me.parked && !me.retired && this.time - me.finishTime < 240;
+    if (this.state === 'finish' && !coming && this.entries.every(e => e.finished || e.retired)) this.state = 'over';
+    if (this.state === 'finish' && !coming && this.time - (this.finishAt || (this.finishAt = this.time)) > 30) this.state = 'over';
   }
 
   // ---- DRS: detection line, then the zone ----------------------------------
@@ -1321,7 +1371,7 @@ export class Race {
   // it about twenty, and two cars 400 m apart cannot touch.
   carContact() {
     const t = this.track;
-    const live = this.entries.filter(e => !e.retired);
+    const live = this.entries.filter(e => !e.retired && e.garageT == null);   // a car in its garage is out of the lane
     live.sort((a, b) => a.proj.s - b.proj.s);
     for (let i = 0; i < live.length; i++) {
       for (let j = i + 1; j < live.length; j++) {

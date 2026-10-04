@@ -9,11 +9,12 @@ import { buildLines } from './line.js';
 import { CARS, registerAero, setWetness } from './physics.js';
 import { makeAero } from './aero.js';
 import { qualiDriver, qualiRun } from './quali.js';
-import { setField } from './drivers.js';
+import { setField, setPlayerTeam } from './drivers.js';
 
 self.onmessage = async ev => {
-  const { base, track: key, cls, tier, seed, drivers, wet = 0, field = 'f1' } = ev.data;
+  const { base, track: key, cls, tier, seed, drivers, wet = 0, field = 'f1', team = null, grid = 22 } = ev.data;
   setField(field);                 // the same grid the page is racing
+  setPlayerTeam(team, grid);       // ...with the same seat taken and the same teammate
   setWetness(wet);                 // a wet qualifying is wet for the bots too
   try {
     // The aero map MUST be registered here too, before the first car is made:
