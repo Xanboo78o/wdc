@@ -35,6 +35,7 @@ import { startDash, mountDashCard, onDash } from './dash.js';
 import { TRACKS } from './tracks.js';
 import { makeDirector } from './attract.js';
 import { Governor } from './perfgov.js';
+import { updateFlags } from './flags.js';
 import { THEMES, hasTheme, defaultTheme, setTheme, sayFor, loadingLine, pauseLine, resultMood, MUSIC_LEVELS, hasLevel, menuMusic, mountChrome, mood, boardNo } from './menuui.js';
 
 const $ = id => document.getElementById(id);
@@ -1585,7 +1586,11 @@ function raceHud(dt) {
   // thing itself was happening out of the windscreen. If you hit a wall you
   // can see that you hit a wall. The only thing left is the safety car light,
   // because a safety car is information you genuinely cannot get by looking.
-  $('scLight').style.display = race.safety > 0 ? '' : 'none';
+  // ...and the flags, which you cannot get by looking either (js/flags.js
+  // draws the marshalling panel, the delta and race control's line to you;
+  // its SC panel replaces the old light).
+  $('scLight').style.display = 'none';
+  updateFlags(race, me);
 
   // ---- the tower ---------------------------------------------------------
   // Eight times a second, not sixty. Twenty-two rows of four text nodes is a

@@ -122,7 +122,7 @@ const CHEER_HOLD = 2.0;
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
                 tier = 'medium', seed = 1, player = true, pits = true, noDnf = false, order = null,
-                battle = null, duel = true, drs = true, rules = true, standIn = false }) {
+                battle = null, duel = true, drs = true, rules = true, standIn = false, sideLock = true, styles = true }) {
     this.track = track; this.lines = lines; this.spec = spec;
     // STAND-IN: a bot at YOUR wheel (a harness, the home page's backdrop).
     // Racecraft then runs for your car too, so `me.ctx` carries the traffic,
@@ -130,6 +130,10 @@ export class Race {
     // through tick()'s playerInput. Without it the stand-in drove blind and
     // rear-ended its way out on lap one (tools/rulescheck.mjs [speeding]).
     this.standIn = !!standIn;
+    // `sideLock: false` is the race before SIDE BY SIDE, for an A/B (battleshape --side 0).
+    this.sideLock = !!sideLock;
+    // `styles: false` drives everyone as before STYLE existed (A/B).
+    this.styles = !!styles;
     // The 2026-09-28 racecraft (see DUEL above). `duel: false` is the
     // previous behaviour exactly, kept for tools/battlecheck.mjs --duel 0.
     this.duel = !!duel;
@@ -248,6 +252,7 @@ export class Race {
     // RACE CONTROL (js/safetycar.js). `rules: false` is the race before it:
     // no safety car, no VSC, no flags, no red — for an A/B, and ?sc=0.
     this.rc = new Director(this, { on: rules, rng: mulberry(seed * 7919 + 11) });
+    this.sideRng = mulberry(seed * 313 + 5);
   }
 
   // ---- the OVERTAKES band --------------------------------------------------
@@ -457,6 +462,108 @@ export class Race {
     return vmin < v[i0] * 0.86;
   }
 
+  // ---- SIDE BY SIDE (Adam, 2026-10-03) ---------------------------------------
+  // "more battles where we're speeding side by side through corners ... lead
+  // up 60%, battle 35%, overtake 5%". Measured before this existed
+  // (tools/battleshape.mjs, Monza + Suzuka): 90 / 2 / 8 — cars followed for
+  // ages and, once a nose was alongside, the move was over in a moment. So
+  // alongside is a phase of its own now. The pair LOCKS: each holds its lane,
+  // inside and outside; whichever edges ahead lifts to keep them level; and
+  // they race like that for a few corners — longer between two drivers who
+  // like it (STYLE.side). Then it is decided: the loser lifts and tucks in.
+  sideBySide(e, blocked) {
+    const t = this.track, L = this.spec.bodyL, now = this.time;
+    let S = e.side;
+    if (S) {
+      const p = S.o;
+      // A fight is at racing speed or it is not a fight: keeping level with a
+      // car that has slowed right down parks the attacker beside it and the
+      // field behind runs into both (tools/rearcheck.mjs, 0 -> 2 rear-ends).
+      const vl = this.lines.race.v[e.proj.i];
+      const slow = e.car.speed < vl * 0.7 || p.car.speed < this.lines.race.v[p.proj.i] * 0.7;
+      const gone = !p || p.retired || p.inPit || p.finished || e.inPit || this.rc.neutral || slow
+        || Math.abs(t.gap(p.proj.s, e.proj.s)) > L * 2.5
+        // A real excursion, not a wheel on the kerb: at w + 1 the lock broke the
+        // instant it formed, 701 times out of 708 at Monza.
+        || Math.abs(e.proj.lat) > e.proj.w + 3.5 || Math.abs(p.proj.lat) > p.proj.w + 3.5
+        || now > S.until + 4;
+      if (gone) { this.unlock(e); return null; }
+      if (now > S.until && !S.done) this.resolveSide(e);
+      const rel = t.gap(e.proj.s, p.proj.s);              // + : I am ahead
+      S.cap = null;
+      if (S.done) {
+        if (S.lose) S.cap = p.car.speed * 0.95;           // lift, and let them go
+        if (Math.abs(rel) > L * 1.3) { this.unlock(e); return null; }
+      } else {
+        // Keep level: the one edging ahead eases off until they are door to door.
+        if (rel > 1.2) S.cap = Math.max(p.car.speed - 6, p.car.speed - (rel - 1.2) * 1.2);
+        // Neither car is on the racing line, so neither can carry its speed:
+        // the inside lane is a tighter corner. Both give a little, as two cars
+        // door to door do; at line speed the first lock tripled the crashes.
+        const vl = this.lines.race.v[e.proj.i] * 0.93;
+        S.cap = Math.min(S.cap ?? Infinity, vl);
+      }
+      return S;
+    }
+    if (blocked || !this.sideLock || !this.duel || this.state !== 'green' || this.time - (this.greenT || 0) < 25) return null;   // not in the lap-one scramble
+    // YOU, alongside a bot from behind: racecraft never runs for your car, so
+    // the bot you have drawn level with starts the fight — it races you door
+    // to door rather than tucking in or squeezing.
+    const me = this.me, Lm = this.spec.bodyL;
+    const pace = x => x.car.speed >= this.lines.race.v[x.proj.i] * 0.8;
+    if (!pace(e)) return null;
+    if (me && me !== e && !me.side && !me.retired && !me.inPit && e.behind === me && pace(me)) {
+      const dsm = t.gap(e.proj.s, me.proj.s), dlm = me.proj.lat - e.proj.lat;
+      if (dsm > 0 && dsm < Lm * 1.2 && Math.abs(dlm) > 1.4 && Math.abs(me.proj.lat) <= me.proj.w + 1
+          && Math.abs(e.proj.lat) <= e.proj.w + 1 && (e.driver?.style?.space ?? 0) <= 0.6) {
+        const keen = Math.min(1, ((e.driver?.style?.side ?? 0.5) + 0.9) / 2 + 0.15);
+        const dur = 2 + 9 * Math.min(1, keen) * (0.5 + this.sideRng());
+        const lane = Math.sign(-dlm) || 1;
+        e.side = { o: me, lane, until: now + dur, done: false, cap: null, lose: false };
+        me.side = { o: e, lane: -lane, until: now + dur, done: false, cap: null, lose: false };
+        this.sideFights = (this.sideFights || 0) + 1;
+        return e.side;
+      }
+    }
+    const o = e.ahead;
+    if (!o || o.side || o.inPit || o.retired || o.recover || o.finished || !pace(o)) return null;
+    const ds = t.gap(o.proj.s, e.proj.s), dl = o.proj.lat - e.proj.lat;
+    // Nose at their gearbox and pulled out of line is enough to START the
+    // fight; keeping level brings the pair door to door. Waiting for a full
+    // overlap, it started 8 times in a 22-car race (Monza, 2 laps).
+    if (!(ds > 0 && ds < L * 1.7 && Math.abs(dl) > 1.4)) return null;
+    if (Math.abs(e.proj.lat) > e.proj.w + 1 || Math.abs(o.proj.lat) > o.proj.w + 1) return null;
+    if (Math.abs(this.progress(e) - this.progress(o)) > t.length * 0.5) return null;   // lapping
+    const se = e.driver?.style, so = o.driver?.style;
+    // The cautious do not go wheel to wheel — as the attacker or the defender.
+    if ((se?.space ?? 0) > 0.6 || (so?.space ?? 0) > 0.6) return null;
+    const keen = ((se?.side ?? 0.5) + (so?.side ?? 0.6)) / 2;
+    const dur = 1.5 + 9 * keen * (0.5 + this.sideRng());
+    const lane = Math.sign(-dl) || 1;                     // my side of them, + = left
+    e.side = { o, lane, until: now + dur, done: false, cap: null, lose: false };
+    o.side = { o: e, lane: -lane, until: now + dur, done: false, cap: null, lose: false };
+    this.sideFights = (this.sideFights || 0) + 1;
+    return e.side;
+  }
+
+  // Who gives. Boldness, the inside of the next corner, being ahead already,
+  // and luck. With you in the pair only the bot's half is decided here — your
+  // half is your right foot.
+  resolveSide(e) {
+    const p = e.side.o, inside = this.insideAhead(e.proj.s, 200);
+    const score = x => (x.driver?.aggression ?? 0.65) + (inside && x.side.lane === inside ? 0.35 : 0)
+      + (this.track.gap(x.proj.s, x.side.o.proj.s) > 0 ? 0.25 : 0) + 0.6 * this.sideRng();
+    const eWins = score(e) >= score(p);
+    e.side.done = p.side.done = true;
+    e.side.lose = !eWins; p.side.lose = eWins;
+  }
+
+  unlock(e) {
+    const p = e.side && e.side.o;
+    e.side = null;
+    if (p && p.side && p.side.o === e) p.side = null;
+  }
+
   // ---- racecraft: the part that needs to know the running order ------------
   racecraft(e) {
     const t = this.track, i = e.proj.i, d = e.driver;
@@ -634,11 +741,19 @@ export class Race {
     // Off the grid, a car eases across to the line over the first few hundred
     // metres rather than snapping onto it; on the grid it holds its box.
     if (e.merge && (Math.abs(e.biasS) < 0.3 || this.time - (this.greenT || 0) > 40)) e.merge = false;
+    // THE LAUNCH (js/drivers.js STYLE.launch): a darter is across to the line
+    // at three times the old rate from the moment the lights go; a patient
+    // one holds its grid lane for up to four seconds and then eases over.
+    const st = (this.styles && d.style) || { launch: 0.27, space: 0, side: 0.5, none: true };
+    const waited = st.none || this.time - (this.greenT || 0) > (1 - st.launch) * 4;
     const slew = e.merge
-      ? (this.state === 'green' ? MERGE_RATE * NEIGH_EVERY * FIXED_DT : 0)
+      ? (this.state === 'green' && waited ? MERGE_RATE * (st.none ? 1 : 0.35 + 2.4 * st.launch) * NEIGH_EVERY * FIXED_DT : 0)
       : (3.0 + 2.5 * d.aggression) * NEIGH_EVERY * FIXED_DT;
     // Race control's say on the lane: the racing line in a queue, out of the
     // queue to unlap, off the line for a blue flag.
+    // SIDE BY SIDE: a locked pair holds its lanes, inside and outside.
+    const sb = this.sideBySide(e, noAtk || pitting);
+    if (sb) want = sb.lane * lim * 0.62 - lineOff;
     want = this.rc.wantBias(e, want, lineOff, lim);
     bias += e.biasS + Math.max(-slew, Math.min(slew, want - e.biasS));
 
@@ -653,7 +768,9 @@ export class Race {
     //
     // A clamp cannot be outvoted. This car may put itself anywhere it likes
     // except inside ROOM of a car that is beside it.
-    const ROOM = 2.6;                       // a car is 2 m wide; this is that, plus a door
+    // A car is 2 m wide; 2.6 is that plus a door. A cautious driver (STYLE
+    // .space) leaves up to a further 2.4 m — a car length of air beside it.
+    const ROOM = 2.6 + 2.4 * st.space;
     let yieldTo = null;
     for (const o of this.entries) {
       if (o === e || o.retired || o.inPit) continue;
@@ -702,7 +819,8 @@ export class Race {
       const closing = v - vA;
       const braking = this.brakingZone(e.proj.s, 140);
       const zone = braking ? 1.7 : 1.0;
-      const headway = (6.5 + v * 0.28 + Math.max(0, closing) * 1.4) * zone;
+      // ...and the same caution behind: up to a car length more headway.
+      const headway = (6.5 + v * 0.28 + Math.max(0, closing) * 1.4) * zone + st.space * this.spec.bodyL;
       // How far apart laterally before the car ahead stops being your problem.
       //
       // A fixed 3.4 m was wrong in the one place it mattered most. The grid
@@ -844,6 +962,7 @@ export class Race {
     // What the slew starts from next time is where the car was ALLOWED to go,
     // pit bias excluded (it is re-added fresh each pass).
     e.biasS = bias - pitBias;
+    if (sb && sb.cap != null) speedCap = Math.min(speedCap ?? Infinity, sb.cap);
     e.ctx = this.rc.limit(e, { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: e.hold ?? 1, obstDs, obstV });
   }
 

@@ -140,6 +140,11 @@ export function makeDriver(seed, tierKey = 'medium', nCorners = 24) {
     corner, rng,
     noise: 0, noiseT: 0,
     mistake: null, nextMistake: 6 + rng() * 40,
+    // How they drive in traffic (js/drivers.js STYLE); random unless the
+    // driver table names this person.
+    // Its own stream, so adding styles left every other draw — and so every
+    // race — exactly as it was: an A/B then compares behaviour, not luck.
+    style: (() => { const r = mulberry(seed * 4243 + 71); return { launch: 0.2 + r() * 0.8, space: r() * r() * 0.8, side: 0.3 + r() * 0.7 }; })(),
     lastMove: 0, movedAt: -999,
   };
 }

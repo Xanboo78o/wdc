@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8"><title>flags demo</title>
+<!-- js/flags.js on its own: ?f=yellow|dyellow|blue|green|red|sc|vsc|vscEnd|chequered, plus a message and a delta. -->
+<body style="margin:0;height:100vh;background:#3a4a5a;font-family:system-ui,sans-serif">
+<script type="module">
+import { updateFlags } from '../js/flags.js';
+const q = new URLSearchParams(location.search), kind = q.get('f') || 'yellow';
+const me = { idx: 3 };
+const race = { time: 0.1, events: [{ t: 0.05, kind: q.get('pen') ? 'penalty' : 'rc', car: 3,
+    code: q.get('pen') ? 'pen5' : 'giveBack',
+    text: q.get('pen') ? 'FIA STEWARDS: 5 SECOND TIME PENALTY FOR CAR 78 (YOU) — SPEEDING IN THE PIT LANE' : 'CAR 78 (YOU) — GIVE THE POSITION BACK TO CAR 16 (LEC)' }],
+  rc: { flagFor: () => kind, deltaFor: () => (kind === 'vsc' || kind === 'sc' ? +(q.get('d') ?? 0.6) : null) } };
+updateFlags(race, me);
+</script>
+</body>

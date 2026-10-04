@@ -117,6 +117,42 @@ export const DRIVERS = [
   { n: 'BOTTAS',     t: 'ivory',    num: 77, agg: 0.62, def: 0.80, err: 0.90, sk: 0.999 },
 ];
 
+// HOW THEY DRIVE (Adam, 2026-10-03: "give all bots very distinct real drive
+// styles, like at the start, some swerve right for the line, some wait to,
+// some are very cautious and stay 1 car length in every direction away").
+//   launch  0..1  at the lights: 1 darts straight across for the racing line,
+//                 0 holds its grid lane for a few seconds and merges late
+//   space   0..1  caution: the room left around the car, up to a full car
+//                 length clear in every direction at 1 (js/race.js ROOM)
+//   side    0..1  appetite for racing wheel to wheel: how long a side-by-side
+//                 fight goes on before somebody gives (js/race.js sideBySide)
+// Characterisations, like agg/def. Anyone not listed (fantasy and league
+// drivers) gets a random style from makeDriver, so nobody is a copy.
+export const STYLE = {
+  VERSTAPPEN: { launch: 0.95, space: 0.00, side: 0.95 },
+  ALONSO:     { launch: 0.90, space: 0.05, side: 1.00 },
+  HAMILTON:   { launch: 0.55, space: 0.25, side: 0.85 },
+  LECLERC:    { launch: 0.85, space: 0.15, side: 0.75 },
+  RUSSELL:    { launch: 0.70, space: 0.30, side: 0.60 },
+  ANTONELLI:  { launch: 0.90, space: 0.15, side: 0.55 },
+  NORRIS:     { launch: 0.40, space: 0.55, side: 0.60 },
+  PIASTRI:    { launch: 0.50, space: 0.35, side: 0.75 },
+  HADJAR:     { launch: 0.85, space: 0.15, side: 0.50 },
+  BEARMAN:    { launch: 0.75, space: 0.25, side: 0.55 },
+  OCON:       { launch: 0.70, space: 0.05, side: 0.85 },
+  GASLY:      { launch: 0.60, space: 0.30, side: 0.65 },
+  COLAPINTO:  { launch: 0.95, space: 0.05, side: 0.45 },
+  LAWSON:     { launch: 0.85, space: 0.05, side: 0.70 },
+  LINDBLAD:   { launch: 0.90, space: 0.15, side: 0.40 },
+  HULKENBERG: { launch: 0.45, space: 0.50, side: 0.65 },
+  BORTOLETO:  { launch: 0.60, space: 0.40, side: 0.50 },
+  SAINZ:      { launch: 0.70, space: 0.25, side: 0.85 },
+  ALBON:      { launch: 0.45, space: 0.50, side: 0.75 },
+  STROLL:     { launch: 0.20, space: 0.90, side: 0.30 },
+  PEREZ:      { launch: 0.65, space: 0.30, side: 0.80 },
+  BOTTAS:     { launch: 0.30, space: 0.85, side: 0.40 },
+};
+
 // The fantasy teams' drivers. Invented people.
 export const FANTASY_DRIVERS = [
   { n: 'DELACROIX',  t: 'bugatti', num: 9,  agg: 0.70, def: 0.84, err: 0.85, sk: 1.004 },
@@ -329,6 +365,7 @@ export function applyProfile(driver, prof, team) {
   // and the first interval with it, or a sloppy rookie would drive his opening
   // stint as cleanly as Alonso.
   driver.errScale = prof.err;
+  if (STYLE[prof.n]) driver.style = { ...STYLE[prof.n] };
   driver.nextMistake /= Math.max(0.3, prof.err);
   driver.profile = prof;
   driver.team = team;
