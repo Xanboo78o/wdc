@@ -91,6 +91,68 @@ export class Track {
       }
       this.bank = out;
     }
+    this.shareWalls();
+  }
+
+  // ONE WALL BETWEEN TWO STRETCHES OF ROAD.
+  //
+  // Adam, 2026-10-04: "random barriers dont have collisions". Each sample's
+  // barrier stands at w + run from ITS centreline, and a car is only ever
+  // tested against the wall of the stretch it is on. Where two stretches run
+  // close — a hairpin's two legs, a paddock loop — each one's run-off reached
+  // past the other's wall, so a barrier was DRAWN in the middle of ground you
+  // could drive across: 20% of the barrier on Adam's first track, 14 m inside
+  // the run-off at Sepang's first two turns, 18 m at Kate Mascoi
+  // (tools/ghostwall.mjs). Derived here at load, like pit.side and the bank
+  // taper, so the renderer and the physics get the same answer from the same
+  // arrays: the two stretches share one wall down the middle of the gap.
+  // Where the roads themselves meet (a crossover, a bridge) nothing changes.
+  shareWalls() {
+    if (!this.runL || !this.runR || this.n < 40) return;
+    const n = this.n, ds = this.ds, x = this.x, y = this.y, w = this.w;
+    const far = Math.round(120 / ds), CELL = 40, grid = new Map();
+    for (let j = 0; j < n; j += 2) {
+      const k = Math.floor(x[j] / CELL) * 73856093 ^ Math.floor(y[j] / CELL) * 19349663;
+      let g = grid.get(k); if (!g) grid.set(k, g = []); g.push(j);
+    }
+    const cap = { 1: Float32Array.from(this.runL), [-1]: Float32Array.from(this.runR) };
+    let moved = 0;
+    for (let i = 0; i < n; i++) for (const side of [1, -1]) {
+      const run = side > 0 ? this.runL[i] : this.runR[i], L = w[i] + run;
+      const h = this.hdg[i], bx = x[i] - Math.sin(h) * side * L, by = y[i] + Math.cos(h) * side * L;
+      let bj = -1, bd = Infinity;
+      const cx = Math.floor(bx / CELL), cy = Math.floor(by / CELL);
+      for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const g = grid.get(gx * 73856093 ^ gy * 19349663);
+        if (!g) continue;
+        for (const j of g) {
+          const along = Math.abs(j - i);
+          if (Math.min(along, this.open ? along : n - along) < far) continue;
+          const d2 = (bx - x[j]) ** 2 + (by - y[j]) ** 2;
+          if (d2 < bd) { bd = d2; bj = j; }
+        }
+      }
+      if (bj < 0) continue;
+      const hj = this.hdg[bj];
+      const lj = -Math.sin(hj) * (bx - x[bj]) + Math.cos(hj) * (by - y[bj]);
+      const limJ = w[bj] + (lj > 0 ? this.runL[bj] : this.runR[bj]);
+      if (Math.abs(lj) >= limJ - 0.5) continue;               // not on the other stretch's ground
+      const D = Math.hypot(x[bj] - x[i], y[bj] - y[i]);
+      if (D < w[i] + w[bj] + 1) continue;                     // the roads meet: a crossing, a bridge
+      const shared = Math.max(1.0, (D - w[i] - w[bj]) / 2 - 0.4);
+      if (shared < cap[side][i]) { cap[side][i] = shared; moved++; }
+    }
+    if (!moved) return;
+    // A wall does not step sideways between two samples: take the least run
+    // within 16 m, then smooth it. (Eroding wider than the blur means the
+    // smoothed wall is never further out than the shared one.)
+    const E = Math.round(16 / ds), B = Math.round(8 / ds);
+    for (const side of [1, -1]) {
+      const c = cap[side], er = new Float32Array(n), out = side > 0 ? this.runL : this.runR;
+      for (let i = 0; i < n; i++) { let m = Infinity; for (let o = -E; o <= E; o++) { const k = this.open ? Math.max(0, Math.min(n - 1, i + o)) : (i + o + n) % n; if (c[k] < m) m = c[k]; } er[i] = m; }
+      for (let i = 0; i < n; i++) { let a = 0; for (let o = -B; o <= B; o++) a += er[this.open ? Math.max(0, Math.min(n - 1, i + o)) : (i + o + n) % n]; out[i] = Math.min(out[i], a / (2 * B + 1)); }
+    }
+    this.sharedWalls = moved;
   }
   static async load(key) {
     const r = await fetch(`./data/tracks/${key}.json`);
