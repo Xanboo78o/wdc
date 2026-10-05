@@ -1017,6 +1017,59 @@ physics crash or spin, photographable), `?carenv=0`, `?carenvk=`, `?skidlift=`. 
     friction, yaw spin, eased flat, back to the solver at a wall) 200 pieces
     went 2.5 -> 0.8 ms. Benchmark it over several runs: it is random.
 
+## The race Adam narrated (2026-10-05) — a story as the spec
+
+He and I narrated a Malaysian Grand Prix turn by turn, and his lines are the
+brief: the field into turn one "braking at different times, some going in side
+by side but minimal and launching down the second straight getting more and
+more separate, attention to how theres been no contact or spins"; then "stroll
+does a stroll and has spun out and dnf'ed. yellow flag and safety car, it
+swerves out onto the course leading 3 laps while safety crews remove his car".
+
+`tools/story.mjs` plays exactly that at Sepang (20 cars, a stand-in in P9, a
+car set down in the gravel at turn eleven on lap four) and prints each beat as
+a number next to what the story says it should be. Run it before and after
+anything that touches the start, the stewards or the safety car.
+
+What it found, and what was built (Sepang, MEDIUM, 3 seeds, mean ± SE):
+
+| beat | before | after |
+|---|---|---|
+| lap one: contacts / spins / cars off | 23.2 ± 4.4 / 8.3 ± 0.9 / 14.7 ± 2.3 | 3.7 ± 0.7 / 2.3 ± 0.3 / 4.0 ± 1.2 |
+| the spun car | sat there, pushed back by marshals | out, 7 s after it stops |
+| safety car | none within 90 s (a VSC) | 3/3, 2.97 ± 0.02 laps |
+| the wreck | left where it stopped, for ever | a truck tows it behind the barrier |
+
+Lap one elsewhere: Monza 12.2 ± 2.2 contacts -> 0.0, Suzuka 19.3 ± 12.9 -> 1.3 ± 0.7.
+
+- **THE OPENING CORNERS** (`race.js` racecraft, `opening: false` for the A/B).
+  The cause was one thing: the follow law only sees the car in your lane, the
+  grid is two columns, and they close onto one line in the braking zone. So on
+  lap one every braking zone is a zip: follow whoever is ahead on the road,
+  any lane, a time headway back; a genuinely overlapped pair goes through as a
+  pair; no dives, no covering moves. The launch to turn one is untouched.
+  **The cost, printed beside it:** places changed per car on lap one fell from
+  1.2-2.1 to 0.2-0.4. It is close to a procession for one lap. That trade was
+  taken because his line was "no contact or spins"; it is the first thing to
+  revisit if lap one feels dead.
+- **A beached rival is out** (it was pushed back after 8 s). You are still
+  pushed. Every retirement is now a safety car (a VSC where there is no pit
+  lane), where a car more than 7 m off the road used to get nothing.
+- **The truck** (`safetycar.js` jobTick -> `rc.vehicles`, drawn by scview.js,
+  which had been waiting for the list since 10-04): out through the barrier
+  55 m up the road once the safety car has the leader, 10 s to hook, tow back.
+  The incident is not clear until it is home. Gate: `rulescheck --only out`,
+  watched to fail with `--break notruck`.
+- **Three laps**: counted on the leader from the call (`scLapsFor`: 3 for 20+
+  laps, 2 for 10+, 1 below). Counted on the safety car's own lead it came to
+  five neutralised laps for three led.
+
+Still wrong, and measured: 1.8 ± 1.4 contacts in the 25 s after a restart (the
+zip was extended to restarts and did not resolve it); the queue behind the
+safety car is loose (the [sc] gate's ten-car-lengths check fails on the
+shipped build too, p95 86 m against 56); about two unprompted spins a lap
+across the field mid-race, nearly all recovered.
+
 ## Not done yet
 
 - **A pit lane that a car can actually use.** `js/pit.js` draws one and the

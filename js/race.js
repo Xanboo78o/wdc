@@ -32,6 +32,8 @@ const NEIGH_EVERY = 4;        // substeps between neighbour/racecraft updates
 // An opening-lap one was built, measured over N circuits x N seeds and
 // deleted: it changed nothing (7.25 -> 7.13 retired of 22) and cost a fifth of
 // the overtaking (104 -> 85 passes). See the note further down.
+// (2026-10-05: THE OPENING CORNERS in racecraft is a different rule, judged on
+// a different number — lap-one contact — and it stayed. tools/story.mjs.)
 const PUSH_TIME = 8;          // s for a crew to heave a car back to the tarmac
 const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
 // SUPERCASUAL's leash, in seconds at the circuit's mean racing-line speed: a
@@ -39,6 +41,11 @@ const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
 // speed per extra second, never more than down to LEASH_MIN.
 const LEASH_FROM = 2.5, LEASH_SLOPE = 0.15, LEASH_MIN = 0.62;
 const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
+// THE OPENING CORNERS: how far past the first complex the truce runs, the
+// time headway a car keeps to whoever is ahead of it while it lasts, and how
+// much of a car length two cars must overlap to count as a pair going in
+// side by side rather than one following the other.
+const OPEN_AFTER = 120, OPEN_T = 0.22, OPEN_PAIR = 0.55;
 
 // ---- THE DUEL (Adam, 2026-09-28) -------------------------------------------
 // "its more like flying at the same speed fighting for inches, building,
@@ -122,7 +129,8 @@ const CHEER_HOLD = 2.0;
 export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
                 tier = 'medium', seed = 1, player = true, pits = true, noDnf = false, order = null,
-                battle = null, duel = true, drs = true, rules = true, standIn = false, sideLock = true, styles = true, playerTeam = null }) {
+                battle = null, duel = true, drs = true, rules = true, standIn = false, sideLock = true, styles = true, playerTeam = null,
+                opening = true }) {
     this.track = track; this.lines = lines; this.spec = spec;
     // STAND-IN: a bot at YOUR wheel (a harness, the home page's backdrop).
     // Racecraft then runs for your car too, so `me.ctx` carries the traffic,
@@ -134,6 +142,17 @@ export class Race {
     this.sideLock = !!sideLock;
     // `styles: false` drives everyone as before STYLE existed (A/B).
     this.styles = !!styles;
+    // THE OPENING CORNERS (see racecraft). `opening: false` is the start
+    // before it, for an A/B (tools/story.mjs --opening 0). It runs from the
+    // braking zone for turn one to OPEN_AFTER m past the end of the first
+    // complex: turn one and every corner that starts within 250 m of the last.
+    this.openOn = !!opening;
+    {
+      const c = track.corners || [];
+      let k = 0;
+      while (k + 1 < c.length && k < 3 && c[k + 1].s0 - c[k].s1 < 250) k++;
+      this.openEnd = c.length ? c[k].s1 + OPEN_AFTER : 600;
+    }
     // The 2026-09-28 racecraft (see DUEL above). `duel: false` is the
     // previous behaviour exactly, kept for tools/battlecheck.mjs --duel 0.
     this.duel = !!duel;
@@ -203,6 +222,7 @@ export class Race {
         warnings: 0, penalty: 0, offNow: false, lastLimit: -99,
         contacts: 0, retired: false, finished: false, finishTime: null, bump: null,
         pitRequest: false, inPit: false, pitTimer: 0, pitStops: 0, stuck: 0,
+        opening: true, zip: false,
         recover: null,
         // the duel: grip trim, how long it has been building on the car
         // ahead, which straight it is on and on which it last moved, DRS
@@ -652,6 +672,49 @@ export class Race {
     // it as the car in front at all, which is the actual mechanism that keeps
     // the cars behind out of the back of it.
     const pitting = e.pitPhase === 'approach';
+    // ---- THE OPENING CORNERS (Adam, 2026-10-05) --------------------------------
+    // He narrated the start he wants: "they enter the corner, braking at
+    // different times, some going in side by side but minimal and launching
+    // down the second straight getting more and more separate, attention to
+    // how theres been no contact or spins".
+    //
+    // MEASURED FIRST (tools/story.mjs, Sepang, 20 cars, MEDIUM, 3 seeds): lap
+    // one had 23 contacts, 8 spins and 15 cars off the road. tools/_t1 said
+    // why: the follow law only sees the car in your LANE, the grid is two
+    // columns, and the columns close onto one line in the braking zone — so
+    // the car that ends up in front of you is one you were never following.
+    // The mid-field arrived at 13 m/s where the line does 30, nose to tail,
+    // closing at 8 m/s, and the ROOM clamp walked the outside column off the
+    // circuit.
+    //
+    // So from the braking zone for turn one, a start is a ZIP. Each car follows whoever is ahead of
+    // it on the ROAD, whatever lane that car is in, a time headway back; two
+    // cars that arrive genuinely alongside go through as a pair and are left
+    // to; nobody dives and nobody chops. The launch down to turn one is
+    // untouched — that is where a start is won — and so is everything after.
+    //
+    // (The opening-lap caution rejected further up was a different thing: longer
+    // gaps for twenty seconds, judged on retirements over a whole race.)
+    let zip = false;
+    if (this.openOn && this.state === 'green' && e.lap === (e.openLap || 0) && !e.finished) {
+      const s = e.proj.s;
+      if (e.opening) {
+        if (s > this.openEnd && s < this.openEnd + 1200) { e.opening = false; e.zip = false; }
+        else if (!e.zip && e.car.speed > 25 && this.brakingZone(s, 320)) e.zip = true;
+        zip = e.zip;
+      }
+      // ...and for the rest of the first lap the field is still one pack, so
+      // every BRAKING ZONE is zipped the same way: places are taken on the
+      // straights, in the tow, and given up into the corner. With the truce
+      // ending at the first complex, the back of the grid went on running
+      // into itself all the way round (Suzuka: 12.8 +- 1.4 contacts on lap
+      // one, none of them at turn one).
+      if (!e.opening) zip = this.brakingZone(s, 200);
+    }
+    // A safety-car restart is a start: the same pack into the same corner
+    // (measured: 1.0 +- 0.5 contacts in the 25 s after green, at turn one,
+    // nose to tail at 10 m/s). Race control sets the window as it goes green.
+    if (this.openOn && !zip && this.time < (e.zipUntil || 0) && this.state === 'green') zip = this.brakingZone(e.proj.s, 200);
     // Over to the pit side for the entry: three quarters of the way, eased in
     // over the last 350 m. It was 1.5x the half-width, at once — the clamp
     // then held the car on the very edge at 200 km/h, and at Suzuka it ran
@@ -690,7 +753,7 @@ export class Race {
     // line on a restart — nobody attacks, and nobody defends against a car
     // that is not allowed to attack (js/safetycar.js).
     // ...and nobody races after the flag.
-    const noAtk = this.rc.noAttack(e) || e.finished, noDef = this.rc.noDefend(e) || e.finished;
+    const noAtk = this.rc.noAttack(e) || e.finished || zip, noDef = this.rc.noDefend(e) || e.finished || zip;
     if (!pitting && !noAtk && e.ahead && e.aheadGapT < reach && !e.inPit) {
       const o = e.ahead;
       const ds = t.gap(o.proj.s, e.proj.s);
@@ -859,6 +922,17 @@ export class Race {
     // zone for the first turn, a car 4 m to your side still "followed" you
     // to a standstill and nine cars queued behind it.
     if (A && A.isPlayer && A.car.speed < 20) A = null;
+    // THE ZIP: whoever is ahead on the road, any lane — unless the two of
+    // you overlap, in which case you are a pair and the next car up is it.
+    if (zip) {
+      A = null;
+      let bd = 200;
+      for (const o of this.entries) {
+        if (o === e || o.retired || o.inPit) continue;
+        const ds = t.gap(o.proj.s, e.proj.s);
+        if (ds > this.spec.bodyL * OPEN_PAIR && ds < bd) { bd = ds; A = o; }
+      }
+    }
     if (A && !e.inPit) {
       const ds = t.gap(A.proj.s, e.proj.s);
       const dl = Math.abs(A.proj.lat - e.proj.lat);
@@ -879,7 +953,7 @@ export class Race {
       //
       // Into a braking zone the road narrows onto one line, so anyone roughly
       // in front IS in front. Widen the gate to most of the road there.
-      const latGate = braking ? Math.max(4.5, t.w[i] * 1.1) : 3.4;
+      const latGate = zip ? Infinity : braking ? Math.max(4.5, t.w[i] * 1.1) : 3.4;
 
       // A car that has PULLED OUT to pass is no longer following. Without this
       // the cap holds every attacker at the speed of the car ahead even at full
@@ -927,7 +1001,7 @@ export class Race {
       // into one unbroken train with no gaps — after which the first braking
       // zone concertinas all 22 of them. That single missing bound took the
       // grid from 22 finishers to 4.
-      const overlap = ds < this.spec.bodyL * 1.15 && dl > 1.9;
+      const overlap = !zip && ds < this.spec.bodyL * 1.15 && dl > 1.9;
       // BRAKE FOR THE CAR AHEAD, NOT JUST THE LINE (the duel). The follow cap
       // above only ever reacts to the speed the car ahead has NOW, and the
       // pedals plan their stop from the racing line's corner speeds — so a car
@@ -937,7 +1011,7 @@ export class Race {
       // single kind of contact, lap one and after. So the car ahead in your
       // lane is also a braking target: arrive no faster than you could shed
       // to its speed in the room there is.
-      if (this.duel && !overlap && ds > 0 && ds < 150 && dl < latGate) { obstDs = ds - this.spec.bodyL * 1.15; obstV = vA; }
+      if (this.duel && !overlap && ds > 0 && ds < 150 && dl < latGate) { obstDs = ds - this.spec.bodyL * 1.15 - (zip ? 1.5 + v * OPEN_T : 0); obstV = vA; }
       if (!overlap && ds > 0 && ds < headway * 1.3 && dl < latGate) {
         // Both halves matter. With room, a bounded run — that is the overtake.
         // Without it, actively SLOWER than the car ahead, so the gap is
@@ -1258,7 +1332,17 @@ export class Race {
       if (racing && !e.finished) {
         if (!e.recover && !e.inPit && e.car.speed < 3.2 && Math.abs(e.proj.lat) > e.proj.w) e.stuck += dt;
         else if (!e.recover) e.stuck = 0;
-        if (e.stuck > 4 && !e.recover) {
+        // A RIVAL that is beached is OUT (Adam, 2026-10-05: "stroll does a
+        // stroll and has spun out and dnf'ed"). Marshals pushing it back onto
+        // the road was a way for a spin to cost nothing; now it costs the race,
+        // the yellows come out, and the truck fetches it under the safety car.
+        // YOU are still pushed: your race ending is your call, not a timer's.
+        if (e.stuck > 4 && !e.recover && !e.isPlayer && !e.retired && this.rc.on) {
+          e.stuck = 0; e.retired = true;
+          this.log('crash', `${e.name} IS OUT — BEACHED`, e);
+          this.rc.incident('retired', e);
+        }
+        if (e.stuck > 4 && !e.recover && !e.retired) {
           const s0 = e.proj.s - 14;
           const lp = t.point(s0, this.lines.race.off[t.idx(s0)] || 0);
           e.recover = { t: 0, x0: e.car.x, y0: e.car.y, h0: e.car.hdg, to: lp };

@@ -38,7 +38,7 @@ for (const a of args) {
   if (args.indexOf(a) !== args.lastIndexOf(a)) { console.error(`rulescheck: ${a} given twice`); process.exit(2); }
 }
 const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i < 0 ? d : BOOL.has(n) ? true : args[i + 1]; };
-const ONLY = flag('only', 'sc,vsc,red,pitsc,unlap,blue,you,speeding').split(',');
+const ONLY = flag('only', 'sc,out,vsc,red,pitsc,unlap,blue,you,speeding').split(',');
 const TRACKS = String(flag('tracks', 'monza')).split(',');
 const SEEDS = +flag('seeds', 3);
 const SEED0 = +flag('seed0', 0);
@@ -48,7 +48,7 @@ const CLS = flag('car', 'f1');
 const TIER = flag('tier', 'medium');
 const SWEEP = !!flag('sweep', false);
 const BREAK = flag('break', null);
-const KNOWN_CASES = ['sc', 'vsc', 'red', 'pitsc', 'unlap', 'blue', 'you', 'speeding'];
+const KNOWN_CASES = ['sc', 'out', 'vsc', 'red', 'pitsc', 'unlap', 'blue', 'you', 'speeding'];
 for (const c of ONLY) if (!KNOWN_CASES.includes(c)) { console.error(`rulescheck: --only ${c}? ${KNOWN_CASES.join('|')}`); process.exit(2); }
 
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
@@ -73,6 +73,7 @@ function makeRace(key, seed, opts = {}) {
   if (BREAK === 'nofollow') race.rc.limit = (e, ctx) => ctx;           // the gate must catch this
   if (BREAK === 'nored') race.rc.redTick = () => {};
   if (BREAK === 'nogive') race.rc.youTick = () => {};
+  if (BREAK === 'notruck') race.rc.jobTick = () => {};
   return { race, track, lines, spec };
 }
 
@@ -202,10 +203,22 @@ function caseVSC(key, seed) {
   // Put it in the gravel, four metres past the edge, and hold it there.
   const t = race.track, lat = (v.proj.w + 4) * (Math.sign(v.proj.lat) || 1);
   const p = t.point(v.proj.s, lat);
-  let hold = 6;
-  run(race, W, 6, null, () => {
+  // A beached RIVAL is out of the race since 2026-10-05 (the [out] case), so
+  // the marshals-are-pushing incident is raised here by hand: it is what YOU
+  // get in the gravel, and the virtual safety car behind it is what is tested.
+  let hold = 3;
+  run(race, W, 3, null, () => {
     if (hold > 0) { v.car.x = p.x; v.car.y = p.y; v.car.vx = 0; v.car.vy = 0; v.car.r = 0; hold -= FIXED_DT; }
   });
+  race.rc.incident('beached', v);
+  // ...and they push for eight seconds and set it back on the road, as
+  // race.js does for you (a rival left in the gravel would retire).
+  const back = t.point(v.proj.s - 14, 0);
+  let push = 8;
+  run(race, W, 8, null, () => {
+    if (push > 0) { v.car.x = p.x; v.car.y = p.y; v.car.vx = 0; v.car.vy = 0; v.car.r = 0; v.stuck = 0; push -= FIXED_DT; }
+  });
+  v.car.x = back.x; v.car.y = back.y; v.car.hdg = back.hdg; v.car.vx = 6; v.car.vy = 0; v.car.r = 0; v.stuck = 0;
   run(race, W, 6, () => race.rc.mode !== 'green');
   check('VSC deployed', race.rc.count.vsc >= 1 && race.rc.count.sc === 0, `vsc=${race.rc.count.vsc} sc=${race.rc.count.sc}`);
   const t0 = race.time;
@@ -217,6 +230,39 @@ function caseVSC(key, seed) {
   const vd = W.vdMax.slice().sort((a, b) => a - b);
   const p99 = vd[Math.floor(vd.length * 0.99)];
   check('bots respect the minimum time', p99 <= 3, `delta p99 ${p99.toFixed(1)} m ahead of the ghost (≤ 3 m), ${vd.length} samples`);
+}
+
+// Adam's story, 2026-10-05: "stroll does a stroll and has spun out and
+// dnf'ed. yellow flag and safety car ... while safety crews remove his car".
+function caseOut(key, seed) {
+  console.log(`\n[out] ${key} seed ${seed}: a rival spins into the gravel and stays there`);
+  const { race } = makeRace(key, seed);
+  const W = watcher(race);
+  run(race, W, 45);
+  let v = null;
+  run(race, W, 60, () => (v = victim(race)));
+  if (!v) { check('found a victim', false, ''); return; }
+  const t = race.track, side = Math.sign(v.proj.lat) || 1;
+  const p = t.point(v.proj.s, (v.proj.w + 5) * side);
+  v.car.x = p.x; v.car.y = p.y; v.car.hdg = p.hdg + Math.PI; v.car.vx = 0.001; v.car.vy = 0; v.car.r = 0; v.car.speed = 0;
+  const t0 = race.time;
+  run(race, W, 12, () => v.retired);
+  check('it is out of the race', v.retired && !v.recover, `retired=${v.retired} after ${(race.time - t0).toFixed(1)} s`);
+  run(race, W, 3);
+  check('yellow, then the safety car', race.rc.yellowAt(v.proj.s) > 0 && race.rc.count.sc >= 1, `mode=${race.rc.mode} sc=${race.rc.count.sc}`);
+  let truck = 0, towed = false, greenAt = null;
+  run(race, W, 900, () => {
+    const tr = race.rc.vehicles.find(x => x.kind === 'truck');
+    if (tr) { truck++; if (tr.towing) towed = true; }
+    return race.rc.mode === 'green' && (greenAt = race.time);
+  });
+  check('a truck came out and towed it', truck > 0 && towed, `${truck} ticks with a truck on the circuit`);
+  const pr = t.project(v.car.x, v.car.y, v.hint, 8);
+  check('the car is behind the barrier', !!v.recovered && Math.abs(pr.lat) > pr.w + (pr.run || 8), `recovered=${!!v.recovered} lat ${Math.abs(pr.lat).toFixed(1)} m (road ${pr.w.toFixed(1)} + runoff ${(pr.run || 8).toFixed(1)})`);
+  check('no truck left on the circuit', race.rc.vehicles.length === 0, `${race.rc.vehicles.length} vehicles`);
+  check('green again', greenAt != null, greenAt ? `${(greenAt - t0).toFixed(0)} s after the spin` : 'never');
+  const under = W.passes.filter(p => p.mode === 'sc');
+  check('no overtaking under the SC', under.length === 0, `${under.length} passes`);
 }
 
 function caseRed(key, seed) {
@@ -437,6 +483,7 @@ if (SWEEP) sweep();
 else for (const key of TRACKS) {
   const seeds = Array.from({ length: SEEDS }, (_, k) => 7 + (SEED0 + k) * 101);
   if (ONLY.includes('sc')) caseSC(key, seeds[0]);
+  if (ONLY.includes('out')) caseOut(key, seeds[0]);
   if (ONLY.includes('vsc')) caseVSC(key, seeds[0]);
   if (ONLY.includes('red')) caseRed(key, seeds[0]);
   if (ONLY.includes('pitsc')) casePitSC(key, seeds);

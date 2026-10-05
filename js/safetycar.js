@@ -50,6 +50,15 @@ const QUEUE_WAIT = 75;            // s: after this the SC stops waiting for stra
 const VSC_MIN = 16, VSC_END = 10; // s: the VSC's minimum, and the ENDING window
 const RED_HOLD = 22, RED_WAIT = 240;
 const CRANE = 38;                 // s to lift a retired car clear
+// THE RECOVERY (Adam, 2026-10-05: the safety car "leading 3 laps while safety
+// crews remove his car"). A truck comes through a gap in the barrier TRUCK_BACK
+// m up the road from the wreck, drives to it, hooks it up and drags it back
+// behind the barrier. The incident is not clear until it has.
+const TRUCK_BACK = 55, TRUCK_V = 8, TOW_V = 5, HOOK_T = 10, TRUCK_AFTER = 6;
+// How many laps a safety car period lasts, on the leader's lap count: three in
+// a Grand Prix, fewer in a short race, where three laps would be most of it.
+const RESTART_ZIP = 45;           // s after a safety-car restart that braking zones stay single file
+const scLapsFor = laps => laps >= 20 ? 3 : laps >= 10 ? 2 : 1;
 const RANK = { green: 0, vsc: 1, vscEnd: 1, sc: 2, red: 3 };
 // How long you have to hand a place back before the stewards decide.
 const GIVE_BACK = 12;
@@ -88,6 +97,9 @@ export class Director {
                 lights: false, inLane: false, prog: 0 };
     this.sub = 0;
     this.wet0 = null; this.rainRed = false;
+    // What js/scview.js draws besides the safety car, and the jobs behind it.
+    this.vehicles = []; this.jobs = [];
+    this.scLaps = scLapsFor(race.laps); this.scFrom = 0;
   }
 
   // ---- what everyone else asks ----------------------------------------------
@@ -174,10 +186,17 @@ export class Director {
         want = 'sc'; why = 'CAR STOPPED ON TRACK';
         break;
       case 'retired': {
-        inc.clearAt = now + CRANE;
+        // A car that is out has to be fetched, wherever it stopped: a truck on
+        // the wrong side of the barrier is a safety car (a VSC where there is
+        // no pit lane for one to come out of). It used to be nothing at all
+        // for a car more than 7 m off the road, which then sat there for the
+        // rest of the race. The incident clears when the truck has it away;
+        // the time is only the fallback for a wreck that never comes to rest.
+        inc.clearAt = now + CRANE * 5;
         this.flag(s, 2, CRANE + 5);
-        want = onTrack ? 'sc' : lat < w + 7 ? 'vsc' : null;
+        want = 'sc';
         why = onTrack ? 'CAR STOPPED ON TRACK' : 'RECOVERY VEHICLE ON TRACK';
+        this.jobs.push({ e, inc, st: 'wait', t: 0, truck: null });
         const out = this.incidents.filter(x => (x.kind === 'retired' || x.kind === 'roof') && now - x.t < 6).length;
         if (out >= 3) { want = 'red'; why = 'MULTIPLE CAR INCIDENT'; }
         else if (out >= 2 && RANK[want || 'green'] < RANK.sc) { want = 'sc'; why = 'MULTIPLE CAR INCIDENT'; }
@@ -187,6 +206,7 @@ export class Director {
         inc.clearAt = now + CRANE * 1.5;
         this.flag(s, 2, CRANE * 1.5);
         want = onTrack ? 'red' : 'sc'; why = 'CAR UPSIDE DOWN';
+        this.jobs.push({ e, inc, st: 'wait', t: 0, truck: null });
         break;
       case 'rain':
         inc.clearAt = now + 60;
@@ -243,6 +263,7 @@ export class Director {
     const r = this.race;
     this.begin('sc'); this.count.sc++;
     this.phase = 'deploy'; this.phaseAt = r.time;
+    { const lead = this.leader(); this.scFrom = lead ? r.progress(lead) : 0; }
     this.sc.out = false; this.sc.lights = true; this.unlapCalled = false;
     this.graceAll();
     for (const e of r.entries) { e.queued = false; e.unlap = false; e.rcCross = false; }
@@ -282,6 +303,8 @@ export class Director {
     for (const e of r.entries) {
       e.holdLine = restart && !e.rcCross && !e.retired && !e.finished;
       e.queued = false; e.unlap = false; e.rcCross = false; e.vd = 0;
+      // ...and the first corners after it are taken as a start is (race.js, THE OPENING CORNERS).
+      if (restart) e.zipUntil = r.time + RESTART_ZIP;
     }
     this.greenAt = r.time;
     if (was === 'sc') {
@@ -477,6 +500,7 @@ export class Director {
       case 'red': this.redTick(dt); break;
     }
     this.moveSC(dt);
+    this.jobTick(dt);
 
     this.dt4 = dt * 4;
     if (this.sub++ % 4 === 0) {
@@ -536,7 +560,13 @@ export class Director {
         }
         const busy = live.some(e => e.unlap);
         const lastLap = lead.lap >= r.laps - 1;
-        const ready = lastLap || (this.clear() && since > PICKUP_MIN && (formed || since > QUEUE_WAIT)
+        // ...and the laps are done: counted on the LEADER from the moment the
+        // safety car was called, and called in with the last of them still to
+        // run, because it peels off at the pit entry at the end of that one.
+        // (Counted on the safety car's own lead, the leader's lap in catching
+        // it came on top: five laps neutralised, measured, for three led.)
+        const led = r.progress(lead) - this.scFrom >= (this.scLaps - 1) * t.length;
+        const ready = lastLap || (this.clear() && led && since > PICKUP_MIN && (formed || since > QUEUE_WAIT)
           && this.unlapCalled && !busy);
         if (ready && (lastLap || t.wrap(lane.entryS - sc.s) > 500)) {
           this.phase = 'in'; this.phaseAt = now; sc.lights = false;
@@ -632,6 +662,65 @@ export class Director {
     c.vx = sc.v; c.vy = 0; c.r = 0; c.speed = sc.v; c.z = 0;
   }
 
+  // ---- the recovery truck ------------------------------------------------------
+  // Kinematic, like the safety car: it has one job. It waits for the wreck to
+  // stop moving and for the field to be neutralised and gathered up — nobody
+  // is sent onto a circuit at racing speed — then out, hook, and back.
+  jobTick(dt) {
+    if (!this.jobs.length) return;
+    const r = this.race, t = r.track, now = r.time;
+    const toward = (v, x, y, sp) => {
+      const dx = x - v.x, dy = y - v.y, d = Math.hypot(dx, dy);
+      if (d < sp * dt + 0.05) { v.x = x; v.y = y; return true; }
+      v.hdg = Math.atan2(dy, dx); v.x += dx / d * sp * dt; v.y += dy / d * sp * dt;
+      return false;
+    };
+    for (const j of this.jobs) {
+      const c = j.e.car;
+      j.t += dt;
+      switch (j.st) {
+        case 'wait': {
+          const safe = this.mode === 'red' || this.mode === 'vsc'
+            ? now - this.since > TRUCK_AFTER
+            : this.mode === 'sc' && (this.phase === 'lead' || now - this.since > 45);
+          if (!j.e.atRest || !safe) break;
+          const pr = t.project(c.x, c.y, j.e.hint, 8);
+          const side = Math.sign(pr.lat) || 1;
+          // The gap in the barrier: up the road, the wreck's side.
+          const g = t.point(pr.s - TRUCK_BACK, side * (pr.w + (pr.run || 8) + 4));
+          j.gate = { x: g.x, y: g.y };
+          j.truck = { kind: 'truck', x: g.x, y: g.y, hdg: g.hdg, lights: true, towing: false };
+          // It stops a truck's length short of the car, on the line between them.
+          const d = Math.hypot(c.x - g.x, c.y - g.y) || 1;
+          j.at = { x: c.x - (c.x - g.x) / d * 7, y: c.y - (c.y - g.y) / d * 7 };
+          j.st = 'out'; j.t = 0;
+          this.rc('RECOVERY VEHICLE ON TRACK', 'truck', j.e);
+          break;
+        }
+        case 'out':
+          if (toward(j.truck, j.at.x, j.at.y, TRUCK_V)) { j.st = 'hook'; j.t = 0; }
+          break;
+        case 'hook':
+          if (j.t > HOOK_T) { j.st = 'tow'; j.t = 0; j.truck.towing = true; }
+          break;
+        case 'tow': {
+          const home = toward(j.truck, j.gate.x, j.gate.y, TOW_V);
+          // The car comes backwards on the hook, 7 m behind the truck.
+          c.x = j.truck.x - Math.cos(j.truck.hdg) * 7; c.y = j.truck.y - Math.sin(j.truck.hdg) * 7;
+          c.hdg = j.truck.hdg + Math.PI; c.vx = 0.0001; c.vy = 0; c.r = 0; c.z = 0; c.pitch = 0; c.roll = 0;
+          if (home) {
+            j.st = 'done'; j.truck = null; j.e.recovered = true;
+            j.inc.clearAt = Math.min(j.inc.clearAt, now);
+            this.rc(`${this.tag(j.e)} RECOVERED`, 'recovered', j.e);
+          }
+          break;
+        }
+      }
+    }
+    this.jobs = this.jobs.filter(j => j.st !== 'done');
+    this.vehicles = this.jobs.filter(j => j.truck).map(j => j.truck);
+  }
+
   // Who is in the queue: close behind the car (or safety car) ahead.
   queueTick() {
     if (this.mode !== 'sc') return;
@@ -678,6 +767,7 @@ export class Director {
       e.proj = t.project(p.x, p.y); e.hint = e.proj.i; e.rcS = e.proj.s;
       e.lap = lap; e.crossed0 = false; e.pastHalf = false;
       e.biasS = slot.lat - (r.lines.race.off[t.idx(slot.s)] || 0); e.merge = true;
+      e.opening = true; e.zip = false; e.openLap = lap;
       e.build = 0; e.tryT = 0; e.atkOn = null;
     }
     r.lane.hold = false;
