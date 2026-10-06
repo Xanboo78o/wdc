@@ -63,10 +63,12 @@ const S = {
   track: 'monza', car: 'f1', mode: 'race', grid: 22, tier: 'medium', laps: 3, start: 'mid',
   noDnf: false, quali: false, time: 'live', weather: 'live', battle: 'medium',
   teams: { f1: null, gt3: null, f4: null }, field: 'f1', theme: 'light', music: 'on',
+  xTrack: 'kate', xCompany: 'few',          // Xingus mode's own two choices
 };
 try { Object.assign(S, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch { /* a fresh start */ }
 S.teams = Object.assign({ f1: null, gt3: null, f4: null }, S.teams);
 if (!TRACKS.some(t => t[0] === S.track)) S.track = 'monza';
+if (!TRACKS.some(t => t[0] === S.xTrack)) S.xTrack = 'kate';
 if (!CARS[S.car]) S.car = 'f1';
 if (!hasTheme(S.theme) || S.theme === 'team') S.theme = 'light';   // home has no all-livery look
 if (!hasLevel(S.music)) S.music = 'on';
@@ -235,6 +237,7 @@ const PAGES = {
     const list = [
       tile('', 'circuit', 'SETUP', () => show('setup')),
       tile('', 'garage', 'GARAGE', () => show('garage')),
+      tile('', 'showroom', 'XINGUS', () => show('xingus')),
       tile('', 'showroom', 'SHOWROOM', () => { location.href = `./carview.html${tk ? '?team=' + tk : ''}`; }),
       tile('', 'builder', 'BUILDER', () => { location.href = './build.html'; }),
       tile('', 'jukebox', 'JUKEBOX', () => { location.href = './ost.html'; }),
@@ -286,6 +289,35 @@ const PAGES = {
     rows.push(['TIME', 'time', [['live', 'LIVE'], ...up(TIME_PHASES)]], ['WEATHER', 'weather', [['live', 'LIVE'], ...up(WEATHER_KINDS), ['changing', 'CHANGING']]]);
     optGrid(rows, 'setup');
     foot(locked(S.track) ? 'LOCKED' : S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', lightsOut, '↑ ↓ MOVE · ← → CHANGE · START / G = LIGHTS OUT');
+  },
+
+  // ------------------------------------------------------------ XINGUS
+  // The other door (Adam, 2026-10-06: "js a seperate door ... i really just
+  // want to be able to sit back, relax, and go fast"). Arcade handling
+  // (js/xingus.js): grip everywhere, the handbrake and some lock for a drift
+  // that holds, no spinning, no damage. For now: the GT car, any circuit, and
+  // how much company you want. Its own cars and its own circuits come next.
+  xingus() {
+    const n = TRACKS.length, i = TRACKS.findIndex(t => t[0] === S.xTrack), t = TRACKS[i];
+    const step = d => { S.xTrack = TRACKS[(i + d + n) % n][0]; show('xingus', 0); };
+    const go = () => {
+      if (locked(S.xTrack)) { say(`${t[1]} is ${priceLabel(packOf(S.xTrack))}. no racing it until it is yours.`); return; }
+      const grid = { alone: 2, few: 8, crowd: 20 }[S.xCompany] || 8;
+      save(); menuMusic.fadeOut(0.4);
+      setTimeout(() => { location.href = `./index.html?auto=${S.xTrack}:gt3&from=home&xingus=1&race=1&grid=${grid}&laps=60&tier=casual&nodnf=1&start=${grid}`; }, 420);
+    };
+    page.append(h(`<div class="top"><div class="title">XINGUS MODE</div><div class="chunk chip yell"><small>ARCADE</small>GRIP · DRIFT · NO SPINS</div><div class="grow"></div>${sayBox()}</div>`));
+    const strip = h(`<div class="chunk strip${locked(t[0]) ? ' locked' : ''}"><button class="chunk arrow" data-l>‹</button>
+      <div class="no">${String(i + 1).padStart(2, '0')}</div><div class="frame"><svg></svg></div>
+      <div class="stext"><small>${t[2]} · <span data-km></span>${dlcStamp(t[0])}</small><b>${t[1]}</b><i>HANDBRAKE: X ON THE KEYBOARD, OR MAP ONE ON THE WHEEL (pad.html)</i></div>
+      <button class="chunk arrow" data-r>›</button></div>`);
+    page.append(strip);
+    drawMap(strip.querySelector('svg'), t[0]);
+    strip.querySelector('[data-l]').onclick = e => { e.stopPropagation(); step(-1); };
+    strip.querySelector('[data-r]').onclick = e => { e.stopPropagation(); step(1); };
+    item(strip, { left: () => step(-1), right: () => step(1), ok: () => focus(at + 1) });
+    optGrid([['COMPANY', 'xCompany', [['alone', 'ONE SPARRING PARTNER'], ['few', 'A FEW'], ['crowd', 'A CROWD']]]], 'xingus');
+    foot(locked(S.xTrack) ? 'LOCKED' : 'GO', go, '← → CIRCUIT · HOLD THE HANDBRAKE WITH SOME LOCK ON TO DRIFT');
   },
 
   // ------------------------------------------------------------ GARAGE

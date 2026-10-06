@@ -16,6 +16,7 @@ import { wakeAt, newWake } from './aero.js';
 import { makeLane, shouldPit, updateStop } from './pitstop.js';
 // Race control — safety car, VSC, red flag, restarts, flags (2026-09-30).
 import { Director } from './safetycar.js';
+import { xingusCar, xingusStep, xingusSurface, xingusDrag } from './xingus.js';
 
 // Module-level scratch for the wake sample. neighbours() is single-threaded and
 // reads the result immediately, so one object serves the whole grid rather than
@@ -130,7 +131,7 @@ export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
                 tier = 'medium', seed = 1, player = true, pits = true, noDnf = false, order = null,
                 battle = null, duel = true, drs = true, rules = true, standIn = false, sideLock = true, styles = true, playerTeam = null,
-                opening = true }) {
+                opening = true, xingus = null }) {
     this.track = track; this.lines = lines; this.spec = spec;
     // STAND-IN: a bot at YOUR wheel (a harness, the home page's backdrop).
     // Racecraft then runs for your car too, so `me.ctx` carries the traffic,
@@ -147,6 +148,10 @@ export class Race {
     // braking zone for turn one to OPEN_AFTER m past the end of the first
     // complex: turn one and every corner that starts within 250 m of the last.
     this.openOn = !!opening;
+    // XINGUS MODE (js/xingus.js): arcade handling for YOUR car. Asked for by
+    // the page's address (?xingus=1, which is what the Xingus door on
+    // home.html sends), or by a harness through the option.
+    this.xingus = xingus ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('xingus') === '1');
     {
       const c = track.corners || [];
       let k = 0;
@@ -194,6 +199,7 @@ export class Race {
       const car = makeCar({ cls: spec.key });
       const p = track.point(slot.s, slot.lat);
       car.x = p.x; car.y = p.y; car.hdg = slot.hdg; car.vx = 0.001;
+      if (this.xingus && isPlayer && !standIn) xingusCar(car);
       // WHO this is, WHAT they drive, and HOW they drive it — one table.
       const prof = driverAt(who);
       const team = teamOf(prof);
@@ -1224,8 +1230,10 @@ export class Race {
       else if (al > pr.w + 1.2) surface = SURFACE.runoff;
       else if (al > pr.w) surface = SURFACE.kerb;
 
+      const xg = e.isPlayer && car.xg;                 // Xingus mode: your car only
+      if (xg) surface = xingusSurface(surface);
       step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv),
-                      dirty: car.dirty, tow: car.tow, rollMul: dragFor(surface),
+                      dirty: car.dirty, tow: car.tow, rollMul: xg ? xingusDrag(dragFor(surface)) : dragFor(surface),
                       // gravity on slopes: main.js hands the session the surveyed
                       // gradient; the harnesses do not, so they stay flat
                       slope: this.slopeAt ? this.slopeAt(pr.s) * Math.cos(car.hdg - t.hdg[pr.i]) : 0 });
@@ -1234,6 +1242,8 @@ export class Race {
       // would shove the car back onto the racing line mid-stop.
       const hit = e.inPit ? null : resolveBarrier(car, t, e.hint);
       if (hit && hit.harm) { e.contacts++; this.log('crash', `${e.name} INTO THE BARRIER`, e); }
+      // After the barrier, so a wall costs you speed and nothing else.
+      if (xg) xingusStep(car, playerInput || {}, dt);
       // The player's own contacts, handed up for the rumble and the toast. The
       // screen must not test for a hit a second time: two places deciding what
       // counts as contact is how they come to disagree.

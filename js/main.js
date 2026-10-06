@@ -1060,6 +1060,8 @@ function loop(now) {
       } else race.tick(FIXED_DT, {
         throttle: inp.throttle, brake: inp.brake,
         delta: inp.wheel * steerLock(car.speed),
+        // Xingus mode (js/xingus.js) reads these two; the serious game ignores them.
+        wheel: inp.wheel, hand: hands.down.has('KeyX') || hands.wheelHeld('handbrake'),
       });
       if (car.brake > 0.05) car.drsOpen = false;
       // Contact the player was part of, reported by the race layer rather than
