@@ -48,6 +48,20 @@ const LEGEND = {
   turf: { 0: 'none', 1: 'astroturf strip outside the kerb' },
 };
 
+// WHAT THE SURVEY PHOTOGRAPH SHOWS, where it disagrees with the rule below.
+// [from s, to s, side L|R|B, run-off code]. The rule calls every corner of a
+// "gravel circuit" gravel; Spa's most famous run-offs are painted asphalt.
+// Read off the Walloon aerial photograph (ORTHO_2023_ETE), 2026-10-06:
+//   the Bus Stop     red, yellow and white painted asphalt on the outside
+//   La Source        a paved apron round the outside of the hairpin
+//   Eau Rouge to the top of Raidillon   painted asphalt both sides
+//   Les Combes       paved (green paint) on the left; gravel on the right
+// Pouhon was looked at too and IS gravel beyond a paved strip: the rule stands.
+// Fagnes, Stavelot and Blanchimont have not been looked at.
+const OVER = {
+  spa: [[6540, 6760, 'B', 1], [200, 460, 'B', 1], [900, 1320, 'B', 1], [2280, 2480, 'L', 1]],
+};
+
 function bake(key) {
   const t = JSON.parse(fs.readFileSync(`${ROOT}data/tracks/${key}.json`, 'utf8'));
   const n = t.x.length, ds = t.ds;
@@ -90,6 +104,13 @@ function bake(key) {
         // with a paved strip nearest the track.
         arr[i] = w > 11 ? 2 : 1;
       }
+    }
+
+    for (const [s0, s1, side, code] of OVER[key] || []) {
+      const sp = i * ds;
+      if (sp < s0 || sp > s1) continue;
+      if (side !== 'R' && t.runL[i] >= 4.5) runL[i] = code;
+      if (side !== 'L' && t.runR[i] >= 4.5) runR[i] = code;
     }
 
     const ci = corner[i];

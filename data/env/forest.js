@@ -49,6 +49,10 @@ export const FOREST = {
   // the firs' slot, so `conifer` here is the share of palms.
   sepang:      { kinds: ['forest', 'park'], conifer: 0.7, palm: true, depth: 90, density: 1.2, scrub: true, cover: true,
                  tall: 1.3, bridge: 200 },
+  // Spa is cut through the High Ardennes forest: Norway spruce plantation in
+  // dark even-aged blocks, right up to the fences for most of the lap (the
+  // aerial survey shows it solid at Les Combes and round Pouhon), 25-30 m tall.
+  spa:         { kinds: ['forest'], conifer: 0.88, depth: 90, density: 1.3, scrub: true, cover: true, tall: 2.1 },
   // Dune pines behind the sand, low scrub everywhere else.
   // Satellite: 15% within 40 m (OSM 2%) — the dune woods behind the scrub.
   zandvoort:   { kinds: ['forest'], conifer: 0.75, depth: 45, density: 0.85, scrub: true, cover: true },

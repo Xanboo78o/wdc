@@ -1101,9 +1101,23 @@ means here, and what it is checked against:
   by the generic rule; Eau Rouge's is really painted asphalt.
 - CEILING f4 0.92 / f1 0.95 (tools/ceiling.mjs). A lone HARD bot laps in 2:00
   against a 1:51.8 ideal line: it lifts where a real car does not.
-- **The set is not built.** js/dlc/spa/index.js is a pack with no parts, so
-  the shared pipeline dresses it. No songs either. One `--quick` load check
-  passed; nobody has looked at it on screen.
+- **The set (2026-10-06) is built and has not been seen.** js/dlc/spa/stands.js
+  puts a covered stand on each of the eight surveyed grandstand footprints
+  (the red-roofed one opposite the pits, two on the run down from La Source,
+  the Eau Rouge stand, the Raidillon stand, three small ones at La Source);
+  js/dlc/spa/pits.js the F1 pit building with its tower and the endurance
+  pits. Where each sits, which way it faces and its roof colour were read off
+  the aerial photograph with the footprints drawn on it; EVERY HEIGHT IS AN
+  ESTIMATE. Adam was driving, so no screenshot: `tools/spasetcheck.mjs` holds
+  what Node can (8 of 8 face the road, front rows 2.5 m+ behind the run-off,
+  no NaN, nobody on the circuit; `--break flip` fails) and the set is OPT-IN,
+  `?set=1`, until `SEEN` is flipped in js/dlc/spa/index.js. The Eau Rouge
+  stand's footprint is L-shaped and is drawn as its bounding box: the first
+  thing to look at.
+- Run-off: tools/baksurf.mjs `OVER` paints asphalt where the photograph shows
+  it (Bus Stop, La Source, Eau Rouge-Raidillon, Les Combes left). Width 12 m
+  now checked against the photograph at Eau Rouge, Les Combes and Pouhon.
+- Forest: spruce, 88% conifer, to the fences (data/env/forest.js).
 
 ## Groundwork laid 2026-10-05: who owns a pack, and a plainer look
 
