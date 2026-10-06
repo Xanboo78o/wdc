@@ -25,13 +25,19 @@ import { Hands } from './input.js';
 import { FFB } from './ffb.js';
 import { SONGS, STATIONS } from './ost.js';
 import { THEMES, hasTheme, MUSIC_LEVELS, hasLevel, menuMusic, sayFor, greeting, setLook } from './menuui.js';
-import { isDLC, locked, previewLocked } from './catalog.js';
+import { isDLC, locked, previewLocked, packOf, priceOf, priceLabel } from './catalog.js';
 
 const $ = s => document.querySelector(s);
 // ?dlc=locked: see the page as someone who owns no packs (js/catalog.js).
 if (new URLSearchParams(location.search).get('dlc') === 'locked') previewLocked(true);
 // A pack's circuit wears a stamp; one you do not own wears the red one.
-const dlcStamp = id => !isDLC(id) ? '' : locked(id) ? '<span class="dlc lock">DLC · LOCKED</span>' : '<span class="dlc">DLC</span>';
+// The price is on it, and on its Grand Prix weekend the half price and why.
+const dlcStamp = id => {
+  if (!isDLC(id)) return '';
+  if (!locked(id)) return '<span class="dlc">DLC</span>';
+  const p = priceOf(packOf(id));
+  return `<span class="dlc lock">DLC · ${priceLabel(packOf(id))}${p && p.sale ? ` · ${p.sale.pct}% OFF, ${p.sale.why} WEEKEND` : ''}</span>`;
+};
 const h = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
 
 // ---------------------------------------------------------------- icons
@@ -200,7 +206,7 @@ const nowPlaying = () => { const n = menuMusic.title(); return n ? `<span class=
 
 // Go racing, now, with what is saved. No team in this league yet = the garage first.
 function lightsOut() {
-  if (locked(S.track)) { if (current !== 'setup') show('setup'); say('this circuit is in a pack you do not own yet.'); return; }
+  if (locked(S.track)) { if (current !== 'setup') show('setup'); say(`${track()[1]} is ${priceLabel(packOf(S.track))}. no racing it until it is yours.`); return; }
   if (!S.teams[S.car]) { show('garage'); say('pick a team first. then we race.'); return; }
   save(); menuMusic.fadeOut(0.4);
   setTimeout(() => { location.href = `./index.html?auto=${S.track}:${S.car}&from=home`; }, 420);

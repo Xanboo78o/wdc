@@ -44,24 +44,55 @@
 /* PRO: the same page with the dials turned down (Adam, 2026-10-05: "a ui
    update (less playful)"). Square-ish, a hairline, nothing hops, nothing is
    crooked, no marker pen, and the menu stops talking (js/menuui.js, the voice).
+   The dials are the first half; the rules under them are the second.
    NOT the default and not in SETTINGS yet: home.html?look=pro shows it, so he
    can look at it before any menu he uses changes. Paper and ink stay: the dark
    sleek version of this was "jackson storm" and is not what this is. */
 html[data-look=pro]{
-  --r-card:4px; --r-in:3px; --r-pill:3px; --r-big:5px; --r-say:4px;
-  --bw:1.5px; --bw-main:1.5px;
-  --lift:0px; --lip:inset 0 -4px 0 var(--red); --lip-go:inset 0 -4px 0 var(--ink); --lip-big:none;
+  --r-card:2px; --r-in:1px; --r-pill:2px; --r-big:2px; --r-say:0;
+  --bw:1px; --bw-main:1px;
+  --lift:0px; --lip:none; --lip-go:none; --lip-big:none;
   --tilt:0deg; --tilt-no:0deg; --tilt-stamp:0deg;
-  --say-font:var(--font); --say-size:12px;
-  --yell:color-mix(in srgb,var(--ink) 8%,var(--card));
+  --say-font:var(--font); --say-size:11px;
+  --yell:transparent;
+  /* one family, in two weights: the tall poster capitals were the loudest thing left */
+  --loud:"Rubik",system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
-html[data-look=pro] .say{border:0;background:none;padding:0;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--soft)}
+/* PRO-ER (Adam, same day, on the first pro pass: "pro-er look"). The first
+   pass straightened the page; this takes out what was still decoration:
+   the poster face, the cartoon icons, the round number badges, the yellow,
+   the hard red lip. What is chosen is solid ink. Red is for one thing, RACE. */
+html[data-look=pro] .chunk{font-weight:700}
+html[data-look=pro] button.chunk{letter-spacing:.1em}
+html[data-look=pro] .say{border:0;background:none;padding:0;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
 html[data-look=pro] .say:empty{display:none}
-html[data-look=pro] .say.shout{background:none;color:var(--red);font-size:12px;animation:none}
+html[data-look=pro] .say.shout{background:none;color:var(--red);font-size:11px;animation:none}
 html[data-look=pro] .yell{color:var(--ink)}
-html[data-look=pro] .title{border-bottom-width:3px}
-html[data-theme=dark]{--paper:#161514; --card:#232120; --ink:#f3f0e8; --soft:#a39f96; --line:#f3f0e8}
-html[data-theme=halloween]{--paper:#1a1220; --card:#2a1c33; --ink:#f6ead8; --soft:#b79cc4; --line:#f6ead8; --red:#ff7a1a; --onred:#1a1220; --yell:#9be24f}
+html[data-look=pro] .logo{font-size:19px;font-weight:800;letter-spacing:.08em;padding:9px 16px 8px}
+html[data-look=pro] .logo svg,html[data-look=pro] .tile svg,html[data-look=pro] .eq{display:none}
+html[data-look=pro] .chip{font-size:13px;letter-spacing:.08em}
+html[data-look=pro] .title{font-size:26px;font-weight:800;letter-spacing:.1em;border-bottom:2px solid var(--ink);padding-bottom:6px}
+html[data-look=pro] .tile{width:auto;height:46px;padding:0 20px;font-size:12px}
+html[data-look=pro] .race{height:74px;font-size:30px;font-weight:800;letter-spacing:.14em}
+html[data-look=pro] .me b{font-size:20px;font-weight:800;letter-spacing:.04em}
+html[data-look=pro] .next b{font-size:18px;font-weight:800;letter-spacing:.04em}
+html[data-look=pro] .trow b{font-weight:700}
+html[data-look=pro] .stripe{height:4px;border-radius:0}
+html[data-look=pro] .me .no,html[data-look=pro] .card .no,html[data-look=pro] .strip .no,html[data-look=pro] .livery .num{border-radius:var(--r-card);border-width:1px;background:none;color:var(--ink);font-size:15px;font-weight:700;width:auto;height:auto;padding:3px 8px}
+html[data-look=pro] .card .no{left:10px;top:10px;background:var(--card)}
+html[data-look=pro] .livery .num{background:#fff;color:#121212}
+html[data-look=pro] .card b{font-size:clamp(20px,2.4vw,30px);font-weight:800;letter-spacing:.05em}
+html[data-look=pro] .card.side b{font-size:15px}
+html[data-look=pro] .strip b{font-size:28px;font-weight:800;letter-spacing:.05em}
+html[data-look=pro] .arrow,html[data-look=pro] .strip .arrow{border-radius:var(--r-card)}
+html[data-look=pro] .foot .chunk{font-size:15px;padding:12px 28px}
+html[data-look=pro] .tabs{border-radius:var(--r-card)} html[data-look=pro] .tabs .chunk{font-size:14px}
+html[data-look=pro] .tabs.on{box-shadow:0 0 0 1px var(--ink)}
+html[data-look=pro] .pill{border-width:1px;font-size:12px;font-weight:700;letter-spacing:.08em;padding:5px 12px}
+html[data-look=pro] .stamp,html[data-look=pro] .dlc{font-size:10px;font-weight:700;letter-spacing:.12em;border-radius:var(--r-pill)}
+html[data-look=pro] .strip.on,html[data-look=pro] .opt.on,html[data-look=pro] .card.main{box-shadow:0 0 0 1px var(--ink)}
+html[data-look=pro] .opt.on small{color:var(--ink) !important}
+html[data-look=pro] .dots u{border-radius:0;width:10px;height:2px} html[data-look=pro] .dots u.on{background:var(--ink);transform:none}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--font);user-select:none;-webkit-font-smoothing:antialiased}
 button{font-family:inherit;color:inherit}

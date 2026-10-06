@@ -1112,11 +1112,20 @@ means here, and what it is checked against:
   nothing is for sale, so every pack reads as owned. The home page stamps a
   pack's circuit DLC and refuses to start a locked one; `home.html?dlc=locked`
   shows that state. NOT gated: index.html?auto=<key> typed by hand (main.js).
-  Undecided and unbuilt: currency, prices, try-before-buy, account vs machine.
+  Decided the same day ("money, 5.00, 50% of on the the weekend of said
+  race, no racing if no buy"): $5.00 a circuit; half price Friday-Sunday of
+  that circuit's own Grand Prix (`SALES`: Spa 23-25 July 2027; Sepang has no
+  F1 race, so MotoGP's Malaysian round, 30 Oct - 1 Nov 2026, which is my
+  reading); no test drive, and index.html turns a typed ?auto= for a locked
+  circuit back to home. NOT built: the till. Real money needs an adult's
+  payment account and a server that remembers who paid; a record in the
+  browser is not ownership. ENFORCE stays false until then.
 - **A look is not a theme.** home.html's playful traits are now dials on
   `:root` (`--r-card --bw --lift --lip --tilt --say-font` ...), value for value
   what they were. `html[data-look=pro]` turns them down and js/menuui.js
-  `look()` silences the voice. Seen only at `home.html?look=pro`; no setting
+  `look()` silences the voice. His verdict on the first pass: "pro-er look" —
+  so pro also drops the poster face, the cartoon icons, the badges, the yellow
+  and the red lip. Seen only at `home.html?look=pro`; no setting
   writes `wdc.look` yet. The game's own menus (style.css) are not on the dials.
   Neither look has been seen on screen since the change.
 
