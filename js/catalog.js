@@ -39,7 +39,7 @@ export const CATALOG = {
   spa: {
     kind: 'circuit', track: 'spa', title: 'Circuit de Spa-Francorchamps', country: 'BELGIUM',
     since: '2026-10-05', price: PRICE,
-    has: ['surveyed circuit', 'Eau Rouge and Raidillon on the 0.5 m laser survey'],
+    has: ['surveyed circuit', 'Eau Rouge and Raidillon on the 0.5 m laser survey', 'two songs'],
   },
 };
 
