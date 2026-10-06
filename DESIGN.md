@@ -1118,6 +1118,19 @@ means here, and what it is checked against:
   it (Bus Stop, La Source, Eau Rouge-Raidillon, Les Combes left). Width 12 m
   now checked against the photograph at Eau Rouge, Les Combes and Pouhon.
 - Forest: spruce, 88% conifer, to the fences (data/env/forest.js).
+- **A rail across La Source (2026-10-06, Adam: "walls ar were they dhouldnt").**
+  The pit-side run-off was widened to 32 m over the whole pit RANGE, which
+  includes the inside of an 11 m hairpin: the guard rail was drawn across the
+  corner's other leg, 0.9 m from its centreline. `localPit` in the bake gives
+  the lane room only where the lane is, re-applies the inside-of-corner cap
+  and shares one wall between a hairpin's two legs (track.js shareWalls only
+  does that 120 m apart along the lap). `tools/wallcheck.mjs [track|all]` is
+  the gate: Spa is clean; **adam1 still has a wall on the road in 7 places**,
+  and Monza, the Nürburgring, Zandvoort and the street circuit have sideways
+  steps in their barriers. Not fixed.
+- **Nobody pushes you back on** (same day: "dragged back on track aftwer
+  crashes ... doesnt happen irl"). Stopped off the road, your car stays where
+  it is under double yellows; REJOIN in the pause menu is still yours to press.
 
 ## Groundwork laid 2026-10-05: who owns a pack, and a plainer look
 

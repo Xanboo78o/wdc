@@ -1336,12 +1336,23 @@ export class Race {
         // stroll and has spun out and dnf'ed"). Marshals pushing it back onto
         // the road was a way for a spin to cost nothing; now it costs the race,
         // the yellows come out, and the truck fetches it under the safety car.
-        // YOU are still pushed: your race ending is your call, not a timer's.
+        // YOU are not retired by a timer: your race ending is your call.
         if (e.stuck > 4 && !e.recover && !e.isPlayer && !e.retired && this.rc.on) {
           e.stuck = 0; e.retired = true;
           this.log('crash', `${e.name} IS OUT — BEACHED`, e);
           this.rc.incident('retired', e);
         }
+        // AND NOBODY PUSHES YOU EITHER (Adam, 2026-10-06: "i keep getting
+        // dragged back on track aftwer crashes, thats not realistic and doesnt
+        // happen irl"). It was the last of the marshal push: four seconds
+        // stopped off the road and your car was slid back to the racing line.
+        // Now it is where you left it. Drive it out, or it stays; the marshals
+        // wave double yellows at it for as long as it sits there.
+        if (e.stuck > 4 && !e.recover && !e.retired && e.isPlayer) {
+          e.stuck = 0;
+          if (this.rc.on) this.rc.flag(e.proj.s, 2, 8);
+        }
+        // (What is left below is the race with `rules: false`, for an A/B.)
         if (e.stuck > 4 && !e.recover && !e.retired) {
           const s0 = e.proj.s - 14;
           const lp = t.point(s0, this.lines.race.off[t.idx(s0)] || 0);

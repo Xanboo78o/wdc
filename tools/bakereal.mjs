@@ -92,7 +92,7 @@ export const SPEC = {
     // "Pit Lane" (the F1 lane, round La Source) and not "Support Pit Lane"
     // (the endurance one, out at the top of Raidillon) or the kart track's.
     pitName: /^Pit Lane$/i, pitSport: 'motor',
-    pitSideOnly: true,
+    pitSideOnly: true, localPit: true,
     centreOsm: /pit|moto|kart/i,
     // Every name is the OSM way the corner lies on (see the log line the bake
     // prints): the automatic pass gives a way's name to one corner only, and
@@ -484,15 +484,74 @@ export function bakeCircuit(key, meta, spec, osm, opt = {}) {
     let need = 0;
     for (const [px, py] of pit.pts) need = Math.max(need, Math.abs(project(px, py).lat));
     need = Math.min(40, need + 4.5);
+    // `localPit`: room for the lane only where the lane is beside the road.
+    // The whole pit RANGE used to get it, which put a 32 m run-off on the
+    // inside of La Source, where the lane is nowhere near (Adam, 2026-10-06: "theres spots on spa where walls ar were
+    // they dhouldnt" — the guard rail was drawn across the road on the other
+    // side of the hairpin, 0.9 m from its centreline).
+    let local = null;
+    if (spec.localPit) {
+      local = new Map();
+      // The lane's path every 5 m: OSM draws the pit straight with two nodes.
+      const dense = [];
+      for (let k = 0; k + 1 < pit.pts.length; k++) {
+        const [ax, ay] = pit.pts[k], [bx, by] = pit.pts[k + 1], m = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 5));
+        for (let o = 0; o < m; o++) dense.push([ax + (bx - ax) * o / m, ay + (by - ay) * o / m]);
+      }
+      dense.push(pit.pts[pit.pts.length - 1]);
+      for (const [px, py] of dense) {
+        const q = project(px, py), k = Math.round(q.s / DS);
+        for (let o = -15; o <= 15; o++) { const kk = ((k + o) % center.length + center.length) % center.length; local.set(kk, Math.max(local.get(kk) || 0, Math.abs(q.lat) + 4.5)); }
+      }
+    }
     for (const p of center) {
       const sp = p.lapS;
       const inRange = pit.entryS <= pit.exitS
         ? (sp >= pit.entryS && sp <= pit.exitS)
         : (sp >= pit.entryS || sp <= pit.exitS);
       if (!inRange) continue;
+      if (local && !local.has(p.idx)) continue;
+      // Where the lane IS beside the road it gets the full room (the garages
+      // stand behind it); where no part of it is — the inside of the hairpin — none.
       const v = Math.max(0, need - W[p.idx]);
       if (!spec.pitSideOnly || pit.side > 0) RUNL[p.idx] = Math.max(RUNL[p.idx], v);
       if (!spec.pitSideOnly || pit.side < 0) RUNR[p.idx] = Math.max(RUNR[p.idx], v);
+    }
+  }
+
+  // ---- walls that fold: the inside of a hairpin, and its two legs --------------------
+  // (spec.localPit circuits.) Two things the pit-side widening above undoes or
+  // never knew: the inside of a tight corner cannot have a wall further in
+  // than the corner's own centre, and where the road doubles back on itself
+  // the two legs' run-offs reach across each other — js/track.js shareWalls
+  // mends that at load, but only for stretches 120 m apart along the lap, and
+  // a hairpin's legs are 60. Here: one wall down the middle of the gap between
+  // this sample and the nearest piece of road running the OTHER way.
+  if (spec.localPit) {
+    for (const p of center) {
+      const R = 1 / Math.max(Math.abs(p.curv), 1e-6), cap = Math.max(1.5, R * 0.8 - W[p.idx]);
+      if (p.curv > 0) RUNL[p.idx] = Math.min(RUNL[p.idx], cap);
+      else if (p.curv < 0) RUNR[p.idx] = Math.min(RUNR[p.idx], cap);
+    }
+    const N = center.length;
+    for (let i = 0; i < N; i++) {
+      const a = center[i];
+      for (let j = 0; j < N; j++) {
+        const al = Math.min(Math.abs(j - i), N - Math.abs(j - i));
+        if (al < 12 || al > 150) continue;
+        const b = center[j];
+        if (Math.cos(a.hdg - b.hdg) > -0.17) continue;                 // not coming back the other way
+        const dx = b.x - a.x, dy = b.y - a.y, D = Math.hypot(dx, dy);
+        const lat = -Math.sin(a.hdg) * dx + Math.cos(a.hdg) * dy, RUNS = lat > 0 ? RUNL : RUNR;
+        if (Math.abs(lat) < D * 0.8 || D >= 2 * (W[a.idx] + RUNS[a.idx])) continue;
+        RUNS[a.idx] = Math.min(RUNS[a.idx], Math.max(1.0, D / 2 - W[a.idx] - 0.4));
+      }
+    }
+    // A wall does not step sideways: the least run within 16 m, then smoothed.
+    for (const RUNS of [RUNL, RUNR]) {
+      const src = sorted.map(p => RUNS[p.idx]), E = Math.round(16 / DS), Bl = Math.round(8 / DS), n2 = src.length;
+      const er = src.map((_, k) => { let m = Infinity; for (let o = -E; o <= E; o++) m = Math.min(m, src[((k + o) % n2 + n2) % n2]); return m; });
+      sorted.forEach((p, k) => { let sum = 0; for (let o = -Bl; o <= Bl; o++) sum += er[((k + o) % n2 + n2) % n2]; RUNS[p.idx] = Math.min(src[k], sum / (2 * Bl + 1)); });
     }
   }
 
