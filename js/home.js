@@ -24,9 +24,14 @@ import { TEAMS, FIELDS, LEAGUES, teamsIn, driversOf } from './drivers.js';
 import { Hands } from './input.js';
 import { FFB } from './ffb.js';
 import { SONGS, STATIONS } from './ost.js';
-import { THEMES, hasTheme, MUSIC_LEVELS, hasLevel, menuMusic, sayFor, greeting } from './menuui.js';
+import { THEMES, hasTheme, MUSIC_LEVELS, hasLevel, menuMusic, sayFor, greeting, setLook } from './menuui.js';
+import { isDLC, locked, previewLocked } from './catalog.js';
 
 const $ = s => document.querySelector(s);
+// ?dlc=locked: see the page as someone who owns no packs (js/catalog.js).
+if (new URLSearchParams(location.search).get('dlc') === 'locked') previewLocked(true);
+// A pack's circuit wears a stamp; one you do not own wears the red one.
+const dlcStamp = id => !isDLC(id) ? '' : locked(id) ? '<span class="dlc lock">DLC · LOCKED</span>' : '<span class="dlc">DLC</span>';
 const h = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
 
 // ---------------------------------------------------------------- icons
@@ -67,6 +72,7 @@ const track = () => TRACKS.find(t => t[0] === S.track);
 const teamKey = () => S.teams[S.car] || Object.values(S.teams).find(Boolean);
 function paint() {
   document.documentElement.dataset.theme = S.theme;
+  setLook();
   const r = document.documentElement.style;
   r.setProperty('--team', cols(teamKey())[0]);
   r.setProperty('--team2', cols(teamKey())[1]);
@@ -194,6 +200,7 @@ const nowPlaying = () => { const n = menuMusic.title(); return n ? `<span class=
 
 // Go racing, now, with what is saved. No team in this league yet = the garage first.
 function lightsOut() {
+  if (locked(S.track)) { if (current !== 'setup') show('setup'); say('this circuit is in a pack you do not own yet.'); return; }
   if (!S.teams[S.car]) { show('garage'); say('pick a team first. then we race.'); return; }
   save(); menuMusic.fadeOut(0.4);
   setTimeout(() => { location.href = `./index.html?auto=${S.track}:${S.car}&from=home`; }, 420);
@@ -212,7 +219,7 @@ const PAGES = {
       <div class="chunk tower" id="tower"><small>LIVE · WARMING UP…</small></div></div>`);
     page.append(mid);
     const dock = h(`<div class="dock">
-      <div class="chunk next"><small>NEXT UP</small><div class="frame"><svg></svg></div><b>${t[1]}</b><small>${t[2]} · <span data-km></span></small></div>
+      <div class="chunk next"><small>NEXT UP</small><div class="frame"><svg></svg></div><b>${t[1]}</b><small>${t[2]} · <span data-km></span>${dlcStamp(t[0])}</small></div>
       <div class="tiles"></div>
       <button class="chunk go race">${FLAG}<div>RACE<small>${S.mode === 'race' ? `${S.laps} LAPS · ${S.grid} CARS` : 'HOT LAP'} · ${t[1].toUpperCase()}</small></div>${FLAG}</button></div>`);
     page.append(dock);
@@ -248,9 +255,9 @@ const PAGES = {
     const st = STATIONS.find(x => x.id === S.track);
     const songs = st ? st.songs.map(id => SONGS[id].name).join(' · ') : '';
     page.append(h(`<div class="top"><div class="title">RACE SETUP</div><div class="chunk chip yell"><small>${TEAMS[S.teams[S.car]] ? TEAMS[S.teams[S.car]].name : 'NO TEAM'}</small>${CARS[S.car].full.toUpperCase()}</div><div class="grow"></div>${sayBox()}</div>`));
-    const strip = h(`<div class="chunk strip"><button class="chunk arrow" data-l>‹</button>
+    const strip = h(`<div class="chunk strip${locked(t[0]) ? ' locked' : ''}"><button class="chunk arrow" data-l>‹</button>
       <div class="no">${String(i + 1).padStart(2, '0')}</div><div class="frame"><svg></svg></div>
-      <div class="stext"><small>${t[2]} · <span data-km></span></small><b>${t[1]}</b>${songs ? `<i>♪ ${songs}</i>` : ''}</div>
+      <div class="stext"><small>${t[2]} · <span data-km></span>${dlcStamp(t[0])}</small><b>${t[1]}</b>${songs ? `<i>♪ ${songs}</i>` : ''}</div>
       <div class="dots">${TRACKS.map((_, k) => `<u${k === i ? ' class="on"' : ''}></u>`).join('')}</div>
       <button class="chunk arrow" data-r>›</button></div>`);
     page.append(strip);
@@ -272,7 +279,7 @@ const PAGES = {
     }
     rows.push(['TIME', 'time', [['live', 'LIVE'], ...up(TIME_PHASES)]], ['WEATHER', 'weather', [['live', 'LIVE'], ...up(WEATHER_KINDS), ['changing', 'CHANGING']]]);
     optGrid(rows, 'setup');
-    foot(S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', lightsOut, '↑ ↓ MOVE · ← → CHANGE · START / G = LIGHTS OUT');
+    foot(locked(S.track) ? 'LOCKED' : S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', lightsOut, '↑ ↓ MOVE · ← → CHANGE · START / G = LIGHTS OUT');
   },
 
   // ------------------------------------------------------------ GARAGE

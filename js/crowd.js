@@ -43,6 +43,10 @@ const FANS = {
   nurburgring: { shirts: SHIRTS.map(c => [c, 1]), flags: [0x111111, 0xdd0000, 0xffce00, 0xeeeeea, 0x00a19c] },
   // Jalur Gemilang: red and white stripes, a blue canton, the yellow star.
   sepang: { shirts: SHIRTS.map(c => [c, 1]), flags: [0xcc0001, 0xeeeeea, 0x010066, 0xffcc00, 0xcc0001] },
+  // Black, yellow and red — and a great deal of orange: the Dutch border is
+  // an hour away and the Kemmel banks are Verstappen's second home crowd.
+  spa: { shirts: [[0xff6a13, 6], [0xf05a0a, 2], ...SHIRTS.map(c => [c, 0.7])],
+    flags: [0x111111, 0xfdda24, 0xef3340, 0xff6a13, 0xff6a13, 0xeeeeea] },
   default: { shirts: SHIRTS.map(c => [c, 1]), flags: [0xd21f26, 0xff6a13, 0x1b4fd8, 0xeeeeea, 0xf5c518] },
 };
 const pickW = (list) => {

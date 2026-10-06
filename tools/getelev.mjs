@@ -53,6 +53,7 @@
 // profile never re-queries anybody.
 // ---------------------------------------------------------------------------
 import fs from 'fs';
+import { metresPerDegree } from './geodesy.mjs';
 
 const ROOT = new URL('../', import.meta.url).pathname;
 const UA = 'wdc-racing-sim/0.1 (hobby racing sim; contact adamcoll.ac@gmail.com)';
@@ -115,6 +116,22 @@ const SOURCES = {
       return Number.isFinite(v) && v > -100 && v < 9000 ? v : null;
     },
   },
+  wallonie: {
+    name: 'SPW Relief de la Wallonie, MNT 2021-2022, 0.5 m lidar, bare earth',
+    licence: 'Service public de Wallonie, CC-BY 4.0',
+    // A post on EVERY 2 m sample of the road: Eau Rouge is why Spa is here
+    // (Adam, 2026-10-05: "eau rougue has to be 1:1"), and at 0.5 m the survey
+    // has the road itself, not a hill it is somewhere on.
+    step: 2, grid: 64, conc: 4,
+    async one(lat, lon) {
+      const u = 'https://geoservices.wallonie.be/arcgis/rest/services/RELIEF/WALLONIE_MNT_2021_2022/MapServer/identify' +
+        `?f=json&geometry=${lon.toFixed(7)},${lat.toFixed(7)}&geometryType=esriGeometryPoint&sr=4326&tolerance=1` +
+        `&mapExtent=${lon.toFixed(7)},${lat.toFixed(7)},${lon.toFixed(7)},${lat.toFixed(7)}&imageDisplay=3,3,96&returnGeometry=false&layers=all`;
+      const j = JSON.parse(await fetchText(u));
+      const v = j.results && j.results[0] ? parseFloat(j.results[0].attributes['Stretch.Pixel Value']) : NaN;
+      return Number.isFinite(v) && v > -100 && v < 9000 ? v : null;
+    },
+  },
   ign: {
     name: 'IGN RGE ALTI via the Géoplateforme altimetry service, bare earth',
     licence: 'IGN, Licence Ouverte 2.0',
@@ -158,7 +175,7 @@ const SMOOTH = { sepang: 2400 };
 const SEA_ASL = { baku: -28 };
 
 // Which survey answers for which circuit. Anything not listed stays on SRTM.
-const CIRCUIT_SOURCE = { monza: 'lombardia', suzuka: 'gsi', zandvoort: 'ahn', monaco: 'ign' };
+const CIRCUIT_SOURCE = { monza: 'lombardia', suzuka: 'gsi', zandvoort: 'ahn', monaco: 'ign', spa: 'wallonie' };
 
 // Ask a list of points of a survey, a few at a time, cached on disk by point.
 async function survey(src, points, cacheFile, label) {
@@ -261,7 +278,7 @@ async function bake(key, force) {
   // this wrong and the hill is in the wrong place, which is much worse than no
   // hill at all.
   const { lat0, lon0 } = env;
-  const mx = 111320 * Math.cos(lat0 * Math.PI / 180), my = 110540;
+  const { mx, my } = metresPerDegree(key, lat0);
   const toLL = (x, y) => [lat0 + y / my, lon0 + x / mx];
 
   console.log(`\n=== ${key} ===`);

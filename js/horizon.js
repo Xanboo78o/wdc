@@ -51,6 +51,9 @@ const LAND = {
   // Sepang is cut out of oil-palm estate on the lowlands south of Kuala
   // Lumpur: flat green canopy to the edge of sight, low forested hills beyond.
   sepang:    { lo: 15, hi: 70,  col: 0x4b6a2c, rough: 0.5,  sea: null,     trees: 0x33502a },
+  // Spa is a valley in the High Ardennes: the circuit climbs 100 m out of it,
+  // and spruce and beech forest stands on every ridge round it.
+  spa:       { lo: 60, hi: 210, col: 0x48593a, rough: 0.75, sea: null,     trees: 0x2c3f27 },
   // Pembroke, NH: watered lawns and a golf course, wooded hills beyond.
   street:    { lo: 20, hi: 60,  col: 0x4f6d34, rough: 0.6,  sea: null,     trees: 0x2f4a26 },
   _:         { lo: 20, hi: 70,  col: 0x5a6340, rough: 0.6,  sea: null,     trees: 0x3d4d2c },

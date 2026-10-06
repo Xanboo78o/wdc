@@ -10,8 +10,10 @@
 //   pack = { replaces: Set<'boards'|'startFinish'|'flagpoles'|'marshals'|...>,
 //            prepareEnv(env, track), build(view, ctx) -> stats }
 import * as sepang from './dlc/sepang/index.js';
+import * as spa from './dlc/spa/index.js';
 
-const PACKS = { sepang };
+// WHO MAY DRIVE a DLC circuit is js/catalog.js. This file is only how one is dressed.
+const PACKS = { sepang, spa };
 
 export const dlcFor = key => PACKS[key] || null;
 export const isDLC = key => !!PACKS[key];

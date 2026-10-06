@@ -39,6 +39,9 @@ export const KERB_PAINT = {
   baku: [0xc4252b, 0xeeeeea],
   nurburgring: [0xc6272d, 0xeeeeea],
   sepang: [0xc8262c, 0xeeeeea],
+  // Spa's kerbs are red and YELLOW (the aerial survey shows it all the way
+  // round, Eau Rouge included): two of the three colours of the Belgian flag.
+  spa: [0xc8262c, 0xe6bf1e],
 };
 
 export async function loadSurface(key) {

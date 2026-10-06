@@ -24,6 +24,7 @@
 // 50 built-up, 60 bare/sparse, 70 snow/ice, 80 water, 90 wetland,
 // 95 mangroves, 100 moss/lichen.
 import fs from 'fs';
+import { metresPerDegree } from './geodesy.mjs';
 import zlib from 'zlib';
 
 const ROOT = new URL('../', import.meta.url).pathname;
@@ -109,7 +110,7 @@ async function bake(key) {
   const env = JSON.parse(fs.readFileSync(`${ROOT}data/env/${key}.json`, 'utf8'));
   const { lat0, lon0 } = env;
   // The SAME projection as bakeenv/getelev, or the woods land in the wrong place.
-  const mx = 111320 * Math.cos(lat0 * Math.PI / 180), my = 110540;
+  const { mx, my } = metresPerDegree(key, lat0);
   let back = ([X, Y]) => [X, Y];
   if (FITTED[key]) {
     const track = JSON.parse(fs.readFileSync(`${ROOT}data/tracks/${key}.json`, 'utf8'));
@@ -164,7 +165,7 @@ async function bake(key) {
     `${cogs.size} file(s), ${[...cogs.values()].reduce((s, c) => s + c.cache.size, 0)} tiles, ${Math.round(fs.statSync(out).size / 1024)} KB`);
 }
 
-const all = ['monza', 'suzuka', 'zandvoort', 'monaco', 'baku', 'nurburgring', 'sepang', 'street'];
+const all = ['monza', 'suzuka', 'zandvoort', 'monaco', 'baku', 'nurburgring', 'sepang', 'spa', 'street'];
 const want = !args[0] || args[0] === 'all' ? all : [args[0]];
 for (const k of want) { console.log(`=== ${k} ===`); await bake(k); }
 fs.writeFileSync(`${ROOT}data/env/cover/SOURCE.md`, `# Ground cover

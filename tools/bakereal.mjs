@@ -1,6 +1,6 @@
 // bakereal.mjs — a REAL circuit, baked from survey data, the way the first five were.
 //
-//   node tools/bakereal.mjs <key> [--force]      (nurburgring, sepang)
+//   node tools/bakereal.mjs <key> [--force]      (nurburgring, sepang, spa)
 //
 // Monza, Zandvoort, Suzuka, Monaco and Baku were baked by DIRTY AIR's
 // tools/bake.mjs, and data/tracks/monza.json is still byte-identical to what
@@ -25,6 +25,7 @@
 //
 // Nothing is invented. A corner OSM does not name stays unnamed ("Turn 3").
 import fs from 'fs';
+import { metresPerDegree } from './geodesy.mjs';
 import path from 'path';
 import { Track } from '../js/track.js';
 import { racingLine } from '../js/line.js';
@@ -45,6 +46,7 @@ const ENDPOINTS = [
 export const CIRCUITS = {
   nurburgring: { id: 'de-1927', name: 'Nürburgring', full: 'Nürburgring Grand-Prix-Strecke' },
   sepang: { id: 'my-1999', name: 'Sepang', full: 'Sepang International Circuit' },
+  spa: { id: 'be-1925', name: 'Spa', full: 'Circuit de Spa-Francorchamps' },
 };
 
 // Per-circuit authored layer, same meaning as DIRTY AIR's SPEC. `w` is HALF
@@ -78,10 +80,33 @@ export const SPEC = {
     // or the wall a car hits stands inside the seats (found 2026-10-03).
     pitSideOnly: true, standsClear: 3,
   },
+  spa: {
+    aiPace: 0.8,
+    // 7.004 km through the Ardennes forest. Narrower than a Tilke circuit:
+    // about 10 m at La Source and through Eau Rouge, 14-15 m up Kemmel.
+    country: 'BELGIUM', w: 6, runoff: 14, wall: 'gravel', startOff: 0,
+    // Looser than the others: Eau Rouge, Raidillon and Blanchimont are flat
+    // out, and at 200 m / 24 degrees none of the three counted as a corner.
+    drs: 2, corner: [330, 14, 13, 30],
+    notCorner: /pit|stand|endurance|F1|kart|access|service|paddock|ancien|old|moto/i,
+    // "Pit Lane" (the F1 lane, round La Source) and not "Support Pit Lane"
+    // (the endurance one, out at the top of Raidillon) or the kart track's.
+    pitName: /^Pit Lane$/i, pitSport: 'motor',
+    pitSideOnly: true,
+    centreOsm: /pit|moto|kart/i,
+    // Every name is the OSM way the corner lies on (see the log line the bake
+    // prints): the automatic pass gives a way's name to one corner only, and
+    // Raidillon is two, Les Fagnes two, the Double Gauche two.
+    namesAt: [[274, 'La Source'], [949, 'Eau Rouge'], [1017, 'Raidillon'], [1174, 'Raidillon'],
+      [2310, 'Les Combes'], [2393, 'Les Combes'], [2546, 'Malmedy'], [2955, 'Bruxelles'],
+      [3182, "Speaker's Corner"], [3731, 'Double Gauche'], [3926, 'Double Gauche'], [4406, 'Fagnes'],
+      [4550, 'Fagnes'], [4843, 'Campus'], [5064, 'Courbe Paul Frère'], [6080, 'Blanchimont'],
+      [6633, 'Chicane'], [6688, 'Chicane']],
+  },
 };
 
 // ---- geometry (ported verbatim from dirtyair/tools/geo.mjs) -----------------
-function loadRaw(id) {
+function loadRaw(id, key) {
   const gj = JSON.parse(fs.readFileSync(GJ, 'utf8'));
   const f = gj.features.find(f => f.properties.id === id);
   if (!f) throw new Error('no circuit ' + id);
@@ -89,7 +114,7 @@ function loadRaw(id) {
   if (c[0][0] === c[c.length - 1][0] && c[0][1] === c[c.length - 1][1]) c.pop();
   const lat0 = c.reduce((a, p) => a + p[1], 0) / c.length;
   const lon0 = c.reduce((a, p) => a + p[0], 0) / c.length;
-  const mx = 111320 * Math.cos(lat0 * Math.PI / 180), my = 110540;
+  const { mx, my } = metresPerDegree(key, lat0);
   return {
     props: f.properties, lat0, lon0, coords: c,
     pts: c.map(([lo, la]) => ({ x: (lo - lon0) * mx, y: (la - lat0) * my })),
@@ -203,9 +228,10 @@ function findCorners(pts, minR = 400, minLen = 18, minTurnDeg = 22) {
 }
 
 // ---- bake helpers (ported verbatim from dirtyair/tools/bake.mjs) ------------
+let GEO = null;          // the circuit being baked: metres per degree (tools/geodesy.mjs)
 const latlon2m = (pts, lat0, lon0) => pts.map(p => ({
-  x: (p.lon - lon0) * 111320 * Math.cos(lat0 * Math.PI / 180),
-  y: (p.lat - lat0) * 110540,
+  x: (p.lon - lon0) * (GEO ? GEO.mx : 111320 * Math.cos(lat0 * Math.PI / 180)),
+  y: (p.lat - lat0) * (GEO ? GEO.my : 110540),
 }));
 
 function projector(center) {
@@ -311,7 +337,33 @@ function chainWays(ways) {
  * Returns the track object exactly as it is written to disk.
  */
 export function bakeCircuit(key, meta, spec, osm, opt = {}) {
-  const raw = loadRaw(meta.id);
+  const raw = loadRaw(meta.id, key);
+  GEO = metresPerDegree(key, raw.lat0);
+  // THE CENTRELINE FROM THE SURVEY (spec.centreOsm: the way names that are
+  // NOT the lap). The GeoJSON draws Spa's 7 km with 153 points — one every
+  // 46 m, which rounds Eau Rouge into a curve it is not and came out 44 m
+  // short of the lap. OSM's own ways for the circuit carry a node every 7-13 m
+  // through the corners (Raidillon: 25 nodes in 222 m). Chained into the lap,
+  // turned to run the GeoJSON's way round and to start where it starts, they
+  // are the centreline; the projection origin stays the GeoJSON's, so every
+  // other bake still lines up.
+  if (spec.centreOsm) {
+    // Every motor-racing way that is not one of the names in `centreOsm`
+    // (La Source carries no operator tag, so the lap cannot be picked by one).
+    const ways = osm.filter(e => e.geometry && (e.tags || {}).highway === 'raceway' && e.tags.sport === 'motor'
+      && !spec.centreOsm.test(e.tags.name || ''));
+    const loop = chainWays(ways).sort((a, b) => b.length - a.length)[0];
+    if (!loop || loop.length < 100) throw new Error(`${key}: no OSM centreline (${ways.length} ways)`);
+    const k = g => `${g.lat.toFixed(7)},${g.lon.toFixed(7)}`;
+    if (k(loop[0]) !== k(loop[loop.length - 1])) throw new Error(`${key}: the OSM ways do not close into a lap`);
+    let m = latlon2m(loop.slice(0, -1), raw.lat0, raw.lon0);
+    const area = p => p.reduce((a, q, i) => a + q.x * p[(i + 1) % p.length].y - p[(i + 1) % p.length].x * q.y, 0);
+    if (Math.sign(area(m)) !== Math.sign(area(raw.pts))) m = m.reverse();
+    let best = 0, bd = Infinity;
+    m.forEach((q, i) => { const d = Math.hypot(q.x - raw.pts[0].x, q.y - raw.pts[0].y); if (d < bd) { bd = d; best = i; } });
+    raw.pts = m.slice(best).concat(m.slice(0, best));
+    raw.centre = `OSM, ${ways.length} ways, ${raw.pts.length} nodes`;
+  }
   const { pts: center, length } = resample(spline(raw.pts), DS);
   reflow(center, spec.smooth || 9);
   center.forEach((p, i) => { p.idx = i; });
@@ -412,7 +464,8 @@ export function bakeCircuit(key, meta, spec, osm, opt = {}) {
 
   // ---- pit lane ----------------------------------------------------------------
   let pit = null;
-  const cand = opt.pitWays || osm.filter(e => e.geometry && spec.pitName.test((e.tags || {}).name || ''));
+  const cand = opt.pitWays || osm.filter(e => e.geometry && spec.pitName.test((e.tags || {}).name || '')
+    && (!spec.pitSport || (e.tags || {}).sport === spec.pitSport));
   const pitWays = chainWays(cand)
     .map(g => ({ m: latlon2m(g, lat0, lon0) }))
     .filter(o => project(o.m[0].x, o.m[0].y).d < 260 && project(o.m[o.m.length - 1].x, o.m[o.m.length - 1].y).d < 260);
@@ -550,7 +603,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url
     process.exit(2);
   }
   const key = keys[0], meta = CIRCUITS[key], spec = SPEC[key];
-  const raw = loadRaw(meta.id);
+  const raw = loadRaw(meta.id, key);
   let la0 = Infinity, lo0 = Infinity, la1 = -Infinity, lo1 = -Infinity;
   for (const [lo, la] of raw.coords) { la0 = Math.min(la0, la); la1 = Math.max(la1, la); lo0 = Math.min(lo0, lo); lo1 = Math.max(lo1, lo); }
   const pad = 0.003;

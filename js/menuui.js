@@ -30,6 +30,28 @@ export function setTheme(id) {
   el.classList.toggle('themed', id !== 'team');
 }
 
+// ---------------------------------------------------------------- the look
+// GROUNDWORK (Adam, 2026-10-05: "a ui update (less playful)"). A LOOK is the
+// other axis from a theme: a theme is the colours, a look is how playful the
+// page is — its shapes (home.html's dials, `html[data-look]`) and whether the
+// menu talks. 'playful' is what there is; 'pro' is the plain one. It is read
+// from ?look= and then from localStorage `wdc.look`, and nothing sets the
+// latter yet: there is no row for it in SETTINGS until he has seen it.
+export const LOOKS = [['playful', 'PLAYFUL', 'IT TALKS BACK'], ['pro', 'PRO', 'JUST THE FACTS']];
+export const hasLook = id => LOOKS.some(l => l[0] === id);
+export function look() {
+  let id = null;
+  try { id = new URLSearchParams(location.search).get('look') || localStorage.getItem('wdc.look'); } catch { /* not a page */ }
+  return hasLook(id) ? id : 'playful';
+}
+export function setLook(id = look()) {
+  if (typeof document !== 'undefined') document.documentElement.dataset.look = id;
+  return id;
+}
+// The plain look has no voice: every line below comes back empty, and a
+// caller that prints nothing for an empty line needs no other change.
+const plain = () => look() === 'pro';
+
 // ---------------------------------------------------------------- the voice
 const pick = a => a[Math.floor(Math.random() * a.length)];
 
@@ -48,6 +70,7 @@ const SAY = {
     monaco: ['the walls are closer than they look. then closer than that.'],
     nurburgring: ['germany. precise. cold. probably foggy.'],
     sepang: ['it will rain. it always rains.'],
+    spa: ['seven kilometres of forest and one hill everybody talks about.'],
   },
   CAR: { f4: ['small car. big dreams.'], gt3: ['the one with a roof.'], f1: ['the big one. hands at ten and two.'] },
   MODE: { hotlap: ['just you and the clock. the clock is mean.'], race: ['wheel to wheel. elbows out.'] },
@@ -65,25 +88,26 @@ const SAY = {
 };
 export function sayFor(row, value) {
   const t = SAY[row];
-  if (!t) return null;
+  if (!t || plain()) return null;
   const a = t[String(value)] || t['*'];
   return a ? pick(a) : null;
 }
 export function greeting() {
+  if (plain()) return '';
   const h = new Date().getHours();
   if (h < 5) return pick(['it is very late. one more race. (it is never one more race.)', 'go to bed. after this one.']);
   if (h < 12) return pick(['morning. lights out before breakfast?', 'early. keen. love that.']);
   if (h < 18) return pick(['afternoon. the track is warm.', 'ok. deep breath. pick a circuit.']);
   return pick(['evening session. best kind.', 'ok. deep breath. pick a circuit.']);
 }
-export const loadingLine = () => pick([
+export const loadingLine = () => plain() ? 'LOADING…' : pick([
   'SOLVING THE RACING LINE… (IT IS THE FAST ONE)',
   'WARMING THE TYRES. AND THE DRIVER.',
   'ASKING THE MARSHALS NICELY…',
   'COUNTING THE KERBS…',
   'DEEP BREATH…',
 ]);
-export const pauseLine = hurt => hurt
+export const pauseLine = hurt => plain() ? '' : hurt
   ? pick(['we do not talk about that one.', 'the car has seen better days.', '...ow.'])
   : pick(['breathe.', 'shake your hands out.', 'it will still be here.']);
 

@@ -1070,6 +1070,56 @@ safety car is loose (the [sc] gate's ten-car-lengths check fails on the
 shipped build too, p95 86 m against 56); about two unprompted spins a lap
 across the field mid-race, nearly all recovered.
 
+## Spa-Francorchamps, and Eau Rouge held to the survey (2026-10-05)
+
+Adam: "add spa ... Spa will be dlc, also eau rougue has to be 1:1". What 1:1
+means here, and what it is checked against:
+
+- **The plan.** The stock GeoJSON draws Spa with 153 points (one per 46 m).
+  The lap is instead OSM's own ways for the circuit, chained (`centreOsm` in
+  tools/bakereal.mjs): a node every 7-13 m through the corners. Laid over the
+  Walloon government's 2023 aerial photograph (IMAGERIE/ORTHO_2023_ETE, 20
+  cm/pixel), the centreline runs down the middle of the tarmac through Eau
+  Rouge and Raidillon and the ±6 m edges sit on the kerbs to about a metre.
+  That was looked at once, by eye; it is not a gate.
+- **The projection.** Every bake used 110540 m per degree of latitude, the
+  equator's figure. At 50.4 N it is 111229: the plane was 0.62% short
+  north-south, two metres over Eau Rouge. tools/geodesy.mjs gives circuits
+  listed in `EXACT` the WGS84 series, in every bake tool; the older circuits
+  keep the old constants so their tracks, cities and hills still agree. Lap:
+  6970 m before, **7006 m after, official 7004**.
+- **The hill.** tools/getelev.mjs source `wallonie`: the SPW 0.5 m lidar
+  terrain model of 2021-22, one post under EVERY 2 m sample. `tools/spacheck.mjs`
+  compares the baked road with the post under the same sample: worst 0.14 m
+  and 0.036 m rms from La Source to the top of Raidillon, worst 0.16 m round
+  the lap; lowest to highest 102.2 m, the figure quoted for the circuit. The
+  bottom is 389.7 m at s=942, inside Eau Rouge; the centreline's steepest
+  climb is 15.2% (15.7% on the raw posts). `--break flat|squash|shift` all fail
+  it — a hill moved 20 m down the road is caught.
+- Width is 12 m everywhere (OSM carries none); it matches the photograph at
+  Eau Rouge and has not been checked elsewhere. Run-off is tagged gravel/grass
+  by the generic rule; Eau Rouge's is really painted asphalt.
+- CEILING f4 0.92 / f1 0.95 (tools/ceiling.mjs). A lone HARD bot laps in 2:00
+  against a 1:51.8 ideal line: it lifts where a real car does not.
+- **The set is not built.** js/dlc/spa/index.js is a pack with no parts, so
+  the shared pipeline dresses it. No songs either. One `--quick` load check
+  passed; nobody has looked at it on screen.
+
+## Groundwork laid 2026-10-05: who owns a pack, and a plainer look
+
+- **js/catalog.js** — the catalogue of packs and the entitlement record
+  (`owns`, `locked`, `grant`, `revoke`, `setStore`/`buy`). `ENFORCE = false`:
+  nothing is for sale, so every pack reads as owned. The home page stamps a
+  pack's circuit DLC and refuses to start a locked one; `home.html?dlc=locked`
+  shows that state. NOT gated: index.html?auto=<key> typed by hand (main.js).
+  Undecided and unbuilt: currency, prices, try-before-buy, account vs machine.
+- **A look is not a theme.** home.html's playful traits are now dials on
+  `:root` (`--r-card --bw --lift --lip --tilt --say-font` ...), value for value
+  what they were. `html[data-look=pro]` turns them down and js/menuui.js
+  `look()` silences the voice. Seen only at `home.html?look=pro`; no setting
+  writes `wdc.look` yet. The game's own menus (style.css) are not on the dials.
+  Neither look has been seen on screen since the change.
+
 ## Not done yet
 
 - **A pit lane that a car can actually use.** `js/pit.js` draws one and the

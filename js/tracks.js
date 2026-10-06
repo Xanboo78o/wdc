@@ -21,4 +21,5 @@ export const TRACKS = [
   ['monaco', 'Monaco', 'MONACO'],
   ['nurburgring', 'Nürburgring', 'GERMANY'],
   ['sepang', 'Sepang', 'MALAYSIA'],
+  ['spa', 'Spa-Francorchamps', 'BELGIUM'],
 ];

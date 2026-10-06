@@ -53,6 +53,9 @@ const CEILING = {
   baku:      { f4: 0.84, f1: 1.01 },
   nurburgring: { f4: 0.78, f1: 1.01 },
   sepang:      { f4: 0.78, f1: 1.01 },
+  // tools/ceiling.mjs spa, 2026-10-05: clean to 0.92 (F4) and 0.95 (F1); above
+  // that the car runs wide out of Raidillon and through Blanchimont.
+  spa:         { f4: 0.92, f1: 0.95 },
 };
 const ceilingFor = (track, spec) => CEILING[track.key]?.[spec.key] ?? 0.82;
 

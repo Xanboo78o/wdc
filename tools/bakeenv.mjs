@@ -14,6 +14,7 @@
 // Raw Overpass responses are cached under data/env/raw/ so re-running is free
 // and does not hammer a volunteer-run public service. --force refetches.
 import fs from 'fs';
+import { metresPerDegree } from './geodesy.mjs';
 import path from 'path';
 
 const ROOT = new URL('../', import.meta.url).pathname;
@@ -30,7 +31,7 @@ const ENDPOINTS = [
 // building sits 40 m from where it belongs.
 const CIRCUITS = {
   suzuka: 'jp-1962', zandvoort: 'nl-1948', monaco: 'mc-1929',
-  monza: 'it-1922', baku: 'az-2016', nurburgring: 'de-1927', sepang: 'my-1999',
+  monza: 'it-1922', baku: 'az-2016', nurburgring: 'de-1927', sepang: 'my-1999', spa: 'be-1925',
 };
 const PAD = 600;        // metres of world to fetch beyond the track's bounding box
 
@@ -242,7 +243,7 @@ async function bake(key, force) {
     lat0 = ring.reduce((a, p) => a + p[1], 0) / ring.length;
     lon0 = ring.reduce((a, p) => a + p[0], 0) / ring.length;
   }
-  const mx = 111320 * Math.cos(lat0 * Math.PI / 180), my = 110540;
+  const { mx, my } = metresPerDegree(key, lat0);
   const local = (lat, lon) => [(lon - lon0) * mx, (lat - lat0) * my];
 
   // local metres -> track metres. Identity for a surveyed circuit; for a

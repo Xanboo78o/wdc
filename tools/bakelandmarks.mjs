@@ -24,6 +24,7 @@
 // Same projection as bakeenv.mjs: the circuit's own lat0/lon0, metres east and
 // north. js/landmarks.js reads the output.
 import fs from 'fs';
+import { metresPerDegree } from './geodesy.mjs';
 import path from 'path';
 
 const ROOT = new URL('../', import.meta.url).pathname;
@@ -78,6 +79,7 @@ const QUERY = {
   baku: `[out:json][timeout:120];(way["place"="neighbourhood"]["material"="stone"](40.36,49.828,40.372,49.842);way["name"="Qız Qalası"](40.36,49.83,40.37,49.84);way["man_made"="tower"](40.36,49.83,40.37,49.84);way["landuse"]["name"="Flame Towers"](40.355,49.815,40.365,49.83);way["building"]["building:levels"](around:140,40.3595,49.8266);way["name"="Hökumət Evi"](40.37,49.84,40.38,49.86););out body geom;`,
   nurburgring: `[out:json][timeout:120];(way(around:200,50.3467,6.9535)["historic"];way(around:200,50.3467,6.9535)["man_made"="tower"];way(around:200,50.3467,6.9535)["building"];way["highway"="raceway"](50.31,6.91,50.35,6.97);way["building"="grandstand"](50.31,6.91,50.35,6.97););out body geom;`,
   sepang: `[out:json][timeout:120];(way["building"="grandstand"](2.745,101.72,2.775,101.75););out body geom;`,
+  spa: `[out:json][timeout:120];(way["building"="grandstand"](50.42,5.95,50.452,5.99);way["building"](around:260,50.4442,5.9650););out body geom;`,
 };
 
 // ---------------------------------------------------------------------------
@@ -85,7 +87,7 @@ function context(key) {
   const env = JSON.parse(fs.readFileSync(ROOT + `data/env/${key}.json`, 'utf8'));
   const t = JSON.parse(fs.readFileSync(ROOT + `data/tracks/${key}.json`, 'utf8'));
   const { lat0, lon0 } = env;
-  const mx = 111320 * Math.cos(lat0 * Math.PI / 180), my = 110540;
+  const { mx, my } = metresPerDegree(key, lat0);
   const r1 = v => Math.round(v * 10) / 10;
   const loc = (lat, lon) => [r1((lon - lon0) * mx), r1((lat - lat0) * my)];
   const n = t.x.length;
@@ -439,6 +441,9 @@ SPEC.nurburgring = (C, E) => {
 // Grandstand under its leaves, the paddock, the gantry — are built by its own
 // set (js/dlc/sepang/), not from this file.
 SPEC.sepang = () => [];
+
+// SPA, likewise: a DLC circuit, dressed by js/dlc/spa/.
+SPEC.spa = () => [];
 
 async function bake(key) {
   if (!QUERY[key] || !SPEC[key]) { console.log(`  ${key}: no landmark spec yet`); return; }
