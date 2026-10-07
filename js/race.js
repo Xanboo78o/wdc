@@ -1237,6 +1237,7 @@ export class Race {
         this.greenT = this.time;
         this.log('flag', 'LIGHTS OUT');
         if (this.jokerRule) this.log('flag', 'ONE JOKER LAP EACH — ANY LAP YOU LIKE, BUT NO FINISH WITHOUT IT', null, 'joker');
+        if (this.stock && this.pits && this.lane && this.lane.len > 60) this.log('flag', 'ONE PIT STOP EACH (P) — ANY LAP YOU LIKE, BUT NO FINISH WITHOUT IT', null, 'tyres');
         for (const e of this.entries) e.lapStart = this.time;
       }
     }
@@ -1296,6 +1297,14 @@ export class Race {
         // the same thing — lift, or go up the road to the wall.
         e.stockHold = 1 - 0.1 * off;
         if (car.xg) car.xg.gCap = 3.0 * (1 - 0.35 * off);
+        // EVERYBODY STOPS ONCE, whatever the length. A rival that has not been
+        // in yet comes in on its own lap of the race — spread over all of them,
+        // so the lane is never the whole field at once — asked for from half a
+        // lap out, because the entry is just past the line.
+        if (!e.isPlayer && racing && !e.pitStops && !e.pitRequest && !e.inPit && !e.finished) {
+          const due = Math.min(this.laps - 1, Math.floor(((e.idx * 7 + 3) % 10) / 10 * this.laps));
+          if (e.lap + (e.pastHalf ? 1 : 0) >= due) { e.pitRequest = true; this.log('flag', `${e.name} WILL PIT`, e); }
+        }
         if (e.isPlayer && racing && !e.inPit) {
           const say = w > 0.8 ? 2 : w > 0.5 ? 1 : 0;
           if (say > (e.stockSaid || 0)) { e.stockSaid = say; this.log('flag', say === 2 ? 'TYRES GONE — P TO PIT' : 'TYRES HALF GONE', e, 'tyres'); }
@@ -1523,7 +1532,14 @@ export class Race {
           if (!e.bestLap || lt < e.bestLap) e.bestLap = lt;
           // The joker you owe: said at the end of every lap until it is paid.
           if (this.jokerRule && e.isPlayer && !e.jokers && e.lap < this.laps) this.log('flag', `JOKER LAP STILL TO TAKE — ${this.laps - e.lap} LAP${this.laps - e.lap === 1 ? '' : 'S'} LEFT`, e, 'joker');
-          if (e.lap >= this.laps && this.jokerRule && !e.jokers) {
+          // ...and on an oval, the stop you owe (Adam, 2026-10-06: "no matter the
+          // lenght on xingus speedway u must pit 1 time to finish like the joker lap").
+          const owesStop = this.stock && this.pits && this.lane && this.lane.len > 60 && !e.pitStops;
+          if (owesStop && e.isPlayer && e.lap < this.laps) this.log('flag', `ONE PIT STOP STILL OWED (P) — ${this.laps - e.lap} LAP${this.laps - e.lap === 1 ? '' : 'S'} LEFT`, e, 'tyres');
+          if (e.lap >= this.laps && owesStop) {
+            if (e.isPlayer) this.log('flag', 'NOT FINISHED — YOU STILL OWE A PIT STOP. P, AND COME IN THIS LAP.', e, 'tyres');
+            e.pitRequest = e.isPlayer ? e.pitRequest : true;
+          } else if (e.lap >= this.laps && this.jokerRule && !e.jokers) {
             // Not finished: the flag is not yours until the joker is done.
             if (e.isPlayer) this.log('flag', 'NOT FINISHED — YOU STILL OWE THE JOKER LAP. TAKE IT THIS LAP.', e, 'joker');
             else e.jokerLap = e.lap + 1;
