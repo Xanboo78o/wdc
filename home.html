@@ -210,6 +210,12 @@ svg .car{fill:var(--red);stroke:var(--ink)}
 .dlc.lock{background:var(--red);color:var(--onred)}
 .locked .frame{opacity:.35}
 
+/* HEILIGEN: the route map, and the boxes beside it */
+.hmap{align-items:stretch}
+.hmap .frame{flex:1.5;min-width:0;padding:6px}
+.hside{flex:1;min-width:260px;max-width:420px;display:flex;flex-direction:column;gap:8px;overflow:auto;padding:4px}
+.hside .card{flex:none} .hside .card b{font-size:34px}
+
 /* SETUP: the circuit as the first row, then the settings */
 .strip{flex:none;display:flex;align-items:center;gap:16px;padding:9px 12px}
 .strip.on{background:var(--card);color:var(--ink);transform:none;box-shadow:var(--lip);border-width:var(--bw-main)}

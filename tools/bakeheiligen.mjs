@@ -212,10 +212,19 @@ if (!dry) {
   // The map the menu draws and clicks on: every road once, and every route.
   const segs = {};
   for (const { T } of baked) {
+    // A lap's line is part-way along the Hauptstrasse, so that road is the
+    // lap's last run AND its first: the two are one road, joined end to start.
+    const runs = new Map();
     let cur = null, run = [];
-    const flush = () => { if (cur && run.length > 1 && (!segs[cur] || segs[cur].pts.length < run.length)) { const g = SEGMENTS[cur]; segs[cur] = { from: g.from, to: g.to, surf: KINDS[g.kind].surf, label: g.name, pts: run.filter((_, k) => k % 4 === 0 || k === run.length - 1).map(p => [+p.x.toFixed(0), +p.y.toFixed(0)]) }; } run = []; };
+    const flush = () => { if (cur && run.length) runs.set(cur, runs.has(cur) ? [...run, ...runs.get(cur)] : run); run = []; };
     for (const p of T) { if (p.seg !== cur) { flush(); cur = p.seg; } run.push(p); }
     flush();
+    for (const [name, r] of runs) {
+      if (segs[name] && segs[name].n >= r.length) continue;
+      const g = SEGMENTS[name];
+      segs[name] = { from: g.from, to: g.to, surf: KINDS[g.kind].surf, label: g.name, n: r.length,
+        pts: r.filter((_, k) => k % 4 === 0 || k === r.length - 1).map(p => [+p.x.toFixed(0), +p.y.toFixed(0)]) };
+    }
   }
   fs.writeFileSync(`${ROOT}data/build/heiligen-map.json`, JSON.stringify({
     note: 'tools/bakeheiligen.mjs from data/build/heiligen.js',

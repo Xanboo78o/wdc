@@ -79,25 +79,43 @@ const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch
 // (js/race.js): which tune the car wears, whether anyone else is out there,
 // and whether the others have stopped being careful.
 // Kept in its own record: the game rewrites `wdc.menu` with only what it knows.
-//   id: [label, the line under it, car tune, rivals, derby]
+//   id: [label, the line under it, car tune, rivals, derby, stakes]
 const XSTYLES = {
   hotlaps:    ['HOTLAPS', 'ALONE · RALLY CAR', 'rally', 0, 0],
-  rally:      ['RALLY', 'RALLY CARS · A FULL ENTRY', 'rally', 13, 0],
+  // "rally should be alone but actual stakes": the damage is real and so is the DNF
+  rally:      ['RALLY', 'ALONE · IT COUNTS', 'rally', 0, 0, 1],
   rallycross: ['RALLYCROSS', 'RALLY CARS · SIX OF YOU', 'rally', 5, 0],
   rallygt:    ['RALLY GT', 'GT CARS ON THE STAGES', 'gt', 9, 0],
   gt3:        ['GT3', 'FAST SEDAN RACE', 'gt', 17, 0],
   gt3lonely:  ['GT3 LONELY', 'ALONE · GT CAR', 'gt', 0, 0],
   derby:      ['DEMO DERBY', 'NOBODY IS CAREFUL', 'gt', 21, 1],
 };
-const X = { on: false, style: 'gt3' };
+const X = { on: false, style: 'gt3', gears: 'manual', track: null, heil: 'heilgrand' };
+// The Heiligen Auto Circuit is Xingus's own: one entry on the circuit row, and
+// its route is chosen on a map (the `heiligen` page).
+const HEIL = ['heiligen', 'Heiligen Auto Circuit', 'VALCORSA · 14 ROUTES'];
 try { Object.assign(X, JSON.parse(localStorage.getItem('wdc.xingus') || '{}')); } catch { /* fresh */ }
 if (!XSTYLES[X.style]) X.style = 'gt3';
+// A route key <-> the choice at each junction.
+const HEIL_BASE = { 'alt|pass': 'grand', 'ring|pass': 'schnee', 'alt|wald': 'wald', 'ring|wald': 'forst', 'alt|tal': 'stadt', 'ring|tal': 'sprint' };
+const heilKey = c => 'heil' + (c.rx ? 'rx' : HEIL_BASE[`${c.town}|${c.mid}`]) + (c.end === 'joker' ? 'j' : '');
+function heilChoice(key) {
+  const end = /j$/.test(key) ? 'joker' : 'wall', base = key.replace(/^heil/, '').replace(/j$/, '');
+  if (base === 'rx') return { rx: 1, town: 'ring', mid: 'tal', end };
+  const hit = Object.entries(HEIL_BASE).find(([, v]) => v === base) || ['alt|pass'];
+  const [town, mid] = hit[0].split('|');
+  return { rx: 0, town, mid, end };
+}
+let HMAP = null;
+fetch('./data/build/heiligen-map.json').then(r => (r.ok ? r.json() : null)).then(j => { HMAP = j; if (current === 'setup' || current === 'heiligen') show(current, at); }).catch(() => {});
 const saveX = () => { try { localStorage.setItem('wdc.xingus', JSON.stringify(X)); } catch { /* private window */ } };
-S.modeX = X.on ? 'xingus' : S.mode; S.xStyle = X.style;
+S.modeX = X.on ? 'xingus' : S.mode; S.xStyle = X.style; S.xGears = X.gears === 'auto' ? 'auto' : 'manual';
+const xTrack = () => (X.track === 'heiligen' ? X.heil : TRACKS.some(t => t[0] === X.track) ? X.track : S.track);
 function xingusUrl() {
-  const [, , tune, rivals, derby] = XSTYLES[X.style], grid = Math.max(2, rivals + 1);
-  return `./index.html?auto=${S.track}:gt3&from=home&xingus=1&xcar=${tune}${rivals ? '' : '&xsolo=1'}${derby ? '&xderby=1&battle=hard' : ''}` +
-    `&race=1&grid=${grid}&laps=${S.laps}&tier=${derby ? 'medium' : 'casual'}&nodnf=1&quali=0&start=${rivals ? grid : 1}`;
+  const [, , tune, rivals, derby, stakes] = XSTYLES[X.style], grid = Math.max(2, rivals + 1);
+  return `./index.html?auto=${xTrack()}:gt3&from=home&xingus=1&xcar=${tune}${rivals ? '' : '&xsolo=1'}${derby ? '&xderby=1&battle=hard' : ''}` +
+    `${stakes ? '&xstakes=1' : ''}${X.gears === 'auto' ? '&xgear=auto' : ''}` +
+    `&race=1&grid=${grid}&laps=${S.laps}&tier=${derby ? 'medium' : 'casual'}&nodnf=${stakes ? 0 : 1}&quali=0&start=${rivals ? grid : 1}`;
 }
 
 // a team's two livery colours
@@ -234,7 +252,7 @@ const nowPlaying = () => { const n = menuMusic.title(); return n ? `<span class=
 
 // Go racing, now, with what is saved. No team in this league yet = the garage first.
 function lightsOut() {
-  if (locked(S.track)) { if (current !== 'setup') show('setup'); say(`${track()[1]} is ${priceLabel(packOf(S.track))}. no racing it until it is yours.`); return; }
+  if (locked(X.on ? xTrack() : S.track)) { if (current !== 'setup') show('setup'); say(`${track()[1]} is ${priceLabel(packOf(S.track))}. no racing it until it is yours.`); return; }
   if (!X.on && !S.teams[S.car]) { show('garage'); say('pick a team first. then we race.'); return; }
   save(); saveX(); menuMusic.fadeOut(0.4);
   setTimeout(() => { location.href = X.on ? xingusUrl() : `./index.html?auto=${S.track}:${S.car}&from=home`; }, 420);
@@ -285,29 +303,34 @@ const PAGES = {
   // between them). The circuit is the first row: left/right steps it, like
   // every other row. START / G goes racing from anywhere on the page.
   setup() {
-    const n = TRACKS.length, i = TRACKS.findIndex(t => t[0] === S.track), t = TRACKS[i];
-    const step = d => { S.track = TRACKS[(i + d + n) % n][0]; show('setup', 0); say(sayFor('CIRCUIT', S.track)); };
-    const st = STATIONS.find(x => x.id === S.track);
+    const xOn = S.modeX === 'xingus', LIST = xOn ? [HEIL, ...TRACKS] : TRACKS;
+    const curId = xOn ? (X.track === 'heiligen' ? 'heiligen' : xTrack()) : S.track;
+    const n = LIST.length, i = Math.max(0, LIST.findIndex(t => t[0] === curId)), t = LIST[i];
+    const step = d => { const id = LIST[(i + d + n) % n][0]; if (xOn) X.track = id; if (id !== 'heiligen') S.track = id; saveX(); show('setup', 0); say(sayFor('CIRCUIT', id)); };
+    const isHeil = t[0] === 'heiligen', heilRoute = isHeil && HMAP ? HMAP.routes.find(r => r.key === X.heil) : null;
+    const st = STATIONS.find(x => x.id === t[0]);
     const songs = st ? st.songs.map(id => SONGS[id].name).join(' · ') : '';
     page.append(h(`<div class="top"><div class="title">RACE SETUP</div><div class="chunk chip yell"><small>${S.modeX === 'xingus' ? 'XINGUS · ' + XSTYLES[XSTYLES[S.xStyle] ? S.xStyle : X.style][1] : TEAMS[S.teams[S.car]] ? TEAMS[S.teams[S.car]].name : 'NO TEAM'}</small>${S.modeX === 'xingus' ? 'HANDBRAKE = X, OR MAP IT IN pad.html' : CARS[S.car].full.toUpperCase()}</div><div class="grow"></div>${sayBox()}</div>`));
     const strip = h(`<div class="chunk strip${locked(t[0]) ? ' locked' : ''}"><button class="chunk arrow" data-l>‹</button>
       <div class="no">${String(i + 1).padStart(2, '0')}</div><div class="frame"><svg></svg></div>
-      <div class="stext"><small>${t[2]} · <span data-km></span>${dlcStamp(t[0])}</small><b>${t[1]}</b>${songs ? `<i>♪ ${songs}</i>` : ''}</div>
-      <div class="dots">${TRACKS.map((_, k) => `<u${k === i ? ' class="on"' : ''}></u>`).join('')}</div>
+      <div class="stext"><small>${t[2]} · <span data-km></span>${dlcStamp(t[0])}</small><b>${t[1]}</b>${isHeil ? `<i>ROUTE: ${heilRoute ? heilRoute.name.replace('Heiligen ', '').toUpperCase() : X.heil} · ENTER / A TO CHOOSE ON THE MAP</i>` : songs ? `<i>♪ ${songs}</i>` : ''}</div>
+      <div class="dots">${LIST.map((_, k) => `<u${k === i ? ' class="on"' : ''}></u>`).join('')}</div>
       <button class="chunk arrow" data-r>›</button></div>`);
     page.append(strip);
-    drawMap(strip.querySelector('svg'), t[0]);
+    drawMap(strip.querySelector('svg'), isHeil ? X.heil : t[0]);
     strip.querySelector('[data-l]').onclick = e => { e.stopPropagation(); step(-1); };
     strip.querySelector('[data-r]').onclick = e => { e.stopPropagation(); step(1); };
-    item(strip, { left: () => step(-1), right: () => step(1), ok: () => focus(at + 1) });
+    if (isHeil) strip.querySelector('.frame').onclick = e => { e.stopPropagation(); show('heiligen'); };
+    item(strip, { left: () => step(-1), right: () => step(1), ok: () => (isHeil ? show('heiligen') : focus(at + 1)) });
 
     const onoff = [[false, 'OFF'], [true, 'ON']], up = a => a.map(k => [k, String(k).toUpperCase()]);
     // MODE's third value is Xingus; the two real ones are still what the game is told.
     X.on = S.modeX === 'xingus'; if (!X.on) S.mode = S.modeX === 'race' ? 'race' : 'hotlap';
-    X.style = XSTYLES[S.xStyle] ? S.xStyle : X.style; saveX();
+    X.style = XSTYLES[S.xStyle] ? S.xStyle : X.style; X.gears = S.xGears === 'auto' ? 'auto' : 'manual'; saveX();
     const rows = [['MODE', 'modeX', [['hotlap', 'HOT LAP'], ['race', 'RACE'], ['xingus', 'XINGUS']]]];
     if (X.on) {
       rows.push(['STYLE', 'xStyle', Object.entries(XSTYLES).map(([k, v]) => [k, v[0]])]);
+      rows.push(['GEARS', 'xGears', [['manual', 'PADDLES (E / Q)'], ['auto', 'AUTOMATIC']]]);
       if (XSTYLES[X.style][3]) rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]]);
     } else if (S.mode === 'race') {
       rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]],
@@ -320,7 +343,56 @@ const PAGES = {
     }
     rows.push(['TIME', 'time', [['live', 'LIVE'], ...up(TIME_PHASES)]], ['WEATHER', 'weather', [['live', 'LIVE'], ...up(WEATHER_KINDS), ['changing', 'CHANGING']]]);
     optGrid(rows, 'setup');
-    foot(locked(S.track) ? 'LOCKED' : X.on || S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', lightsOut, '↑ ↓ MOVE · ← → CHANGE · START / G = LIGHTS OUT');
+    foot(locked(xOn ? xTrack() : S.track) ? 'LOCKED' : X.on || S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', lightsOut, '↑ ↓ MOVE · ← → CHANGE · START / G = LIGHTS OUT');
+  },
+
+  // ------------------------------------------------------------ HEILIGEN
+  // Adam, 2026-10-06: "when u have heilegen it opens a big preveiw where u can
+  // click a custom route up or use a premade one (add one that needs a joker
+  // lap)". The whole site on one map. A route is a choice at each junction —
+  // town or ring road, valley or forest or the pass, the banking or the joker —
+  // so clicking a road picks it, and every combination is a lap that exists
+  // (data/build/heiligen.js bakes all fourteen). The premades are those same
+  // choices, set for you.
+  heiligen() {
+    back = () => show('setup');
+    const M = HMAP;
+    page.append(h(`<div class="top"><div class="title">HEILIGEN AUTO CIRCUIT</div><div class="grow"></div>${sayBox()}</div>`));
+    if (!M) { page.append(h('<div class="body"><div class="chunk say">the map did not load.</div></div>')); foot('BACK', () => show('setup')); return; }
+    const C = heilChoice(X.heil), route = M.routes.find(r => r.key === X.heil) || M.routes[0], on = new Set(route.segs);
+    const set = c => { X.heil = heilKey({ ...C, ...c }); saveX(); const keep = at; show('heiligen', keep); };
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const g of Object.values(M.segs)) for (const [x, y] of g.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, -y); y1 = Math.max(y1, -y); }
+    const COL = { tarmac: 'var(--ink)', gravel: '#b0844a', snow: '#6fa8dc' }, pad = 230;
+    const path = g => 'M' + g.pts.map(([x, y]) => `${x} ${-y}`).join('L');
+    const body = h(`<div class="body hmap"><div class="chunk frame"><svg viewBox="${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}" preserveAspectRatio="xMidYMid meet">
+      ${Object.entries(M.segs).map(([k, g]) => `<path d="${path(g)}" data-seg="${k}" fill="none" stroke="${COL[g.surf]}" stroke-width="${on.has(k) ? 34 : 13}" stroke-opacity="${on.has(k) ? 1 : 0.28}" stroke-linecap="round" stroke-linejoin="round" style="cursor:pointer"><title>${g.label}</title></path>`).join('')}
+      ${Object.entries(M.segs).filter(([k]) => on.has(k) && !/hauptstrasse2|steilwand1|talstrasse2/.test(k)).map(([, g]) => { const p = g.pts[Math.floor(g.pts.length / 2)]; return `<text x="${p[0] + 30}" y="${-p[1] - 26}" font-size="52" font-weight="700" fill="var(--ink)" style="font-family:var(--loud);letter-spacing:2px">${g.label.toUpperCase()}</text>`; }).join('')}
+      <circle cx="0" cy="0" r="30" fill="var(--red)" stroke="var(--ink)" stroke-width="8"/><text x="-60" y="-50" font-size="46" font-weight="700" fill="var(--red)" style="font-family:var(--loud)">START</text>
+    </svg></div>
+    <div class="hside"><div class="chunk card"><small>THE ROUTE</small><b>${route.name.replace('Heiligen ', '')}</b>
+      <i>${route.km.toFixed(2)} KM · ${route.corners} CORNERS · ${route.jumps} JUMP${route.jumps === 1 ? '' : 'S'}</i><i>${route.tag}</i>
+      <i style="opacity:.7">black tarmac · brown gravel · blue snow<br>click a road, or use the boxes</i></div></div></div>`);
+    page.append(body);
+    // A click on a road is a choice at its junction.
+    const pick = { altstadt: { town: 'alt', rx: 0 }, stadtring: { town: 'ring', rx: 0 }, talstrasse1: { mid: 'tal', rx: 0 }, waldaufstieg: C.mid === 'tal' || C.rx ? { mid: 'wald', rx: 0 } : null,
+      waldweg: { mid: 'wald', rx: 0 }, passstrasse: { mid: 'pass', rx: 0 }, abstieg: C.mid === 'tal' || C.rx ? { mid: 'wald', rx: 0 } : null, joker: { end: 'joker' }, steilwand2: { end: 'wall' }, infield: { rx: 1 }, ostkurve: { rx: 0 } };
+    for (const el of body.querySelectorAll('[data-seg]')) el.onclick = e => { e.stopPropagation(); const c = pick[el.dataset.seg]; if (c) set(c); };
+    const side = body.querySelector('.hside'), box = (label, opts, cur, fn) => {
+      const card = h(`<div class="chunk opt"><small>${label}</small><div class="pills">${opts.map(([v, n]) => `<span class="pill${cur === v ? ' sel' : ''}">${n}</span>`).join('')}</div></div>`);
+      side.append(card);
+      const step = d => { const k = Math.max(0, opts.findIndex(o => o[0] === cur)); fn(opts[(k + d + opts.length) % opts.length][0]); };
+      card.querySelectorAll('.pill').forEach((p, k) => { p.onclick = e => { e.stopPropagation(); fn(opts[k][0]); }; });
+      item(card, { left: () => step(-1), right: () => step(1), ok: () => focus(at + 1) });
+    };
+    box('PREMADE', [['heilgrand', 'GRAND 9.0'], ['heilschnee', 'SCHNEE'], ['heilwald', 'WALD'], ['heilforst', 'FORST'], ['heilstadt', 'STADT'], ['heilsprint', 'SPRINT 4.9'], ['heilrx', 'RALLYCROSS'], ['heilrxj', 'RALLYCROSS · JOKER']],
+      X.heil, v => { X.heil = v; saveX(); const keep = at; show('heiligen', keep); });
+    if (!C.rx) {
+      box('THE TOWN', [['alt', 'ALTSTADT'], ['ring', 'STADTRING']], C.town, v => set({ town: v }));
+      box('THE MOUNTAIN', [['tal', 'VALLEY'], ['wald', 'FOREST'], ['pass', 'THE PASS']], C.mid, v => set({ mid: v }));
+    }
+    box('THE LAST CORNER', [['wall', 'STEILWAND'], ['joker', 'JOKER, EVERY LAP']], C.end, v => set({ end: v }));
+    foot('DONE', () => show('setup'), 'CLICK A ROAD · ← → IN A BOX · ESC BACK');
   },
 
   // ------------------------------------------------------------ GARAGE
