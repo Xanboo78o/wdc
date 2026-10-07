@@ -237,6 +237,30 @@ if (!dry) {
     segs,
     routes: baked.map(({ r, json }) => ({ key: r.key, name: r.name, tag: r.tag, segs: r.segs, km: +(json.length / 1000).toFixed(3), jumps: json.jumps.length, corners: json.corners.length })),
   }));
+  // THE REST OF THE SITE (js/landmarks.js `ribbon` and `tempbarrier`). Whichever
+  // lap is being driven, the roads it does not use are still there to see — and
+  // where one of them meets the lap, it is shut with a row of temporary blocks.
+  for (const { r } of baked) {
+    const used = new Set(r.segs), usedNodes = new Set(r.segs.flatMap(k => [SEGMENTS[k].from, SEGMENTS[k].to]));
+    const runs = { tarmac: [], gravel: [], snow: [] }, blocks = [];
+    for (const [name, g] of Object.entries(segs)) {
+      if (used.has(name)) continue;
+      const P = g.pts, K = KINDS[SEGMENTS[name].kind], w = (SEGMENTS[name].w || K.w);
+      // stop 18 m short of a junction the lap passes through, so the two roads do not overlap
+      const cut = (pts, n) => { let d = 0, k = 0; while (k + 1 < pts.length && d < n) { d += Math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]); k++; } return k; };
+      const k0 = usedNodes.has(g.from) ? cut(P, 18) : 0, rev = P.slice().reverse(), k1 = usedNodes.has(g.to) ? P.length - 1 - cut(rev, 18) : P.length - 1;
+      if (k1 - k0 < 2) continue;
+      runs[K.surf].push({ w, pts: P.slice(k0, k1 + 1) });
+      const mouth = (a, c) => ({ x: a[0], y: a[1], hdg: +Math.atan2(c[1] - a[1], c[0] - a[0]).toFixed(3), w: +(w * 2 + 3).toFixed(1) });
+      if (usedNodes.has(g.from)) blocks.push(mouth(P[k0], P[k0 + 1]));
+      if (usedNodes.has(g.to)) blocks.push(mouth(P[k1], P[k1 - 1]));
+    }
+    const items = [];
+    for (const [surf, list] of Object.entries(runs)) for (const run of list)
+      items.push({ type: 'ribbon', name: 'heiligen', surf, rails: false, width: +(run.w * 2).toFixed(1), runs: [run.pts] });
+    if (blocks.length) items.push({ type: 'tempbarrier', at: blocks });
+    fs.writeFileSync(`${ROOT}data/landmarks/${r.key}.json`, JSON.stringify({ key: r.key, note: 'tools/bakeheiligen.mjs: the roads this lap does not use, and the blocks that shut them', items }));
+  }
   console.log(`\n  -> data/tracks/heil*.json and data/elev/heil*.json (${baked.length} each)`);
 }
 

@@ -1003,10 +1003,34 @@ BUILD.ribbon = (it, ctx) => {
       u += L;
     }
   }
-  const m = put(ctx, road, ctx.look.mat('tarmac', { size: 1.6, tint: 0xa9a7a2, roughness: 0.92, metalness: 0, side: THREE.DoubleSide, vertexColors: true,
+  // `surf`: what the road is made of (the Heiligen Auto Circuit's other routes:
+  // dirt, and snow on the pass). `rails: false` leaves the Armco off.
+  const SURF = { gravel: ['gravel', 0x9a7f5c, 1.3], snow: ['concrete', 0xe6ecf1, 4] }[it.surf] || ['tarmac', 0xa9a7a2, 1.6];
+  const m = put(ctx, road, ctx.look.mat(SURF[0], { size: SURF[2], tint: SURF[1], roughness: 0.92, metalness: 0, side: THREE.DoubleSide, vertexColors: true,
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }), { shadow: false });
-  if (m) m.name = 'landmark.nordschleife';
-  put(ctx, rail, mats(ctx).metal, { shadow: false });
+  if (m) m.name = it.name ? 'landmark.' + it.name : 'landmark.nordschleife';
+  if (it.rails !== false) put(ctx, rail, mats(ctx).metal, { shadow: false });
+};
+
+// ---- TEMPORARY BARRIERS across a road that is shut ----------------------------------------------
+// Adam, 2026-10-06, of the Heiligen Auto Circuit: "load the whole track, but
+// add temp barriers where the routes closed off would be". The whole site is
+// there whichever lap you are on (the ribbons above); where a road you are not
+// using meets the one you are, a row of red and white water-filled blocks
+// stands across its mouth. `at`: [{ x, y, hdg, w }] — where, facing along the
+// closed road, and how wide it is.
+BUILD.tempbarrier = (it, ctx) => {
+  const b = new Builder({ color: true });
+  const RED = [0.82, 0.12, 0.10], WHITE = [0.93, 0.93, 0.90];
+  for (const q of it.at) {
+    const nx = -Math.sin(q.hdg), ny = Math.cos(q.hdg), n = Math.max(2, Math.round(q.w / 2.0)), step = q.w / n;
+    for (let k = 0; k < n; k++) {
+      const o = -q.w / 2 + (k + 0.5) * step, x = q.x + nx * o, y = q.y + ny * o;
+      b.box(x, gY(ctx, x, y) + 0.45, Z(y), 0.55, 0.9, step - 0.12, q.hdg, k % 2 ? WHITE : RED);
+    }
+  }
+  const m = put(ctx, b, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0 }), {});
+  if (m) m.name = 'landmark.tempbarriers';
 };
 
 // ---- BAKU: Government House --------------------------------------------------------------
