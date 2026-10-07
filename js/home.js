@@ -47,6 +47,14 @@ const svg = body => `<svg viewBox="0 0 64 64" stroke-linecap="round" stroke-line
 const FLAG = svg(`<path d="M14 58 L22 8" stroke="#111" stroke-width="5" fill="none"/>
   <path d="M22 9 L56 14 L52 38 L19 33 Z" fill="#fff" stroke="#111" stroke-width="3"/>
   <path d="M22 9 L33 10.6 L31.6 18.6 L20.7 17 Z M44.6 12.3 L56 14 L54.7 22 L43.3 20.3 Z M31.6 18.6 L43.3 20.3 L42 28.3 L30.3 26.6 Z M19.4 25 L30.3 26.6 L29 34.6 L19 33 Z M42 28.3 L53.3 30 L52 38 L40.6 36.3 Z" fill="#111"/>`);
+// A jack-o'-lantern (Adam, 2026-10-06: "make EVRYTHING halloween, add some
+// jackolantern icons" and again "add jackolanterns to the ui"). Lit from inside.
+const JACK = svg(`<path d="M32 12 C30 6 34 3 38 4" stroke="#3d6b1f" stroke-width="5" fill="none"/>
+  <ellipse cx="32" cy="36" rx="25" ry="21" fill="#ff7a14" stroke="#a8440a" stroke-width="3"/>
+  <path d="M32 15 C22 22 22 50 32 57 M32 15 C42 22 42 50 32 57 M19 20 C10 28 10 46 19 53 M45 20 C54 28 54 46 45 53" stroke="#c9560c" stroke-width="2" fill="none"/>
+  <path d="M17 31 L25 24 L28 34 Z M47 31 L39 24 L36 34 Z M32 34 L29 40 L35 40 Z" fill="#ffe14d" stroke="#1a1220" stroke-width="2"/>
+  <path d="M15 42 L21 46 L25 42 L29 47 L32 43 L35 47 L39 42 L43 46 L49 42 C46 53 18 53 15 42 Z" fill="#ffe14d" stroke="#1a1220" stroke-width="2"/>`);
+const halloween = () => S.theme === 'halloween';
 const ICON = {
   circuit: FLAG,
   garage: svg(`<rect x="12" y="28" width="40" height="28" fill="#b98a4e" stroke="#7a4f1c" stroke-width="5"/><path d="M6 30 L32 10 L58 30" fill="none" stroke="#7a4f1c" stroke-width="7"/><rect x="24" y="38" width="16" height="18" fill="#8a5a22" stroke="#5c3a10" stroke-width="4"/>`),
@@ -84,7 +92,7 @@ const XSTYLES = {
   hotlaps:    ['HOTLAPS', 'ALONE · RALLY CAR', 'rally', 0, 0],
   // "rally should be alone but actual stakes": the damage is real and so is the DNF
   rally:      ['RALLY', 'ALONE · IT COUNTS', 'rally', 0, 0, 1],
-  rallycross: ['RALLYCROSS', 'RALLY CARS · SIX OF YOU', 'rally', 5, 0],
+  rallycross: ['RALLYCROSS', 'SIX OF YOU · NO LINE, NO RULES', 'rally', 5, 0, 0, 1],
   rallygt:    ['RALLY GT', 'GT CARS ON THE STAGES', 'gt', 9, 0],
   gt3:        ['GT3', 'FAST SEDAN RACE', 'gt', 17, 0],
   gt3lonely:  ['GT3 LONELY', 'ALONE · GT CAR', 'gt', 0, 0],
@@ -109,12 +117,13 @@ function heilChoice(key) {
 let HMAP = null;
 fetch('./data/build/heiligen-map.json').then(r => (r.ok ? r.json() : null)).then(j => { HMAP = j; if (current === 'setup' || current === 'heiligen') show(current, at); }).catch(() => {});
 const saveX = () => { try { localStorage.setItem('wdc.xingus', JSON.stringify(X)); } catch { /* private window */ } };
+if (new Date().getMonth() === 9 && !X.boo) { S.theme = 'halloween'; X.boo = 1; saveX(); }   // it is October: Halloween, until he says otherwise
 S.modeX = X.on ? 'xingus' : S.mode; S.xStyle = X.style; S.xGears = X.gears === 'auto' ? 'auto' : 'manual';
 const xTrack = () => (X.track === 'heiligen' ? X.heil : TRACKS.some(t => t[0] === X.track) ? X.track : S.track);
 function xingusUrl() {
   const [, , tune, rivals, derby, stakes] = XSTYLES[X.style], grid = Math.max(2, rivals + 1);
   return `./index.html?auto=${xTrack()}:gt3&from=home&xingus=1&xcar=${tune}${rivals ? '' : '&xsolo=1'}${derby ? '&xderby=1&battle=hard' : ''}` +
-    `${stakes ? '&xstakes=1' : ''}${X.gears === 'auto' ? '&xgear=auto' : ''}` +
+    `${stakes ? '&xstakes=1' : ''}${XSTYLES[X.style][6] ? '&xloose=1' : ''}${X.gears === 'auto' ? '&xgear=auto' : ''}` +
     `&race=1&grid=${grid}&laps=${S.laps}&tier=${derby ? 'medium' : 'casual'}&nodnf=${stakes ? 0 : 1}&quali=0&start=${rivals ? grid : 1}`;
 }
 
@@ -245,6 +254,8 @@ function dayChips() {
   const now = new Date(), d0 = new Date(2026, 9, 3);
   const day = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - d0) / 864e5) + 1;
   let s = day >= 1 ? `<div class="chunk chip yell"><small>CHASING THE WDC</small>DAY ${day}</div>` : '';
+  const boo = Math.round((new Date(now.getFullYear(), 9, 31) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+  if (halloween() && boo >= 0) s += `<div class="chunk chip jack">${JACK}<div><small>HALLOWEEN</small>${boo === 0 ? 'TONIGHT' : boo + ' NIGHT' + (boo === 1 ? '' : 'S')}</div></div>`;
   if (now.getMonth() === 9) s += `<div class="chunk chip dark"><small>RACETOBER</small>DAY ${now.getDate()}</div>`;
   return s;
 }
@@ -262,7 +273,7 @@ const PAGES = {
   // ------------------------------------------------------------ HOME
   home() {
     const t = track(), tk = teamKey(), team = TEAMS[tk], drv = tk ? driversOf(tk) : [];
-    page.append(h(`<div class="top"><div class="chunk logo">${FLAG}<div>CHASING <span>WDC</span><small>Racing for all</small></div></div>${dayChips()}<div class="grow"></div>
+    page.append(h(`<div class="top"><div class="chunk logo">${halloween() ? JACK : FLAG}<div>CHASING <span>WDC</span><small>Racing for all</small></div></div>${dayChips()}<div class="grow"></div>
       <div class="chunk chip" id="np"><small>ON THE RADIO</small><span>${nowPlaying()}</span></div></div>`));
     page.append(h(sayBox()));
     const mid = h(`<div class="mid">
@@ -277,7 +288,7 @@ const PAGES = {
     page.append(dock);
     drawMap(dock.querySelector('svg'), S.track);
     const tiles = dock.querySelector('.tiles');
-    const tile = (cls, icon, label, ok) => { const b = h(`<button class="chunk tile ${cls}">${ICON[icon]}${label}</button>`); tiles.append(b); return [b, ok]; };
+    const tile = (cls, icon, label, ok) => { const b = h(`<button class="chunk tile ${cls}">${halloween() && icon === 'jukebox' && label === 'XINGUS' ? JACK : ICON[icon]}${label}</button>`); tiles.append(b); return [b, ok]; };
     const list = [
       tile('', 'circuit', 'SETUP', () => show('setup')),
       tile('', 'garage', 'GARAGE', () => show('garage')),

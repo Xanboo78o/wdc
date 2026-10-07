@@ -165,7 +165,12 @@ function bakeRoute(route) {
     corners, drs: [], pit: null, sponsors: [],
     road, jumps,
   };
-  json.line = Array.from(racingLine(new Track(json), 0.35), v => +v.toFixed(2));
+  // The line is the slow part (seconds a route). A change that moves no
+  // road — a surface, a name — keeps the line that is already on disk.
+  let old = null;
+  try { old = JSON.parse(fs.readFileSync(`${ROOT}data/tracks/${route.key}.json`, 'utf8')); } catch { /* first bake */ }
+  const same = old && old.x.length === json.x.length && old.x.every((v, k) => v === json.x[k]) && old.y.every((v, k) => v === json.y[k]) && old.w.every((v, k) => v === json.w[k]);
+  json.line = same ? old.line : Array.from(racingLine(new Track(json), 0.35), v => +v.toFixed(2));
   return { json, z: Array.from(z), T, step };
 }
 

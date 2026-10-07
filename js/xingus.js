@@ -84,12 +84,17 @@ export function xingusStep(car, inp, dt) {
   // Full lock held on the power for a quarter of a second is a drift too: the
   // flick. Lifting off the wheel, or off the throttle for half a second, ends it.
   x.flick = Math.abs(steer) > 0.85 && thr > 0.85 ? x.flick + dt : 0;
-  if (x.state !== 'drift' && v > V_DRIFT && Math.abs(steer) > 0.2 && (inp.hand || x.flick > 0.25)) {
+  // ...and so is standing on the brakes with lock on (Adam: "when i do heavy
+  // braking in a turn i wanna slide like usual in realistic mode but more
+  // controllabe"): the tail comes round as it would, and from there it is the
+  // same drift — the wheel sets the angle, and it cannot go past the limit.
+  const trail = (inp.brake || 0) > 0.55 && Math.abs(steer) > 0.3;
+  if (x.state !== 'drift' && v > V_DRIFT && Math.abs(steer) > 0.2 && (inp.hand || x.flick > 0.25 || trail)) {
     x.state = 'drift'; x.dir = Math.sign(steer); x.calm = 0;
   }
   if (x.state === 'drift') {
     const into = steer * x.dir;                           // + = still steering into the turn
-    x.calm = (into < 0.12 || (thr < 0.08 && !inp.hand)) ? x.calm + dt : 0;
+    x.calm = (into < 0.12 || (thr < 0.08 && !inp.hand && (inp.brake || 0) < 0.25)) ? x.calm + dt : 0;
     if (x.calm > (into < -0.3 ? 0.08 : 0.4) || v < V_MIN + 2) { x.state = 'out'; x.calm = 0; }
   } else if (x.state === 'out' && Math.abs(x.beta) < GRIP_BETA * 0.8) x.state = 'grip';
 

@@ -47,9 +47,6 @@ const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
 // on the road itself: tarmac, gravel, packed snow. Rivals carry ROAD_HOLD of
 // their line's speed over it — the line was solved for tarmac.
 const ROAD_MU = [1.0, 0.8, 0.62], ROAD_DRAG = [1, 1.5, 1.3], ROAD_HOLD = [1, 0.74, 0.62];
-// A JUMP (`jumps`: [{ s, kick }]): crossing the lip above JUMP_V the car is
-// thrown as hard as the lip is sharp. physics.js flies it and lands it.
-const JUMP_V = 14, JUMP_VZ = 8.5;
 // THE OPENING CORNERS: how far past the first complex the truce runs, the
 // time headway a car keeps to whoever is ahead of it while it lasts, and how
 // much of a car length two cars must overlap to count as a pair going in
@@ -167,6 +164,12 @@ export class Race {
     this.xcar = xopt.car ?? (XQ.get('xcar') === 'rally' ? 'rally' : 'gt');
     this.xsolo = this.xingus && (xopt.solo ?? XQ.get('xsolo') === '1');
     this.derby = this.xingus && (xopt.derby ?? XQ.get('xderby') === '1');
+    // RALLYCROSS HAS NO LINE AND NO MANNERS (Adam: "they shouldnt follow a
+    // line, theres no rules in rally cross but youre not willingly trying to
+    // hit ppl, youre not avoiding them thooo"). `loose`: every rival picks its
+    // own way across the road and wanders, nobody leaves room, nobody lifts
+    // for the car ahead — and nobody aims at anybody. The derby is loose too.
+    this.loose = this.xingus && (this.derby || (xopt.loose ?? XQ.get('xloose') === '1'));
     this.xstakes = this.xingus && (xopt.stakes ?? XQ.get('xstakes') === '1');
     {
       const c = track.corners || [];
@@ -900,7 +903,7 @@ export class Race {
     const ROOM = 2.6 + 2.4 * st.space;
     let yieldTo = null;
     for (const o of this.entries) {
-      if (o === e || o.retired || o.inPit || this.derby) continue;
+      if (o === e || o.retired || o.inPit || this.loose) continue;
       if (Math.abs(t.gap(o.proj.s, e.proj.s)) > 7) continue;
       const dl = o.proj.lat - e.proj.lat;   // + = they are on my left
       const keep = dl > 0 ? (o.proj.lat - ROOM) - lineOff
@@ -1069,7 +1072,7 @@ export class Race {
     // road, because a car in that state can end up anywhere across it.
     {
       // (not in a demo derby: there, nobody is careful round anybody)
-      const me = this.derby ? null : this.me;
+      const me = this.loose ? null : this.me;
       if (me && me !== e && !me.retired && me.proj) {
         const ds = t.gap(me.proj.s, e.proj.s);
         if (ds > 0 && ds < 300) {
@@ -1131,6 +1134,13 @@ export class Race {
     // The yield goes on last, so the car-following cap above cannot undo it.
     // Backing out of a move you have no room for is not optional.
     if (yieldTo != null) speedCap = Math.min(speedCap ?? Infinity, yieldTo);
+    if (this.loose) {
+      // its own lane, drifting from one side to the other over ten or twenty
+      // seconds, and no speed taken off for whoever is in front
+      if (e.lanePh == null) { e.lanePh = (e.idx * 2.399) % 6.283; e.laneF = 0.25 + ((e.idx * 0.618) % 1) * 0.3; }
+      bias = lim * 0.72 * Math.sin(this.time * e.laneF + e.lanePh) - this.lines.race.off[i];
+      speedCap = null; obstDs = null; obstV = null;
+    }
 
     const off = this.lines.race.off[i];
     bias = Math.max(-lim - off, Math.min(lim - off, bias));
@@ -1254,26 +1264,45 @@ export class Race {
       const xg = e.isPlayer && car.xg;                 // Xingus mode: your car only
       if (xg) surface = roadCode ? Math.max(surface, car.xg.loose) : xingusSurface(surface);
       const drag = roadCode ? ROAD_DRAG[roadCode] : dragFor(surface);
-      if (t.jumps && !car.airborne && car.speed > JUMP_V && !e.inPit) {
-        for (const j of t.jumps) {
-          const d = t.gap(pr.s, j.s);
-          if (d >= 0 && d < Math.max(1.5, car.speed * dt * 1.5) && e.jumped !== j) {
-            e.jumped = j; e.jumpDmg = car.damage || 0;
-            car.airborne = true; car.airTime = 0; car.z = 0.05;
-            car.vz = Math.min(JUMP_VZ, car.speed * j.kick);
-            car.pRate = -0.12 * j.kick * 10;             // a touch nose-down, as off a real lip
-            if (e.isPlayer) this.log('flag', `AIRBORNE — ${j.name || 'jump'}`, e, 'jump');
+// LEAVING THE GROUND IS PHYSICS, NOT A TRIGGER (Adam, 2026-10-06: "the jump
+      // should be real physics ... no 'jump' code, js code for if i happen to be
+      // in the air ... if not enough speed i kinda js rooll over"). There is no
+      // list of jumps here any more. A car following the road is being turned
+      // downward by it at v^2 x (how fast the slope is falling away); when that
+      // is more than gravity and the car's own downforce can supply, the road
+      // has left the car. It goes up at the rate the ramp was carrying it,
+      // physics.js flies it, and the ground under it is the REAL ground: each
+      // tick the car's height is corrected by how far the road rose or fell
+      // beneath it. Too slow over the same crest and none of that is true, and
+      // it rolls over the top. (js/ffb.js already lets the wheel go dead in the air.)
+      if (this.slopeAt && !e.inPit) {
+        // Everything is in the ROAD'S frame: car.z is height above the road
+        // and car.vz the rate of it. In that frame a road curving away under a
+        // moving car is an upward acceleration of v^2 x curvature, and one
+        // rising to meet it (a landing ramp, a compression) is the opposite —
+        // so the same term takes the car off, keeps the ground honest under
+        // it while it flies, and brings a downslope landing in gently.
+        const vAlong = car.speed * Math.cos(car.hdg - t.hdg[pr.i]);
+        const d = Math.max(3, Math.abs(vAlong) * 0.06);
+        const lift = -vAlong * vAlong * (this.slopeAt(pr.s + d) - this.slopeAt(pr.s - d)) / (2 * d);   // m/s2, + = the road is leaving
+        if (!car.airborne) {
+          if (vAlong > 6 && al <= pr.w + 2) {
+            const down = 0.5 * 1.225 * (car.spec.ClA || 0) * car.speed * car.speed / car.spec.m;
+            if (lift > (9.81 + down) * 1.02) {
+              car.airborne = true; car.airTime = 0; car.z = 0.03; car.vz = 0.05;
+              e.flying = { dmg: car.damage || 0 };
+              if (e.isPlayer) this.log('flag', 'AIRBORNE', e, 'jump');
+            }
           }
-        }
-        if (e.jumped && Math.abs(t.gap(pr.s, e.jumped.s)) > 40) e.jumped = null;
-      }
-      // A jump that was built to be jumped does not break the car that takes it:
-      // what the landing cost is given back (a bot lost 0.11 a lap to the
-      // Himmelssprung, and its race by the ninth). Hitting something after is yours.
-      if (e.jumpDmg != null && !car.airborne) {
-        if (car.damage > e.jumpDmg) car.damage = e.jumpDmg;
-        if (car.crush) for (const k in car.crush) if (typeof car.crush[k] === 'number' && e.jumpCrush) car.crush[k] = Math.min(car.crush[k], e.jumpCrush[k] ?? car.crush[k]);
-        e.jumpDmg = null;
+          if (e.flying && !car.airborne) {
+            // A rival's landing is given back: they do not lift for a crest
+            // they cannot see, and one lost its race to the Himmelssprung in
+            // nine laps. Yours is yours.
+            if (!e.isPlayer && car.damage > e.flying.dmg) car.damage = e.flying.dmg;
+            e.flying.t = (e.flying.t || 0) + dt;
+            if (e.flying.t > 0.6) e.flying = null;
+          }
+        } else car.vz += Math.max(-60, Math.min(60, lift)) * dt;
       }
       step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv),
                       dirty: car.dirty, tow: car.tow, rollMul: xg ? xingusDrag(drag) : drag,

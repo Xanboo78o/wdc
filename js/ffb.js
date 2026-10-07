@@ -56,6 +56,12 @@ export class FFB {
     this.jolt = 0; this.dist = 0; this.kick = 1;
     this._retry = 0;
     this.off = new URLSearchParams(location.search).get('ffb') === '0';
+    // THE SLIDER (Adam, 2026-10-06: "add a force feedback slider in the pause
+    // menu"). A share of the ceiling the bridge was started with (tools/ffb.py
+    // --max): it can turn the wheel DOWN from there and back up to it, never
+    // past it — raising the ceiling restarts the bridge and is asked about.
+    this.gain = 1;
+    try { const g = parseFloat(localStorage.getItem('wdc.ffbGain')); if (g >= 0 && g <= 1) this.gain = g; } catch { /* blocked storage */ }
     // Connect from the moment the page loads, not from the first frame of
     // driving: the bridge also carries the rim buttons (js/bridgebtn.js), and
     // MENU and confirm are needed on the menu and the pause screen, where no
@@ -134,7 +140,8 @@ export class FFB {
 
     // The inputs as well as the answer, so tools/ffb.log can say WHY a force
     // was zero (the bridge ignores keys it does not use).
-    this.ws.send(JSON.stringify({ f: +f.toFixed(3), r: +r.toFixed(2), d: +d.toFixed(2),
+    f *= this.gain;
+    this.ws.send(JSON.stringify({ f: +f.toFixed(3), r: +(r * this.gain).toFixed(2), d: +d.toFixed(2),
       v: +v.toFixed(1), y: +sat.toFixed(3), c: +centre.toFixed(3), a: car.airborne ? 1 : 0, j: +this.jolt.toFixed(2) }));
   }
 }

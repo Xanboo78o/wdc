@@ -39,6 +39,7 @@ import { bankY, bankRoll } from './bank.js';
 import { buildCar, buildGT3, liveryAtlas, numberTexture } from './car.js';
 import { liveryFor, applyLivery } from './livery.js';
 import { carLamps } from './lamps.js';
+import { rivalCar } from './xcar.js';
 import { crushParts, applyCrush, slopePitch } from './render.js';
 
 // ---------------------------------------------------------------------------
@@ -166,6 +167,20 @@ export class Field {
     this.merged = mergeByMaterial(ref.group);
     // Where the lamps go: the reference car's own extent, shared by every clone.
     this.refBox = new THREE.Box3().setFromObject(ref.group);
+    // XINGUS MODE: every rival its own body and its own livery (js/xcar.js:
+    // four rally cars, or the GT coupe, in seven paint jobs). A variant is a
+    // whole reference car already wearing its colours, so nothing on it is
+    // repainted in the team's; a rival is a clone of one.
+    this.variants = null;
+    const XQ = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
+    if (XQ && XQ.get('xingus') === '1' && cls === 'gt3') {
+      const gt = XQ.get('xcar') !== 'rally';
+      this.variants = [];
+      for (let k = 0; k < Math.min(8, Math.max(1, entries.length - 1)); k++) {
+        const r = rivalCar(view.look, k, gt);
+        this.variants.push({ ref: r, paints: new Set(), merged: mergeByMaterial(r.group), box: new THREE.Box3().setFromObject(r.group) });
+      }
+    }
 
     for (const e of entries) {
       if (e.isPlayer) { this.rigs.push(null); continue; }
@@ -175,7 +190,9 @@ export class Field {
 
   // One car, in one team's colour, parked at the origin until it is posed.
   make(colour, entry = null) {
-    const src = this.ref;
+    const V = this.variants ? this.variants[(entry ? entry.idx : 0) % this.variants.length] : null;
+    this._V = V;
+    const src = V ? V.ref : this.ref;
     // The livery. Team-mates share one sticker atlas (their sponsors) and each
     // car gets only its own number — Adam: "make cars look like actual f1 cars
     // with sponsors and numbers". A GT3 body has no livery materials to swap.
@@ -213,7 +230,7 @@ export class Field {
         if (!this._livMats.has(k)) { const m2 = mat.clone(); m2.color = new THREE.Color(liv.second); this._livMats.set(k, m2); }
         return this._livMats.get(k);
       }
-      if (!this.refPaints.has(mat)) return mat;
+      if (!(V ? V.paints : this.refPaints).has(mat)) return mat;
       if (liv) {
         const k = team.key + ':1';
         if (!this._livMats.has(k)) this._livMats.set(k, applyLivery(mat.clone(), liv));
@@ -235,7 +252,7 @@ export class Field {
     // The distant version: nine-ish meshes instead of fifty-seven, sharing the
     // merged geometry with every other car on the grid.
     const lod = new THREE.Group();
-    for (const part of this.merged) {
+    for (const part of (V ? V.merged : this.merged)) {
       const m = new THREE.Mesh(part.geo, swap(part.mat));
       m.renderOrder = part.order;
       m.castShadow = true;
@@ -272,7 +289,7 @@ export class Field {
     return {
       yaw, tilt, full, lod, dot, wheels, steer, wings, level: 0,
       // head, tail and brake lights, on the tilt group so both LODs carry them
-      lamps: carLamps(tilt, this.refBox),
+      lamps: carLamps(tilt, V ? V.box : this.refBox),
       drs: src.drs ? map.get(src.drs) : null,
       crush: crushParts(full, wheels),
       R: src.R, spin: 0, crushAt: null,
@@ -291,11 +308,12 @@ export class Field {
   // colours are exactly the ones the nearer versions of this car wear.
   _dotGeometry(team, colour, swap) {
     this._dots = this._dots || new Map();
-    const key = team ? team.key : 'c' + colour;
+    const V = this._V;
+    const key = V ? 'v' + this.variants.indexOf(V) : team ? team.key : 'c' + colour;
     if (this._dots.has(key)) return this._dots.get(key);
     const pos = [], nrm = [], col = [];
     const c = new THREE.Color();
-    for (const part of this.merged) {
+    for (const part of (V ? V.merged : this.merged)) {
       const mat = swap(part.mat);
       if (!mat || (mat.transparent && (mat.opacity ?? 1) < 0.35)) continue;
       const liv = mat.userData && mat.userData.livery;

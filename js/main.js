@@ -47,6 +47,8 @@ const $ = id => document.getElementById(id);
 const ATTRACT = new URLSearchParams(location.search).has('attract');
 // XINGUS MODE (js/xingus.js): no engineer in your ear, and the paddles are a real gearbox.
 const XINGUS = new URLSearchParams(location.search).get('xingus') === '1';
+// What tools/ffb.py was started with (--max), in percent. The pause menu's slider works below it.
+const FFB_CEILING = 80;
 const XMANUAL = XINGUS && new URLSearchParams(location.search).get('xgear') !== 'auto';
 const FROM_HOME = new URLSearchParams(location.search).get('from') === 'home';
 // ms of simulation a frame may spend before it drops the backlog (see loop)
@@ -642,7 +644,7 @@ async function start() {
   if (!state.view) {
     state.view = await View.create($('cv'), t, line, {
       shadows: !q.has('lo'), env, textures: !q.has('notex'), cls: pickCar,
-      body: XINGUS && q.get('xcar') === 'rally' ? 'rally' : null,   // Xingus: the rally car's own body
+      body: XINGUS ? (q.get('xcar') === 'rally' ? 'rally' : 'xgt') : null,   // Xingus: its own cars, built to be sat in (js/xcar.js)
       // Your car in your team's livery, for the league you are driving.
       livery: liveryFor(pickTeams[pickCar], TEAMS[pickTeams[pickCar]]),
       team: TEAMS[pickTeams[pickCar]] || null,
@@ -1468,6 +1470,13 @@ const MENU_ITEMS = () => [
   ['CAMERA — ' + CAMS[state.view.mode], () => { state.view.setMode(state.view.mode + 1); drawMenu(); }],
   ['IDEAL LINE', () => { state.view.toggleLine(); drawMenu(); }],
   ['SOUND', () => { if (state.engine) state.engine.toggleMute(); drawMenu(); }],
+  // Steps down from the bridge's ceiling (80% as it is running) to nothing, then back to the top.
+  ['FORCE FEEDBACK — ' + Math.round(ffb.gain * FFB_CEILING) + '%', () => {
+    const steps = FFB_CEILING / 10, k = Math.round(ffb.gain * steps);
+    ffb.gain = (k <= 0 ? steps : k - 1) / steps;
+    try { localStorage.setItem('wdc.ffbGain', String(ffb.gain)); } catch { /* private window */ }
+    drawMenu();
+  }],
   ['QUIT TO MENU', toMenu],
 ];
 let _menuBox = null;

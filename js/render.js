@@ -40,7 +40,7 @@ import { carLamps, buildCourseLights, LightTrails } from './lamps.js';
 import { buildGrandstands } from './crowd.js';
 import { placeLandmarks } from './landmarks.js';
 import { dlcFor } from './dlc.js';
-import { buildRally } from './xcar.js';
+import { buildRally, buildXGT } from './xcar.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar, buildGT3, liveryAtlas } from './car.js';
@@ -687,7 +687,7 @@ export class View {
     // A GT3 is a different car, not a repainted single-seater.
     // (Xingus mode's rally styles: the Braewick Torr, js/xcar.js, on the GT's physics.)
     const car = opts.cls === 'gt3'
-      ? (opts.body === 'rally' ? buildRally(look) : buildGT3(look, 0x2f6fe0))
+      ? (opts.body === 'rally' ? buildRally(look) : opts.body === 'xgt' ? buildXGT(look) : buildGT3(look, 0x2f6fe0))
       : buildCar(look, 0xd8352a, opts.chassis ? chassisGeometry(THREE, opts.chassis) : null, { livery: opts.livery });
     // Your team's sponsors on your car, the way a rival wears theirs.
     if (opts.team && car.decalMat) car.decalMat.map = liveryAtlas(opts.team.col, opts.team).texture;
@@ -1312,6 +1312,21 @@ export class View {
     this.world.lift(road.geometry);
     S.add(road);
     this.road = road;
+    // A ROAD THAT IS NOT TARMAC (Adam, 2026-10-06, on the Heiligen dirt: "the
+    // ground.pavement doesnt appaear as dirt but gives dust fix"). `track.road`
+    // says what each sample is made of (1 gravel, 2 snow) and the physics and
+    // the dust already believed it; the picture did not. The dirt and the snow
+    // are laid over the road, a centimetre and a half up, edge to edge.
+    if (t.road) {
+      const over = split(t, i => -t.w[i], i => t.w[i], 0.015, bank, i => t.road[i] || 0);
+      const DIRT = groundDetail(look.mat('gravel', { size: 1.3, tint: 0x9a7f5c, roughness: 1, side: THREE.DoubleSide, normalScale: 1.6 }), look, 1.3, { amp: 0.5 });
+      const SNOW = new THREE.MeshStandardMaterial({ color: 0xe6ecf1, roughness: 0.96, metalness: 0, side: THREE.DoubleSide });
+      for (const m in over) {
+        if (+m === 0) continue;
+        const mesh = over[m].mesh(+m === 2 ? SNOW : DIRT, { shadow: false });
+        if (mesh) { mesh.name = +m === 2 ? 'road.snow' : 'road.dirt'; this.world.lift(mesh.geometry); S.add(mesh); }
+      }
+    }
 
     // The white lines that define the track limits. They sit a centimetre up
     // and are pulled forward in the depth buffer, because over a 2 km view

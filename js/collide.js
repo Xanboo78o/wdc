@@ -268,7 +268,12 @@ export function resolveCars(a, b, restitution = 0.18) {
     // score of 0.06 — which is to say, without ever having had an accident.
     // Nine is a genuinely misjudged dive down the inside rather than the
     // ordinary shuffling of a pack.
-    if (nose && onWheel && -rvn > 9.0) {
+    // ...AND ONLY AN OPEN WHEEL IS A RAMP (Adam, 2026-10-06, in a rallycross:
+    // "i js hit a car and went flying ... thats nt how rally cross cars work,
+    // them bois are heavy, and are closed wheel"). A nose climbs a bare rear
+    // tyre. It does not climb a bumper: two closed cars shunt, and stay down.
+    const closed = SA.shape === 'gt' || SB.shape === 'gt';
+    if (nose && onWheel && -rvn > 9.0 && !closed) {
       // A rear tyre is a ramp about a metre across, so it turns a good share of
       // the closing speed into vertical — applied at the front axle, which is
       // what pitches the nose up and sends the car over.

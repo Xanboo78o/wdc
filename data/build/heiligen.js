@@ -45,6 +45,10 @@ export const KINDS = {
   gravel:  { surf: 'gravel', w: 4.6, run: 3 },     // trees to the edge
   snow:    { surf: 'snow',   w: 4.6, run: 3.5 },   // snowbanks
   arena:   { surf: 'gravel', w: 5.5, run: 6 },
+  // Adam, same evening: "make most of haeliegen a dirt track with SOME paveent but
+  // mostly drit and snow". The valley's roads are dirt now; what is paved is
+  // the town (the Hauptstrasse and the Altstadt) and the two banked bowls.
+  dirt:    { surf: 'gravel', w: 6.0, run: 9 },
 };
 
 // Junctions, by name. A segment starts and ends on one.
@@ -69,7 +73,7 @@ export const SEGMENTS = {
   hauptstrasse1: { from: 'START', to: 'ARENA', kind: 'road', name: 'Hauptstraße', pts: [[-100, 0, 0], [100, 0, 0]] },
   hauptstrasse2: { from: 'ARENA', to: 'TOWN', kind: 'road', name: 'Hauptstraße', pts: [[390, 0, 0]] },
   // The Stadtring: straight on, one fast kink past the church.
-  stadtring: { from: 'TOWN', to: 'OST', kind: 'road', name: 'Stadtring', pts: [[700, 6, 0], [900, 30, 1]] },
+  stadtring: { from: 'TOWN', to: 'OST', kind: 'dirt', name: 'Stadtring', pts: [[700, 6, 0], [900, 30, 1]] },
   // The Altstadt: right into Kirchgasse, left along the Mühlbach, left up
   // Brunnengasse, right at the Rathaus. Four right angles between houses.
   altstadt: { from: 'TOWN', to: 'OST', kind: 'street', name: 'Altstadt',
@@ -80,13 +84,13 @@ export const SEGMENTS = {
   ostkurve: { from: 'OST', to: 'TAL', kind: 'bowl', name: 'Ostkurve', bank: 27, banked: [0.12, 0.9],
     pts: [[1245, 82, 3], [1338, 150, 5], [1368, 262, 7], [1318, 366, 9], [1210, 420, 11], [1090, 432, 12]] },
   // The Talstrasse: west along the valley floor, three long sweeps by the river.
-  talstrasse1: { from: 'TAL', to: 'RX', kind: 'road', name: 'Talstraße',
+  talstrasse1: { from: 'TAL', to: 'RX', kind: 'dirt', name: 'Talstraße',
     pts: [[870, 425, 12], [760, 505, 13], [640, 622, 13], [500, 648, 13], [384, 530, 14], [300, 400, 14], [170, 340, 14],
       [40, 390, 15], [-40, 470, 16], [-130, 485, 16]],
     corners: { 0.3: 'Flussbogen', 0.62: 'Mühle' } },
-  talstrasse2: { from: 'RX', to: 'WEST', kind: 'road', name: 'Talstraße', pts: [[-300, 440, 16], [-380, 425, 15]] },
+  talstrasse2: { from: 'RX', to: 'WEST', kind: 'dirt', name: 'Talstraße', pts: [[-300, 440, 16], [-380, 425, 15]] },
   // Down to the Steilwand: 31 degrees of banking, south to east.
-  steilwand1: { from: 'WEST', to: 'JOKER', kind: 'road', name: 'Steilwand', pts: [[-445, 365, 13]] },
+  steilwand1: { from: 'WEST', to: 'JOKER', kind: 'dirt', name: 'Steilwand', pts: [[-445, 365, 13]] },
   steilwand2: { from: 'JOKER', to: 'START', kind: 'bowl', name: 'Steilwand', bank: 31, banked: [0.1, 0.88],
     pts: [[-462, 270, 9], [-470, 190, 6], [-448, 100, 3], [-400, 34, 1], [-340, 6, 0]] },
 
@@ -115,7 +119,7 @@ export const SEGMENTS = {
     corners: { 0.07: 'Schneeweg', 0.15: 'Schneekehre 1', 0.2: 'Schneekehre 2', 0.25: 'Schneekehre 3', 0.3: 'Schneekehre 4', 0.4: 'Heiligenpass', 0.5: 'Heiligenpass', 0.62: 'Gratkurve', 0.72: 'Gratkurve' } },
 
   // ---- the west ---------------------------------------------------------------------
-  abstieg: { from: 'ABSTIEG', to: 'WEST', kind: 'road', name: 'Abstieg', w: 5.2, run: 5,
+  abstieg: { from: 'ABSTIEG', to: 'WEST', kind: 'dirt', name: 'Abstieg', w: 5.2, run: 5,
     pts: [[-398, 1140, 94], [-450, 1040, 84], [-520, 960, 76], [-520, 870, 68],
       // the Horquilla de Granada: in from the north-east, round to the left, out to the east
       [-560, 790, 61], [-610, 738, 56], [-656, 706, 52], [-700, 697, 49], [-719, 686, 48], [-722, 675, 47],
@@ -150,9 +154,9 @@ export const ROUTES = [
   ...lay('wald', 'Wald', 'TOWN AND FOREST', ['altstadt', 'ostkurve', 'waldaufstieg', 'waldweg', 'abstieg']),
   ...lay('forst', 'Forst', 'THE FOREST STAGE', ['stadtring', 'ostkurve', 'waldaufstieg', 'waldweg', 'abstieg']),
   ...lay('stadt', 'Stadt', 'TOWN AND VALLEY', ['altstadt', 'ostkurve', 'talstrasse1', 'talstrasse2']),
-  ...lay('sprint', 'Sprint', 'THE VALLEY, ALL TARMAC', ['stadtring', 'ostkurve', 'talstrasse1', 'talstrasse2']),
+  ...lay('sprint', 'Sprint', 'THE VALLEY, FAST DIRT', ['stadtring', 'ostkurve', 'talstrasse1', 'talstrasse2']),
   // Rallycross: half the Hauptstrasse, the gravel infield, the end of the
   // Talstrasse and the Steilwand — or the joker.
-  { key: 'heilrx', name: 'Heiligen Rallycross', tag: 'TARMAC AND GRAVEL', segs: ['hauptstrasse1', 'infield', 'talstrasse2', ...HOME] },
-  { key: 'heilrxj', name: 'Heiligen Rallycross Joker', tag: 'TARMAC AND GRAVEL · JOKER', segs: ['hauptstrasse1', 'infield', 'talstrasse2', ...HOME_J] },
+  { key: 'heilrx', name: 'Heiligen Rallycross', tag: 'TOWN TARMAC AND DIRT', segs: ['hauptstrasse1', 'infield', 'talstrasse2', ...HOME] },
+  { key: 'heilrxj', name: 'Heiligen Rallycross Joker', tag: 'TOWN TARMAC AND DIRT · JOKER', segs: ['hauptstrasse1', 'infield', 'talstrasse2', ...HOME_J] },
 ];

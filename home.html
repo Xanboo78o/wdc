@@ -210,6 +210,23 @@ svg .car{fill:var(--red);stroke:var(--ink)}
 .dlc.lock{background:var(--red);color:var(--onred)}
 .locked .frame{opacity:.35}
 
+/* HALLOWEEN (Adam, 2026-10-06: "make EVRYTHING halloween ... jackolantern icons").
+   The theme's colours were there already; these are the pumpkins. One carved
+   face, used everywhere: beside every page title, on the logo, on a countdown
+   chip, in the corner of the chosen card, and a patch of three along the foot. */
+html[data-theme=halloween]{--jack:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 12 C30 6 34 3 38 4' stroke='%233d6b1f' stroke-width='5' fill='none'/%3E%3Cellipse cx='32' cy='36' rx='25' ry='21' fill='%23ff7a14' stroke='%23a8440a' stroke-width='3'/%3E%3Cpath d='M32 15 C22 22 22 50 32 57 M32 15 C42 22 42 50 32 57 M19 20 C10 28 10 46 19 53 M45 20 C54 28 54 46 45 53' stroke='%23c9560c' stroke-width='2' fill='none'/%3E%3Cpath d='M17 31 L25 24 L28 34 Z M47 31 L39 24 L36 34 Z M32 34 L29 40 L35 40 Z' fill='%23ffe14d' stroke='%231a1220' stroke-width='2'/%3E%3Cpath d='M15 42 L21 46 L25 42 L29 47 L32 43 L35 47 L39 42 L43 46 L49 42 C46 53 18 53 15 42 Z' fill='%23ffe14d' stroke='%231a1220' stroke-width='2'/%3E%3C/svg%3E")}
+html[data-theme=halloween] .title::after{content:"";display:inline-block;width:.82em;height:.82em;margin-left:.28em;vertical-align:-.06em;background:var(--jack) center/contain no-repeat}
+html[data-theme=halloween] .logo svg{filter:none}
+html[data-theme=halloween] .chunk.on::after{content:"";position:absolute;right:-13px;top:-15px;width:32px;height:32px;background:var(--jack) center/contain no-repeat;transform:rotate(12deg);pointer-events:none}
+html[data-theme=halloween] .chunk.say.on::after{display:none}
+html[data-theme=halloween] .tile svg{filter:none}
+html[data-theme=halloween] body::after{content:"";position:fixed;left:14px;bottom:6px;width:150px;height:46px;pointer-events:none;opacity:.9;
+  background:var(--jack) 0 100%/46px no-repeat,var(--jack) 44px 100%/34px no-repeat,var(--jack) 82px 100%/52px no-repeat}
+html[data-theme=halloween] body[data-page=home]::after{display:none}
+.chip.jack{display:flex;align-items:center;gap:8px;background:#ff7a14;color:#1a1220}
+.chip.jack svg{width:30px;height:30px;flex:none}
+html[data-theme=halloween] .go{box-shadow:0 0 18px color-mix(in srgb,#ff7a14 60%,transparent)}
+
 /* HEILIGEN: the route map, and the boxes beside it */
 .hmap{align-items:stretch}
 .hmap .frame{flex:1.5;min-width:0;padding:6px}
