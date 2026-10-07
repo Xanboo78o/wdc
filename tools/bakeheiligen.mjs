@@ -209,6 +209,20 @@ if (!dry) {
       grid: { x0: +gx0.toFixed(1), y0: +gy0.toFixed(1), dx: +gdx.toFixed(3), dy: +gdy.toFixed(3), n: GN, h: GH.map(v => +(v - mean).toFixed(2)) },
     }));
   }
+  // The map the menu draws and clicks on: every road once, and every route.
+  const segs = {};
+  for (const { T } of baked) {
+    let cur = null, run = [];
+    const flush = () => { if (cur && run.length > 1 && (!segs[cur] || segs[cur].pts.length < run.length)) { const g = SEGMENTS[cur]; segs[cur] = { from: g.from, to: g.to, surf: KINDS[g.kind].surf, label: g.name, pts: run.filter((_, k) => k % 4 === 0 || k === run.length - 1).map(p => [+p.x.toFixed(0), +p.y.toFixed(0)]) }; } run = []; };
+    for (const p of T) { if (p.seg !== cur) { flush(); cur = p.seg; } run.push(p); }
+    flush();
+  }
+  fs.writeFileSync(`${ROOT}data/build/heiligen-map.json`, JSON.stringify({
+    note: 'tools/bakeheiligen.mjs from data/build/heiligen.js',
+    nodes: Object.fromEntries(Object.entries(NODES).map(([k, p]) => [k, sc(p).map(v => +v.toFixed(0))])),
+    segs,
+    routes: baked.map(({ r, json }) => ({ key: r.key, name: r.name, tag: r.tag, segs: r.segs, km: +(json.length / 1000).toFixed(3), jumps: json.jumps.length, corners: json.corners.length })),
+  }));
   console.log(`\n  -> data/tracks/heil*.json and data/elev/heil*.json (${baked.length} each)`);
 }
 

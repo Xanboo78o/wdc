@@ -34,6 +34,8 @@ const DRIFT_MIN = 14 * D2R, DRIFT_MAX = 40 * D2R;   // the drift's angle, shallo
 const T_GRIP = 0.12;                   // s: how fast grip pulls the slip angle back inside its limit
 const RATE_IN = 75 * D2R, RATE_OUT = 55 * D2R;      // rad/s: how fast a drift's angle winds on, and off
 const HOLD_ON = 1.6, HOLD_OFF = 7;      // m/s2 a drift may cost you: on the power, and off it
+const TURN_G = 2.7, TURN_G_FAST = 2.0;  // cornering the wheel can ask for, in g: slow, and flat out
+const SCRUB_ON = 0.4, SCRUB_OFF = 3.5;   // m/s2 a corner may cost you: on the power, and off it
 const V_MIN = 9, V_DRIFT = 15;          // m/s: below these nothing is governed / no drift starts
 const G = 9.81;
 
@@ -53,10 +55,12 @@ export function xingusSpec(spec, tune = 'gt') {
   if (!TUNED.has(k)) TUNED.set(k, { ...spec, ...T.f(spec), mu: spec.mu * T.mu, loadSens: (spec.loadSens || 0) * 0.5, xingus: tune });
   return TUNED.get(k);
 }
-export function xingusCar(car, tune = 'gt') {
+// `stakes`: the handling still looks after you, the consequences do not. Damage
+// is real and a car on its roof stays there (the RALLY style).
+export function xingusCar(car, tune = 'gt', stakes = false) {
   car.spec = xingusSpec(car.spec, tune);
   car.aids = { ...(car.aids || {}), tc: 0.9, abs: 0.9, sc: 0 };   // stability is this file's job now
-  car.xg = { dir: 0, flick: 0, calm: 0, lock: 0.25, beta: 0, state: 'grip', vHold: 0, loose: (TUNES[tune] || TUNES.gt).loose };
+  car.xg = { dir: 0, flick: 0, calm: 0, lock: 0.25, beta: 0, state: 'grip', vHold: 0, loose: (TUNES[tune] || TUNES.gt).loose, stakes: !!stakes };
   return car;
 }
 
@@ -64,9 +68,9 @@ export function xingusCar(car, tune = 'gt') {
 export function xingusStep(car, inp, dt) {
   const x = car.xg;
   if (!x) return;
-  // It forgives.
-  car.damage = 0;
-  if (car.onRoof && car.speed < 12) { car.onRoof = false; car.airborne = false; car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0; }
+  // It forgives — unless there are stakes.
+  if (!x.stakes) car.damage = 0;
+  if (!x.stakes && car.onRoof && car.speed < 12) { car.onRoof = false; car.airborne = false; car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0; }
   if (car.airborne) return;                               // in the air it is the air's
   const vx = car.vx, v = Math.hypot(car.vx, car.vy);
   // How much lock is on, -1..1, + = left. The wheel's own fraction if the game
@@ -93,6 +97,22 @@ export function xingusStep(car, inp, dt) {
   // Turning LEFT the car's nose leads its path, so the path points to the
   // nose's RIGHT: vy < 0. beta = atan2(vy, vx), so a left drift is negative.
   let beta = Math.atan2(car.vy, vx), speed = v;
+  // ---- the gear you are in (manual shifting) -----------------------------------
+  // physics.js has an engine and no gearbox, so the gear's two limits are put
+  // on here. AT THE LIMITER the car will not go faster than the gear's top
+  // speed — hold it there and it sits on the stop, which is redlining — and
+  // above it (a downshift at speed) the engine drags it back. LUGGING: well
+  // below the gear's working range the engine gives a fraction of its shove,
+  // so leaving it in sixth out of a hairpin costs you.
+  if (inp.gearTop) {
+    const top = inp.gearTop, low = inp.gearLow || 0;
+    if (v > top) speed = Math.max(top, v - 9 * dt);
+    else if (x.vPrev != null && v > x.vPrev && thr > 0.05) {
+      const frac = v / top, lug = Math.max(0.3, Math.min(1, 0.3 + 1.6 * (frac - 0.25)));
+      speed = x.vPrev + (v - x.vPrev) * (low && frac < 0.62 ? lug : 1);
+    }
+    x.vHold = x.vHold ? Math.min(x.vHold, top) : 0;
+  }
   if (x.state === 'drift' || x.state === 'out') {
     // The angle is COMMANDED, not coaxed: the tyres pull a sliding car straight
     // again every step, and a target merely leaned towards settled eight
@@ -103,8 +123,11 @@ export function xingusStep(car, inp, dt) {
     beta = x.beta + Math.max(-rate, Math.min(rate, target - x.beta));
     if (x.state === 'drift') {
       // The line: the wheel sets how hard the car is turning, not the tyres.
-      // Half a g of lateral with a little lock on, a g and a half at full lock.
-      const rWant = x.dir * (0.55 + 0.95 * into) * G / v;
+      // A wide arc with a little lock on, as tight as the car goes at full lock.
+      // (It was 0.55-1.5 g: flooring it with the wheel hard over put the car in
+      // a drift that turned LESS than not drifting. A drift at full lock now
+      // turns as hard as grip does.)
+      const rWant = x.dir * Math.min(1.9, (1.25 + (TURN_G - 1.25) * into) * G / v);
       // Commanded as well, and for the same reason as the angle: left to the
       // tyres the car held a left-hand drift's attitude while turning RIGHT.
       x.r = (x.r ?? car.r) + Math.max(-3 * dt, Math.min(3 * dt, rWant - (x.r ?? car.r)));
@@ -114,24 +137,36 @@ export function xingusStep(car, inp, dt) {
       // HOLD_OFF off it, and never more; the brake pedal is still the brake.
       if ((inp.brake || 0) < 0.1) {
         x.vHold = Math.max(v, (x.vHold || v) - (HOLD_ON + (HOLD_OFF - HOLD_ON) * (1 - thr)) * dt);
-        speed = x.vHold;
+        speed = inp.gearTop ? Math.min(x.vHold, inp.gearTop) : x.vHold;
       } else x.vHold = v;
     }
   } else {
     const target = Math.max(-GRIP_BETA, Math.min(GRIP_BETA, beta));
     beta += (target - beta) * Math.min(1, dt / T_GRIP);
+    if (x.state === 'grip') {
+      // THE WHEEL TURNS THE CAR (Adam, 2026-10-06, first drive: "i cant turn 40
+      // degrees at 54 mph in this fucked up rally car"). Measured: he was right.
+      // Left to the tyres, full lock at 87 km/h took over a second to turn the
+      // car forty degrees and scrubbed it down to 17 km/h doing it, and a
+      // quarter of a turn of the wheel took nearly two. So in grip the yaw
+      // rate is the wheel's: TURN_G of cornering at town speeds, easing to
+      // TURN_G_FAST flat out, reached with 65% of the wheel's travel, and the
+      // tyres' scrub may not cost more than SCRUB_ON on the power.
+      const sEff = Math.sign(steer) * Math.min(1, Math.pow(Math.abs(steer), 0.75) * 1.6);   // eager off centre
+      const aMax = (TURN_G - (TURN_G - TURN_G_FAST) * Math.max(0, Math.min(1, (v - 30) / 45))) * G;
+      const rCmd = sEff * Math.min(aMax / v, 1.9);
+      car.r += (rCmd - car.r) * Math.min(1, dt / 0.07);
+      if (x.vPrev != null && (inp.brake || 0) < 0.1 && x.vPrev - speed < 1 && speed < x.vPrev)
+        speed = Math.max(speed, x.vPrev - (SCRUB_ON + (SCRUB_OFF - SCRUB_ON) * (1 - thr)) * dt);
+    }
   }
   if (x.state !== 'drift') { x.vHold = 0; x.r = null; }
   beta = Math.max(-SPIN_BETA, Math.min(SPIN_BETA, beta));
   car.vx = speed * Math.cos(beta); car.vy = speed * Math.sin(beta);
-  x.beta = beta;
+  x.beta = beta; x.vPrev = speed;
   // Out of a drift, the yaw rate that was holding the angle is let go, or the
   // car goes on rotating after you have straightened the wheel.
-  if (x.state !== 'drift') {
-    const rMax = 1.9 * G / v;
-    if (Math.abs(car.r) > rMax) car.r = Math.sign(car.r) * rMax;
-    if (x.state === 'out') car.r *= 1 - Math.min(1, dt / 0.25) * (Math.abs(steer) < 0.2 ? 1 : 0.3);
-  }
+  if (x.state === 'out') car.r *= 1 - Math.min(1, dt / 0.25) * (Math.abs(steer) < 0.2 ? 1 : 0.3);
 }
 
 // Off the road is still somewhere you can drive: the grip never falls below

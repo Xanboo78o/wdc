@@ -167,6 +167,7 @@ export class Race {
     this.xcar = xopt.car ?? (XQ.get('xcar') === 'rally' ? 'rally' : 'gt');
     this.xsolo = this.xingus && (xopt.solo ?? XQ.get('xsolo') === '1');
     this.derby = this.xingus && (xopt.derby ?? XQ.get('xderby') === '1');
+    this.xstakes = this.xingus && (xopt.stakes ?? XQ.get('xstakes') === '1');
     {
       const c = track.corners || [];
       let k = 0;
@@ -215,7 +216,7 @@ export class Race {
       const car = makeCar({ cls: spec.key });
       const p = track.point(slot.s, slot.lat);
       car.x = p.x; car.y = p.y; car.hdg = slot.hdg; car.vx = 0.001;
-      if (this.xingus && isPlayer && !standIn) xingusCar(car, this.xcar);
+      if (this.xingus && isPlayer && !standIn) xingusCar(car, this.xcar, this.xstakes);
       // WHO this is, WHAT they drive, and HOW they drive it — one table.
       const prof = driverAt(who);
       const team = teamOf(prof);
@@ -1257,7 +1258,7 @@ export class Race {
         for (const j of t.jumps) {
           const d = t.gap(pr.s, j.s);
           if (d >= 0 && d < Math.max(1.5, car.speed * dt * 1.5) && e.jumped !== j) {
-            e.jumped = j;
+            e.jumped = j; e.jumpDmg = car.damage || 0;
             car.airborne = true; car.airTime = 0; car.z = 0.05;
             car.vz = Math.min(JUMP_VZ, car.speed * j.kick);
             car.pRate = -0.12 * j.kick * 10;             // a touch nose-down, as off a real lip
@@ -1265,6 +1266,14 @@ export class Race {
           }
         }
         if (e.jumped && Math.abs(t.gap(pr.s, e.jumped.s)) > 40) e.jumped = null;
+      }
+      // A jump that was built to be jumped does not break the car that takes it:
+      // what the landing cost is given back (a bot lost 0.11 a lap to the
+      // Himmelssprung, and its race by the ninth). Hitting something after is yours.
+      if (e.jumpDmg != null && !car.airborne) {
+        if (car.damage > e.jumpDmg) car.damage = e.jumpDmg;
+        if (car.crush) for (const k in car.crush) if (typeof car.crush[k] === 'number' && e.jumpCrush) car.crush[k] = Math.min(car.crush[k], e.jumpCrush[k] ?? car.crush[k]);
+        e.jumpDmg = null;
       }
       step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv),
                       dirty: car.dirty, tow: car.tow, rollMul: xg ? xingusDrag(drag) : drag,

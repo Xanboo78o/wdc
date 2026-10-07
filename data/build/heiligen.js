@@ -135,7 +135,9 @@ export const SEGMENTS = {
     corners: { 0.4: 'Joker' } },
 };
 
-// The twelve routes. A route is the segments of one lap, in order, from START.
+// The routes: every lap the network allows (fourteen). A route is the segments
+// of one lap, in order, from START. The menu's picker (home.html) turns a
+// choice at each junction into one of these keys.
 const VALLEY_IN = ['hauptstrasse1', 'hauptstrasse2'];
 const HOME = ['steilwand1', 'steilwand2'], HOME_J = ['steilwand1', 'joker'];
 const lay = (key, name, tag, segs) => [
@@ -147,6 +149,7 @@ export const ROUTES = [
   ...lay('schnee', 'Schnee', 'THE PASS, NO TOWN', ['stadtring', 'ostkurve', 'waldaufstieg', 'passstrasse', 'abstieg']),
   ...lay('wald', 'Wald', 'TOWN AND FOREST', ['altstadt', 'ostkurve', 'waldaufstieg', 'waldweg', 'abstieg']),
   ...lay('forst', 'Forst', 'THE FOREST STAGE', ['stadtring', 'ostkurve', 'waldaufstieg', 'waldweg', 'abstieg']),
+  ...lay('stadt', 'Stadt', 'TOWN AND VALLEY', ['altstadt', 'ostkurve', 'talstrasse1', 'talstrasse2']),
   ...lay('sprint', 'Sprint', 'THE VALLEY, ALL TARMAC', ['stadtring', 'ostkurve', 'talstrasse1', 'talstrasse2']),
   // Rallycross: half the Hauptstrasse, the gravel infield, the end of the
   // Talstrasse and the Steilwand — or the joker.

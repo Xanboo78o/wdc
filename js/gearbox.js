@@ -93,11 +93,33 @@ export function makeBox(spec) {
     shifted: 0,          // +1 up, -1 down, 0 none — one frame only, for a cue
     // `dt` and speed in km/h. Call it once a frame; it is not a physics step
     // and nothing downstream integrates it.
+    // MANUAL (Xingus mode; Adam, 2026-10-06: "i want real gear shifting so be
+    // able to emulate redlining"). Set `manual` to a gear and the box stops
+    // choosing: it stays in that gear, the revs are whatever the road speed
+    // makes them, and `limiter` is true while it is on the stop. shift() is the
+    // paddle: it refuses a downshift that would over-rev.
+    manual: null,
+    limiter: false,
+    shift(dir, speedKmh) {
+      const last = this.box.tops.length - 1, g = Math.max(0, Math.min(last, (this.manual ?? this.gear) + dir));
+      if (dir < 0 && this.box.limit * (speedKmh / this.box.tops[g]) > this.box.limit * 1.06) return false;
+      if (g !== this.manual) { this.manual = g; this.gear = g; this.shiftT = 0.07; this.shifted = dir; }
+      return true;
+    },
     update(dt, speedKmh, throttle = 1) {
-      this.shifted = 0;
+      this.shifted = this.manual != null && this.shiftT > 0.06 ? this.shifted : 0;
       if (this.shiftT > 0) this.shiftT = Math.max(0, this.shiftT - dt);
       const last = this.box.tops.length - 1;
+      if (this.manual != null) this.gear = Math.max(0, Math.min(last, this.manual));
       const raw = this.box.limit * (speedKmh / this.box.tops[this.gear]);
+      this.limiter = this.manual != null && raw >= this.box.limit * 0.995 && throttle > 0.2;
+      if (this.manual != null) {
+        // On the limiter the needle bounces: the cut is what you hear.
+        const bounce = this.limiter ? 1 - 0.035 * (0.5 + 0.5 * Math.sin(performance.now() * 0.075)) : 1;
+        const want = Math.max(this.box.idle, Math.min(this.box.limit, raw)) * bounce * (this.shiftT > 0 ? 0.85 : 1);
+        this.rpm += (want - this.rpm) * Math.min(1, dt * 30);
+        return this;
+      }
       if (this.shiftT === 0) {
         if (raw > this.box.shiftUp && this.gear < last) {
           this.gear++; this.shiftT = 0.05; this.shifted = 1;

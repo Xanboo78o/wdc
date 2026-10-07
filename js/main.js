@@ -45,6 +45,9 @@ const $ = id => document.getElementById(id);
 // when it ends. Always loaded with ffb=0 and sound=0, so it never moves the
 // wheel and never makes a noise. ?from=home sends "back to the menu" there.
 const ATTRACT = new URLSearchParams(location.search).has('attract');
+// XINGUS MODE (js/xingus.js): no engineer in your ear, and the paddles are a real gearbox.
+const XINGUS = new URLSearchParams(location.search).get('xingus') === '1';
+const XMANUAL = XINGUS && new URLSearchParams(location.search).get('xgear') !== 'auto';
 const FROM_HOME = new URLSearchParams(location.search).get('from') === 'home';
 // ms of simulation a frame may spend before it drops the backlog (see loop)
 const SIM_BUDGET = (v => v == null ? 12 : +v || 0)(new URLSearchParams(location.search).get('simbudget'));
@@ -998,10 +1001,19 @@ function loop(now) {
   //
   // Reverse only from near a standstill, because selecting it at racing speed
   // is not a gearshift, it is a typo with consequences. Forward always.
+  // XINGUS, MANUAL: the paddles (or E / Q) ARE the gearbox. Up and down a gear;
+  // a downshift that would bury the needle is refused; down from first at a
+  // standstill is reverse, and up out of it is first again.
+  if (XMANUAL && state.box) {
+    const b = state.box, up = hands.tapped('w:shiftUp') || hands.tapped('KeyE'), dn = hands.tapped('w:shiftDn') || hands.tapped('KeyQ');
+    if (b.manual == null) b.manual = 0;
+    if (up) { if (hands.selector < 0) { hands.selector = 1; b.manual = 0; } else b.shift(1, car.speed * 3.6); }
+    if (dn) { if (b.manual === 0 && car.speed < 3 && hands.selector > 0) { hands.selector = -1; toast('REVERSE'); } else if (hands.selector > 0 && !b.shift(-1, car.speed * 3.6)) toast('TOO FAST FOR THAT GEAR'); }
+  } else
   if (hands.tapped('w:shiftUp') && hands.selector < 0) {
     hands.selector = 1; toast('DRIVE');
   }
-  if (hands.tapped('w:shiftDn') && hands.selector > 0) {
+  if (!XMANUAL && hands.tapped('w:shiftDn') && hands.selector > 0) {
     if (car.speed < 5) { hands.selector = -1; toast('REVERSE'); }
     else toast('TOO FAST FOR REVERSE');
   }
@@ -1062,6 +1074,9 @@ function loop(now) {
         delta: inp.wheel * steerLock(car.speed),
         // Xingus mode (js/xingus.js) reads these two; the serious game ignores them.
         wheel: inp.wheel, hand: hands.down.has('KeyX') || hands.wheelHeld('handbrake'),
+        // the gear you are in, as the road speed it runs out of revs at
+        gearTop: XMANUAL && state.box && state.box.manual != null ? state.box.box.tops[state.box.manual] / 3.6 : null,
+        gearLow: XMANUAL && state.box && state.box.manual > 0 ? state.box.box.tops[state.box.manual - 1] / 3.6 : 0,
       });
       if (car.brake > 0.05) car.drsOpen = false;
       // Contact the player was part of, reported by the race layer rather than
@@ -1171,9 +1186,9 @@ function loop(now) {
   // watches the race every frame and calls what the strategy calls.
   ptt(hands.wheelHeld('radio'));
   if (state.race) {
-    if (engineer.race !== state.race) engineer.begin(state.race);
+    if (engineer.race !== state.race && !XINGUS) engineer.begin(state.race);
     if (state.director) state.director(frame);
-    if (!ATTRACT) engineer.tick(frame);
+    if (!ATTRACT && !XINGUS) engineer.tick(frame);
     // Celebrate the pass (js/race.js cheerTick): the crowd goes up and the
     // tower flashes you. The radio call is the engineer's, from the same event.
     const cz = state.race.cheers, c = cz && cz[cz.length - 1];
