@@ -1639,7 +1639,7 @@ function raceHud(dt) {
   pit.style.display = (me.pitRequest || me.inPit) ? '' : 'none';
   pit.classList.toggle('on', !!me.inPit);
   pit.textContent = me.inPit ? `PIT ${me.pitTimer > 0 ? me.pitTimer.toFixed(1) : ''}` : 'BOX';
-  $('lapNo').textContent = `${Math.min(race.laps, me.lap + 1)}/${race.laps}`;
+  $('lapNo').textContent = `${race.state === 'formation' ? 'F' : Math.min(race.laps, me.lap + 1)}/${race.laps}`;   // F: the formation lap (an oval's rolling start)
   if (me.penalty > 0) $('posV').textContent += ` +${me.penalty}s`;
 
   // ---- race control ------------------------------------------------------

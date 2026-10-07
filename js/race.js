@@ -325,8 +325,16 @@ export class Race {
         const s = this.lane.boxS(e.box), i = track.idx(s);
         const p = track.point(s, this.lane.off + sg * (BOX_SIDE + Math.floor(k / per) * 4.6));
         e.car.x = p.x; e.car.y = p.y; e.car.hdg = track.hdg[i]; e.car.vx = 0.001; e.hint = i;
-        e.inPit = true; e.pitPhase = 'service'; e.pitJobs = []; e.pitTimer = 4 + Math.floor(k / 5) * 5; e.formK = k;
+        e.inPit = true; e.pitPhase = 'service'; e.pitJobs = []; e.formK = k;
+        e.formAlong = ((s - this.lane.entryS) % track.length + track.length) % track.length;   // how far down the lane its box is
       });
+      // Five every ten seconds, the five nearest the pit EXIT first, and within
+      // a five two seconds apart. Let go in grid order, a car had to pull out
+      // round one still parked seven metres in front of it; let go in the same
+      // instant, five cars took the one driving line together. Both ended with
+      // the lane wedged solid at 8 km/h.
+      this.entries.slice().sort((a, b) => b.formAlong - a.formAlong)
+        .forEach((e, r) => { e.pitTimer = 4 + Math.floor(r / 5) * 10 + (r % 5) * 2; });
     }
     if (this.battle) {
       const B = this.battle, rng = mulberry(seed * 977 + 5);
@@ -1258,7 +1266,7 @@ export class Race {
     if (this.state === 'formation') {
       // (the "pole car" is whoever is first out of the lane: this.formLead)
       const near = e.ahead && !e.ahead.inPit && e.aheadGapT < 1.6;
-      speedCap = Math.min(speedCap ?? Infinity, e === this.formLead ? 28 : near ? Math.max(15, e.ahead.car.speed * (e.aheadGapT < 0.9 ? 0.92 : 1)) : 45);
+      speedCap = Math.min(speedCap ?? Infinity, e === this.formLead ? (this.formOutAt != null ? 36 : 28) : near ? Math.max(15, e.ahead.car.speed * (e.aheadGapT < 0.9 ? 0.92 : 1)) : 45);
     }
     const crest = this.crests();
     if (crest && crest[i] < 200) speedCap = Math.min(speedCap ?? Infinity, crest[i]);
@@ -1281,12 +1289,27 @@ export class Race {
       }
     }
     if (this.state === 'formation') {
-      // Green when everybody is out of the lane and the pole car is on its way back to the line.
-      if (!this._formSaid) { this._formSaid = true; this.log('flag', 'FORMATION LAP — OUT OF THE PITS IN FIVES, THEN A ROLLING START', null, 'form'); }
+      // Adam, same evening: "every 10 secs 5 cars are relaeased, then once all
+      // cars are out there is 1 more formation where cars are asked to get into
+      // a civil line (no passing on formation duh) then once the first car
+      // [crosses the line] the F/3 switches to 1/3 then racing begins".
+      // So: when the last car is out, ONE MORE LAP in line — a whole one, from
+      // wherever the lead car is — and it is green as the lead car crosses the
+      // line at the end of it. Not before the line: at it.
+      if (!this._formSaid) { this._formSaid = true; this.log('flag', 'FORMATION — FIVE CARS OUT EVERY 10 SECONDS. NO PASSING.', null, 'form'); }
       if (!this.formLead) this.formLead = this.entries.find(e => !e.inPit && e.pitPhase === 'none') || null;
       const lead = this.formLead, L = t.length;
       const out = this.entries.every(e => e.retired || (!e.inPit && e.pitPhase === 'none'));
-      if (out && lead && lead.proj.s > L - 320 && lead.proj.s < L - 20) {
+      if (out && lead && this.formOutAt == null) {
+        this.formOutAt = 0;
+        this.log('flag', 'ALL OUT — ONE MORE LAP, IN LINE, NO PASSING. GREEN AT THE LINE.', null, 'form');
+      }
+      const ls = lead ? lead.proj.s : 0, crossedLine = lead && lead._fs != null && lead._fs > L * 0.75 && ls < L * 0.25;
+      if (lead && this.formOutAt != null && lead._fs != null) this.formOutAt += t.wrap ? Math.max(0, Math.min(40, ((ls - lead._fs) % L + L) % L)) : 0;
+      if (lead) lead._fs = ls;
+      // ("one more lap" is the one that ends at the lead car's next crossing, if at least 40% of a lap
+      // was left to form up in when the last car came out; otherwise the one after)
+      if (this.formOutAt != null && this.formOutAt >= L * 0.4 && crossedLine) {
         this.state = 'green'; this.greenT = this.time;
         this.log('flag', 'GREEN FLAG — ROLLING START. ONE PIT STOP OWED (P).', null, 'form');
         this.log('flag', 'ONE PIT STOP EACH (P) — ANY LAP YOU LIKE, BUT NO FINISH WITHOUT IT', null, 'tyres');
@@ -1295,6 +1318,7 @@ export class Race {
           e.pitStops = 0; e.stockStops = 0; e.stintM = 0; e.stockSaid = 0; e.pitRequest = false;
           if (e.car.tyre) { e.car.tyre.wf = 0; e.car.tyre.wr = 0; }
         }
+        lead.crossed0 = true;                            // it is over the line already: lap one is its
       }
     }
     const forming = this.state === 'formation';
