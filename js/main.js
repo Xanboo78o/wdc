@@ -27,6 +27,7 @@ import { Field } from './field.js';
 import { RaceVehicles } from './scview.js';
 import { Replay } from './replay.js';
 import { makeBox } from './gearbox.js';
+import { xingusSteer } from './xingus.js';
 import { Engine } from './audio.js';
 import { QUALI_LAPS, RUN_UP, gridOrder } from './quali.js';
 import { TIME_PHASES, timeFor, WEATHER_KINDS } from './weather.js';
@@ -1470,6 +1471,8 @@ const MENU_ITEMS = () => [
   ['CAMERA — ' + CAMS[state.view.mode], () => { state.view.setMode(state.view.mode + 1); drawMenu(); }],
   ['IDEAL LINE', () => { state.view.toggleLine(); drawMenu(); }],
   ['SOUND', () => { if (state.engine) state.engine.toggleMute(); drawMenu(); }],
+  // Xingus only: how quick the wheel is, 1 (calm) to 5 (twitchy). js/xingus.js.
+  ...(XINGUS ? [['XINGUS STEERING — ' + xingusSteer() + ' OF 5', () => { xingusSteer(xingusSteer() % 5 + 1); drawMenu(); }]] : []),
   // Steps down from the bridge's ceiling (80% as it is running) to nothing, then back to the top.
   ['FORCE FEEDBACK — ' + Math.round(ffb.gain * FFB_CEILING) + '%', () => {
     const steps = FFB_CEILING / 10, k = Math.round(ffb.gain * steps);

@@ -40,7 +40,19 @@ const TURN_G = 4.2, TURN_G_FAST = 3.6;  // cornering the wheel can ask for, in g
 // without heavy brakes". Flat out the wheel could ask for 2.6 g; the Ostkurve at
 // 250 km/h needs 3.8 and the Steilwand more. A bowl is there to be taken flat.)
 const BANK_G = 1.6, BANK_MAX = 5;
-const STEER_GAIN = 2.7;                 // full turning at (1/2.7)^(1/0.7) = 24% of the wheel's travel
+// HOW QUICK THE WHEEL IS, 1 to 5 (the pause menu, XINGUS STEERING). Three passes
+// in one evening went "not enough", "wayyyy more", "woah too reactive needs
+// less" — so it is his to set, and 3 is between the last two. A level is how
+// much of the wheel's travel it takes to ask for everything the car has:
+//   1: 85%   2: 62%   3: 45%   4: 33%   5: 24%
+// What the car HAS (TURN_G, the banking) is not touched by it.
+const STEER_AT = [0, 0.85, 0.62, 0.45, 0.33, 0.24];
+let steerLevel = 3;
+try { const l = +localStorage.getItem('wdc.xsteer'); if (l >= 1 && l <= 5) steerLevel = l; } catch { /* not a page */ }
+export function xingusSteer(level) {
+  if (level != null) { steerLevel = Math.max(1, Math.min(5, Math.round(level))); try { localStorage.setItem('wdc.xsteer', String(steerLevel)); } catch { /* private window */ } }
+  return steerLevel;
+}
 const SCRUB_ON = 0.4, SCRUB_OFF = 3.5;   // m/s2 a corner may cost you: on the power, and off it
 const V_MIN = 9, V_DRIFT = 15;          // m/s: below these nothing is governed / no drift starts
 const G = 9.81;
@@ -169,10 +181,10 @@ export function xingusStep(car, inp, dt) {
       // needs more reactiveeeeee like wayyyy moreee". The whole of the car's
       // turning is now reached with a QUARTER of the wheel's travel, there is
       // more of it, and it answers in a twentieth of a second.)
-      const sEff = Math.sign(steer) * Math.min(1, Math.pow(Math.abs(steer), 0.7) * STEER_GAIN);
+      const sEff = Math.sign(steer) * Math.min(1, Math.pow(Math.abs(steer) / STEER_AT[steerLevel], 0.85));
       const aMax = (TURN_G - (TURN_G - TURN_G_FAST) * Math.max(0, Math.min(1, (v - 30) / 45)) + Math.min(BANK_MAX, Math.abs(x.bank || 0) / 10 * BANK_G)) * G;
       const rCmd = sEff * Math.min(aMax / v, 2.8);
-      car.r += (rCmd - car.r) * Math.min(1, dt / 0.045);
+      car.r += (rCmd - car.r) * Math.min(1, dt / (0.10 - 0.012 * steerLevel));
       if (x.vPrev != null && (inp.brake || 0) < 0.1 && x.vPrev - speed < 1 && speed < x.vPrev)
         speed = Math.max(speed, x.vPrev - (SCRUB_ON + (SCRUB_OFF - SCRUB_ON) * (1 - thr)) * dt);
     }
