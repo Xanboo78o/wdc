@@ -84,6 +84,9 @@ const engineer = new Engineer({ say });
 let pickTrack = 'monza', pickCar = 'f4';
 // Race settings. `pickGrid` counts EVERY car including yours, so 22 is the real
 // thing and 6 is a sprint you can actually see all of.
+// Any number may be typed on the home page (Adam, 2026-10-06: "a 50 bot 1 lap race would be
+// fun, while others think a 30 bot 500 lap nascar race would be cool"). The menu still offers 22.
+const MAX_GRID = 61, MAX_LAPS = 999;
 let pickMode = 'hotlap', pickGrid = 22, pickTier = 'medium', pickLaps = 3, pickStart = 'mid';
 let pickNoDnf = false;
 let pickQuali = false;
@@ -112,9 +115,9 @@ function loadMenu() {
   if (TRACKS.some(t => t[0] === m.track)) pickTrack = m.track;
   if (CARS[m.car]) pickCar = m.car;
   if (m.mode === 'race' || m.mode === 'hotlap') pickMode = m.mode;
-  if ([6, 12, 16, 22].includes(m.grid)) pickGrid = m.grid;
+  if (Number.isInteger(m.grid) && m.grid >= 2 && m.grid <= MAX_GRID) pickGrid = m.grid;
   if (TIERS[m.tier]) pickTier = m.tier;
-  if ([2, 3, 5, 10].includes(m.laps)) pickLaps = m.laps;
+  if (Number.isInteger(m.laps) && m.laps >= 1 && m.laps <= MAX_LAPS) pickLaps = m.laps;
   if (['pole', 'front', 'mid', 'back'].includes(m.start)) pickStart = m.start;
   pickNoDnf = m.noDnf === true;
   pickQuali = m.quali === true;
@@ -526,11 +529,11 @@ async function start() {
   const qualiOn = pickMode === 'race' && (q.has('quali') ? q.get('quali') === '1' : pickQuali);
   if (qualiOn) {
     // Qualifying first: the race is built from its result (startQualiRace).
-    const grid = Math.max(2, Math.min(22, +q.get('grid') || pickGrid));
+    const grid = Math.max(2, Math.min(MAX_GRID, +q.get('grid') || pickGrid));
     const tier = TIERS[q.get('tier')] ? q.get('tier') : pickTier;
     state.qcfg = {
       grid, tier,
-      laps: Math.max(1, Math.min(60, +q.get('laps') || pickLaps)),
+      laps: Math.max(1, Math.min(MAX_LAPS, +q.get('laps') || pickLaps)),
       battle: tier !== 'supercasual' ? null
         : q.has('battle') ? (BATTLE[q.get('battle')] ? q.get('battle') : null) : pickBattle,
       noDnf: q.has('nodnf') ? q.get('nodnf') === '1' : pickNoDnf,
@@ -543,8 +546,8 @@ async function start() {
     // Everything here can also come off the URL, so a headless check can boot
     // a full grid without a human clicking four card lists:
     //   ?auto=monza:f1&race=1&grid=22&tier=hard&laps=2&start=10&seed=7
-    const grid = Math.max(2, Math.min(22, +q.get('grid') || pickGrid));
-    const laps = Math.max(1, Math.min(60, +q.get('laps') || pickLaps));
+    const grid = Math.max(2, Math.min(MAX_GRID, +q.get('grid') || pickGrid));
+    const laps = Math.max(1, Math.min(MAX_LAPS, +q.get('laps') || pickLaps));
     const tier = TIERS[q.get('tier')] ? q.get('tier') : pickTier;
     // ?battle=easy|medium|hard (or 0 for the old, passive supercasual field)
     const battle = tier !== 'supercasual' ? null
@@ -1802,9 +1805,9 @@ mountDashCard(document.querySelector('#menu .keys'));
 const Q = new URLSearchParams(location.search);
 loadMenu();   // before the URL, so ?race= and friends still win
 if (Q.has('race')) pickMode = Q.get('race') === '0' ? 'hotlap' : 'race';
-if (Q.has('grid')) pickGrid = Math.max(2, Math.min(22, +Q.get('grid') || 22));
+if (Q.has('grid')) pickGrid = Math.max(2, Math.min(MAX_GRID, +Q.get('grid') || 22));
 if (TIERS[Q.get('tier')]) pickTier = Q.get('tier');
-if (Q.has('laps')) pickLaps = Math.max(1, Math.min(60, +Q.get('laps') || 3));
+if (Q.has('laps')) pickLaps = Math.max(1, Math.min(MAX_LAPS, +Q.get('laps') || 3));
 
 buildMenu();
 if (!themeKey() && !Q.has('auto')) openTeamPick('f1');

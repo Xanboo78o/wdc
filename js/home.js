@@ -98,7 +98,7 @@ const XSTYLES = {
   gt3lonely:  ['GT3 LONELY', 'ALONE · GT CAR', 'gt', 0, 0],
   derby:      ['DEMO DERBY', 'NOBODY IS CAREFUL', 'gt', 21, 1],
 };
-const X = { on: false, style: 'gt3', gears: 'manual', track: null, heil: 'heilgrand' };
+const X = { on: false, style: 'gt3', gears: 'manual', track: null, heil: 'heilgrand', bots: 'style', field: '4fun' };
 // The Heiligen Auto Circuit is Xingus's own: one entry on the circuit row, and
 // its route is chosen on a map (the `heiligen` page).
 const HEIL = ['heiligen', 'Heiligen Auto Circuit', 'VALCORSA · 14 ROUTES'];
@@ -123,12 +123,19 @@ fetch('./data/build/heiligen-map.json').then(r => (r.ok ? r.json() : null)).then
 const saveX = () => { try { localStorage.setItem('wdc.xingus', JSON.stringify(X)); } catch { /* private window */ } };
 if (new Date().getMonth() === 9 && !X.boo) { S.theme = 'halloween'; X.boo = 1; saveX(); }   // it is October: Halloween, until he says otherwise
 S.modeX = X.on ? 'xingus' : S.mode; S.xStyle = X.style; S.xGears = X.gears === 'auto' ? 'auto' : 'manual';
+S.xBots = Number.isInteger(X.bots) ? X.bots : 'style'; S.xField = X.field === 'skilled' ? 'skilled' : '4fun';
+// "TYPE…" on a row: any whole number in the row's range (js/main.js MAX_GRID / MAX_LAPS).
+const TYPE = ['#', 'TYPE…'], LAPS_LIM = [1, 999], BOTS_LIM = [1, 60];
 const xTrack = () => (X.track === 'heiligen' ? X.heil : X.track === OVAL[0] || TRACKS.some(t => t[0] === X.track) ? X.track : S.track);
 function xingusUrl() {
-  const [, , tune, rivals, derby, stakes] = XSTYLES[X.style], grid = Math.max(2, rivals + 1);
+  const [, , tune, own, derby, stakes] = XSTYLES[X.style];
+  // BOTS: the style's own number unless one was picked; a style that is ALONE stays alone.
+  const rivals = own && Number.isInteger(X.bots) ? X.bots : own, grid = Math.max(2, rivals + 1);
+  // On the oval, FIELD: SKILLED is the hard drivers, nose to tail and side by side; 4FUN is the casual ones, trying.
+  const tier = derby ? 'medium' : xTrack() === OVAL[0] && X.field === 'skilled' ? 'hard' : 'casual';
   return `./index.html?auto=${xTrack()}:gt3&from=home&xingus=1&xcar=${tune}${rivals ? '' : '&xsolo=1'}${derby ? '&xderby=1&battle=hard' : ''}` +
     `${stakes ? '&xstakes=1' : ''}${XSTYLES[X.style][6] ? '&xloose=1' : ''}${X.gears === 'auto' ? '&xgear=auto' : ''}` +
-    `&race=1&grid=${grid}&laps=${S.laps}&tier=${derby ? 'medium' : 'casual'}&nodnf=${stakes ? 0 : 1}&quali=0&start=${rivals ? grid : 1}`;
+    `&race=1&grid=${grid}&laps=${S.laps}&tier=${tier}&nodnf=${stakes ? 0 : 1}&quali=0&start=${rivals ? grid : 1}`;
 }
 
 // a team's two livery colours
@@ -321,7 +328,9 @@ const PAGES = {
     const xOn = S.modeX === 'xingus', LIST = xOn ? [HEIL, OVAL, ...TRACKS] : TRACKS;
     const curId = xOn ? (X.track === 'heiligen' ? 'heiligen' : xTrack()) : S.track;
     const n = LIST.length, i = Math.max(0, LIST.findIndex(t => t[0] === curId)), t = LIST[i];
-    const step = d => { const id = LIST[(i + d + n) % n][0]; if (xOn) X.track = id; if (id !== 'heiligen' && id !== OVAL[0]) S.track = id; saveX(); show('setup', 0); say(sayFor('CIRCUIT', id)); };
+    const step = d => { const id = LIST[(i + d + n) % n][0]; if (xOn) X.track = id; if (id !== 'heiligen' && id !== OVAL[0]) S.track = id;
+      if (id === OVAL[0] && !XSTYLES[X.style][3]) S.xStyle = X.style = 'gt3';   // an oval is a pack: not a style that is alone
+      saveX(); show('setup', 0); say(sayFor('CIRCUIT', id)); };
     const isHeil = t[0] === 'heiligen', heilRoute = isHeil && HMAP ? HMAP.routes.find(r => r.key === X.heil) : null;
     const st = STATIONS.find(x => x.id === t[0]);
     const songs = st ? st.songs.map(id => SONGS[id].name).join(' · ') : '';
@@ -341,15 +350,20 @@ const PAGES = {
     const onoff = [[false, 'OFF'], [true, 'ON']], up = a => a.map(k => [k, String(k).toUpperCase()]);
     // MODE's third value is Xingus; the two real ones are still what the game is told.
     X.on = S.modeX === 'xingus'; if (!X.on) S.mode = S.modeX === 'race' ? 'race' : 'hotlap';
-    X.style = XSTYLES[S.xStyle] ? S.xStyle : X.style; X.gears = S.xGears === 'auto' ? 'auto' : 'manual'; saveX();
+    X.style = XSTYLES[S.xStyle] ? S.xStyle : X.style; X.gears = S.xGears === 'auto' ? 'auto' : 'manual';
+    X.bots = S.xBots; X.field = S.xField; saveX();
     const rows = [['MODE', 'modeX', [['hotlap', 'HOT LAP'], ['race', 'RACE'], ['xingus', 'XINGUS']]]];
     if (X.on) {
       rows.push(['STYLE', 'xStyle', Object.entries(XSTYLES).map(([k, v]) => [k, v[0]])]);
       rows.push(['GEARS', 'xGears', [['manual', 'PADDLES (E / Q)'], ['auto', 'AUTOMATIC']]]);
-      if (XSTYLES[X.style][3]) rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]]);
+      if (XSTYLES[X.style][3]) {
+        rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10'], TYPE], LAPS_LIM],
+          ['BOTS', 'xBots', [['style', `${XSTYLES[X.style][3]}`], [29, '29'], [49, '49'], TYPE], BOTS_LIM]);
+        if (xTrack() === OVAL[0]) rows.push(['FIELD', 'xField', [['skilled', 'SKILLED'], ['4fun', '4FUN']]]);
+      }
     } else if (S.mode === 'race') {
-      rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]],
-        ['GRID', 'grid', [[6, '6'], [12, '12'], [16, '16'], [22, '22']]],
+      rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10'], TYPE], LAPS_LIM],
+        ['GRID', 'grid', [[6, '6'], [12, '12'], [16, '16'], [22, '22'], TYPE], [2, 61]],
         ['RIVALS', 'tier', Object.keys(TIERS).map(k => [k, TIERS[k].name])]);
       if (S.tier === 'supercasual') rows.push(['OVERTAKES', 'battle', Object.keys(BATTLE).map(k => [k, BATTLE[k].name])]);
       rows.push(['YOU START', 'start', [['pole', 'POLE'], ['front', 'FRONT ROW'], ['mid', 'MIDFIELD'], ['back', 'LAST']]],
@@ -455,12 +469,22 @@ const PAGES = {
 function optGrid(rows, name) {
   const grid = h('<div class="grid"></div>');
   page.append(grid);
-  for (const [label, key, opts] of rows) {
+  for (const [label, key, opts, lim] of rows) {
+    // A typed number: the TYPE… pill shows it, and is the one that is lit.
+    const typed = !!lim && !opts.some(o => o[0] === S[key]);
     const card = h(`<div class="chunk opt"><small>${label}</small><div class="pills">${opts.map(([v, n]) =>
-      `<span class="pill${S[key] === v ? ' sel' : ''}">${n}</span>`).join('')}</div></div>`);
+      `<span class="pill${S[key] === v || (v === '#' && typed) ? ' sel' : ''}">${v === '#' && typed ? S[key] + ' ✎' : n}</span>`).join('')}</div></div>`);
     grid.append(card);
-    const set = v => { S[key] = v; const keep = at; show(name, keep); say(sayFor(label, v)); };
-    const step = d => { const i = Math.max(0, opts.findIndex(o => o[0] === S[key])); set(opts[(i + d + opts.length) % opts.length][0]); };
+    const set = v => {
+      if (v === '#') {
+        const r = prompt(`${label}: any whole number from ${lim[0]} to ${lim[1]}`, typed ? S[key] : '');
+        const k = Math.round(+r);
+        if (r == null || r === '' || !(k >= lim[0] && k <= lim[1])) return;
+        v = k;
+      }
+      S[key] = v; const keep = at; show(name, keep); say(sayFor(label, v));
+    };
+    const step = d => { const i = Math.max(0, opts.findIndex(o => (typed ? o[0] === '#' : o[0] === S[key]))); set(opts[(i + d + opts.length) % opts.length][0]); };
     card.querySelectorAll('.pill').forEach((p, i) => { p.onclick = e => { e.stopPropagation(); focus(items.findIndex(it => it.el === card)); set(opts[i][0]); }; });
     item(card, { left: () => step(-1), right: () => step(1), ok: () => focus(at + 1) });
   }
