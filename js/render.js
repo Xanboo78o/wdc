@@ -1578,10 +1578,13 @@ export class View {
     // (`this.headLean`, used by the bolted cameras below). Airborne, the true
     // attitude is handed back in full, as before.
     this.headLean = (car.roll || 0) * this.leanK * grounded;
+    // the ground under its four wheels, in the car's frame (js/terrain.js), when the race has measured it
+    this.car.rotation.x = (car.roll || 0) * this.leanK * (1 - grounded)
+      + (car.gnd ? car.gnd.roll : bankRoll(this.bank, this.track, proj.i, proj.lat) * grounded);
     // NO BRAKING DIVE (Adam, 2026-10-03: "remove the full tilt when braking,
     // its goofy"). Same rule as the roll above: on the ground the body follows
     // the road's gradient only; airborne it takes its true attitude.
-    this.car.rotation.z = (car.pitch || 0) * this.leanK * (1 - grounded) + slopePitch(this.world, this.track, proj, car) * grounded;
+    this.car.rotation.z = (car.pitch || 0) * this.leanK * (1 - grounded) + (car.gnd ? car.gnd.pitch : slopePitch(this.world, this.track, proj, car) * grounded);
     // THE SUSPENSION (Adam, 2026-10-03: "the wheels arent actually connected
     // to the hinges ... the downforce pushes the body down, and the hinges
     // just go on down below the wheels"). It used to move the WHEELS, six

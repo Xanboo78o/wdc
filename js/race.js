@@ -17,6 +17,7 @@ import { makeLane, shouldPit, updateStop } from './pitstop.js';
 // Race control — safety car, VSC, red flag, restarts, flags (2026-09-30).
 import { Director } from './safetycar.js';
 import { xingusCar, xingusStep, xingusSurface, xingusDrag } from './xingus.js';
+import { Terrain, heightFromSlope } from './terrain.js';
 
 // Module-level scratch for the wake sample. neighbours() is single-threaded and
 // reads the result immediately, so one object serves the whole grid rather than
@@ -547,6 +548,34 @@ export class Race {
   // finished with it: it slides, tumbles and hits the barriers until it has
   // really come to rest. Other cars do not collide with it (they cannot see a
   // wreck yet, and a field ploughing into one is a pile-up by construction).
+  // THE GROUND (js/terrain.js): one surface, made when the road's gradient has
+  // arrived (js/main.js hands it over on the first frame; a harness never does,
+  // and gets the banking on a flat road).
+  ground() {
+    if (!this._gnd || this._gndSlope !== this.slopeAt) {
+      this._gndSlope = this.slopeAt;
+      this._gnd = new Terrain(this.track, this.slopeAt ? heightFromSlope(this.track, this.slopeAt) : null);
+    }
+    return this._gnd;
+  }
+  // How fast each metre of the lap can be taken without the road dropping away
+  // faster than a car can fall (a little faster than that: a small hop is a
+  // landing a car survives), and braked for from far enough back to make it.
+  crests() {
+    if (!this.slopeAt) return null;
+    if (this._crestFor !== this.slopeAt) {
+      this._crestFor = this.slopeAt;
+      const t = this.track, n = t.n, T = this.ground(), v = new Float32Array(n).fill(999), d = 6;
+      let any = false;
+      for (let i = 0; i < n; i++) {
+        const s = i * t.ds, k = -(T.h(s + d, 0) - 2 * T.h(s, 0) + T.h(s - d, 0)) / (d * d);   // 1/m, + = a crest
+        if (k > 9.81 * 1.15 / (95 * 95)) { v[i] = Math.sqrt(9.81 * 1.15 / k); any = true; }
+      }
+      if (any) for (let k = 2 * n; k >= 0; k--) { const i = k % n, j = (i + 1) % n, cap = Math.sqrt(v[j] * v[j] + 2 * 9 * t.ds); if (v[i] > cap) v[i] = cap; }
+      this._crest = any ? v : null;
+    }
+    return this._crest;
+  }
   wreckStep(e, dt) {
     const t = this.track, car = e.car;
     car.throttle = 0; car.brake = 0.5;
@@ -556,8 +585,9 @@ export class Race {
     if (al > pr.w + pr.run) surface = SURFACE.grass;
     else if (al > pr.w + 1.2) surface = SURFACE.runoff;
     else if (al > pr.w) surface = SURFACE.kerb;
-    step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv), dirty: 0, tow: 0, rollMul: dragFor(surface),
-                    slope: this.slopeAt ? this.slopeAt(pr.s) * Math.cos(car.hdg - t.hdg[pr.i]) : 0 });
+    const gnd = this.ground().under(car, pr);
+    if (car.airborne) { car.pitch -= gnd.dPitch; car.roll -= gnd.dRoll; }
+    step(car, dt, { surface, bank: gnd.bank, bankDir: gnd.dir, dirty: 0, tow: 0, rollMul: dragFor(surface), slope: gnd.gx });
     const hit = resolveBarrier(car, t, e.hint);
     if (hit && e.isPlayer && hit.closing > 3.5) e.bump = { what: 'barrier', closing: hit.closing, harm: hit.harm, part: hit.part };
     const still = car.speed < 0.6 && Math.abs(car.vz || 0) < 0.3 && Math.abs(car.pRate || 0) < 0.3 && Math.abs(car.rRate || 0) < 0.3;
@@ -1182,6 +1212,9 @@ export class Race {
     if (sb && sb.cap != null) speedCap = Math.min(speedCap ?? Infinity, sb.cap);
     // The cool-down lap is driven at two thirds of racing speed.
     if (e.finished) speedCap = Math.min(speedCap ?? Infinity, this.lines.race.v[i] * 0.66);
+    // A crest is a speed limit: faster than this over it and the road leaves the car.
+    const crest = this.crests();
+    if (crest && crest[i] < 200) speedCap = Math.min(speedCap ?? Infinity, crest[i]);
     e.ctx = this.rc.limit(e, { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: (e.hold ?? 1) * (e.roadHold ?? 1), obstDs, obstV });
   }
 
@@ -1341,18 +1374,27 @@ export class Race {
       // tick the car's height is corrected by how far the road rose or fell
       // beneath it. Too slow over the same crest and none of that is true, and
       // it rolls over the top. (js/ffb.js already lets the wheel go dead in the air.)
-      if (this.slopeAt && !e.inPit) {
+      // THE GROUND UNDER ITS FOUR WHEELS, in the car's own frame (js/terrain.js).
+      // It was the track's banking and the track's gradient, in the track's
+      // direction: drive the Steilwand backwards and the car leaned, and was
+      // pushed, up the wall.
+      const T = this.ground(), gnd = T.under(car, pr);
+      // In the air the car keeps the attitude it has while the ground turns
+      // under it (car.pitch / car.roll are measured from the ground), so it
+      // comes down on whatever is there at whatever angle it is at.
+      if (car.airborne) { car.pitch -= gnd.dPitch; car.roll -= gnd.dRoll; }
+      if (!e.inPit) {
         // Everything is in the ROAD'S frame: car.z is height above the road
         // and car.vz the rate of it. In that frame a road curving away under a
         // moving car is an upward acceleration of v^2 x curvature, and one
         // rising to meet it (a landing ramp, a compression) is the opposite —
         // so the same term takes the car off, keeps the ground honest under
         // it while it flies, and brings a downslope landing in gently.
-        const vAlong = car.speed * Math.cos(car.hdg - t.hdg[pr.i]);
-        const d = Math.max(3, Math.abs(vAlong) * 0.06);
-        const lift = -vAlong * vAlong * (this.slopeAt(pr.s + d) - this.slopeAt(pr.s - d)) / (2 * d);   // m/s2, + = the road is leaving
+        // ...and along the car's ACTUAL path, not the lap's: across the banking,
+        // off the top of it, backwards over a crest.
+        const lift = T.lift(car, pr);                    // m/s2, + = the ground is leaving
         if (!car.airborne) {
-          if (vAlong > 6 && al <= pr.w + 2) {
+          if (car.speed > 6 && al <= pr.w + pr.run) {
             const down = 0.5 * 1.225 * (car.spec.ClA || 0) * car.speed * car.speed / car.spec.m;
             if (lift > (9.81 + down) * 1.02) {
               car.airborne = true; car.airTime = 0; car.z = 0.03; car.vz = 0.05;
@@ -1360,21 +1402,19 @@ export class Race {
               if (e.isPlayer) this.log('flag', 'AIRBORNE', e, 'jump');
             }
           }
-          if (e.flying && !car.airborne) {
-            // A rival's landing is given back: they do not lift for a crest
-            // they cannot see, and one lost its race to the Himmelssprung in
-            // nine laps. Yours is yours.
-            if (!e.isPlayer && car.damage > e.flying.dmg) { car.damage = e.flying.dmg; if (car.crush) for (const k in car.crush) car.crush[k] = e.flying.crush ? e.flying.crush[k] ?? 0 : 0; }
-            e.flying.t = (e.flying.t || 0) + dt;
-            if (e.flying.t > 0.6) e.flying = null;
-          }
+          // (A rival's landing used to be GIVEN BACK here — damage and crush
+          // reset to what they were at take-off — because they did not lift for
+          // a crest and one lost its race to the Himmelssprung. Adam,
+          // 2026-10-06: "cars can still make that super fast jump ... WHICH
+          // SHOULDNT BE POSSIBLE BECAUSE CARS ARE ALSO PHYSICS OBJECTS RIGHT?"
+          // Right. Their landing is theirs now, and they slow for the crest
+          // like anyone who wants to finish: this.crestV, below.)
+          if (e.flying && !car.airborne) e.flying = null;
         } else car.vz += Math.max(-60, Math.min(60, lift)) * dt;
       }
-      step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv),
+      step(car, dt, { surface, bank: gnd.bank, bankDir: gnd.dir,
                       dirty: car.dirty, tow: car.tow, rollMul: xg ? xingusDrag(drag) : drag,
-                      // gravity on slopes: main.js hands the session the surveyed
-                      // gradient; the harnesses do not, so they stay flat
-                      slope: this.slopeAt ? this.slopeAt(pr.s) * Math.cos(car.hdg - t.hdg[pr.i]) : 0 });
+                      slope: gnd.gx });
       // The barrier test asks how far this car is from the centreline, and for
       // a car in the pit lane the answer is seventeen metres — so running it
       // would shove the car back onto the racing line mid-stop.

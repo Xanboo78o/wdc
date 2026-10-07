@@ -430,8 +430,8 @@ export class Field {
       // No cornering lean on the ground (Adam, 2026-10-03) — camber only, and
       // the true attitude once airborne. Same rule as your own car in render.js.
       rig.tilt.rotation.x = (car.roll || 0) * (1 - grounded)
-        + bankRoll(view.bank, t, proj.i, proj.lat) * grounded;
-      rig.tilt.rotation.z = (car.pitch || 0) * (1 - grounded) + slopePitch(view.world, t, proj, car) * grounded;
+        + (car.gnd ? car.gnd.roll : bankRoll(view.bank, t, proj.i, proj.lat) * grounded);
+      rig.tilt.rotation.z = (car.pitch || 0) * (1 - grounded) + (car.gnd ? car.gnd.pitch : slopePitch(view.world, t, proj, car) * grounded);
 
       // Everything below here is a moving part, and the merged car has none.
       // Skipping it is most of the point of having a merged car at all.

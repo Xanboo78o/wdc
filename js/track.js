@@ -79,38 +79,37 @@ export class Track {
       this.pit.offset = lat;                    // how far out, in metres
     }
 
-    // BANKING NEEDS A TRANSITION.
+    // BANKING NEEDS A TRANSITION — A LONG ONE.
     //
-    // The bake stores bank as a hard step — Zandvoort is 0 -> 18 -> 0 with no
-    // taper, twice a lap. Physically that lands the full banking force on the
-    // car in a single 2.5 ms substep, which is a jolt no real camber change
-    // makes; geometrically it is a 3.6 m vertical cliff at each end, so it
-    // cannot be drawn at all. Real banking ramps in over tens of metres.
+    // The survey stores bank as a hard step (Zandvoort is 0 -> 18 -> 0), and
+    // a step is a cliff across the road and the whole banking force landing
+    // on the car in one substep. It used to be tapered over 38 m inside each
+    // run of EQUAL values — which is what a surveyed step is, and not what a
+    // hand-built corner is: Kate's Bowl and Heiligen's two walls are baked
+    // with their own long ramps, every sample different, and that rule threw
+    // those ramps away and put the 38 m one on what was left. Adam,
+    // 2026-10-06: "in all the banked corners in the game they jump from no
+    // banking to full banking, not like a subtle curve from flat".
     //
-    // Taper each banked run in and out with a smoothstep, eating into the run
-    // rather than extending past it, so a banked corner never spills camber
-    // onto the straight that approaches it.
+    // So: banking may change by no more than BANK_RATE degrees per metre,
+    // anywhere, whatever the bake says. 27 degrees takes 135 m. The ramp is
+    // centred on where the bake put the change — half of it on the approach,
+    // half inside the corner — and its two ends are rounded off. A bake that
+    // is already gentler than that is left exactly as it is.
     if (this.bank && this.bank.some(v => v !== 0)) {
-      const src = Array.from(this.bank);
-      const out = new Float32Array(n);
-      const TAPER = 38;                          // metres of transition
-      let i = 0;
-      while (i < n) {
-        if (src[i] === 0) { out[i] = 0; i++; continue; }
-        let j = i;
-        while (j + 1 < n && src[j + 1] === src[i]) j++;
-        const runLen = (j - i + 1) * this.ds;
-        const tap = Math.min(TAPER, runLen / 3);
-        const steps = Math.max(1, Math.round(tap / this.ds));
-        for (let k = i; k <= j; k++) {
-          const inFrom = k - i, inTo = j - k;
-          const f = Math.min(1, Math.min(inFrom, inTo) / steps);
-          const s = f * f * (3 - 2 * f);         // smoothstep
-          out[k] = src[k] * s;
-        }
-        i = j + 1;
+      const BANK_RATE = 0.2, r = BANK_RATE * this.ds;
+      const a = Float32Array.from(this.bank, Math.abs);
+      const sweep = (f) => { for (let pass = 0; pass < 2; pass++) { for (let i = 0; i < n; i++) f(i, (i - 1 + n) % n); for (let i = n - 1; i >= 0; i--) f(i, (i + 1) % n); } };
+      sweep((i, j) => { if (a[j] - 2 * r > a[i]) a[i] = a[j] - 2 * r; });   // out onto the approach, at twice the rate...
+      sweep((i, j) => { if (a[j] + r < a[i]) a[i] = a[j] + r; });           // ...then up from there at the rate: centred
+      let v = a;
+      for (let pass = 0; pass < 24; pass++) {
+        const w = new Float32Array(n);
+        for (let i = 0; i < n; i++) w[i] = (v[(i - 1 + n) % n] + 2 * v[i] + v[(i + 1) % n]) / 4;
+        v = w;
       }
-      this.bank = out;
+      for (let i = 0; i < n; i++) if (v[i] < 0.05) v[i] = 0;
+      this.bank = v;
     }
     this.shareWalls();
   }
