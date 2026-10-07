@@ -51,6 +51,8 @@ const BAY = 3.6;             // metres between windows along a facade
 const COVER = {
   forest: { col: 0x46552f, y: -0.035, tex: 'grass', size: 6 },
   rock:   { col: 0x7d7a72, y: -0.036, tex: 'gravel', size: 5 },
+  // above the tree line on the Heiligen pass
+  snow:   { col: 0xe9eef2, y: -0.0365, tex: 'concrete', size: 9 },
   scrub:  { col: 0x6c6c4a, y: -0.038, tex: 'grass', size: 7 },
   park:   { col: 0x5a7040, y: -0.039, tex: 'grass', size: 4 },
   grass:  { col: 0x62733f, y: -0.040, tex: 'grass', size: 4 },

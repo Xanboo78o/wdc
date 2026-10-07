@@ -274,6 +274,64 @@ if (!dry) {
     if (blocks.length) items.push({ type: 'tempbarrier', at: blocks });
     fs.writeFileSync(`${ROOT}data/landmarks/${r.key}.json`, JSON.stringify({ key: r.key, note: 'tools/bakeheiligen.mjs: the roads this lap does not use, and the blocks that shut them', items }));
   }
+  // THE PLACE ROUND IT (js/env.js). One town, one forest, one pass, the same
+  // for every route: Adam, "imagine allllll the routes, city, forest, snow".
+  //   the TOWN    houses in rows along the Hauptstrasse, the Stadtring and the
+  //               Altstadt's four streets, a church with a tower on the Marktplatz
+  //   the FOREST  spruce over the whole hillside, in 70 m blocks, left out
+  //               wherever a road — any road on the site — runs through
+  //   the PASS    snow above the tree line
+  // The LAYOUT of the roads is drawn; this dressing follows from it, the way a
+  // kerb follows from a corner. Nothing here is a road.
+  {
+    const roadPts = [];
+    for (const g of Object.values(segs)) for (const q of g.pts) roadPts.push(q);
+    const nearRoad = (x, y) => { let b = Infinity; for (const q of roadPts) { const d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d < b) b = d; } return Math.sqrt(b); };
+    const rnd = (() => { let a = 20261006; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();
+    const buildings = [], areas = [];
+    const rect = (cx, cy, hdg, L, D) => { const c = Math.cos(hdg), sn = Math.sin(hdg); return [[-L / 2, -D / 2], [L / 2, -D / 2], [L / 2, D / 2], [-L / 2, D / 2]].map(([u, v]) => [+(cx + u * c - v * sn).toFixed(1), +(cy + u * sn + v * c).toFixed(1)]); };
+    const placed = [];
+    for (const name of ['hauptstrasse2', 'altstadt', 'stadtring', 'hauptstrasse1']) {
+      const g = segs[name]; if (!g) continue;
+      const K = KINDS[SEGMENTS[name].kind], edge = K.w + Math.min(K.run, 3) + 2.5;
+      let since = 99;
+      for (let k = 1; k < g.pts.length; k++) {
+        const a = g.pts[k - 1], c = g.pts[k], hdg = Math.atan2(c[1] - a[1], c[0] - a[0]);
+        since += Math.hypot(c[0] - a[0], c[1] - a[1]);
+        if (since < 15) continue;
+        if (name === 'stadtring' && c[0] > 800 * SCALE) continue;          // the town ends at the church
+        if (name === 'hauptstrasse1' && c[0] < 60 * SCALE) continue;       // ...and begins after the paddock
+        since = 0;
+        for (const side of [1, -1]) {
+          const D = 8 + rnd() * 4, L = 10 + rnd() * 4, off = edge + D / 2;
+          const cx = c[0] - Math.sin(hdg) * side * off, cy = c[1] + Math.cos(hdg) * side * off;
+          if (nearRoad(cx, cy) < off - 0.8) continue;                      // another street is in the way
+          if (placed.some(q => Math.hypot(q[0] - cx, q[1] - cy) < 11)) continue;
+          placed.push([cx, cy]);
+          buildings.push({ k: 'house', h: +(7.5 + rnd() * 6.5).toFixed(1), p: rect(cx, cy, hdg, L, D) });
+        }
+      }
+    }
+    // the church on the Marktplatz: a nave, and a tower you can see from the pass
+    { const [tx, ty] = sc(NODES.TOWN); buildings.push({ k: 'church', h: 16, p: rect(tx + 40, ty + 46, 0, 30, 14) }, { k: 'tower', h: 44, p: rect(tx + 22, ty + 46, 0, 8, 8) }); }
+    areas.push({ k: 'urban', p: [[350, -420], [1130, -420], [1130, 150], [350, 150]].map(([x, y]) => [x * SCALE, y * SCALE]) });
+    const CELL = 70;
+    for (let y = 500 * SCALE; y < 1470 * SCALE; y += CELL) for (let x = -900 * SCALE; x < 1500 * SCALE; x += CELL) {
+      const cx = x + CELL / 2, cy = y + CELL / 2;
+      if (nearRoad(cx, cy) < CELL * 0.86) continue;
+      if (cy < 600 * SCALE && cx > -480 * SCALE && cx < 1000 * SCALE) continue;      // the valley floor is meadow
+      areas.push({ k: 'forest', p: [[x, y], [x + CELL, y], [x + CELL, y + CELL], [x, y + CELL]].map(q => q.map(v => +v.toFixed(0))) });
+    }
+    areas.push({ k: 'snow', p: [[-1100, 1500], [1700, 1500], [1700, 2500], [-1100, 2500]].map(([x, y]) => [x * SCALE, y * SCALE]) });
+    for (const { r } of baked) {
+      fs.writeFileSync(`${ROOT}data/env/${r.key}.json`, JSON.stringify({
+        key: 'heiligen', full: 'Heiligen Auto Circuit', lat0: 47.26, lon0: 11.39, pad: PAD, made: 'tools/bakeheiligen.mjs from data/build/heiligen.js — dressed, not surveyed',
+        bbox: { x0: +gx0.toFixed(0), y0: +gy0.toFixed(0), x1: +gx1.toFixed(0), y1: +gy1.toFixed(0) },
+        buildings, areas, sea: [], trees: [], roads: [],
+      }));
+    }
+    console.log(`  town ${buildings.length} buildings, forest ${areas.filter(a => a.k === 'forest').length} blocks`);
+  }
   console.log(`\n  -> data/tracks/heil*.json and data/elev/heil*.json (${baked.length} each)`);
 }
 
