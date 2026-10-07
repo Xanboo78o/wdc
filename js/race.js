@@ -1157,6 +1157,17 @@ export class Race {
       if (e.lanePh == null) { e.lanePh = (e.idx * 2.399) % 6.283; e.laneF = 0.25 + ((e.idx * 0.618) % 1) * 0.3; }
       bias = lim * 0.72 * Math.sin(this.time * e.laneF + e.lanePh) - this.lines.race.off[i];
       speedCap = null; obstDs = null; obstV = null;
+      // In a DERBY it is not wandering: it is going for the nearest car in
+      // reach, yours included, and steers at wherever that car is.
+      if (this.derby) {
+        let tgt = null, bd = 55;
+        for (const o of this.entries) {
+          if (o === e || o.retired) continue;
+          const ds = t.gap(o.proj.s, e.proj.s);
+          if (ds > -6 && ds < bd) { bd = ds; tgt = o; }
+        }
+        if (tgt) bias = tgt.proj.lat - this.lines.race.off[i];
+      }
     }
 
     const off = this.lines.race.off[i];
@@ -1388,7 +1399,19 @@ export class Race {
       const wingNow = !!(car.lost && (car.lost.frontWing || car.lost.rearWing));
       if (wingNow && !e.wingWas) this.rc.incident('debris', e);
       e.wingWas = wingNow;
-      if (car.damage >= 1 && !e.retired) { e.retired = true; this.log('crash', `${e.name} RETIRES`, e); this.rc.incident('retired', e); }
+      if (car.damage >= 1 && !e.retired) {
+        e.retired = true; this.log('crash', `${e.name} RETIRES`, e); this.rc.incident('retired', e);
+        if (this.derby) {
+          const left = this.entries.filter(x => !x.retired && !x.isPlayer).length;
+          const by = e.hitBy && this.time - (e.hitAt || -99) < 4 ? e.hitBy : null;
+          if (by) by.wrecks = (by.wrecks || 0) + 1;
+          this.log('flag', `${by && by.isPlayer ? 'YOU WRECKED ' + e.name : e.name + ' IS OUT'} — ${left} LEFT${by && by.isPlayer ? ` · THAT IS ${by.wrecks}` : ''}`, e, 'derby');
+          if (left === 0 && this.me && !this.me.retired && this.state === 'green') {
+            this.log('flag', `LAST ONE RUNNING — ${this.me.wrecks || 0} WRECKED BY YOU`, this.me, 'derby');
+            this.me.finished = true; this.me.finishTime = this.time; this.state = 'finish';
+          }
+        }
+      }
       // A car on its roof is not rejoining. Retire it once it has stopped
       // sliding, or it keeps being classified and crawls round for the rest of
       // the race: measured, an upside-down car dragged the field spread from
@@ -1630,6 +1653,16 @@ export class Race {
         if (hit && (live[i].isPlayer || live[j].isPlayer) && hit.closing > 2) {
           const you = live[i].isPlayer ? live[i] : live[j];
           you.bump = { what: 'car', closing: hit.closing, harm: hit.harm, by: live[i].isPlayer ? live[j] : live[i] };
+        }
+        // THE DEMO DERBY. Every hit that counts breaks the rivals in it a tenth
+        // more (yours is the car that cannot be broken), whoever was last in
+        // contact with a car when it stops running gets it, and the last one
+        // moving has won.
+        if (this.derby && hit && hit.harm > 0.5) {
+          for (const [x, o] of [[live[i], live[j]], [live[j], live[i]]]) {
+            x.hitBy = o; x.hitAt = this.time;
+            if (!x.isPlayer) x.car.damage = Math.min(1, (x.car.damage || 0) + Math.min(0.12, 0.015 + hit.closing * 0.007));
+          }
         }
         if (hit && hit.harm > 1.2) {
           const a = live[i], b = live[j];
