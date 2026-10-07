@@ -40,6 +40,7 @@ import { carLamps, buildCourseLights, LightTrails } from './lamps.js';
 import { buildGrandstands } from './crowd.js';
 import { placeLandmarks } from './landmarks.js';
 import { dlcFor } from './dlc.js';
+import { buildRally } from './xcar.js';
 import { buildPitLane, pitCorridor } from './pit.js';
 import { buildHorizon, buildGround, buildSkirt } from './horizon.js';
 import { buildCar, buildGT3, liveryAtlas } from './car.js';
@@ -684,15 +685,16 @@ export class View {
     }
 
     // A GT3 is a different car, not a repainted single-seater.
+    // (Xingus mode's rally styles: the Braewick Torr, js/xcar.js, on the GT's physics.)
     const car = opts.cls === 'gt3'
-      ? buildGT3(look, 0x2f6fe0)
+      ? (opts.body === 'rally' ? buildRally(look) : buildGT3(look, 0x2f6fe0))
       : buildCar(look, 0xd8352a, opts.chassis ? chassisGeometry(THREE, opts.chassis) : null, { livery: opts.livery });
     // Your team's sponsors on your car, the way a rival wears theirs.
     if (opts.team && car.decalMat) car.decalMat.map = liveryAtlas(opts.team.col, opts.team).texture;
     this.car = car.group; this.wheels = car.wheels; this.steer = car.steer;
     // The driver's own eyes, for ONBOARD, on a car that has a cockpit to sit
     // in. The GT3 body is a shell with no interior, so it keeps the roof cam.
-    this.carEye = car.mirrors && car.mirrors.length ? car.eye : null;
+    this.carEye = (car.mirrors && car.mirrors.length) || car.cabin ? car.eye : null;   // `cabin`: a car built to be sat in (js/xcar.js)
     this.carMirrorGlass = car.mirrors || [];
     // What first person hides: your own head, and the cockpit rim that read
     // as a steering wheel in front of Adam's real one.

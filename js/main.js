@@ -642,6 +642,7 @@ async function start() {
   if (!state.view) {
     state.view = await View.create($('cv'), t, line, {
       shadows: !q.has('lo'), env, textures: !q.has('notex'), cls: pickCar,
+      body: XINGUS && q.get('xcar') === 'rally' ? 'rally' : null,   // Xingus: the rally car's own body
       // Your car in your team's livery, for the league you are driving.
       livery: liveryFor(pickTeams[pickCar], TEAMS[pickTeams[pickCar]]),
       team: TEAMS[pickTeams[pickCar]] || null,
@@ -649,6 +650,7 @@ async function start() {
     // chase to begin with (TV sat behind trees); js/attract.js cuts between cameras and stages the incidents
     // ?director=0&cam=N: the bot drives but nothing is staged and the camera stays put, which is
     // what a performance run wants (tools measure YOUR view of a race, not the show's).
+    if (XINGUS && !ATTRACT) state.view.setMode(0);          // Xingus starts in the driver's seat
     if (ATTRACT) {
       state.view.setMode(q.has('cam') ? +q.get('cam') || 0 : 1);
       if (state.race && q.get('director') !== '0') state.director = makeDirector(state.race, state.view, state.me);
