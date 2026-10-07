@@ -183,7 +183,11 @@ export class Race {
       for (let k = 1; k < P.length; k++) cum.push(cum[k - 1] + Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]));
       return { ...d, P, len: cum[cum.length - 1], cum };
     });
-    this.jokerRule = this.detours.length > 0 && (xopt.joker ?? XQ.get('xjoker') === '1');
+    // THE RULE, as he gave it: "joker lap u ahve to do every race ... it must
+    // happen 1 time per car tho, but can happen anylap but is required to
+    // finish". So wherever there is a fork the rule is ON — no switch — and a
+    // car that has not taken it has not finished, however many laps it has done.
+    this.jokerRule = this.detours.length > 0 && xopt.joker !== false;
     this.xstakes = this.xingus && (xopt.stakes ?? XQ.get('xstakes') === '1');
     {
       const c = track.corners || [];
@@ -1191,7 +1195,7 @@ export class Race {
         this.state = 'green';
         this.greenT = this.time;
         this.log('flag', 'LIGHTS OUT');
-        if (this.jokerRule) this.log('flag', 'ONE JOKER LAP EACH, BEFORE THE FLAG', null, 'joker');
+        if (this.jokerRule) this.log('flag', 'ONE JOKER LAP EACH — ANY LAP YOU LIKE, BUT NO FINISH WITHOUT IT', null, 'joker');
         for (const e of this.entries) e.lapStart = this.time;
       }
     }
@@ -1452,9 +1456,12 @@ export class Race {
           if (!e.bestLap || lt < e.bestLap) e.bestLap = lt;
           // The joker you owe: said at the end of every lap until it is paid.
           if (this.jokerRule && e.isPlayer && !e.jokers && e.lap < this.laps) this.log('flag', `JOKER LAP STILL TO TAKE — ${this.laps - e.lap} LAP${this.laps - e.lap === 1 ? '' : 'S'} LEFT`, e, 'joker');
-          if (e.lap >= this.laps) {
+          if (e.lap >= this.laps && this.jokerRule && !e.jokers) {
+            // Not finished: the flag is not yours until the joker is done.
+            if (e.isPlayer) this.log('flag', 'NOT FINISHED — YOU STILL OWE THE JOKER LAP. TAKE IT THIS LAP.', e, 'joker');
+            else e.jokerLap = e.lap + 1;
+          } else if (e.lap >= this.laps) {
             e.finished = true; e.finishTime = this.time;
-            if (this.jokerRule && !e.jokers) { e.penalty += 30; this.log('penalty', `${e.isPlayer ? 'YOU' : e.name} — NO JOKER LAP: 30 SECONDS`, e, 'pen'); }
             // THE COOL-DOWN LAP (Adam, 2026-10-04: "when i finish i need to do 1
             // lap then return to pit"). Past the flag everybody eases off,
             // drives the lap round, and the pit lane takes them in to their

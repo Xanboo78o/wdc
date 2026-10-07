@@ -110,7 +110,7 @@ const HEIL_BASE = { 'alt|pass': 'grand', 'ring|pass': 'schnee', 'alt|wald': 'wal
 // 'once' the Steilwand lap with the joker open beside it and ONE owed (X.joker).
 const heilKey = c => 'heil' + (c.rx ? 'rx' : HEIL_BASE[`${c.town}|${c.mid}`]) + (c.end === 'joker' ? 'j' : '');
 function heilChoice(key) {
-  const end = /j$/.test(key) ? 'joker' : X.joker ? 'once' : 'wall', base = key.replace(/^heil/, '').replace(/j$/, '');
+  const end = /j$/.test(key) ? 'joker' : 'wall', base = key.replace(/^heil/, '').replace(/j$/, '');
   if (base === 'rx') return { rx: 1, town: 'ring', mid: 'tal', end };
   const hit = Object.entries(HEIL_BASE).find(([, v]) => v === base) || ['alt|pass'];
   const [town, mid] = hit[0].split('|');
@@ -125,7 +125,7 @@ const xTrack = () => (X.track === 'heiligen' ? X.heil : TRACKS.some(t => t[0] ==
 function xingusUrl() {
   const [, , tune, rivals, derby, stakes] = XSTYLES[X.style], grid = Math.max(2, rivals + 1);
   return `./index.html?auto=${xTrack()}:gt3&from=home&xingus=1&xcar=${tune}${rivals ? '' : '&xsolo=1'}${derby ? '&xderby=1&battle=hard' : ''}` +
-    `${stakes ? '&xstakes=1' : ''}${X.track === 'heiligen' && X.joker && !/j$/.test(X.heil) ? '&xjoker=1' : ''}${XSTYLES[X.style][6] ? '&xloose=1' : ''}${X.gears === 'auto' ? '&xgear=auto' : ''}` +
+    `${stakes ? '&xstakes=1' : ''}${XSTYLES[X.style][6] ? '&xloose=1' : ''}${X.gears === 'auto' ? '&xgear=auto' : ''}` +
     `&race=1&grid=${grid}&laps=${S.laps}&tier=${derby ? 'medium' : 'casual'}&nodnf=${stakes ? 0 : 1}&quali=0&start=${rivals ? grid : 1}`;
 }
 
@@ -373,8 +373,8 @@ const PAGES = {
     page.append(h(`<div class="top"><div class="title">HEILIGEN AUTO CIRCUIT</div><div class="grow"></div>${sayBox()}</div>`));
     if (!M) { page.append(h('<div class="body"><div class="chunk say">the map did not load.</div></div>')); foot('BACK', () => show('setup')); return; }
     const C = heilChoice(X.heil), route = M.routes.find(r => r.key === X.heil) || M.routes[0], on = new Set(route.segs);
-    if (C.end === 'once') on.add('joker');
-    const set = c => { const n = { ...C, ...c }; X.joker = n.end === 'once'; X.heil = heilKey(n); saveX(); const keep = at; show('heiligen', keep); };
+    if (C.end === 'wall') on.add('joker');
+    const set = c => { X.heil = heilKey({ ...C, ...c }); saveX(); const keep = at; show('heiligen', keep); };
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const g of Object.values(M.segs)) for (const [x, y] of g.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, -y); y1 = Math.max(y1, -y); }
     const COL = { tarmac: 'var(--ink)', gravel: '#b0844a', snow: '#6fa8dc' }, pad = 230;
@@ -399,13 +399,15 @@ const PAGES = {
       card.querySelectorAll('.pill').forEach((p, k) => { p.onclick = e => { e.stopPropagation(); fn(opts[k][0]); }; });
       item(card, { left: () => step(-1), right: () => step(1), ok: () => focus(at + 1) });
     };
-    box('PREMADE', [['heilgrand', 'GRAND 9.0'], ['heilschnee', 'SCHNEE'], ['heilwald', 'WALD'], ['heilforst', 'FORST'], ['heilstadt', 'STADT'], ['heilsprint', 'SPRINT 4.9'], ['heilrx', 'RALLYCROSS'], ['heilrx+', 'RALLYCROSS · ONE JOKER LAP'], ['heilrxj', 'RX · JOKER EVERY LAP']],
-      X.heil + (X.joker && X.heil === 'heilrx' ? '+' : ''), v => { X.joker = v.endsWith('+'); X.heil = v.replace('+', ''); saveX(); const keep = at; show('heiligen', keep); });
+    box('PREMADE', [['heilgrand', 'GRAND 9.0'], ['heilschnee', 'SCHNEE'], ['heilwald', 'WALD'], ['heilforst', 'FORST'], ['heilstadt', 'STADT'], ['heilsprint', 'SPRINT 4.9'], ['heilrx', 'RALLYCROSS'], ['heilrxj', 'RX · JOKER EVERY LAP']],
+      X.heil, v => { X.heil = v; saveX(); const keep = at; show('heiligen', keep); });
     if (!C.rx) {
       box('THE TOWN', [['alt', 'ALTSTADT'], ['ring', 'STADTRING']], C.town, v => set({ town: v }));
       box('THE MOUNTAIN', [['tal', 'VALLEY'], ['wald', 'FOREST'], ['pass', 'THE PASS']], C.mid, v => set({ mid: v }));
     }
-    box('THE LAST CORNER', [['wall', 'STEILWAND'], ['once', 'ONE JOKER LAP OWED'], ['joker', 'JOKER, EVERY LAP']], C.end, v => set({ end: v }));
+    // The rule is not a choice: on the Steilwand lap the joker road is open beside
+    // it and every car owes it once, on any lap, or it has not finished.
+    box('THE LAST CORNER', [['wall', 'STEILWAND · ONE JOKER LAP OWED'], ['joker', 'JOKER ROAD EVERY LAP']], C.end, v => set({ end: v }));
     foot('DONE', () => show('setup'), 'CLICK A ROAD · ← → IN A BOX · ESC BACK');
   },
 
