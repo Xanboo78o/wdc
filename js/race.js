@@ -170,6 +170,20 @@ export class Race {
     // own way across the road and wanders, nobody leaves room, nobody lifts
     // for the car ahead — and nobody aims at anybody. The derby is loose too.
     this.loose = this.xingus && (this.derby || (xopt.loose ?? XQ.get('xloose') === '1'));
+    // THE JOKER LAP (Adam: "add one that needs a joker lap"). A track may carry
+    // `detours`: a road that forks off the lap and rejoins it (the Heiligen
+    // joker). It is an open road for you whenever you turn into it. With the
+    // rule on, everybody owes ONE lap through it before the flag, or thirty
+    // seconds. A rival's is paid in time, on a lap of its own choosing — the
+    // line it drives does not fork.
+    this.detours = (track.detours || []).map(d => {
+      const P = [], cum = [0];
+      for (let k = 0; k + 1 < d.pts.length; k++) { const a = d.pts[k], b = d.pts[k + 1], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2)); for (let o = 0; o < n; o++) P.push([a[0] + (b[0] - a[0]) * o / n, a[1] + (b[1] - a[1]) * o / n]); }
+      P.push(d.pts[d.pts.length - 1]);
+      for (let k = 1; k < P.length; k++) cum.push(cum[k - 1] + Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]));
+      return { ...d, P, len: cum[cum.length - 1], cum };
+    });
+    this.jokerRule = this.detours.length > 0 && (xopt.joker ?? XQ.get('xjoker') === '1');
     this.xstakes = this.xingus && (xopt.stakes ?? XQ.get('xstakes') === '1');
     {
       const c = track.corners || [];
@@ -249,6 +263,7 @@ export class Race {
         contacts: 0, retired: false, finished: false, finishTime: null, bump: null,
         pitRequest: false, inPit: false, pitTimer: 0, pitStops: 0, stuck: 0,
         opening: true, zip: false,
+        jokers: 0, det: null, jokerLap: 1 + ((k * 7 + seed) % Math.max(1, laps - 1)),
         recover: null,
         // the duel: grip trim, how long it has been building on the car
         // ahead, which straight it is on and on which it last moved, DRS
@@ -1165,6 +1180,7 @@ export class Race {
         this.state = 'green';
         this.greenT = this.time;
         this.log('flag', 'LIGHTS OUT');
+        if (this.jokerRule) this.log('flag', 'ONE JOKER LAP EACH, BEFORE THE FLAG', null, 'joker');
         for (const e of this.entries) e.lapStart = this.time;
       }
     }
@@ -1271,9 +1287,31 @@ export class Race {
       else if (al > pr.w + 1.2) surface = SURFACE.runoff;
       else if (al > pr.w) surface = SURFACE.kerb;
 
-      const roadCode = t.road && al <= pr.w ? t.road[pr.i] || 0 : 0;
+      // On a fork? Off the lap's own road, and within the fork's width of its line.
+      let onFork = null;
+      if (this.detours.length && e.isPlayer && !e.inPit && al > pr.w - 1.5) {
+        for (const d of this.detours) {
+          const i0 = e.det && e.det.d === d ? Math.max(0, e.det.i - 30) : 0, i1 = e.det && e.det.d === d ? Math.min(d.P.length - 1, e.det.i + 60) : d.P.length - 1;
+          let bi = -1, bd = (d.w + 2) ** 2;
+          for (let k = i0; k <= i1; k++) { const q = d.P[k], dd = (q[0] - car.x) ** 2 + (q[1] - car.y) ** 2; if (dd < bd) { bd = dd; bi = k; } }
+          if (bi >= 0) { onFork = d; e.det = { d, i: bi, from: e.det && e.det.d === d ? e.det.from : bi }; break; }
+        }
+      }
+      if (!onFork && e.det) {
+        // back on the lap: a fork driven end to end is a joker lap taken
+        if (e.det.from < e.det.d.P.length * 0.2 && e.det.i > e.det.d.P.length * 0.8) { e.jokers++; this.log('flag', `JOKER LAP TAKEN${this.jokerRule && e.jokers === 1 ? ' — THAT IS THE ONE YOU OWED' : ''}`, e, 'joker'); }
+        e.det = null;
+      }
+      e.onFork = !!onFork;
+      // A rival's joker: this lap, between the fork's two ends, at the pace the long way round would cost.
+      let jokerHold = 1;
+      if (this.jokerRule && !e.isPlayer && this.detours[0] && e.lap + 1 === e.jokerLap) {
+        const d = this.detours[0], inside = d.s0 <= d.s1 ? pr.s >= d.s0 && pr.s <= d.s1 : pr.s >= d.s0 || pr.s <= d.s1;
+        if (inside) { jokerHold = Math.max(0.35, Math.min(1, t.wrap(d.s1 - d.s0) / d.len)); e.jokers = 1; }
+      }
+      const roadCode = onFork ? onFork.road || 1 : t.road && al <= pr.w ? t.road[pr.i] || 0 : 0;
       if (roadCode) surface = ROAD_MU[roadCode];
-      e.roadHold = t.road ? ROAD_HOLD[roadCode] : 1;
+      e.roadHold = (t.road ? ROAD_HOLD[roadCode] : 1) * jokerHold;
       const xg = e.isPlayer && car.xg;                 // Xingus mode: your car only
       if (xg) surface = roadCode ? Math.max(surface, car.xg.loose) : xingusSurface(surface);
       const drag = roadCode ? ROAD_DRAG[roadCode] : dragFor(surface);
@@ -1303,7 +1341,7 @@ export class Race {
             const down = 0.5 * 1.225 * (car.spec.ClA || 0) * car.speed * car.speed / car.spec.m;
             if (lift > (9.81 + down) * 1.02) {
               car.airborne = true; car.airTime = 0; car.z = 0.03; car.vz = 0.05;
-              e.flying = { dmg: car.damage || 0 };
+              e.flying = { dmg: car.damage || 0, crush: car.crush ? { ...car.crush } : null };
               if (e.isPlayer) this.log('flag', 'AIRBORNE', e, 'jump');
             }
           }
@@ -1311,7 +1349,7 @@ export class Race {
             // A rival's landing is given back: they do not lift for a crest
             // they cannot see, and one lost its race to the Himmelssprung in
             // nine laps. Yours is yours.
-            if (!e.isPlayer && car.damage > e.flying.dmg) car.damage = e.flying.dmg;
+            if (!e.isPlayer && car.damage > e.flying.dmg) { car.damage = e.flying.dmg; if (car.crush) for (const k in car.crush) car.crush[k] = e.flying.crush ? e.flying.crush[k] ?? 0 : 0; }
             e.flying.t = (e.flying.t || 0) + dt;
             if (e.flying.t > 0.6) e.flying = null;
           }
@@ -1325,7 +1363,7 @@ export class Race {
       // The barrier test asks how far this car is from the centreline, and for
       // a car in the pit lane the answer is seventeen metres — so running it
       // would shove the car back onto the racing line mid-stop.
-      const hit = e.inPit ? null : resolveBarrier(car, t, e.hint);
+      const hit = e.inPit || e.onFork ? null : resolveBarrier(car, t, e.hint);
       if (hit && hit.harm) { e.contacts++; this.log('crash', `${e.name} INTO THE BARRIER`, e); }
       // After the barrier, so a wall costs you speed and nothing else.
       if (xg) xingusStep(car, playerInput || {}, dt);
@@ -1389,8 +1427,11 @@ export class Race {
           e.lapStart = this.time;
           e.lastLap = lt;
           if (!e.bestLap || lt < e.bestLap) e.bestLap = lt;
+          // The joker you owe: said at the end of every lap until it is paid.
+          if (this.jokerRule && e.isPlayer && !e.jokers && e.lap < this.laps) this.log('flag', `JOKER LAP STILL TO TAKE — ${this.laps - e.lap} LAP${this.laps - e.lap === 1 ? '' : 'S'} LEFT`, e, 'joker');
           if (e.lap >= this.laps) {
             e.finished = true; e.finishTime = this.time;
+            if (this.jokerRule && !e.jokers) { e.penalty += 30; this.log('penalty', `${e.isPlayer ? 'YOU' : e.name} — NO JOKER LAP: 30 SECONDS`, e, 'pen'); }
             // THE COOL-DOWN LAP (Adam, 2026-10-04: "when i finish i need to do 1
             // lap then return to pit"). Past the flag everybody eases off,
             // drives the lap round, and the pit lane takes them in to their

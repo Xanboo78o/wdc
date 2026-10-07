@@ -240,7 +240,19 @@ if (!dry) {
   // THE REST OF THE SITE (js/landmarks.js `ribbon` and `tempbarrier`). Whichever
   // lap is being driven, the roads it does not use are still there to see — and
   // where one of them meets the lap, it is shut with a row of temporary blocks.
+  // THE JOKER AS A REAL FORK (js/race.js `detours`). On every lap that takes the
+  // Steilwand, the joker is an open road that leaves the lap at the JOKER
+  // junction and comes back at the head of the Hauptstrasse: `s0`/`s1` are
+  // those two places on the lap, `pts` the road between them.
+  for (const { r, json, T } of baked) {
+    if (!r.segs.includes('steilwand2') || !segs.joker) continue;
+    const first = T.findIndex(p => p.seg === 'steilwand2'), n = T.length;
+    let last = first; while (T[(last + 1) % n].seg === 'steilwand2') last = (last + 1) % n;
+    json.detours = [{ name: 'Joker', s0: +(first * json.ds).toFixed(0), s1: +(((last + 1) % n) * json.ds).toFixed(0), w: KINDS.arena.w, road: 1, pts: segs.joker.pts }];
+    fs.writeFileSync(`${ROOT}data/tracks/${r.key}.json`, JSON.stringify(json));
+  }
   for (const { r } of baked) {
+    const open = r.segs.includes('steilwand2') ? 'joker' : null;      // not shut: it is the fork
     const used = new Set(r.segs), usedNodes = new Set(r.segs.flatMap(k => [SEGMENTS[k].from, SEGMENTS[k].to]));
     const runs = { tarmac: [], gravel: [], snow: [] }, blocks = [];
     for (const [name, g] of Object.entries(segs)) {
@@ -252,6 +264,7 @@ if (!dry) {
       if (k1 - k0 < 2) continue;
       runs[K.surf].push({ w, pts: P.slice(k0, k1 + 1) });
       const mouth = (a, c) => ({ x: a[0], y: a[1], hdg: +Math.atan2(c[1] - a[1], c[0] - a[0]).toFixed(3), w: +(w * 2 + 3).toFixed(1) });
+      if (name === open) continue;
       if (usedNodes.has(g.from)) blocks.push(mouth(P[k0], P[k0 + 1]));
       if (usedNodes.has(g.to)) blocks.push(mouth(P[k1], P[k1 - 1]));
     }

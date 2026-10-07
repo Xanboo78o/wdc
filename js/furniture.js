@@ -196,7 +196,11 @@ export function buildBarriers(scene, track, look, sign, corridor = null, world =
   // the pit lane: at Monza the right-hand barrier lands 4.7 m from the pit
   // centreline, so the view down the lane came back with hoardings standing in
   // it, mirrored, because you were reading their backs.
+  // ...and a road that forks off the lap (track.detours: the Heiligen joker)
+  // has to be able to leave it: no rail across either mouth.
+  const forks = (t.detours || []).flatMap(d => [...d.pts.slice(0, 5), ...d.pts.slice(-5)]);
   const nearPit = (x, z) => {
+    for (const q of forks) if ((q[0] - x) ** 2 + (-q[1] - z) ** 2 < 144) return true;
     if (!corridor) return false;
     const r2 = corridor.wallClear * corridor.wallClear;
     for (const q of corridor.pts) if ((q[0] - x) ** 2 + (-q[1] - z) ** 2 < r2) return true;
