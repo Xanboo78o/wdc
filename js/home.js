@@ -63,16 +63,42 @@ const S = {
   track: 'monza', car: 'f1', mode: 'race', grid: 22, tier: 'medium', laps: 3, start: 'mid',
   noDnf: false, quali: false, time: 'live', weather: 'live', battle: 'medium',
   teams: { f1: null, gt3: null, f4: null }, field: 'f1', theme: 'light', music: 'on',
-  xTrack: 'kate', xCompany: 'few',          // Xingus mode's own two choices
 };
 try { Object.assign(S, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch { /* a fresh start */ }
 S.teams = Object.assign({ f1: null, gt3: null, f4: null }, S.teams);
 if (!TRACKS.some(t => t[0] === S.track)) S.track = 'monza';
-if (!TRACKS.some(t => t[0] === S.xTrack)) S.xTrack = 'kate';
 if (!CARS[S.car]) S.car = 'f1';
 if (!hasTheme(S.theme) || S.theme === 'team') S.theme = 'light';   // home has no all-livery look
 if (!hasLevel(S.music)) S.music = 'on';
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { /* private window */ } };
+
+// ---------------------------------------------------------------- XINGUS
+// Adam, 2026-10-06: "itll go in modes with hot lap and race, excpet itll add
+// xingus wich adds a new box called style". MODE has a third value, and with
+// it on, a STYLE box. A style is three switches the race understands
+// (js/race.js): which tune the car wears, whether anyone else is out there,
+// and whether the others have stopped being careful.
+// Kept in its own record: the game rewrites `wdc.menu` with only what it knows.
+//   id: [label, the line under it, car tune, rivals, derby]
+const XSTYLES = {
+  hotlaps:    ['HOTLAPS', 'ALONE · RALLY CAR', 'rally', 0, 0],
+  rally:      ['RALLY', 'RALLY CARS · A FULL ENTRY', 'rally', 13, 0],
+  rallycross: ['RALLYCROSS', 'RALLY CARS · SIX OF YOU', 'rally', 5, 0],
+  rallygt:    ['RALLY GT', 'GT CARS ON THE STAGES', 'gt', 9, 0],
+  gt3:        ['GT3', 'FAST SEDAN RACE', 'gt', 17, 0],
+  gt3lonely:  ['GT3 LONELY', 'ALONE · GT CAR', 'gt', 0, 0],
+  derby:      ['DEMO DERBY', 'NOBODY IS CAREFUL', 'gt', 21, 1],
+};
+const X = { on: false, style: 'gt3' };
+try { Object.assign(X, JSON.parse(localStorage.getItem('wdc.xingus') || '{}')); } catch { /* fresh */ }
+if (!XSTYLES[X.style]) X.style = 'gt3';
+const saveX = () => { try { localStorage.setItem('wdc.xingus', JSON.stringify(X)); } catch { /* private window */ } };
+S.modeX = X.on ? 'xingus' : S.mode; S.xStyle = X.style;
+function xingusUrl() {
+  const [, , tune, rivals, derby] = XSTYLES[X.style], grid = Math.max(2, rivals + 1);
+  return `./index.html?auto=${S.track}:gt3&from=home&xingus=1&xcar=${tune}${rivals ? '' : '&xsolo=1'}${derby ? '&xderby=1&battle=hard' : ''}` +
+    `&race=1&grid=${grid}&laps=${S.laps}&tier=${derby ? 'medium' : 'casual'}&nodnf=1&quali=0&start=${rivals ? grid : 1}`;
+}
 
 // a team's two livery colours
 const cols = k => { const t = TEAMS[k]; return t ? (t.ui || [t.col, t.fg || '#ffffff']) : ['#e8452c', '#ffd23f']; };
@@ -209,9 +235,9 @@ const nowPlaying = () => { const n = menuMusic.title(); return n ? `<span class=
 // Go racing, now, with what is saved. No team in this league yet = the garage first.
 function lightsOut() {
   if (locked(S.track)) { if (current !== 'setup') show('setup'); say(`${track()[1]} is ${priceLabel(packOf(S.track))}. no racing it until it is yours.`); return; }
-  if (!S.teams[S.car]) { show('garage'); say('pick a team first. then we race.'); return; }
-  save(); menuMusic.fadeOut(0.4);
-  setTimeout(() => { location.href = `./index.html?auto=${S.track}:${S.car}&from=home`; }, 420);
+  if (!X.on && !S.teams[S.car]) { show('garage'); say('pick a team first. then we race.'); return; }
+  save(); saveX(); menuMusic.fadeOut(0.4);
+  setTimeout(() => { location.href = X.on ? xingusUrl() : `./index.html?auto=${S.track}:${S.car}&from=home`; }, 420);
 }
 
 const PAGES = {
@@ -229,7 +255,7 @@ const PAGES = {
     const dock = h(`<div class="dock">
       <div class="chunk next"><small>NEXT UP</small><div class="frame"><svg></svg></div><b>${t[1]}</b><small>${t[2]} · <span data-km></span>${dlcStamp(t[0])}</small></div>
       <div class="tiles"></div>
-      <button class="chunk go race">${FLAG}<div>RACE<small>${S.mode === 'race' ? `${S.laps} LAPS · ${S.grid} CARS` : 'HOT LAP'} · ${t[1].toUpperCase()}</small></div>${FLAG}</button></div>`);
+      <button class="chunk go race">${FLAG}<div>RACE<small>${X.on ? `XINGUS · ${XSTYLES[X.style][0]}` : S.mode === 'race' ? `${S.laps} LAPS · ${S.grid} CARS` : 'HOT LAP'} · ${t[1].toUpperCase()}</small></div>${FLAG}</button></div>`);
     page.append(dock);
     drawMap(dock.querySelector('svg'), S.track);
     const tiles = dock.querySelector('.tiles');
@@ -237,7 +263,7 @@ const PAGES = {
     const list = [
       tile('', 'circuit', 'SETUP', () => show('setup')),
       tile('', 'garage', 'GARAGE', () => show('garage')),
-      tile('', 'showroom', 'XINGUS', () => show('xingus')),
+      tile('', 'jukebox', 'XINGUS', () => { X.on = true; S.modeX = 'xingus'; saveX(); show('setup'); say('xingus mode. grip, drift, no spins.'); }),
       tile('', 'showroom', 'SHOWROOM', () => { location.href = `./carview.html${tk ? '?team=' + tk : ''}`; }),
       tile('', 'builder', 'BUILDER', () => { location.href = './build.html'; }),
       tile('', 'jukebox', 'JUKEBOX', () => { location.href = './ost.html'; }),
@@ -263,7 +289,7 @@ const PAGES = {
     const step = d => { S.track = TRACKS[(i + d + n) % n][0]; show('setup', 0); say(sayFor('CIRCUIT', S.track)); };
     const st = STATIONS.find(x => x.id === S.track);
     const songs = st ? st.songs.map(id => SONGS[id].name).join(' · ') : '';
-    page.append(h(`<div class="top"><div class="title">RACE SETUP</div><div class="chunk chip yell"><small>${TEAMS[S.teams[S.car]] ? TEAMS[S.teams[S.car]].name : 'NO TEAM'}</small>${CARS[S.car].full.toUpperCase()}</div><div class="grow"></div>${sayBox()}</div>`));
+    page.append(h(`<div class="top"><div class="title">RACE SETUP</div><div class="chunk chip yell"><small>${S.modeX === 'xingus' ? 'XINGUS · ' + XSTYLES[XSTYLES[S.xStyle] ? S.xStyle : X.style][1] : TEAMS[S.teams[S.car]] ? TEAMS[S.teams[S.car]].name : 'NO TEAM'}</small>${S.modeX === 'xingus' ? 'HANDBRAKE = X, OR MAP IT IN pad.html' : CARS[S.car].full.toUpperCase()}</div><div class="grow"></div>${sayBox()}</div>`));
     const strip = h(`<div class="chunk strip${locked(t[0]) ? ' locked' : ''}"><button class="chunk arrow" data-l>‹</button>
       <div class="no">${String(i + 1).padStart(2, '0')}</div><div class="frame"><svg></svg></div>
       <div class="stext"><small>${t[2]} · <span data-km></span>${dlcStamp(t[0])}</small><b>${t[1]}</b>${songs ? `<i>♪ ${songs}</i>` : ''}</div>
@@ -276,8 +302,14 @@ const PAGES = {
     item(strip, { left: () => step(-1), right: () => step(1), ok: () => focus(at + 1) });
 
     const onoff = [[false, 'OFF'], [true, 'ON']], up = a => a.map(k => [k, String(k).toUpperCase()]);
-    const rows = [['MODE', 'mode', [['hotlap', 'HOT LAP'], ['race', 'RACE']]]];
-    if (S.mode === 'race') {
+    // MODE's third value is Xingus; the two real ones are still what the game is told.
+    X.on = S.modeX === 'xingus'; if (!X.on) S.mode = S.modeX === 'race' ? 'race' : 'hotlap';
+    X.style = XSTYLES[S.xStyle] ? S.xStyle : X.style; saveX();
+    const rows = [['MODE', 'modeX', [['hotlap', 'HOT LAP'], ['race', 'RACE'], ['xingus', 'XINGUS']]]];
+    if (X.on) {
+      rows.push(['STYLE', 'xStyle', Object.entries(XSTYLES).map(([k, v]) => [k, v[0]])]);
+      if (XSTYLES[X.style][3]) rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]]);
+    } else if (S.mode === 'race') {
       rows.push(['LAPS', 'laps', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]],
         ['GRID', 'grid', [[6, '6'], [12, '12'], [16, '16'], [22, '22']]],
         ['RIVALS', 'tier', Object.keys(TIERS).map(k => [k, TIERS[k].name])]);
@@ -288,36 +320,7 @@ const PAGES = {
     }
     rows.push(['TIME', 'time', [['live', 'LIVE'], ...up(TIME_PHASES)]], ['WEATHER', 'weather', [['live', 'LIVE'], ...up(WEATHER_KINDS), ['changing', 'CHANGING']]]);
     optGrid(rows, 'setup');
-    foot(locked(S.track) ? 'LOCKED' : S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', lightsOut, '↑ ↓ MOVE · ← → CHANGE · START / G = LIGHTS OUT');
-  },
-
-  // ------------------------------------------------------------ XINGUS
-  // The other door (Adam, 2026-10-06: "js a seperate door ... i really just
-  // want to be able to sit back, relax, and go fast"). Arcade handling
-  // (js/xingus.js): grip everywhere, the handbrake and some lock for a drift
-  // that holds, no spinning, no damage. For now: the GT car, any circuit, and
-  // how much company you want. Its own cars and its own circuits come next.
-  xingus() {
-    const n = TRACKS.length, i = TRACKS.findIndex(t => t[0] === S.xTrack), t = TRACKS[i];
-    const step = d => { S.xTrack = TRACKS[(i + d + n) % n][0]; show('xingus', 0); };
-    const go = () => {
-      if (locked(S.xTrack)) { say(`${t[1]} is ${priceLabel(packOf(S.xTrack))}. no racing it until it is yours.`); return; }
-      const grid = { alone: 2, few: 8, crowd: 20 }[S.xCompany] || 8;
-      save(); menuMusic.fadeOut(0.4);
-      setTimeout(() => { location.href = `./index.html?auto=${S.xTrack}:gt3&from=home&xingus=1&race=1&grid=${grid}&laps=60&tier=casual&nodnf=1&start=${grid}`; }, 420);
-    };
-    page.append(h(`<div class="top"><div class="title">XINGUS MODE</div><div class="chunk chip yell"><small>ARCADE</small>GRIP · DRIFT · NO SPINS</div><div class="grow"></div>${sayBox()}</div>`));
-    const strip = h(`<div class="chunk strip${locked(t[0]) ? ' locked' : ''}"><button class="chunk arrow" data-l>‹</button>
-      <div class="no">${String(i + 1).padStart(2, '0')}</div><div class="frame"><svg></svg></div>
-      <div class="stext"><small>${t[2]} · <span data-km></span>${dlcStamp(t[0])}</small><b>${t[1]}</b><i>HANDBRAKE: X ON THE KEYBOARD, OR MAP ONE ON THE WHEEL (pad.html)</i></div>
-      <button class="chunk arrow" data-r>›</button></div>`);
-    page.append(strip);
-    drawMap(strip.querySelector('svg'), t[0]);
-    strip.querySelector('[data-l]').onclick = e => { e.stopPropagation(); step(-1); };
-    strip.querySelector('[data-r]').onclick = e => { e.stopPropagation(); step(1); };
-    item(strip, { left: () => step(-1), right: () => step(1), ok: () => focus(at + 1) });
-    optGrid([['COMPANY', 'xCompany', [['alone', 'ONE SPARRING PARTNER'], ['few', 'A FEW'], ['crowd', 'A CROWD']]]], 'xingus');
-    foot(locked(S.xTrack) ? 'LOCKED' : 'GO', go, '← → CIRCUIT · HOLD THE HANDBRAKE WITH SOME LOCK ON TO DRIFT');
+    foot(locked(S.track) ? 'LOCKED' : X.on || S.teams[S.car] ? 'LIGHTS OUT' : 'PICK A TEAM', lightsOut, '↑ ↓ MOVE · ← → CHANGE · START / G = LIGHTS OUT');
   },
 
   // ------------------------------------------------------------ GARAGE

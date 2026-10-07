@@ -39,15 +39,24 @@ const G = 9.81;
 
 // What the mode asks of the car's own systems: every aid up, a tune with more
 // tyre than is real. A copy, so the serious game's GT3 is not touched.
-const TUNED = new WeakMap();
-export function xingusSpec(spec) {
-  if (!TUNED.has(spec)) TUNED.set(spec, { ...spec, mu: spec.mu * 1.22, loadSens: (spec.loadSens || 0) * 0.5, xingus: true });
-  return TUNED.get(spec);
+// Two tunes of it. GT: the car as it is, with more tyre. RALLY: the same body
+// set up for stages — four driven wheels' worth of traction, most of the wing
+// taken off, a softer tyre that does not care what it is standing on (LOOSE is
+// the least grip a gravel or snow ROAD gives it; the GT gets less).
+const TUNES = {
+  gt: { mu: 1.22, loose: 0.84, f: s => ({}) },
+  rally: { mu: 1.16, loose: 0.97, f: s => ({ Fdrive: s.Fdrive * 1.3, ClA: s.ClA * 0.45, CdA: s.CdA * 0.85, h: (s.h || 0.45) + 0.07 }) },
+};
+const TUNED = new Map();
+export function xingusSpec(spec, tune = 'gt') {
+  const T = TUNES[tune] || TUNES.gt, k = spec.key + '|' + tune;
+  if (!TUNED.has(k)) TUNED.set(k, { ...spec, ...T.f(spec), mu: spec.mu * T.mu, loadSens: (spec.loadSens || 0) * 0.5, xingus: tune });
+  return TUNED.get(k);
 }
-export function xingusCar(car) {
-  car.spec = xingusSpec(car.spec);
+export function xingusCar(car, tune = 'gt') {
+  car.spec = xingusSpec(car.spec, tune);
   car.aids = { ...(car.aids || {}), tc: 0.9, abs: 0.9, sc: 0 };   // stability is this file's job now
-  car.xg = { dir: 0, flick: 0, calm: 0, lock: 0.25, beta: 0, state: 'grip', vHold: 0 };
+  car.xg = { dir: 0, flick: 0, calm: 0, lock: 0.25, beta: 0, state: 'grip', vHold: 0, loose: (TUNES[tune] || TUNES.gt).loose };
   return car;
 }
 

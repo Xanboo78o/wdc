@@ -42,6 +42,14 @@ const BAND_EVERY = 0.5;       // s between OVERTAKES band updates
 // speed per extra second, never more than down to LEASH_MIN.
 const LEASH_FROM = 2.5, LEASH_SLOPE = 0.15, LEASH_MIN = 0.62;
 const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
+// WHAT THE ROAD IS MADE OF, where a track says (`road`, per sample: the
+// Heiligen Auto Circuit's forest stages and its pass). Grip and rolling drag
+// on the road itself: tarmac, gravel, packed snow. Rivals carry ROAD_HOLD of
+// their line's speed over it — the line was solved for tarmac.
+const ROAD_MU = [1.0, 0.8, 0.62], ROAD_DRAG = [1, 1.5, 1.3], ROAD_HOLD = [1, 0.74, 0.62];
+// A JUMP (`jumps`: [{ s, kick }]): crossing the lip above JUMP_V the car is
+// thrown as hard as the lip is sharp. physics.js flies it and lands it.
+const JUMP_V = 14, JUMP_VZ = 8.5;
 // THE OPENING CORNERS: how far past the first complex the truce runs, the
 // time headway a car keeps to whoever is ahead of it while it lasts, and how
 // much of a car length two cars must overlap to count as a pair going in
@@ -131,7 +139,7 @@ export class Race {
   constructor({ track, lines, spec, slots, laps = 5, grid = 22, playerGrid = 10,
                 tier = 'medium', seed = 1, player = true, pits = true, noDnf = false, order = null,
                 battle = null, duel = true, drs = true, rules = true, standIn = false, sideLock = true, styles = true, playerTeam = null,
-                opening = true, xingus = null }) {
+                opening = true, xingus = null, xopt = {} }) {
     this.track = track; this.lines = lines; this.spec = spec;
     // STAND-IN: a bot at YOUR wheel (a harness, the home page's backdrop).
     // Racecraft then runs for your car too, so `me.ctx` carries the traffic,
@@ -151,7 +159,14 @@ export class Race {
     // XINGUS MODE (js/xingus.js): arcade handling for YOUR car. Asked for by
     // the page's address (?xingus=1, which is what the Xingus door on
     // home.html sends), or by a harness through the option.
-    this.xingus = xingus ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('xingus') === '1');
+    const XQ = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
+    this.xingus = xingus ?? XQ.get('xingus') === '1';
+    // Its STYLES (home.html, the STYLE box) are made of three switches: which
+    // tune the car wears, whether anybody else is out there at all, and
+    // whether the others have stopped being careful (the demo derby).
+    this.xcar = xopt.car ?? (XQ.get('xcar') === 'rally' ? 'rally' : 'gt');
+    this.xsolo = this.xingus && (xopt.solo ?? XQ.get('xsolo') === '1');
+    this.derby = this.xingus && (xopt.derby ?? XQ.get('xderby') === '1');
     {
       const c = track.corners || [];
       let k = 0;
@@ -183,7 +198,8 @@ export class Race {
     this.bandAt = 0;
     this.vRef = lines.race.v.reduce((a, b) => a + b, 0) / lines.race.v.length;
 
-    const n = Math.min(grid, slots.length);
+    const n = this.xsolo ? 1 : Math.min(grid, slots.length);
+    if (this.xsolo) playerGrid = 1;
     this.entries = [];
     for (let k = 0; k < n; k++) {
       const slot = slots[k];
@@ -199,7 +215,7 @@ export class Race {
       const car = makeCar({ cls: spec.key });
       const p = track.point(slot.s, slot.lat);
       car.x = p.x; car.y = p.y; car.hdg = slot.hdg; car.vx = 0.001;
-      if (this.xingus && isPlayer && !standIn) xingusCar(car);
+      if (this.xingus && isPlayer && !standIn) xingusCar(car, this.xcar);
       // WHO this is, WHAT they drive, and HOW they drive it — one table.
       const prof = driverAt(who);
       const team = teamOf(prof);
@@ -883,7 +899,7 @@ export class Race {
     const ROOM = 2.6 + 2.4 * st.space;
     let yieldTo = null;
     for (const o of this.entries) {
-      if (o === e || o.retired || o.inPit) continue;
+      if (o === e || o.retired || o.inPit || this.derby) continue;
       if (Math.abs(t.gap(o.proj.s, e.proj.s)) > 7) continue;
       const dl = o.proj.lat - e.proj.lat;   // + = they are on my left
       const keep = dl > 0 ? (o.proj.lat - ROOM) - lineOff
@@ -1051,7 +1067,8 @@ export class Race {
     // Slow, sliding or sideways on the road, the gate widens to most of the
     // road, because a car in that state can end up anywhere across it.
     {
-      const me = this.me;
+      // (not in a demo derby: there, nobody is careful round anybody)
+      const me = this.derby ? null : this.me;
       if (me && me !== e && !me.retired && me.proj) {
         const ds = t.gap(me.proj.s, e.proj.s);
         if (ds > 0 && ds < 300) {
@@ -1122,7 +1139,7 @@ export class Race {
     if (sb && sb.cap != null) speedCap = Math.min(speedCap ?? Infinity, sb.cap);
     // The cool-down lap is driven at two thirds of racing speed.
     if (e.finished) speedCap = Math.min(speedCap ?? Infinity, this.lines.race.v[i] * 0.66);
-    e.ctx = this.rc.limit(e, { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: e.hold ?? 1, obstDs, obstV });
+    e.ctx = this.rc.limit(e, { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: (e.hold ?? 1) * (e.roadHold ?? 1), obstDs, obstV });
   }
 
   // ---- one substep --------------------------------------------------------
@@ -1230,10 +1247,27 @@ export class Race {
       else if (al > pr.w + 1.2) surface = SURFACE.runoff;
       else if (al > pr.w) surface = SURFACE.kerb;
 
+      const roadCode = t.road && al <= pr.w ? t.road[pr.i] || 0 : 0;
+      if (roadCode) surface = ROAD_MU[roadCode];
+      e.roadHold = t.road ? ROAD_HOLD[roadCode] : 1;
       const xg = e.isPlayer && car.xg;                 // Xingus mode: your car only
-      if (xg) surface = xingusSurface(surface);
+      if (xg) surface = roadCode ? Math.max(surface, car.xg.loose) : xingusSurface(surface);
+      const drag = roadCode ? ROAD_DRAG[roadCode] : dragFor(surface);
+      if (t.jumps && !car.airborne && car.speed > JUMP_V && !e.inPit) {
+        for (const j of t.jumps) {
+          const d = t.gap(pr.s, j.s);
+          if (d >= 0 && d < Math.max(1.5, car.speed * dt * 1.5) && e.jumped !== j) {
+            e.jumped = j;
+            car.airborne = true; car.airTime = 0; car.z = 0.05;
+            car.vz = Math.min(JUMP_VZ, car.speed * j.kick);
+            car.pRate = -0.12 * j.kick * 10;             // a touch nose-down, as off a real lip
+            if (e.isPlayer) this.log('flag', `AIRBORNE — ${j.name || 'jump'}`, e, 'jump');
+          }
+        }
+        if (e.jumped && Math.abs(t.gap(pr.s, e.jumped.s)) > 40) e.jumped = null;
+      }
       step(car, dt, { surface, bank: pr.bank, bankDir: Math.sign(pr.curv),
-                      dirty: car.dirty, tow: car.tow, rollMul: xg ? xingusDrag(dragFor(surface)) : dragFor(surface),
+                      dirty: car.dirty, tow: car.tow, rollMul: xg ? xingusDrag(drag) : drag,
                       // gravity on slopes: main.js hands the session the surveyed
                       // gradient; the harnesses do not, so they stay flat
                       slope: this.slopeAt ? this.slopeAt(pr.s) * Math.cos(car.hdg - t.hdg[pr.i]) : 0 });
