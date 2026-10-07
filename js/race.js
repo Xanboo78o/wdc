@@ -50,6 +50,7 @@ const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
 // The formation: under a metre between cars, nose to tail and side to side
 // (it was a foot; Adam: "maybe a lil furthr apart").
 const FORM_GAP = 0.9, FORM_SIDE = (2.0 + FORM_GAP) / 2;
+const FORM_PACE = 17.9;       // m/s: 40 mph, the pace the first car out holds until the green (Adam: "like 40 mph")
 const ROAD_MU = [1.0, 0.8, 0.62], ROAD_DRAG = [1, 1.5, 1.3], ROAD_HOLD = [1, 0.74, 0.62];
 // THE OPENING CORNERS: how far past the first complex the truce runs, the
 // time headway a car keeps to whoever is ahead of it while it lasts, and how
@@ -324,9 +325,27 @@ export class Race {
     if (this.rolling) {
       this.state = 'formation';
       const sg = Math.sign(this.lane.off) || 1, per = this.lane.garages * 2;
+      const alongOf = box => ((this.lane.boxS(box) - this.lane.entryS) % track.length + track.length) % track.length;
+      // YOUR BOX IS ANYBODY'S (Adam: "release me randomly, not first, im not
+      // the main character"). You had the spare garage, which is the one by
+      // the pit exit, so you were always the first car out and the one the
+      // whole field formed up behind. You swap boxes with a rival picked at
+      // random — and again if that still leaves you nearest the exit.
+      const layer = this.entries.map((_, k) => Math.floor(k / per));
+      if (this.me && this.entries.length > 2) {
+        const rng = mulberry(seed * 613 + 29), m = this.entries.indexOf(this.me);
+        for (let tries = 0; tries < 12; tries++) {
+          const j = Math.floor(rng() * this.entries.length), o = this.entries[j];
+          if (j === m) continue;
+          [this.me.box, o.box] = [o.box, this.me.box]; [this.me.garage, o.garage] = [o.garage, this.me.garage];
+          [layer[m], layer[j]] = [layer[j], layer[m]];
+          const mine = alongOf(this.me.box) - layer[m] * 1e-3;
+          if (this.entries.some((x, k) => x !== this.me && alongOf(x.box) - layer[k] * 1e-3 > mine)) break;
+        }
+      }
       this.entries.forEach((e, k) => {
         const s = this.lane.boxS(e.box), i = track.idx(s);
-        const p = track.point(s, this.lane.off + sg * (BOX_SIDE + Math.floor(k / per) * 4.6));
+        const p = track.point(s, this.lane.off + sg * (BOX_SIDE + layer[k] * 4.6));
         e.car.x = p.x; e.car.y = p.y; e.car.hdg = track.hdg[i]; e.car.vx = 0.001; e.hint = i;
         e.inPit = true; e.pitPhase = 'service'; e.pitJobs = []; e.formK = k;
         e.formAlong = ((s - this.lane.entryS) % track.length + track.length) % track.length;   // how far down the lane its box is
@@ -1274,7 +1293,7 @@ export class Race {
     if (this.state === 'formation') {
       const lead = this.formLead;
       if (e === lead || !lead || lead.inPit) {
-        speedCap = Math.min(speedCap ?? Infinity, e === lead ? (this.formOutAt != null ? 36 : 28) : 40);
+        speedCap = Math.min(speedCap ?? Infinity, e === lead ? FORM_PACE : 40);
         if (e === lead) bias = FORM_SIDE;
       } else {
         // The line grows as they come out (his words: "the first group is just 5
@@ -1311,7 +1330,7 @@ export class Race {
         }
         // (far from its place it just drives there: the wandering is for holding station)
         const settle = Math.abs(err) < 25 ? 1 : 0;
-        speedCap = Math.min(speedCap ?? Infinity, Math.max(6, Math.min(62, lead.car.speed + (settle ? seen * gain + foot : err * 0.6))));
+        speedCap = Math.min(speedCap ?? Infinity, Math.max(6, Math.min(62, lead.car.speed + (settle ? seen * gain + foot : err > 0 ? Math.sqrt(err * 8) : err * 0.6))));   // (far back: as fast as it can still stop from, 4 m/s2)
         const sway = wheel ? Math.sin(this.time * (0.35 + h(26.651) * 0.5) + h(54.478) * 6.28) * (0.12 + h(61.725) * 0.18)
                              + Math.sin(this.time * (1.1 + h(17.31) * 0.9) + h(3.77) * 6.28) * 0.08 : 0;
         bias = col * FORM_SIDE + sway * settle;
