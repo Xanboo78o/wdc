@@ -47,6 +47,8 @@ const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
 // Heiligen Auto Circuit's forest stages and its pass). Grip and rolling drag
 // on the road itself: tarmac, gravel, packed snow. Rivals carry ROAD_HOLD of
 // their line's speed over it — the line was solved for tarmac.
+// The formation: a foot (0.3 m) between cars, nose to tail and side to side.
+const FORM_GAP = 0.3, FORM_SIDE = (2.0 + FORM_GAP) / 2;
 const ROAD_MU = [1.0, 0.8, 0.62], ROAD_DRAG = [1, 1.5, 1.3], ROAD_HOLD = [1, 0.74, 0.62];
 // THE OPENING CORNERS: how far past the first complex the truce runs, the
 // time headway a car keeps to whoever is ahead of it while it lasts, and how
@@ -334,7 +336,7 @@ export class Race {
       // instant, five cars took the one driving line together. Both ended with
       // the lane wedged solid at 8 km/h.
       this.entries.slice().sort((a, b) => b.formAlong - a.formAlong)
-        .forEach((e, r) => { e.pitTimer = 4 + Math.floor(r / 5) * 10 + (r % 5) * 2; });
+        .forEach((e, r) => { e.pitTimer = 4 + Math.floor(r / 5) * 10 + (r % 5) * 2; e.formR = r; if (!r) this.formLead = e; });
     }
     if (this.battle) {
       const B = this.battle, rng = mulberry(seed * 977 + 5);
@@ -1260,13 +1262,35 @@ export class Race {
     // The cool-down lap is driven at two thirds of racing speed.
     if (e.finished) speedCap = Math.min(speedCap ?? Infinity, this.lines.race.v[i] * 0.66);
     // A crest is a speed limit: faster than this over it and the road leaves the car.
-    // THE FORMATION LAP: the pole car at 100 km/h, everyone else up to 160 until
-    // they are on the car in front, then at its speed. No passing is asked for;
-    // the car ahead in your lane is already a braking target (obstDs / obstV).
+    // THE FORMATION: TWO WIDE AND TIGHT (Adam, 2026-10-06: "the line should be 2
+    // cars wide, and tighly packecked, like a foot between cars all ways, but
+    // dont add a speedcap, just let me manage"). The first car out sets the
+    // pace. Every rival has a PLACE behind it — row and column, in the order
+    // they came out — a foot behind the car in front and a foot from the one
+    // beside it, and drives to that place: faster when it is behind it, slower
+    // when it is ahead of it. Your place is left open for you; nothing holds
+    // you to it.
     if (this.state === 'formation') {
-      // (the "pole car" is whoever is first out of the lane: this.formLead)
-      const near = e.ahead && !e.ahead.inPit && e.aheadGapT < 1.6;
-      speedCap = Math.min(speedCap ?? Infinity, e === this.formLead ? (this.formOutAt != null ? 36 : 28) : near ? Math.max(15, e.ahead.car.speed * (e.aheadGapT < 0.9 ? 0.92 : 1)) : 45);
+      const lead = this.formLead;
+      if (e === lead || !lead || lead.inPit) {
+        speedCap = Math.min(speedCap ?? Infinity, e === lead ? (this.formOutAt != null ? 36 : 28) : 40);
+        if (e === lead) bias = FORM_SIDE;
+      } else {
+        // The line grows as they come out (his words: "the first group is just 5
+        // cars ... 2 rows and one extra on the outer side, then the next cars
+        // come and add in left to right, top to bottom"). Places fill left then
+        // right, row by row — except the fifth car, the odd one of the first
+        // five, which takes the OUTER side of row three, and the sixth fills in
+        // on its left. Left is the inside (+lat): the oval turns left.
+        const row = Math.floor(e.formR / 2), left = e.formR === 4 ? false : e.formR === 5 ? true : e.formR % 2 === 0, col = left ? 1 : -1;
+        let d = t.gap(lead.proj.s, e.proj.s);                    // metres the lead car is ahead of it
+        if (d < -40) d += t.length;                              // more than half a lap back: still behind, not ahead
+        const err = d - row * ((e.car.spec.bodyL || 4.6) + FORM_GAP);
+        speedCap = Math.min(speedCap ?? Infinity, Math.max(6, Math.min(62, lead.car.speed + err * 0.6)));
+        e.formErr = err;
+        bias = col * FORM_SIDE;
+        if (e.ahead !== this.me) { obstDs = null; obstV = null; }   // its place is the rule, not the car in front (but never into YOU)
+      }
     }
     const crest = this.crests();
     if (crest && crest[i] < 200) speedCap = Math.min(speedCap ?? Infinity, crest[i]);
@@ -1297,10 +1321,11 @@ export class Race {
       // wherever the lead car is — and it is green as the lead car crosses the
       // line at the end of it. Not before the line: at it.
       if (!this._formSaid) { this._formSaid = true; this.log('flag', 'FORMATION — FIVE CARS OUT EVERY 10 SECONDS. NO PASSING.', null, 'form'); }
-      if (!this.formLead) this.formLead = this.entries.find(e => !e.inPit && e.pitPhase === 'none') || null;
       const lead = this.formLead, L = t.length;
       const out = this.entries.every(e => e.retired || (!e.inPit && e.pitPhase === 'none'));
-      if (out && lead && this.formOutAt == null) {
+      // ...and IN LINE: every rival within 15 m of its place (yours is your business)
+      const formed = out && this.entries.every(e => e.retired || e.isPlayer || e === lead || Math.abs(e.formErr ?? 99) < 15);
+      if (formed && lead && this.formOutAt == null) {
         this.formOutAt = 0;
         this.log('flag', 'ALL OUT — ONE MORE LAP, IN LINE, NO PASSING. GREEN AT THE LINE.', null, 'form');
       }
@@ -1377,6 +1402,11 @@ export class Race {
         // has a third less cornering to ask for, which round a banked end is
         // the same thing — lift, or go up the road to the wall.
         e.stockHold = 1 - 0.1 * off;
+        // A rival's wreck on an oval is a trip to the pits, not the end of its
+        // race: the pack is the point, and 5 to 8 of 18 were retiring in five
+        // laps (wall hits out of a pack a foot apart). Past 0.55 damage its
+        // engineer calls it in (shouldPit), and that is as bad as it gets.
+        if (!e.isPlayer && racing) car.damage = Math.min(car.damage || 0, 0.7);
         if (car.xg) car.xg.gCap = 3.0 * (1 - 0.35 * off);
         // EVERYBODY STOPS ONCE, whatever the length. A rival that has not been
         // in yet comes in on its own lap of the race — spread over all of them,
@@ -1544,6 +1574,22 @@ export class Race {
       if (hit && hit.harm) { e.contacts++; this.log('crash', `${e.name} INTO THE BARRIER`, e); }
       // After the barrier, so a wall costs you speed and nothing else.
       if (xg) { car.xg.bank = pr.bank || 0; xingusStep(car, playerInput || {}, dt); }
+      // ONE PACK (an oval's stock rules; Adam: "will stay one pack and lapping
+      // and being more than 3 secs ahead should be impossible"). Nobody gets
+      // away and nobody is dropped: a car with more than 2.5 s of clear road
+      // BEHIND it is held back, harder the further it goes (at 3 s it is losing
+      // 2 m/s2), and a car more than 1.2 s off the one in front is pulled up to
+      // it. Yours too, both ways. Cars in the lane are not part of it.
+      if (this.stock && racing && !e.inPit && !e.finished && !car.airborne && car.vx > 25) {
+        const dA = e.ahead && !e.ahead.inPit ? t.gap(e.ahead.proj.s, pr.s) : 0, dB = e.behind && !e.behind.inPit ? t.gap(pr.s, e.behind.proj.s) : 0;
+        // (a car coming up to speed out of the lane is not waited for: it is pulled back up to the pack instead)
+        const gA = dA > 0 ? dA / car.vx : 0, gB = dB > 0 && e.behind.car.speed > 0.75 * car.vx ? dB / e.behind.car.speed : 0;
+        let dv = 0;
+        if (gB > 2.5) dv = -Math.min(7, (gB - 2.5) * 4) * dt;
+        // (to 285 km/h and no more: at 320 the pulled-up car could not hold the banking, and went into the wall alone)
+        else if (gA > 1.2 && car.throttle > 0.5 && car.vx < 79) dv = Math.min(4, (gA - 1.2) * 2.5) * dt;
+        if (dv) { car.vx += dv; if (car.xg) car.xg.vPrev = Math.hypot(car.vx, car.vy); }
+      }
       // The player's own contacts, handed up for the rumble and the toast. The
       // screen must not test for a hit a second time: two places deciding what
       // counts as contact is how they come to disagree.
