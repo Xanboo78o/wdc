@@ -306,7 +306,9 @@ export class Race {
     this.order();
     // RACE CONTROL (js/safetycar.js). `rules: false` is the race before it:
     // no safety car, no VSC, no flags, no red — for an A/B, and ?sc=0.
-    this.rc = new Director(this, { on: rules, rng: mulberry(seed * 7919 + 11) });
+    // Xingus has no race control at all (Adam, 2026-10-06: "remove flags and
+    // warnings and fia alerts on xingus"): no flags, no safety car, no stewards.
+    this.rc = new Director(this, { on: rules && !this.xingus, rng: mulberry(seed * 7919 + 11) });
     this.sideRng = mulberry(seed * 313 + 5);
   }
 
@@ -1249,7 +1251,18 @@ export class Race {
         }
       }
 
-      if (!racing) { car.throttle = 0; car.brake = 1; car.delta = 0; }
+      // THE START IS A REFLEX (Adam, 2026-10-06: "allow jumpstarting all modes,
+      // so its acutally about refelx"). Your car is not held on the grid any
+      // more: the lights go out when they go out, and how soon you are moving
+      // is up to your foot. Go before them and you have jumped it — which the
+      // stewards see (five seconds), except in Xingus, where there are none.
+      // The rivals are still held: they react to the lights, each in its own time.
+      const held = !racing && !(e.isPlayer && !this.standIn && this.state === 'grid');
+      if (held) { car.throttle = 0; car.brake = 1; car.delta = 0; }
+      if (!racing && !held && !e.jumped && car.speed > 1.5) {
+        e.jumped = true;
+        if (this.rc.on) { e.penalty += 5; this.log('penalty', `FIA STEWARDS: 5 SECOND TIME PENALTY FOR CAR ${e.num} (YOU) — JUMP START`, e, 'pen5'); }
+      }
 
       const pr = e.proj;
       const al = Math.abs(pr.lat);
@@ -1583,7 +1596,7 @@ export class Race {
           // Blame sits here because only the session knows the running order:
           // whoever was behind going in carries it, as in the real thing.
           const behind = t.gap(a.proj.s, b.proj.s) < 0 ? a : b;
-          if (this.time - (behind.lastBlame || -99) > 3) {
+          if (this.time - (behind.lastBlame || -99) > 3 && !this.xingus) {
             behind.lastBlame = this.time;
             behind.penalty += 5;
             const where = t.cornerAt(behind.proj.s)?.name || 'a straight';
