@@ -31,10 +31,11 @@ const D2R = Math.PI / 180;
 export const GRIP_BETA = 5 * D2R;       // the most the car slides when it is not drifting
 export const SPIN_BETA = 48 * D2R;      // the most it can ever slide
 const DRIFT_MIN = 14 * D2R, DRIFT_MAX = 40 * D2R;   // the drift's angle, shallowest to deepest
-const T_GRIP = 0.12;                   // s: how fast grip pulls the slip angle back inside its limit
+const T_GRIP = 0.05;                   // s: how fast grip pulls the slip angle back inside its limit
 const RATE_IN = 75 * D2R, RATE_OUT = 55 * D2R;      // rad/s: how fast a drift's angle winds on, and off
 const HOLD_ON = 1.6, HOLD_OFF = 7;      // m/s2 a drift may cost you: on the power, and off it
-const TURN_G = 2.7, TURN_G_FAST = 2.0;  // cornering the wheel can ask for, in g: slow, and flat out
+const TURN_G = 3.8, TURN_G_FAST = 2.6;  // cornering the wheel can ask for, in g: slow, and flat out
+const STEER_GAIN = 2.7;                 // full turning at (1/2.7)^(1/0.7) = 24% of the wheel's travel
 const SCRUB_ON = 0.4, SCRUB_OFF = 3.5;   // m/s2 a corner may cost you: on the power, and off it
 const V_MIN = 9, V_DRIFT = 15;          // m/s: below these nothing is governed / no drift starts
 const G = 9.81;
@@ -132,7 +133,7 @@ export function xingusStep(car, inp, dt) {
       // (It was 0.55-1.5 g: flooring it with the wheel hard over put the car in
       // a drift that turned LESS than not drifting. A drift at full lock now
       // turns as hard as grip does.)
-      const rWant = x.dir * Math.min(1.9, (1.25 + (TURN_G - 1.25) * into) * G / v);
+      const rWant = x.dir * Math.min(2.8, (1.25 + (TURN_G - 1.25) * Math.min(1, into * 2)) * G / v);
       // Commanded as well, and for the same reason as the angle: left to the
       // tyres the car held a left-hand drift's attitude while turning RIGHT.
       x.r = (x.r ?? car.r) + Math.max(-3 * dt, Math.min(3 * dt, rWant - (x.r ?? car.r)));
@@ -157,10 +158,14 @@ export function xingusStep(car, inp, dt) {
       // rate is the wheel's: TURN_G of cornering at town speeds, easing to
       // TURN_G_FAST flat out, reached with 65% of the wheel's travel, and the
       // tyres' scrub may not cost more than SCRUB_ON on the power.
-      const sEff = Math.sign(steer) * Math.min(1, Math.pow(Math.abs(steer), 0.75) * 1.6);   // eager off centre
+      // (Second pass, same evening: "steering is still not enough in xingus, it
+      // needs more reactiveeeeee like wayyyy moreee". The whole of the car's
+      // turning is now reached with a QUARTER of the wheel's travel, there is
+      // more of it, and it answers in a twentieth of a second.)
+      const sEff = Math.sign(steer) * Math.min(1, Math.pow(Math.abs(steer), 0.7) * STEER_GAIN);
       const aMax = (TURN_G - (TURN_G - TURN_G_FAST) * Math.max(0, Math.min(1, (v - 30) / 45))) * G;
-      const rCmd = sEff * Math.min(aMax / v, 1.9);
-      car.r += (rCmd - car.r) * Math.min(1, dt / 0.07);
+      const rCmd = sEff * Math.min(aMax / v, 2.8);
+      car.r += (rCmd - car.r) * Math.min(1, dt / 0.045);
       if (x.vPrev != null && (inp.brake || 0) < 0.1 && x.vPrev - speed < 1 && speed < x.vPrev)
         speed = Math.max(speed, x.vPrev - (SCRUB_ON + (SCRUB_OFF - SCRUB_ON) * (1 - thr)) * dt);
     }
