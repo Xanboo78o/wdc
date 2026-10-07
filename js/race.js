@@ -1282,12 +1282,13 @@ export class Race {
     }
     if (this.state === 'formation') {
       // Green when everybody is out of the lane and the pole car is on its way back to the line.
+      if (!this._formSaid) { this._formSaid = true; this.log('flag', 'FORMATION LAP — OUT OF THE PITS IN FIVES, THEN A ROLLING START', null, 'form'); }
       if (!this.formLead) this.formLead = this.entries.find(e => !e.inPit && e.pitPhase === 'none') || null;
       const lead = this.formLead, L = t.length;
       const out = this.entries.every(e => e.retired || (!e.inPit && e.pitPhase === 'none'));
       if (out && lead && lead.proj.s > L - 320 && lead.proj.s < L - 20) {
         this.state = 'green'; this.greenT = this.time;
-        this.log('flag', 'GREEN FLAG — ROLLING START');
+        this.log('flag', 'GREEN FLAG — ROLLING START. ONE PIT STOP OWED (P).', null, 'form');
         this.log('flag', 'ONE PIT STOP EACH (P) — ANY LAP YOU LIKE, BUT NO FINISH WITHOUT IT', null, 'tyres');
         for (const e of this.entries) {
           e.lapStart = this.time; e.lap = 0; e.crossed0 = false; e.pastHalf = false;

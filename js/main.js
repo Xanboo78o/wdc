@@ -996,6 +996,17 @@ function loop(now) {
   }
   // Gravity on slopes for every car in the session (race.js env.slope).
   if (state.race && !state.race.slopeAt) state.race.slopeAt = gradeAt;
+  // What the race says to YOU about a rule you owe (the joker lap, an oval's pit stop and its
+  // tyres) goes on the screen: in Xingus there is no engineer to read it out, and nothing else showed it.
+  if (state.race && state.me) {
+    // (by time, not by index: the race keeps only its last 300 events)
+    const ev = state.race.events, since = state._ruleRace === state.race ? state._ruleT : -1;
+    for (let k = ev.length - 1; k >= 0 && ev[k].t > since; k--) {
+      const x = ev[k];
+      if ((x.code === 'joker' || x.code === 'tyres' || x.code === 'form') && (x.car == null || x.car === state.me.idx)) { toast(x.text); state.msgT = 5; }
+    }
+    state._ruleT = state.race.time; state._ruleRace = state.race;
+  }
   if (!state.tape.playing && Q.has('replay') && !state._replayQ) { state._replayQ = true; replayStart(+Q.get('replay') || 15); }
   if (!state.tape.playing && hands.tapped('KeyI')) replayStart();
   if (state.tape.playing) { replayFrame(frame); hands.endFrame(); acc = 0; return; }
