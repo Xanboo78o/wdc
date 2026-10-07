@@ -150,6 +150,8 @@ export function xingusStep(car, inp, dt) {
     const target = Math.max(-GRIP_BETA, Math.min(GRIP_BETA, beta));
     beta += (target - beta) * Math.min(1, dt / T_GRIP);
     if (x.state === 'grip') {
+      beta = target;                     // in grip the limit is a limit, not a spring (it read 5.7 deg against 5)
+
       // THE WHEEL TURNS THE CAR (Adam, 2026-10-06, first drive: "i cant turn 40
       // degrees at 54 mph in this fucked up rally car"). Measured: he was right.
       // Left to the tyres, full lock at 87 km/h took over a second to turn the
