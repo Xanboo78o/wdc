@@ -13,7 +13,7 @@ import { makeCar, step, FIXED_DT, SURFACE, peakSlip, dragFor } from './physics.j
 import { makeAutopilot, makeDriver, BATTLE } from './autopilot.js';
 import { resolveBarrier, resolveCars } from './collide.js';
 import { wakeAt, newWake } from './aero.js';
-import { makeLane, shouldPit, updateStop } from './pitstop.js';
+import { makeLane, shouldPit, updateStop, BOX_SIDE } from './pitstop.js';
 // Race control — safety car, VSC, red flag, restarts, flags (2026-09-30).
 import { Director } from './safetycar.js';
 import { xingusCar, xingusStep, xingusSurface, xingusDrag } from './xingus.js';
@@ -308,6 +308,26 @@ export class Race {
       }
     }
     this.me = this.entries.find(e => e.isPlayer) || null;
+    // OUT OF THE PITS IN FIVES, A FORMATION LAP, A ROLLING START (an oval's
+    // stock rules; Adam, 2026-10-06: "make it so the cars are sent out 5 by 5
+    // from pit until all are out for formation laps, once all are out then we
+    // start with a rolling start"). Nobody is on a grid: every car starts in
+    // its pit box — the third and later cars of a garage further back in it —
+    // and the crews let them go five at a time, pole's five first. They go
+    // round behind the pole car at 100 km/h until the last one is out and the
+    // pole car is coming back to the line, and then it is green.
+    this.rolling = !!this.stock && this.pits && this.lane.len > 60 && this.lane.garages > 0
+      && xopt.rolling !== false && XQ.get('xroll') !== '0';
+    if (this.rolling) {
+      this.state = 'formation';
+      const sg = Math.sign(this.lane.off) || 1, per = this.lane.garages * 2;
+      this.entries.forEach((e, k) => {
+        const s = this.lane.boxS(e.box), i = track.idx(s);
+        const p = track.point(s, this.lane.off + sg * (BOX_SIDE + Math.floor(k / per) * 4.6));
+        e.car.x = p.x; e.car.y = p.y; e.car.hdg = track.hdg[i]; e.car.vx = 0.001; e.hint = i;
+        e.inPit = true; e.pitPhase = 'service'; e.pitJobs = []; e.pitTimer = 4 + Math.floor(k / 5) * 5; e.formK = k;
+      });
+    }
     if (this.battle) {
       const B = this.battle, rng = mulberry(seed * 977 + 5);
       for (const e of this.entries) {
@@ -807,9 +827,19 @@ export class Race {
     let pitBias = 0;
     if (pitting && this.lane) {
       const to = t.wrap(this.lane.entryS - e.proj.s);
-      const ramp = Math.max(0, Math.min(1, (350 - to) / 250));
+      // (on an oval it is down on the inside 400 m out, before it starts to slow: the pack is 0.3 s behind it)
+      const ramp = Math.max(0, Math.min(1, ((this.stock ? 650 : 350) - to) / 250));
       pitBias = (Math.sign(this.lane.off) || 1) * lim * 0.75 * ramp;
       bias += pitBias;
+    }
+    // ...and OUT of them on an oval: the lane ends 150 m before a banked turn
+    // the pack takes at 260 km/h, and a car that came back up onto the groove
+    // at 150 was the cause of every multi-car wreck measured (five cars at
+    // once, twice in six laps). It stays down on the inside until it is up to
+    // speed, as they do.
+    if (this.stock && e.rejoin && !pitting && this.lane) {
+      if (e.car.speed > 64) e.rejoin = false;
+      else { pitBias = (Math.sign(this.lane.off) || 1) * lim * 0.85; bias += pitBias; }
     }
 
     // ---- attack -------------------------------------------------------------
@@ -838,7 +868,8 @@ export class Race {
     // line on a restart — nobody attacks, and nobody defends against a car
     // that is not allowed to attack (js/safetycar.js).
     // ...and nobody races after the flag.
-    const noAtk = this.rc.noAttack(e) || e.finished || zip, noDef = this.rc.noDefend(e) || e.finished || zip;
+    const parade = this.state === 'formation';      // nobody races on the formation lap
+    const noAtk = this.rc.noAttack(e) || e.finished || zip || parade, noDef = this.rc.noDefend(e) || e.finished || zip || parade;
     if (!pitting && !noAtk && e.ahead && e.aheadGapT < reach && !e.inPit) {
       const o = e.ahead;
       const ds = t.gap(o.proj.s, e.proj.s);
@@ -1221,6 +1252,14 @@ export class Race {
     // The cool-down lap is driven at two thirds of racing speed.
     if (e.finished) speedCap = Math.min(speedCap ?? Infinity, this.lines.race.v[i] * 0.66);
     // A crest is a speed limit: faster than this over it and the road leaves the car.
+    // THE FORMATION LAP: the pole car at 100 km/h, everyone else up to 160 until
+    // they are on the car in front, then at its speed. No passing is asked for;
+    // the car ahead in your lane is already a braking target (obstDs / obstV).
+    if (this.state === 'formation') {
+      // (the "pole car" is whoever is first out of the lane: this.formLead)
+      const near = e.ahead && !e.ahead.inPit && e.aheadGapT < 1.6;
+      speedCap = Math.min(speedCap ?? Infinity, e === this.formLead ? 28 : near ? Math.max(15, e.ahead.car.speed * (e.aheadGapT < 0.9 ? 0.92 : 1)) : 45);
+    }
     const crest = this.crests();
     if (crest && crest[i] < 200) speedCap = Math.min(speedCap ?? Infinity, crest[i]);
     e.ctx = this.rc.limit(e, { offBias: bias, speedCap, lunge: yieldTo != null ? 0 : lunge, pressure, hold: (e.hold ?? 1) * (e.roadHold ?? 1), obstDs, obstV });
@@ -1241,6 +1280,23 @@ export class Race {
         for (const e of this.entries) e.lapStart = this.time;
       }
     }
+    if (this.state === 'formation') {
+      // Green when everybody is out of the lane and the pole car is on its way back to the line.
+      if (!this.formLead) this.formLead = this.entries.find(e => !e.inPit && e.pitPhase === 'none') || null;
+      const lead = this.formLead, L = t.length;
+      const out = this.entries.every(e => e.retired || (!e.inPit && e.pitPhase === 'none'));
+      if (out && lead && lead.proj.s > L - 320 && lead.proj.s < L - 20) {
+        this.state = 'green'; this.greenT = this.time;
+        this.log('flag', 'GREEN FLAG — ROLLING START');
+        this.log('flag', 'ONE PIT STOP EACH (P) — ANY LAP YOU LIKE, BUT NO FINISH WITHOUT IT', null, 'tyres');
+        for (const e of this.entries) {
+          e.lapStart = this.time; e.lap = 0; e.crossed0 = false; e.pastHalf = false;
+          e.pitStops = 0; e.stockStops = 0; e.stintM = 0; e.stockSaid = 0; e.pitRequest = false;
+          if (e.car.tyre) { e.car.tyre.wf = 0; e.car.tyre.wr = 0; }
+        }
+      }
+    }
+    const forming = this.state === 'formation';
     const racing = this.state === 'green' || this.state === 'finish';
 
     // Neighbours and racecraft change slowly compared with 400 Hz, and they are
@@ -1310,6 +1366,10 @@ export class Race {
           if (say > (e.stockSaid || 0)) { e.stockSaid = say; this.log('flag', say === 2 ? 'TYRES GONE — P TO PIT' : 'TYRES HALF GONE', e, 'tyres'); }
         }
       }
+      if (forming) {
+        updateStop(e, t, this.lane, e.proj, dt, this.peak, this.entries);
+        car.damage = 0;                                  // and nobody's race ends on it
+      }
       if (racing && (!e.finished || e.cool) && this.pits) {
         // Their engineers call it on TYRES too, not only damage: past 0.8 wear
         // with two or more laps left to use a fresh set (Adam, 2026-09-25:
@@ -1327,6 +1387,7 @@ export class Race {
           this.rc.released(e);
         }
         if (e.inPit && !wasIn) { this.log('flag', `${e.name} PITS`, e); this.rc.pitEntry(e); }
+        if (wasIn && !e.inPit) e.rejoin = true;
         // PUSHED BACK INTO THE GARAGE. A car that is staying — home after the
         // flag, or held under a red flag — cannot stay on its mark: the marks
         // are in the working lane, and the car for the next one along has to
@@ -1356,9 +1417,9 @@ export class Race {
       // is up to your foot. Go before them and you have jumped it — which the
       // stewards see (five seconds), except in Xingus, where there are none.
       // The rivals are still held: they react to the lights, each in its own time.
-      const held = !racing && !(e.isPlayer && !this.standIn && this.state === 'grid');
+      const held = !racing && !forming && !(e.isPlayer && !this.standIn && this.state === 'grid');
       if (held) { car.throttle = 0; car.brake = 1; car.delta = 0; }
-      if (!racing && !held && !e.jumped && car.speed > 1.5) {
+      if (!racing && !forming && !held && !e.jumped && car.speed > 1.5) {
         e.jumped = true;
         if (this.rc.on) { e.penalty += 5; this.log('penalty', `FIA STEWARDS: 5 SECOND TIME PENALTY FOR CAR ${e.num} (YOU) — JUMP START`, e, 'pen5'); }
       }

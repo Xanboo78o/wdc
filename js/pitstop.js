@@ -47,7 +47,7 @@ export const SERVICE = { tyres: 2.4, nose: 11.5, floor: 7.5 };
 export const BOX_PITCH = 14.4;      // metres of lane per garage
 export const MAX_BOXES = 12;        // eleven teams (2026) and a spare for you
 const MARK = 3.6;                   // a teammate's mark, either side of centre
-const BOX_SIDE = 3.3;               // metres from the fast lane's line to the box, garage side
+export const BOX_SIDE = 3.3;               // metres from the fast lane's line to the box, garage side
 
 // The lane polyline resampled to 2 m and lightly smoothed (pit.js draws on it).
 export function resampleLane(pts, step = 2) {
