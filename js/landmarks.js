@@ -1033,6 +1033,83 @@ BUILD.tempbarrier = (it, ctx) => {
   if (m) m.name = 'landmark.tempbarriers';
 };
 
+// ---- XINGUS SPEEDWAY: floodlight towers ----------------------------------------------------
+// Adam, 2026-10-06: "add lights that be bright". A mast taller than the stands
+// with a bank of lamps turned across the road. The lamps are unlit geometry at
+// full white, so they read as ON in daylight and blow out at night; the pools
+// on the tarmac are js/lamps.js's, as on every circuit.
+// list: [x, y, the lap's heading there, height]
+BUILD.floodtowers = (it, ctx) => {
+  const mast = new Builder({ color: true }), lamp = new Builder({ color: true });
+  const STEEL = [0.50, 0.52, 0.55], WHITE = [1, 1, 1];
+  for (const [x, y, h, H] of it.list) {
+    const g = gY(ctx, x, y);
+    mast.box(x, g + H / 2, Z(y), 1.3, H, 1.3, h, STEEL);
+    mast.box(x, g + H - 3.2, Z(y), 12.6, 6.8, 0.9, h, STEEL);            // the frame the lamps hang in
+    // four rows of six lamps, on both faces of the frame
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 6; c++) for (const f of [-1, 1]) {
+      const along = (c - 2.5) * 2.0, up = g + H - 5.6 + r * 1.55;
+      lamp.box(x + Math.cos(h) * along + Math.sin(h) * f * 0.55, up, Z(y + Math.sin(h) * along - Math.cos(h) * f * 0.55), 1.5, 1.15, 0.25, h, WHITE);
+    }
+  }
+  const m = put(ctx, mast, mats(ctx).metal, {});
+  if (m) m.name = 'landmark.floodtowers';
+  const l = put(ctx, lamp, new THREE.MeshBasicMaterial({ color: 0xfff6e0, toneMapped: false }), { shadow: false });
+  if (l) l.name = 'landmark.floodlamps';
+};
+
+// ---- HALLOWEEN: jack-o'-lanterns -------------------------------------------------------------
+// Adam, 2026-10-06: "add other halloween decor". Carved pumpkins, from the
+// size of a car to the size of a house, lit from inside. In October, or
+// whenever the Halloween theme is the one chosen on the home page.
+// list: [x, y, radius, the way its face looks]
+function isHalloween() {
+  if (new Date().getMonth() === 9) return true;
+  try { return JSON.parse(localStorage.getItem('wdc.menu') || '{}').theme === 'halloween'; } catch { return false; }
+}
+function pumpkinSkin() {
+  const W = 512, H = 256, mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c; };
+  const skin = mk(), glow = mk();
+  let g = skin.getContext('2d');
+  g.fillStyle = '#e8751a'; g.fillRect(0, 0, W, H);
+  for (let k = 0; k < 12; k++) {                                   // the ribs
+    const x = (k + 0.5) * W / 12, gr = g.createLinearGradient(x - W / 24, 0, x + W / 24, 0);
+    gr.addColorStop(0, 'rgba(120,45,0,0.55)'); gr.addColorStop(0.5, 'rgba(255,170,60,0.25)'); gr.addColorStop(1, 'rgba(120,45,0,0.55)');
+    g.fillStyle = gr; g.fillRect(x - W / 24, 0, W / 12, H);
+  }
+  const face = (c, fill) => {
+    c.fillStyle = fill;
+    const tri = (x, y, r, up) => { c.beginPath(); c.moveTo(x - r, y + (up ? r : -r) * 0.8); c.lineTo(x + r, y + (up ? r : -r) * 0.8); c.lineTo(x, y - (up ? r : -r) * 0.8); c.fill(); };
+    const cx = W / 2;                                               // u = 0.5 is the sphere's +x: the face
+    tri(cx - 34, 92, 17, true); tri(cx + 34, 92, 17, true); tri(cx, 128, 9, true);
+    c.beginPath(); c.moveTo(cx - 62, 150);
+    for (let k = 0; k <= 8; k++) c.lineTo(cx - 62 + k * 15.5, 150 + (k % 2 ? 16 : 0));
+    for (let k = 8; k >= 0; k--) c.lineTo(cx - 62 + k * 15.5, 176 + (k % 2 ? 14 : 0) + (k === 0 || k === 8 ? -22 : 0));
+    c.fill();
+  };
+  face(g, '#ffd23f');
+  g = glow.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, W, H); face(g, '#ffc832');
+  const tex = c => { const x = new THREE.CanvasTexture(c); x.colorSpace = THREE.SRGBColorSpace; return x; };
+  return { map: tex(skin), emissiveMap: tex(glow) };
+}
+BUILD.pumpkins = (it, ctx) => {
+  if (!isHalloween() || typeof document === 'undefined') return;
+  const mat = new THREE.MeshStandardMaterial({ ...pumpkinSkin(), emissive: 0xffffff, emissiveIntensity: 2.4, roughness: 0.62, metalness: 0 });
+  const im = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 28, 18), mat, it.list.length);
+  const o = new THREE.Object3D(), stalk = new Builder({ color: true });
+  it.list.forEach(([x, y, r, face], k) => {
+    const g = gY(ctx, x, y);
+    o.position.set(x, g + r * 0.74, Z(y));
+    o.rotation.set(0, face, 0);                                     // the face is the sphere's +x; rotation.y = sim heading
+    o.scale.set(r, r * 0.8, r);
+    o.updateMatrix(); im.setMatrixAt(k, o.matrix);
+    stalk.box(x, g + r * 1.6, Z(y), r * 0.16, r * 0.3, r * 0.16, face, [0.25, 0.36, 0.14]);
+  });
+  im.castShadow = true; im.name = 'landmark.pumpkins';
+  ctx.G.add(im);
+  put(ctx, stalk, mats(ctx).paint, { shadow: false });
+};
+
 // ---- BAKU: Government House --------------------------------------------------------------
 // The env bake has its ten storeys; what makes it Hökumət Evi from the start
 // straight is the stepped central tower rising out of the horseshoe's base.
