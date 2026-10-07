@@ -1381,7 +1381,7 @@ export class Race {
       const hit = e.inPit || e.onFork ? null : resolveBarrier(car, t, e.hint);
       if (hit && hit.harm) { e.contacts++; this.log('crash', `${e.name} INTO THE BARRIER`, e); }
       // After the barrier, so a wall costs you speed and nothing else.
-      if (xg) xingusStep(car, playerInput || {}, dt);
+      if (xg) { car.xg.bank = pr.bank || 0; xingusStep(car, playerInput || {}, dt); }
       // The player's own contacts, handed up for the rumble and the toast. The
       // screen must not test for a hit a second time: two places deciding what
       // counts as contact is how they come to disagree.

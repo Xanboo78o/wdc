@@ -34,7 +34,12 @@ const DRIFT_MIN = 14 * D2R, DRIFT_MAX = 40 * D2R;   // the drift's angle, shallo
 const T_GRIP = 0.05;                   // s: how fast grip pulls the slip angle back inside its limit
 const RATE_IN = 75 * D2R, RATE_OUT = 55 * D2R;      // rad/s: how fast a drift's angle winds on, and off
 const HOLD_ON = 1.6, HOLD_OFF = 7;      // m/s2 a drift may cost you: on the power, and off it
-const TURN_G = 3.8, TURN_G_FAST = 2.6;  // cornering the wheel can ask for, in g: slow, and flat out
+const TURN_G = 4.2, TURN_G_FAST = 3.6;  // cornering the wheel can ask for, in g: slow, and flat out
+// ...and what a banked corner adds to it, in g per ten degrees of banking, up to BANK_MAX.
+// (Adam, third pass: "no like at all speed, i cant even make the big banked one
+// without heavy brakes". Flat out the wheel could ask for 2.6 g; the Ostkurve at
+// 250 km/h needs 3.8 and the Steilwand more. A bowl is there to be taken flat.)
+const BANK_G = 1.6, BANK_MAX = 5;
 const STEER_GAIN = 2.7;                 // full turning at (1/2.7)^(1/0.7) = 24% of the wheel's travel
 const SCRUB_ON = 0.4, SCRUB_OFF = 3.5;   // m/s2 a corner may cost you: on the power, and off it
 const V_MIN = 9, V_DRIFT = 15;          // m/s: below these nothing is governed / no drift starts
@@ -133,7 +138,7 @@ export function xingusStep(car, inp, dt) {
       // (It was 0.55-1.5 g: flooring it with the wheel hard over put the car in
       // a drift that turned LESS than not drifting. A drift at full lock now
       // turns as hard as grip does.)
-      const rWant = x.dir * Math.min(2.8, (1.25 + (TURN_G - 1.25) * Math.min(1, into * 2)) * G / v);
+      const rWant = x.dir * Math.min(2.8, (1.25 + (TURN_G + Math.min(BANK_MAX, Math.abs(x.bank || 0) / 10 * BANK_G) - 1.25) * Math.min(1, into * 2)) * G / v);
       // Commanded as well, and for the same reason as the angle: left to the
       // tyres the car held a left-hand drift's attitude while turning RIGHT.
       x.r = (x.r ?? car.r) + Math.max(-3 * dt, Math.min(3 * dt, rWant - (x.r ?? car.r)));
@@ -165,7 +170,7 @@ export function xingusStep(car, inp, dt) {
       // turning is now reached with a QUARTER of the wheel's travel, there is
       // more of it, and it answers in a twentieth of a second.)
       const sEff = Math.sign(steer) * Math.min(1, Math.pow(Math.abs(steer), 0.7) * STEER_GAIN);
-      const aMax = (TURN_G - (TURN_G - TURN_G_FAST) * Math.max(0, Math.min(1, (v - 30) / 45))) * G;
+      const aMax = (TURN_G - (TURN_G - TURN_G_FAST) * Math.max(0, Math.min(1, (v - 30) / 45)) + Math.min(BANK_MAX, Math.abs(x.bank || 0) / 10 * BANK_G)) * G;
       const rCmd = sEff * Math.min(aMax / v, 2.8);
       car.r += (rCmd - car.r) * Math.min(1, dt / 0.045);
       if (x.vPrev != null && (inp.brake || 0) < 0.1 && x.vPrev - speed < 1 && speed < x.vPrev)
