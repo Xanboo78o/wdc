@@ -155,12 +155,17 @@ const track = {
   // start line with nothing behind it.
   open: !TRACK.closed,
   bbox: { x0: round(x0), y0: round(y0), x1: round(x1), y1: round(y1) },
-  x: arr(p.x), y: arr(p.y), w: arr(p.w), bank: arr(p.bank, 2),
+  // TRACK.bankFloor: an oval is banked a little even on its straights
+  x: arr(p.x), y: arr(p.y), w: arr(p.w), bank: arr(TRACK.bankFloor ? Array.from(p.bank, b => Math.max(TRACK.bankFloor, b)) : p.bank, 2),
   runL: arr(p.runL), runR: arr(p.runR),
   // The racing line is SOLVED at load by js/line.js, per car, so a baked one
   // would only be a stale copy of it.
-  line: new Array(p.n).fill(0),
+  // ...unless the drawing fixes a LANE (TRACK.lane, metres left of centre): an
+  // oval has a groove, not an apex, and the fastest geometric line there is
+  // wall to wall, which is where a pack must not be.
+  line: new Array(p.n).fill(TRACK.lane || 0),
   corners, drs, pit: null,
+  ...(TRACK.stock ? { stock: true } : {}),      // an oval: stock rules (js/race.js)
   sponsors: ['XB STUDIOS', 'FOGLAST', 'CRITTERS', 'VROOM', 'XANCOIN', 'ORBIX', 'EVERYDEATH'],
 };
 
@@ -211,7 +216,7 @@ if (TRACK.closed) {
   // level. The coarse pass that lived here (and racingLine's `init` argument
   // it fed) was the first version of the same idea and is folded into it.
   const tk = new Track(track);
-  track.line = Array.from(racingLine(tk, 0.35), v => round(v, 2));
+  track.line = TRACK.lane != null ? new Array(p.n).fill(TRACK.lane) : Array.from(racingLine(tk, 0.35), v => round(v, 2));
 }
 fs.writeFileSync(path.join(ROOT, `data/tracks/${KEY}.json`), JSON.stringify(track));
 fs.writeFileSync(path.join(ROOT, `data/elev/${KEY}.json`), JSON.stringify(elev));

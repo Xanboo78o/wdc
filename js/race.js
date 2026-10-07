@@ -189,6 +189,14 @@ export class Race {
     // finish". So wherever there is a fork the rule is ON — no switch — and a
     // car that has not taken it has not finished, however many laps it has done.
     this.jokerRule = this.detours.length > 0 && xopt.joker !== false;
+    // STOCK RULES (an oval: data/build/speedway.js sets `stock`). Adam,
+    // 2026-10-06: "a nascar track ... solely focused on overtakes and pitting".
+    // The overtakes are the tow's and the road's (24 m of it, banked). The
+    // pitting is this: a set of tyres is good for a STINT and then goes off —
+    // 0.8 worn at the end of it, which is where a rival's engineer calls the
+    // car in — and a stint is a third of the race, so any race long enough to
+    // have a middle has stops in it. Everybody's tyres, yours included.
+    this.stock = track.stock ? { stint: Math.max(3, Math.min(25, Math.round(laps / 3))) } : null;
     this.xstakes = this.xingus && (xopt.stakes ?? XQ.get('xstakes') === '1');
     {
       const c = track.corners || [];
@@ -1275,6 +1283,24 @@ export class Race {
       // Asking to pit is the DRIVER's decision, not the rulebook's — this is
       // the one line of it the session owns, and it owns it only because
       // nothing else iterates the field.
+      if (this.stock && car.tyre) {
+        if (e.stockStops !== e.pitStops) { e.stockStops = e.pitStops; e.stintM = 0; e.stockSaid = 0; }
+        if (!e.inPit) e.stintM += car.speed * dt;
+        // some sets last a third longer than others, so the stops do not all come on one lap
+        const life = this.stock.stint * t.length * (1 + 0.3 * Math.sin(e.idx * 2.4));
+        const w = Math.min(1.25, 0.8 * e.stintM / life), off = Math.pow(Math.min(1, w), 1.5);
+        car.tyre.wf = car.tyre.wr = w;
+        // What a worn set costs: corner speed. A rival carries a tenth less of
+        // it by the time the set is finished; your car (Xingus: js/xingus.js)
+        // has a third less cornering to ask for, which round a banked end is
+        // the same thing — lift, or go up the road to the wall.
+        e.stockHold = 1 - 0.1 * off;
+        if (car.xg) car.xg.gCap = 3.0 * (1 - 0.35 * off);
+        if (e.isPlayer && racing && !e.inPit) {
+          const say = w > 0.8 ? 2 : w > 0.5 ? 1 : 0;
+          if (say > (e.stockSaid || 0)) { e.stockSaid = say; this.log('flag', say === 2 ? 'TYRES GONE — P TO PIT' : 'TYRES HALF GONE', e, 'tyres'); }
+        }
+      }
       if (racing && (!e.finished || e.cool) && this.pits) {
         // Their engineers call it on TYRES too, not only damage: past 0.8 wear
         // with two or more laps left to use a fresh set (Adam, 2026-09-25:
@@ -1359,7 +1385,7 @@ export class Race {
       }
       const roadCode = onFork ? onFork.road || 1 : t.road && al <= pr.w ? t.road[pr.i] || 0 : 0;
       if (roadCode) surface = ROAD_MU[roadCode];
-      e.roadHold = (t.road ? ROAD_HOLD[roadCode] : 1) * jokerHold;
+      e.roadHold = (t.road ? ROAD_HOLD[roadCode] : 1) * jokerHold * (e.stockHold ?? 1);
       const xg = e.isPlayer && car.xg;                 // Xingus mode: your car only
       if (xg) surface = roadCode ? Math.max(surface, car.xg.loose) : xingusSurface(surface);
       const drag = roadCode ? ROAD_DRAG[roadCode] : dragFor(surface);
@@ -1413,7 +1439,8 @@ export class Race {
         } else car.vz += Math.max(-60, Math.min(60, lift)) * dt;
       }
       step(car, dt, { surface, bank: gnd.bank, bankDir: gnd.dir,
-                      dirty: car.dirty, tow: car.tow, rollMul: xg ? xingusDrag(drag) : drag,
+                      // on an oval the pack lives in each other's air: the tow is kept, the lost downforce is not
+                      dirty: this.stock ? 0 : car.dirty, tow: car.tow, rollMul: xg ? xingusDrag(drag) : drag,
                       slope: gnd.gx });
       // The barrier test asks how far this car is from the centreline, and for
       // a car in the pit lane the answer is seventeen metres — so running it

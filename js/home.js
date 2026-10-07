@@ -102,6 +102,8 @@ const X = { on: false, style: 'gt3', gears: 'manual', track: null, heil: 'heilgr
 // The Heiligen Auto Circuit is Xingus's own: one entry on the circuit row, and
 // its route is chosen on a map (the `heiligen` page).
 const HEIL = ['heiligen', 'Heiligen Auto Circuit', 'VALCORSA · 14 ROUTES'];
+// ...and so is the oval (Adam, 2026-10-06: "in xingus mode add a nascar track").
+const OVAL = ['speedway', 'Xingus Speedway', 'OVAL · DRAFT · PIT (P)'];
 try { Object.assign(X, JSON.parse(localStorage.getItem('wdc.xingus') || '{}')); } catch { /* fresh */ }
 if (!XSTYLES[X.style]) X.style = 'gt3';
 // A route key <-> the choice at each junction.
@@ -121,7 +123,7 @@ fetch('./data/build/heiligen-map.json').then(r => (r.ok ? r.json() : null)).then
 const saveX = () => { try { localStorage.setItem('wdc.xingus', JSON.stringify(X)); } catch { /* private window */ } };
 if (new Date().getMonth() === 9 && !X.boo) { S.theme = 'halloween'; X.boo = 1; saveX(); }   // it is October: Halloween, until he says otherwise
 S.modeX = X.on ? 'xingus' : S.mode; S.xStyle = X.style; S.xGears = X.gears === 'auto' ? 'auto' : 'manual';
-const xTrack = () => (X.track === 'heiligen' ? X.heil : TRACKS.some(t => t[0] === X.track) ? X.track : S.track);
+const xTrack = () => (X.track === 'heiligen' ? X.heil : X.track === OVAL[0] || TRACKS.some(t => t[0] === X.track) ? X.track : S.track);
 function xingusUrl() {
   const [, , tune, rivals, derby, stakes] = XSTYLES[X.style], grid = Math.max(2, rivals + 1);
   return `./index.html?auto=${xTrack()}:gt3&from=home&xingus=1&xcar=${tune}${rivals ? '' : '&xsolo=1'}${derby ? '&xderby=1&battle=hard' : ''}` +
@@ -316,10 +318,10 @@ const PAGES = {
   // between them). The circuit is the first row: left/right steps it, like
   // every other row. START / G goes racing from anywhere on the page.
   setup() {
-    const xOn = S.modeX === 'xingus', LIST = xOn ? [HEIL, ...TRACKS] : TRACKS;
+    const xOn = S.modeX === 'xingus', LIST = xOn ? [HEIL, OVAL, ...TRACKS] : TRACKS;
     const curId = xOn ? (X.track === 'heiligen' ? 'heiligen' : xTrack()) : S.track;
     const n = LIST.length, i = Math.max(0, LIST.findIndex(t => t[0] === curId)), t = LIST[i];
-    const step = d => { const id = LIST[(i + d + n) % n][0]; if (xOn) X.track = id; if (id !== 'heiligen') S.track = id; saveX(); show('setup', 0); say(sayFor('CIRCUIT', id)); };
+    const step = d => { const id = LIST[(i + d + n) % n][0]; if (xOn) X.track = id; if (id !== 'heiligen' && id !== OVAL[0]) S.track = id; saveX(); show('setup', 0); say(sayFor('CIRCUIT', id)); };
     const isHeil = t[0] === 'heiligen', heilRoute = isHeil && HMAP ? HMAP.routes.find(r => r.key === X.heil) : null;
     const st = STATIONS.find(x => x.id === t[0]);
     const songs = st ? st.songs.map(id => SONGS[id].name).join(' · ') : '';

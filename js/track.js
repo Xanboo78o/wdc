@@ -103,7 +103,11 @@ export class Track {
       sweep((i, j) => { if (a[j] - 2 * r > a[i]) a[i] = a[j] - 2 * r; });   // out onto the approach, at twice the rate...
       sweep((i, j) => { if (a[j] + r < a[i]) a[i] = a[j] + r; });           // ...then up from there at the rate: centred
       let v = a;
-      for (let pass = 0; pass < 24; pass++) {
+      // The rounding is long (about 25 m either side) because the END of the
+      // ramp is a crest for the outside of the road: 20 m up the banking, where
+      // the ramp stopped in 15 m the surface dropped away at 31 m/s2 under a
+      // car doing 260 km/h, and it flew into the wall.
+      for (let pass = 0; pass < 300; pass++) {
         const w = new Float32Array(n);
         for (let i = 0; i < n; i++) w[i] = (v[(i - 1 + n) % n] + 2 * v[i] + v[(i + 1) % n]) / 4;
         v = w;

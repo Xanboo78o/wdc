@@ -169,7 +169,12 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
   d.grip = d.gripOverride ?? Math.max(0.35, Math.min(1.05, d.gripFrac * d.ceiling));
   // The profile is solved at THIS driver's grip, so pace differences live in
   // the physics rather than in a speed multiplier.
-  let line = lines.at(d.T.line, d.grip);
+  // On an oval (track.stock) every driver is on the one flat-out profile: a
+  // driver's grip band is how much of a CORNER they dare use, and the banked
+  // ends are not that kind of corner — at 70% grip the solver had them braking
+  // to 206 km/h for a turn the car takes at 262.
+  const lineAt = (kind, g) => (track.stock ? lines.race : lines.at(kind, g));
+  let line = lineAt(d.T.line, d.grip);
   // Which profile is live, so the race can move a driver onto another line or
   // another grip mid-session (`d.lineKind`, `d.gripNow` — the OVERTAKES band)
   // and the solve happens once per change. Quantised to 1/400 of grip, because
@@ -253,7 +258,7 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
       if (wg < 1) g *= wg;
       if (d.gripNow != null || wingless || wg < 1) g = Math.round(g * 400) / 400;
       const key = `${kind}:${g}`;
-      if (key !== lineKey) { lineKey = key; line = lines.at(kind, g); }
+      if (key !== lineKey) { lineKey = key; line = lineAt(kind, g); }
     }
 
     // ---- mistakes: scheduled, with consequences ---------------------------
@@ -331,10 +336,15 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     // tyres are going off, you are in someone's wake.
     let mod = 1;
     const c = track.cornerAt(proj.s);
-    if (c) mod *= d.corner[c.n % d.corner.length];       // per-corner strength
+    // An oval's banked ends are flat out for everybody (track.stock, js/race.js):
+    // nobody has a weak corner there and the pack runs nose to tail in each
+    // other's air by design. What slows a car on an oval is its tyres, and the
+    // race hands that over as ctx.hold.
+    const stock = !!track.stock;
+    if (c && !stock) mod *= d.corner[c.n % d.corner.length];       // per-corner strength
     const wear = Math.max(car.tyre.wf, car.tyre.wr);
-    mod *= 1 - 0.05 * wear * d.tyreCare;
-    mod *= 1 - 0.17 * (car.dirty || 0);                  // no front wing in the wake
+    if (!stock) mod *= 1 - 0.05 * wear * d.tyreCare;
+    if (!stock) mod *= 1 - 0.17 * (car.dirty || 0);                  // no front wing in the wake
 
     const look = Math.min(60, v * 0.30);
     let need = line.v[idxAt(look)] * mod;
@@ -386,7 +396,8 @@ export function makeAutopilot(track, lines, spec, peak, opt = {}) {
     const gripNow = Math.min(car.muF ?? spec.mu, car.muR ?? spec.mu);
     const latUse = Math.min(1, Math.abs((car.gLat || 0) * 9.81)
       / Math.max(4, gripNow * (spec.m * 9.81 + 0.5 * spec.rho * v * v * spec.ClA) / spec.m));
-    const hold = Math.min(0.85, Fres / Fcap) * Math.max(0, 1 - latUse * latUse);
+    // (not on an oval's banking, where most of the cornering is the road's and the pedal stays down)
+    const hold = Math.min(stock ? 1 : 0.85, Fres / Fcap) * (stock ? 1 : Math.max(0, 1 - latUse * latUse));
     // PLAN THE STOP. Reacting to the speed error alone braked, overshot the
     // target, released, coasted, and braked again — 5 to 10 stabs per corner,
     // traced at Monza's first chicane. A driver looks at the corner and picks

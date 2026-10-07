@@ -80,6 +80,18 @@ export function bankY(table, track, i, lat) {
   if (u >= w) return 0;
   const rise = Math.abs(k);
   if (u >= -w) return (w - u) * rise;
+  // AN OVAL'S WALL STANDS AT THE TOP OF THE BANKING (track.stock): the surface
+  // carries on up at the same angle to the wall, and the earth falls away
+  // behind it. With the crest at the edge of the road instead, three metres
+  // short of the wall, a car run wide in the pack went over it, left the
+  // ground and arrived at the wall in the air (measured: 44 car-seconds
+  // airborne in a nine-lap race on a track with no hills).
+  if (track.stock) {
+    const run = (s > 0 ? track.runR[i] : track.runL[i]) || 1, top = (2 * w + run) * rise;
+    if (u >= -(w + run)) return (w - u) * rise;
+    const fall = Math.max(4, top / EMBANK), f = (u + w + run + fall) / fall;
+    return f <= 0 ? 0 : top * (f * f * (3 - 2 * f));
+  }
   // Past the outer edge of the road, fall back to grade across the run-off on
   // THAT side — the right-hand run-off for a left-hander. Smoothstep rather
   // than linear: the top of this embankment is the bit you can see from the
@@ -143,7 +155,7 @@ export function bankRoll(table, track, i, lat) {
   // is level. Only the road itself carries the full angle. Blended over the
   // last metre either side, because a car straddling the white line should not
   // snap 18 degrees the instant a wheel crosses it.
-  const edge = Math.min(w - u, u + w);
+  const edge = Math.min(w - u, u + w + (track.stock ? (s > 0 ? track.runR[i] : track.runL[i]) || 0 : 0));
   if (edge <= 0) return 0;
   const blend = Math.min(1, edge);
   return -s * Math.atan(Math.abs(k)) * blend;

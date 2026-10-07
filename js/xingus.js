@@ -183,7 +183,9 @@ export function xingusStep(car, inp, dt) {
       // more of it, and it answers in a twentieth of a second.)
       const sEff = Math.sign(steer) * Math.min(1, Math.pow(Math.abs(steer) / STEER_AT[steerLevel], 0.85));
       const aMax = (TURN_G - (TURN_G - TURN_G_FAST) * Math.max(0, Math.min(1, (v - 30) / 45)) + Math.min(BANK_MAX, Math.abs(x.bank || 0) / 10 * BANK_G)) * G;
-      const rCmd = sEff * Math.min(aMax / v, 2.8);
+      // x.gCap (g): all the cornering the tyres have left, whatever the wheel
+      // and the banking ask for. Only an oval's stock rules set it (js/race.js).
+      const rCmd = sEff * Math.min((x.gCap ? Math.min(aMax, x.gCap * G) : aMax) / v, 2.8);
       car.r += (rCmd - car.r) * Math.min(1, dt / (0.10 - 0.012 * steerLevel));
       if (x.vPrev != null && (inp.brake || 0) < 0.1 && x.vPrev - speed < 1 && speed < x.vPrev)
         speed = Math.max(speed, x.vPrev - (SCRUB_ON + (SCRUB_OFF - SCRUB_ON) * (1 - thr)) * dt);
