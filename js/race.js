@@ -47,8 +47,9 @@ const MERGE_RATE = 0.55;      // m/s a car drifts from its grid box to the line
 // Heiligen Auto Circuit's forest stages and its pass). Grip and rolling drag
 // on the road itself: tarmac, gravel, packed snow. Rivals carry ROAD_HOLD of
 // their line's speed over it — the line was solved for tarmac.
-// The formation: a foot (0.3 m) between cars, nose to tail and side to side.
-const FORM_GAP = 0.3, FORM_SIDE = (2.0 + FORM_GAP) / 2;
+// The formation: under a metre between cars, nose to tail and side to side
+// (it was a foot; Adam: "maybe a lil furthr apart").
+const FORM_GAP = 0.9, FORM_SIDE = (2.0 + FORM_GAP) / 2;
 const ROAD_MU = [1.0, 0.8, 0.62], ROAD_DRAG = [1, 1.5, 1.3], ROAD_HOLD = [1, 0.74, 0.62];
 // THE OPENING CORNERS: how far past the first complex the truce runs, the
 // time headway a car keeps to whoever is ahead of it while it lasts, and how
@@ -1286,9 +1287,34 @@ export class Race {
         let d = t.gap(lead.proj.s, e.proj.s);                    // metres the lead car is ahead of it
         if (d < -40) d += t.length;                              // more than half a lap back: still behind, not ahead
         const err = d - row * ((e.car.spec.bodyL || 4.6) + FORM_GAP);
-        speedCap = Math.min(speedCap ?? Infinity, Math.max(6, Math.min(62, lead.car.speed + err * 0.6)));
         e.formErr = err;
-        bias = col * FORM_SIDE;
+        // PEOPLE, NOT A TRAIN (Adam: "make them humaner like they have a lil
+        // stop and go to it, wobbly steering, some over correct or undercorrect
+        // either steering or speed or both or neighter"). Each driver is one of
+        // four, fixed for the race: sloppy with the pedals, sloppy with the
+        // wheel, both, or neither.
+        //   pedals: they answer where the gap WAS (0.6-1.4 s ago), and too hard
+        //           or not hard enough — which is the concertina: close up,
+        //           brake, drop back, hurry — plus a foot that wanders a little.
+        //   wheel:  the car drifts off its column and comes back, some of them
+        //           past it, at their own slow rhythm.
+        const h = (n) => { const x = Math.sin((e.idx + 1) * n) * 43758.5453; return x - Math.floor(x); };
+        const kind = Math.floor(h(12.9898) * 4), pedals = kind === 0 || kind === 2, wheel = kind === 1 || kind === 2;
+        const dtc = NEIGH_EVERY * FIXED_DT;
+        let gain = 0.6, seen = err, foot = 0;
+        if (pedals) {
+          const lag = 0.6 + h(78.233) * 0.8;
+          e.formSeen = (e.formSeen ?? err) + (err - (e.formSeen ?? err)) * Math.min(1, dtc / lag);
+          seen = e.formSeen;
+          gain = h(39.346) < 0.5 ? 1.3 : 0.28;                       // over-corrects, or under-corrects
+          foot = Math.sin(this.time * (0.5 + h(11.135) * 0.7) + h(93.989) * 6.28) * 1.6;   // m/s
+        }
+        // (far from its place it just drives there: the wandering is for holding station)
+        const settle = Math.abs(err) < 25 ? 1 : 0;
+        speedCap = Math.min(speedCap ?? Infinity, Math.max(6, Math.min(62, lead.car.speed + (settle ? seen * gain + foot : err * 0.6))));
+        const sway = wheel ? Math.sin(this.time * (0.35 + h(26.651) * 0.5) + h(54.478) * 6.28) * (0.12 + h(61.725) * 0.18)
+                             + Math.sin(this.time * (1.1 + h(17.31) * 0.9) + h(3.77) * 6.28) * 0.08 : 0;
+        bias = col * FORM_SIDE + sway * settle;
         if (e.ahead !== this.me) { obstDs = null; obstV = null; }   // its place is the rule, not the car in front (but never into YOU)
       }
     }
