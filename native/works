@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# native/works — build what has changed, then open the car editor.
+#
+#   native/works                 the car called "untitled"
+#   native/works porsche-gt      open or start data/garage/porsche-gt.json
+#   native/works porsche-gt --ref ~/Pictures/911.jpg    with a picture pinned in the corner
+#
+# Or drop a picture on the window. Every piece saves the car.
+set -e
+cd "$(dirname "$0")/.."
+make -s -C native -f works.mk
+exec native/build/xbr-works "$@"
