@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# native/play — build what has changed, then run the native game.
+# Everything after the name goes straight to it:
+#
+#   native/play                    Monza in the F1 car
+#   native/play spa gt3            any circuit in data/tracks, f1 | f4 | gt3
+#   native/play monaco f4 --auto   watch the reference driver (F1 hands it back)
+#
+# Keys are listed on screen for the first few seconds. F3 shows what the wheel
+# is sending, which is the first place to look if a pedal seems dead.
+set -e
+cd "$(dirname "$0")/.."
+make -s -C native
+exec native/build/xbr "$@"
