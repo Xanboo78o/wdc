@@ -44,6 +44,11 @@ const RECIPES = {
   },
   m720: {
     title: 'McLaren 720S GT3', klass: 'gt3', length: null,      // already in metres
+    // The driver's eyes, measured off the model's own seat (headrest top 0.955 m, seat 0.26 m left of centre).
+    // The first guess, 80% of the roof height, put them at 0.93 m: above the seat. Adam: "the cam is too high in the mclaren".
+    eye: [-0.02, 0.80, -0.26],
+    // He drives with a real wheel in his hands: the model's own must not sit in front of it.
+    skip: /Interior-SteeringWheel/,
     wheels: { by: 'node', fl: /(Wheel|Tire)-LF_/, fr: /Wheel-Front_|Tire-RF_/, rl: /(Wheel|Tire)-LR_/, rr: /Wheel-Rear_|Tire-RR_/,
               hub: { fl: /Wheel-LF_.*(Caliper|BrakePad|BrakeSteel)/, fr: /Wheel-Front_.*(Caliper|BrakePad|BrakeSteel)/, rl: /Wheel-LR_.*(Caliper|BrakePad|BrakeSteel)/, rr: /Wheel-Rear_.*(Caliper|BrakePad|BrakeSteel)/ },
               tyreMat: 'TIRE' },
