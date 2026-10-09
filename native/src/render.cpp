@@ -9,6 +9,7 @@
 #include "render.hpp"
 #include "carmesh.hpp"
 #include "dress.hpp"
+#include "props.hpp"
 
 #include <ctime>
 #include <epoxy/gl.h>
@@ -534,6 +535,8 @@ bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
   sky.upload(b);
   dress = new Dress();
   if (!dress->init(dataDir, texDir)) std::fprintf(stderr, "xbr: the photograph shaders did not build — no downloaded cars, no woods\n");
+  props = new Props();
+  if (!props->init(dataDir, texDir)) std::fprintf(stderr, "xbr: the trackside shader did not build — plain barriers\n");
   // XBR_PACK=p911 native/play ...  puts a downloaded car on the grid before there is a menu row for it
   if (const char *pk = std::getenv("XBR_PACK")) if (*pk) setCarPack(pk);
   return true;
@@ -850,6 +853,10 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
   MeshB m;
   const double KW = 1.2;
   const double hWall = track.wall == "wall" ? 1.10 : track.wall == "gravel" ? 1.00 : 0.90;
+  // The downloaded barrier (props.cpp), if it is there: then the plain one below is left out.
+  // XBR_PROPS=off puts the plain one back.
+  const char *propsEnv = std::getenv("XBR_PROPS");
+  const bool modelWall = props && !(propsEnv && std::string(propsEnv) == "off") && props->canBarrier(track.wall);
   for (int i = 0; i < segs; i++) {
     const int j = (i + 1) % n;
     auto lats = [&](int s, double L[5], double R[5]) {
@@ -887,6 +894,18 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
       else strip(A[1], A[2], B[1], B[2], RUNCOL[rt], RUNKIND[rt]);
 
       // the barrier: face, top, back
+      if (modelWall) {
+        // A rail on posts hides nothing: the ground carries on behind it for a
+        // couple of metres and then turns down, so no chord of terrain shows a gap.
+        const double back = side * 2.2;
+        double a[3], b[3], c[3], d[3], e[3], f[3];
+        P(i, A[0], 0, a); P(j, B[0], 0, b); P(j, B[0] + back, 0, c); P(i, A[0] + back, 0, d);
+        P(j, B[0] + back, -2.5, e); P(i, A[0] + back, -2.5, f);
+        const bool paved = track.wall == "wall";
+        m.flat(a, b, c, d, paved ? RUNCOL[rt] : VERGE, paved ? RUNKIND[rt] : 2);
+        m.quad(d, c, e, f, paved ? RUNCOL[rt] : VERGE, paved ? RUNKIND[rt] : 2);
+        continue;
+      }
       const bool alt = ((i / 2) & 1) != 0;
       float face[3], top[3];
       if (track.wall == "wall") { const float c0 = alt ? 0.70f : 0.63f; face[0] = c0; face[1] = c0; face[2] = c0 - 0.02f; std::memcpy(top, face, sizeof top); }
@@ -904,6 +923,25 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
       m.quad(d, c, f, e, top, wk);
       m.quad(e, f, gq, hq, face, wk);
     }
+  }
+  // The downloaded barrier and fence: the foot of the wall on each side, sample by sample.
+  if (props) {
+    std::vector<Props::Edge> edges;
+    if (modelWall) for (int side : {1, -1}) {
+      Props::Edge e;
+      e.rightSide = side < 0; e.closed = !track.open;
+      for (int i = 0; i < n; i++) {
+        const double lat = side * (track.w[i] + std::max(0.05, side > 0 ? track.runL[i] : track.runR[i]));
+        double q[3];
+        P(i, lat, 0, q);
+        e.p.push_back((float)q[0]); e.p.push_back((float)q[2]); e.p.push_back((float)-q[1]);
+        // a catch fence: all the way round a street circuit, and along the start straight of any other
+        const double s = i * track.ds, fromLine = std::min(s, track.length - s);
+        e.fenced.push_back(track.wall == "wall" || fromLine < 320 ? 1 : 0);
+      }
+      edges.push_back(std::move(e));
+    }
+    props->buildWorld(track.wall, edges);
   }
   // the gantry over the line
   {
@@ -1708,7 +1746,9 @@ void Renderer::drawWorld(const FrameIn &f) {
   const Mat4 VP = proj * view;
   static const bool noSh = std::getenv("XBR_NOSH") != nullptr;
   if (std::getenv("XBR_NOTREESH")) treeShadows = false;
+  bool shadowOnNow = false;
   if (post && !noSh && L.sun[1] / sl0(L.sun) > 0.10f && L.sunCol[0] + L.sunCol[1] + L.sunCol[2] > 0.9f) {
+    shadowOnNow = true;
     const float fl = std::sqrt((at[0] - eye[0]) * (at[0] - eye[0]) + (at[2] - eye[2]) * (at[2] - eye[2])) + 1e-6f;
     const float fwd[3] = {(at[0] - eye[0]) / fl, 0, (at[2] - eye[2]) / fl};
     renderShadow(L, eye, fwd, f.time);
@@ -1718,6 +1758,7 @@ void Renderer::drawWorld(const FrameIn &f) {
   PROF.mark(0);
   glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, shTex); glActiveTexture(GL_TEXTURE0);
   if (dress) dress->frame(VP, eye, L, f.time);
+  if (props) props->frame(VP, eye, L, shVP, shadowOnNow);
   // lamps on when it is dark, or raining hard enough that you would
   {
     const float on = std::max(L.night, L.rain > 0.3f ? 0.6f : 0.0f);
@@ -1766,6 +1807,7 @@ void Renderer::drawWorld(const FrameIn &f) {
   drawMesh(scenery, Mat4::identity());
   PROF.mark(2);
   if (dress) dress->drawWorld();
+  if (props) props->draw();
   PROF.mark(3);
 
   // The land, pushed a little AWAY in depth: where it runs level with the

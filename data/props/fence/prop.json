@@ -1,0 +1,15 @@
+{
+ "key": "fence",
+ "title": "Race Fence",
+ "author": "Franjo Badurina (https://sketchfab.com/rumesic)",
+ "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+ "source": "https://sketchfab.com/3d-models/race-fence-05ddea3908a8438d9bcf8f12428ee4d3",
+ "length": 4.5,
+ "height": 3.5031,
+ "depth": 0.9116,
+ "bend": true,
+ "cutout": true,
+ "tex": "base.png",
+ "verts": 9054,
+ "farVerts": 333
+}

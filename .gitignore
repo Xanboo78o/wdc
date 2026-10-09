@@ -3,3 +3,6 @@ node_modules/
 tools/shots/
 .env
 native/build/
+
+# raw downloads waiting to be baked (tools/bakeprop.mjs, tools/bakecar.mjs)
+inbox/

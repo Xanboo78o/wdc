@@ -226,6 +226,8 @@ class Renderer {
   void drawMesh(const GLMesh &m, const Mat4 &model, float alpha = 1);
   // photographs with their own UVs: downloaded cars, the woods, the boards (dress.cpp)
   Dress *dress = nullptr;
+  // downloaded trackside models laid along the circuit's edge: armco, concrete, fence (props.cpp)
+  class Props *props = nullptr;
   const PackCar *packCar = nullptr;
   std::string packKey;
 };

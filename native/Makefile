@@ -16,7 +16,7 @@ BUILD    := build
 SIM  := physics.cpp parts.cpp track.cpp driver.cpp collide.cpp world.cpp
 # the race layer: js/race.js and everything it imports that is pure logic
 SIM  += grid.cpp drivers.cpp pitstop.cpp xingus.cpp safetycar.cpp race.cpp weather.cpp multiclass.cpp brain.cpp
-GAME := game_main.cpp render.cpp audio.cpp bridge.cpp carmesh.cpp ui.cpp home.cpp dress.cpp fx.cpp career.cpp home_career.cpp
+GAME := game_main.cpp render.cpp audio.cpp bridge.cpp carmesh.cpp ui.cpp home.cpp dress.cpp props.cpp fx.cpp career.cpp home_career.cpp
 
 SIM_O  := $(SIM:%.cpp=$(BUILD)/%.o)
 GAME_O := $(GAME:%.cpp=$(BUILD)/%.o)
@@ -41,7 +41,15 @@ $(BUILD)/tex/livery-atlas.pam: ../data/livery/atlas.png | $(BUILD)
 	@mkdir -p $(BUILD)/tex
 	magick $< -depth 8 pam:$@
 
-all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA)
+# The downloaded trackside models' photographs (data/props/<key>/base.jpg, or
+# base.png when it has a cut-out; tools/bakeprop.mjs): props.cpp.
+PROPTEX := $(foreach d,$(wildcard ../data/props/*/prop.json),$(BUILD)/tex/prop-$(notdir $(patsubst %/,%,$(dir $(d)))).pam)
+.SECONDEXPANSION:
+$(BUILD)/tex/prop-%.pam: $$(wildcard ../data/props/$$*/base.jpg ../data/props/$$*/base.png) | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $< -colorspace sRGB -type TrueColorAlpha -depth 8 pam:$@
+
+all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA) $(PROPTEX)
 
 $(BUILD)/tex/flora-leaf.pam: ../data/flora/leaf-c.jpg ../data/flora/leaf-a.png | $(BUILD)
 	@mkdir -p $(BUILD)/tex

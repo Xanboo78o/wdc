@@ -1,0 +1,15 @@
+{
+ "key": "armco",
+ "title": "guardrail road",
+ "author": "danimow (https://sketchfab.com/danimow)",
+ "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+ "source": "https://sketchfab.com/3d-models/guardrail-road-76e85683d30c4e6ba35da370467b7aa6",
+ "length": 6.06,
+ "height": 0.9,
+ "depth": 0.3156,
+ "bend": true,
+ "cutout": false,
+ "tex": "base.jpg",
+ "verts": 3300,
+ "farVerts": 891
+}

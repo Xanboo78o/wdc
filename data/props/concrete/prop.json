@@ -1,0 +1,15 @@
+{
+ "key": "concrete",
+ "title": "Concrete Barrier 04",
+ "author": "Rocz3D (https://sketchfab.com/rocz3d)",
+ "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+ "source": "https://sketchfab.com/3d-models/concrete-barrier-04-e36894d941ae49f2a553d0a5959f743b",
+ "length": 3.5696,
+ "height": 0.9,
+ "depth": 0.6594,
+ "bend": false,
+ "cutout": false,
+ "tex": "base.jpg",
+ "verts": 2016,
+ "farVerts": 297
+}
