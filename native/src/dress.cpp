@@ -413,7 +413,14 @@ const double ROW_GAP = 5.0, PAPER_SPACING = 2.6, PAPER_GAP_MIN = 2.5, PAPER_TALL
 const double ROW_SPACING[3] = {5.2, 4.4, 3.8};
 const double SHORT_H = 2.4, TALL_H = 6.2, WALL_H = 9.0, LAYER_SHADE = 0.64;
 const double STEP = 5, SEARCH = 150, MARCH = 2, JUMP = 8, CLEAR = 1.5, HOLE = 12, FAR_CLEAR = 30, REACH = 700;
-const double CELL = 220, NEAR_TREES = 150;
+// A tree is drawn leaf by leaf only within NEAR_TREES of the eye; past that it
+// is two crossed photographs of itself. The hand-over is per TREE, in the
+// vertex shader, by the same distance on both sides, so nothing pops and
+// nothing is drawn twice. The leaf-by-leaf trees are kept in small cells
+// (TCELL) so only the handful near the car are ever sent to the card.
+// (It was 150 m by 220 m cells: every tree within 300 m, a million triangles,
+// 17.8 ms of a 56 ms frame on the UHD 620.)
+const double CELL = 220, NEAR_TREES = 70, TCELL = 56;
 // fade ids
 enum { F_ROW = 0, F_SHORT = 1, F_TALL = 2, F_PAPER1 = 3, F_PAPER2 = 4, F_PAPER3 = 5, F_BACK = 6, F_FAR = 7, F_NEVER = 8, N_FADE = 9 };
 // metres from the eye: starts to go, gone; and the share that never goes (the sparse trees)
@@ -621,7 +628,7 @@ layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNrm; layout(locatio
 layout(location=3) in vec3 aCol; layout(location=4) in vec4 aExt;
 layout(location=5) in vec4 iPos; layout(location=6) in vec4 iMore;     // instanced trees: xyz scale | yaw shade rnd fadeId
 uniform mat4 uVP; uniform vec3 uEye; uniform float uTime; uniform int uInst;
-uniform vec3 uFade[9]; uniform vec2 uFar;
+uniform vec3 uFade[9]; uniform vec2 uFar; uniform float uNear;
 out vec3 vW, vN, vU, vC; out float vFade;
 void main(){
   vec3 p = aPos, n = aNrm, pivot = aPos; float rnd = aExt.z; int id = int(aExt.y + 0.5); float shade = 1.0;
@@ -634,6 +641,11 @@ void main(){
     p = vec3(q.x * c + q.z * s, q.y, -q.x * s + q.z * c) + iPos.xyz;
     n = vec3(aNrm.x * c + aNrm.z * s, aNrm.y, -aNrm.x * s + aNrm.z * c);
     pivot = iPos.xyz; rnd = iMore.z; id = int(iMore.w + 0.5); shade = iMore.y;
+    if (distance(uEye.xz, pivot.xz) >= uNear) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }      // too far: its photograph is drawn instead
+  } else if (aExt.x > 1.5) {
+    // a far tree: two crossed photographs. Its foot is in aNrm; gone when the real tree takes over.
+    pivot = vec3(aNrm.x, aPos.y, aNrm.z); n = normalize(vec3(0.25, 0.9, 0.25));
+    if (distance(uEye.xz, pivot.xz) < uNear) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   } else if (aExt.x > 0.5) {
     // a paper tree: one flat cut-out that turns to face you
     vec3 to = uEye - aPos; to.y = 0.0; to = normalize(to);
@@ -675,7 +687,7 @@ void main(){
 
 struct CellMesh {
   std::vector<float> deco, cards;           // 16 floats a vertex
-  std::vector<float> inst[2];               // 8 floats a tree, broadleaf then conifer
+  std::vector<float> inst[2];               // 8 floats a tree, broadleaf then conifer (the small cells only)
   GLuint vao[2] = {0, 0}, vbo[2] = {0, 0}, ivao[2] = {0, 0}, ivbo[2] = {0, 0};
   int n[2] = {0, 0}, ni[2] = {0, 0};
   double cx = 0, cz = 0;
@@ -687,7 +699,8 @@ struct Woods {
   GLuint tex = 0, kitVbo[2] = {0, 0};
   int kitN[2] = {0, 0};
   Species sp[2];
-  std::map<long long, CellMesh> cells;
+  std::map<long long, CellMesh> cells, tcells;      // the wood in 220 m cells; the leaf-by-leaf trees in 56 m ones
+  std::vector<CellMesh *> order;                    // the big cells, sorted near to far each frame
   bool ok = false;
   size_t trees = 0, papers = 0;
 
@@ -699,6 +712,12 @@ struct Woods {
     const long long gx = (long long)std::floor(x / CELL), gz = (long long)std::floor(z / CELL);
     CellMesh &c = cells[gx * 100003LL + gz];
     c.cx = (gx + 0.5) * CELL; c.cz = (gz + 0.5) * CELL;
+    return c;
+  }
+  CellMesh &tcell(double x, double z) {
+    const long long gx = (long long)std::floor(x / TCELL), gz = (long long)std::floor(z / TCELL);
+    CellMesh &c = tcells[gx * 100003LL + gz];
+    c.cx = (gx + 0.5) * TCELL; c.cz = (gz + 0.5) * TCELL;
     return c;
   }
 };
@@ -909,6 +928,7 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
     for (int i = 0; i < N_FADE; i++) { far[i * 3] = 1e9f; far[i * 3 + 1] = 2e9f; far[i * 3 + 2] = 1; }
     glUniform3fv(glGetUniformLocation(floraProg, "uFade"), N_FADE, far);
     glUniform2f(glGetUniformLocation(floraProg, "uFar"), 1e9f, 2e9f);
+    glUniform1f(glGetUniformLocation(floraProg, "uNear"), 1e9f);
     // the bake keeps the leaf's own colour and its place in the crown; the sun is added when it is drawn
     glUniform3f(glGetUniformLocation(floraProg, "uSun"), 0, 1, 0);
     glUniform3f(glGetUniformLocation(floraProg, "uSunCol"), 0, 0, 0);
@@ -992,9 +1012,9 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
 
   auto tree = [&](double x, double y, bool con, double scale, double shade, int fade) {
     const double gy = world.groundY(x, y) - 0.15, yaw = rnd() * 6.2831853, r = rnd();
-    CellMesh &c = W.cell(x, -y);
+    CellMesh &c = W.cell(x, -y), &tc = W.tcell(x, -y);
     const float in[8] = {(float)x, (float)gy, (float)-y, (float)scale, (float)yaw, (float)shade, (float)r, (float)fade};
-    c.inst[con ? 1 : 0].insert(c.inst[con ? 1 : 0].end(), in, in + 8);
+    tc.inst[con ? 1 : 0].insert(tc.inst[con ? 1 : 0].end(), in, in + 8);
     // and the same tree as two crossed photographs of itself, for when it is far away
     const Species &sp = W.sp[con ? 1 : 0];
     const double Sz = sp.frame * scale, y0 = gy - 0.02 * Sz, y1 = gy + 0.98 * Sz;
@@ -1003,7 +1023,7 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
       const double a = yaw + k * 1.5707963, dx = std::cos(a) * Sz / 2, dz = std::sin(a) * Sz / 2;
       const double p[4][3] = {{x - dx, y0, -y - dz}, {x + dx, y0, -y + dz}, {x + dx, y1, -y + dz}, {x - dx, y1, -y - dz}};
       const double uu[4] = {0, 1, 1, 0}, vv[4] = {0, 0, 1, 1};
-      for (int i : {0, 1, 2, 0, 2, 3}) Woods::sv(c.cards, p[i], -dz * 0.3, 0.9, dx * 0.3, uu[i], vv[i], sp.layer, col, 0, fade, r);
+      for (int i : {0, 1, 2, 0, 2, 3}) Woods::sv(c.cards, p[i], x, 0, -y, uu[i], vv[i], sp.layer, col, 2, fade, r);
     }
     W.trees++;
   };
@@ -1204,13 +1224,17 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
     CellMesh &c = kv2.second;
     const std::vector<float> *src[2] = {&c.deco, &c.cards};
     for (int k = 0; k < 2; k++) if (!src[k]->empty()) { staticVao(c.vao[k], c.vbo[k], *src[k]); c.n[k] = (int)(src[k]->size() / 16); worldTris += (size_t)c.n[k] / 3; }
+    c.deco.clear(); c.deco.shrink_to_fit(); c.cards.clear(); c.cards.shrink_to_fit();
+    W.order.push_back(&c);
+  }
+  for (auto &kv2 : W.tcells) {
+    CellMesh &c = kv2.second;
     for (int s = 0; s < 2; s++) if (!c.inst[s].empty()) {
       glGenBuffers(1, &c.ivbo[s]); glBindBuffer(GL_ARRAY_BUFFER, c.ivbo[s]);
       glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(c.inst[s].size() * 4), c.inst[s].data(), GL_STATIC_DRAW);
       instVao(c.ivao[s], W.kitVbo[s], c.ivbo[s]);
       c.ni[s] = (int)(c.inst[s].size() / 8);
     }
-    c.deco.clear(); c.deco.shrink_to_fit(); c.cards.clear(); c.cards.shrink_to_fit();
     for (auto &v : c.inst) { v.clear(); v.shrink_to_fit(); }
   }
   glBindVertexArray(0);
@@ -1219,7 +1243,12 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
                S->key, lines, samples, W.trees, singles, W.papers, boards, W.cells.size(), W.kitN[0] / 3, W.kitN[1] / 3);
 }
 
-void Dress::drawWorld() {
+void Dress::drawWorld() { drawWoods(false); }
+// The trees as the sun sees them, for a shadow map: every tree as its two
+// photographs, and nothing else — no leaf-by-leaf trees, banners or boards.
+void Dress::drawShadow() { drawWoods(true); }
+
+void Dress::drawWoods(bool shadow) {
   if (!woods || !woods->ok) return;
   Woods &W = *woods;
   GLint was = 0;
@@ -1231,24 +1260,35 @@ void Dress::drawWorld() {
   glUniform1f(glGetUniformLocation(floraProg, "uTime"), (float)time);
   glUniform3fv(glGetUniformLocation(floraProg, "uFade"), N_FADE, &FADE[0][0]);
   glUniform2f(glGetUniformLocation(floraProg, "uFar"), FAR0, FAR1);
+  glUniform1f(glGetUniformLocation(floraProg, "uNear"), shadow ? 0.0f : (float)NEAR_TREES);
   const GLint uInst = glGetUniformLocation(floraProg, "uInst");
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D_ARRAY, W.tex);
-  const double R = CELL * 0.71;
-  for (auto &kv2 : W.cells) {
-    const CellMesh &c = kv2.second;
-    const double dx = c.cx - eye[0], dz = c.cz - eye[2], d = std::hypot(dx, dz) - R;
-    if (d > FAR1) continue;
+  // near to far, so what is in front hides what is behind before it is shaded
+  const float ex = eye[0], ez = eye[2];
+  std::sort(W.order.begin(), W.order.end(), [ex, ez](const CellMesh *a, const CellMesh *b) {
+    return (a->cx - ex) * (a->cx - ex) + (a->cz - ez) * (a->cz - ez) < (b->cx - ex) * (b->cx - ex) + (b->cz - ez) * (b->cz - ez); });
+  const double R = CELL * 0.71, TR = TCELL * 0.71;
+  auto unseen = [&](const CellMesh &c, double rad) {
     // behind the camera, or well off to one side of what it sees
     const float cw = VP.m[3] * (float)c.cx + VP.m[7] * eye[1] + VP.m[11] * (float)c.cz + VP.m[15];
     const float cxp = VP.m[0] * (float)c.cx + VP.m[4] * eye[1] + VP.m[8] * (float)c.cz + VP.m[12];
-    if (cw < -R || std::fabs(cxp) > std::fabs(cw) + R * 2.2) continue;
-    glUniform1i(uInst, 0);
-    if (c.n[0]) { glBindVertexArray(c.vao[0]); glDrawArrays(GL_TRIANGLES, 0, c.n[0]); }
-    if (d < NEAR_TREES) {
-      glUniform1i(uInst, 1);
-      for (int s = 0; s < 2; s++) if (c.ni[s]) { glBindVertexArray(c.ivao[s]); glDrawArraysInstanced(GL_TRIANGLES, 0, W.kitN[s], c.ni[s]); }
-    } else if (c.n[1]) { glBindVertexArray(c.vao[1]); glDrawArrays(GL_TRIANGLES, 0, c.n[1]); }
+    return cw < -rad || std::fabs(cxp) > std::fabs(cw) + rad * 2.2;
+  };
+  glUniform1i(uInst, 1);
+  if (!shadow) for (auto &kv2 : W.tcells) {
+    const CellMesh &c = kv2.second;
+    if (std::hypot(c.cx - eye[0], c.cz - eye[2]) - TR > NEAR_TREES || unseen(c, TR)) continue;
+    for (int s = 0; s < 2; s++) if (c.ni[s]) { glBindVertexArray(c.ivao[s]); glDrawArraysInstanced(GL_TRIANGLES, 0, W.kitN[s], c.ni[s]); }
+  }
+  glUniform1i(uInst, 0);
+  for (const CellMesh *cp : W.order) {
+    const CellMesh &c = *cp;
+    const double d = std::hypot(c.cx - eye[0], c.cz - eye[2]) - R;
+    if (d > (shadow ? 320.0 : (double)FAR1)) break;                 // sorted: everything after is further still
+    if (!shadow && unseen(c, R)) continue;
+    if (!shadow && c.n[0]) { glBindVertexArray(c.vao[0]); glDrawArrays(GL_TRIANGLES, 0, c.n[0]); }
+    if (c.n[1]) { glBindVertexArray(c.vao[1]); glDrawArrays(GL_TRIANGLES, 0, c.n[1]); }
   }
   glBindVertexArray(0);
   glUseProgram((GLuint)was);

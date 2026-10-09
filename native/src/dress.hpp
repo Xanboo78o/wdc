@@ -53,6 +53,7 @@ class Dress {
   void buildWorld(const Track &track, const World &world, const Json &env, const Line &raceLine);
   bool hasWoods() const;     // false: the photographs are missing, draw the old trees and boards
   void drawWorld();          // opaque + cut-out: call with depth test on, blend off
+  void drawShadow();         // the trees only, as crossed photographs: for a sun shadow map (set frame() to the sun's view first)
   size_t worldTris = 0;
 
  private:
@@ -67,6 +68,7 @@ class Dress {
   std::map<std::string, std::unique_ptr<PackCar>> packs;
   std::unique_ptr<Woods> woods;
   void lights(unsigned prog);
+  void drawWoods(bool shadow);
 };
 
 // What the renderer needs to know about a pack to sit a driver in it.
