@@ -46,6 +46,7 @@ struct Brain {
   // what it has decided: 0 the line, 1 a lane of its own (planLat), and whether it brakes late into the next corner
   int plan = 0;
   double planLat = 0, planAt = -9, planLate = 0, planCap = NaN;
+  double commitUntil = -9;         // a move, once begun, is seen through: until then the only question is how late to brake
   double pressT = 0;               // how long somebody has been filling the mirrors it looks in
   Entry *grudge = nullptr;         // MAD: who did this to me
   // TEMPER. Being hit or cut off fills it; time empties it. Past 1 the driver is MAD,

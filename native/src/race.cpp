@@ -248,7 +248,7 @@ Race::Race(const RaceOptions &o)
         static const bool REV = std::getenv("XBR_REVGRID") != nullptr;      // a test: the fastest start LAST, so the whole field has someone to pass
         static const bool FASTLAST = std::getenv("XBR_FASTLAST") != nullptr;      // a test: the grid as it is, and the LAST car as fast as the first
         const double r0 = nk > 1 ? (double)rk / (nk - 1) : 0, r = FASTLAST && k == n - 1 ? 0 : REV ? 1 - r0 : r0;
-        e.driver.gripFrac = base * (1 - 0.13 * std::pow(r, 1.25));
+        e.driver.gripFrac = base * (1 - 0.32 * std::pow(r, 1.25));      // 0.32: last is ~7% a lap off first (measured: lap time barely moves with grip near the ceiling, steeply far below it)
         e.driver.paceMul = NaN;
       }
     }
@@ -533,6 +533,11 @@ void Race::neighbours() {
       if (ds > 0 && ds < bestA) { bestA = ds; e.ahead = &o; e.aheadGapT = ds / std::max(e.car.speed, 12.0); }
       if (ds < 0 && -ds < bestB) { bestB = -ds; e.behind = &o; e.behindGapT = -ds / std::max(o.car.speed, 12.0); }
     }
+    // REAL: the wake here is a single-seater's — half the front downforce gone at two car lengths.
+    // A GT car makes a fraction of its grip from wings and follows another nose to tail; with the
+    // full penalty a car eight seconds a lap quicker could not stay close enough to try a move.
+    // The tow is left whole: that is how a GT car passes.
+    if (real && e.car.spec->gt) dirty *= 0.25;
     e.car.dirty = dirty; e.car.tow = tow;
   }
 }

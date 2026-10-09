@@ -264,25 +264,39 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
   const double inside = insideAhead(e.proj.s, 220);
   const bool zone = brakingZone(e.proj.s, 140);
   const double lateBy = (std::isnan(e.driver.lungeMax) ? 0.02 : e.driver.lungeMax) * (0.6 + 0.6 * e.driver.aggression) * b.dive;
-  if (ahead && ahead->ds < 70 && !noAtk) {
-    const double l = ahead->lat + BT.lane, r = ahead->lat - BT.lane;
-    const bool lOk = l <= lim, rOk = r >= -lim;
-    if (b.tier == 2) {
-      // DUMB knows one way past: the side with more road
-      if (lOk && (!rOk || lim - ahead->lat > lim + ahead->lat)) cands[nc++] = {1, l, 0};
-      else if (rOk) cands[nc++] = {1, r, 0};
-    } else {
-      if (lOk) cands[nc++] = {1, l, 0};
-      if (rOk) cands[nc++] = {1, r, 0};
-      if (zone && ahead->ds < 30) {                       // the dive: either side, brakes left late
-        if (lOk) cands[nc++] = {1, l, lateBy};
-        if (rOk) cands[nc++] = {1, r, lateBy};
+  // TRACED (Monza, a car 8 s a lap quicker stuck behind a backmarker for four laps): it chose a
+  // side of the car ahead, and as that car turned in "its side" swept across the road with it, so
+  // the attacker changed sides every second and arrived nowhere. Two things follow.
+  //  - Near a corner the lanes belong to the CORNER (its inside, its outside), not to the other car.
+  //  - A move, once begun, is seen through: for a couple of seconds the only choice is how late to brake.
+  const bool committed = b.plan == 1 && time < b.commitUntil && ahead && ahead->ds < 60 && !noAtk;
+  if (committed) {
+    nc = 0;
+    cands[nc++] = {1, b.planLat, 0};
+    if (zone && b.tier != 2) cands[nc++] = {1, b.planLat, lateBy};
+  } else {
+    if (ahead && ahead->ds < 70 && !noAtk && inside == 0) {
+      // a straight with no corner in sight: either side of the car itself
+      const double l = ahead->lat + BT.lane, r = ahead->lat - BT.lane;
+      const bool lOk = l <= lim, rOk = r >= -lim;
+      if (b.tier == 2) {
+        // DUMB knows one way past: the side with more road
+        if (lOk && (!rOk || lim - ahead->lat > lim + ahead->lat)) cands[nc++] = {1, l, 0};
+        else if (rOk) cands[nc++] = {1, r, 0};
+      } else {
+        if (lOk) cands[nc++] = {1, l, 0};
+        if (rOk) cands[nc++] = {1, r, 0};
       }
     }
-  }
-  if (b.tier != 2 && inside != 0 && ((behind && !noDef) || (ahead && !noAtk))) {
-    cands[nc++] = {1, inside * lim * 0.72, 0};            // the inside of the next corner: to take it, or to keep it
-    if (nc < 8) cands[nc++] = {1, -inside * lim * 0.72, 0};
+    if (inside != 0 && ((behind && !noDef) || (ahead && !noAtk))) {
+      const double in = inside * lim * 0.72;
+      cands[nc++] = {1, in, 0};                           // the inside of the next corner: to take it, or to keep it
+      if (b.tier != 2) cands[nc++] = {1, -in, 0};         // ...and round the outside (DUMB never thinks of it)
+      if (zone && ahead && ahead->ds < 45 && !noAtk) {    // the dive: brakes left late
+        cands[nc++] = {1, in, lateBy};
+        if (b.tier == 3) cands[nc++] = {1, -in, lateBy};  // SONNY HAYES will do it round the outside too
+      }
+    }
   }
 
   // ---- IMAGINE EACH ONE
@@ -353,6 +367,15 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
       const double end = x - o[q].ds;                     // + : I finish ahead of them
       const double w = b.grudge == seen[q].who ? 2.2 : 1;
       if (!seen[q].behind && end > L * 0.6) U += BT.passW * wAtk * w * (0.6 + 0.8 * e.driver.aggression);
+      // WHERE A MOVE LEAVES YOU is worth something even when it has not come off yet (traced: the
+      // quick car kept pulling out mid-corner for a pass it could not finish, came off the corner
+      // 25 m back, and no tow reaches that far). Level with them is most of a pass; tucked under
+      // their wing with a straight to come is the start of the next one.
+      if (!seen[q].behind && end <= L * 0.6 && seen[q].who == (ahead ? ahead->who : nullptr)) {
+        const double dl = std::fabs(o[q].lat - lat);
+        if (end > -L && dl > 1.8) U += 0.42 * BT.passW * wAtk * w;                       // alongside (0.30: 19 passes, 1.5 retired; 0.55: 30 and 2.8 — Monza, 18 cars, 8 seeds)
+        else if (dl < 1.6) U += 0.45 * BT.passW * std::clamp(1 + end / 22.0, 0.0, 1.0);   // in the tow
+      }
       if (seen[q].behind && end < -L * 0.3) U -= BT.defW * wDef * (0.5 + e.driver.defence);
       if (seen[q].behind && !noDef) U += std::clamp(end - (-seen[q].ds), -8.0, 8.0) * 0.5 * wDef * e.driver.defence;   // even keeping them further back is worth something
     }
@@ -361,6 +384,11 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
     const bool same = c.plan == b.plan && (c.plan == 0 || std::fabs(c.lat - b.planLat) < 1.2) && (c.late > 0) == (b.planLate > 0);
     if (!same) U -= (b.tier == 2 ? 0.27 : 1.0) * BT.switchC;
     if (U > bestU) { bestU = U; bestK = k; bestCap = cap; }
+  }
+  {
+    const Cand &w = cands[bestK];
+    const bool fresh = w.plan == 1 && (b.plan != 1 || std::fabs(w.lat - b.planLat) > 1.2);
+    if (fresh) b.commitUntil = time + (b.tier == 2 ? 1.6 : 2.6);
   }
   b.plan = cands[bestK].plan; b.planLat = cands[bestK].lat; b.planLate = cands[bestK].late; b.planCap = bestCap;
   {
