@@ -76,23 +76,35 @@ struct PropRun {
   PropKit *k = nullptr;
   float zoff = 0;
   GLuint vao = 0, inst = 0;
+  bool gives = false, right = false;       // a barrier the cars can bend; which side of the road
+  std::vector<float> data;                 // 13 floats a piece: P0 C P2, then how far back its start, middle and end are pushed, and its lean
+  std::vector<int> ids;                    // 3 a piece: the track samples under its start, middle and end
   struct Chunk { int first, count; float cx, cy, cz, rad; };
   std::vector<Chunk> chunks;
 };
+
+static const int PIECE = 13;        // floats a piece in the instance buffer
 
 // The piece is bent here. aPos.x runs 0..uLen along the curve iP0 -> iC -> iP2
 // (a quadratic), y is up, z is across: positive away from the road.
 static const char *PROP_VS = R"(#version 330 core
 layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNrm; layout(location=2) in vec2 aUv;
-layout(location=3) in vec3 iP0; layout(location=4) in vec3 iC; layout(location=5) in vec3 iP2;
-uniform mat4 uVP; uniform float uLen, uZoff;
+layout(location=3) in vec3 iP0; layout(location=4) in vec3 iC; layout(location=5) in vec3 iP2; layout(location=6) in vec4 iB;
+uniform mat4 uVP; uniform float uLen, uZoff, uLean;
 out vec3 vW, vN; out vec2 vU;
 void main(){
   float u = aPos.x / uLen;
   vec3 a = mix(iP0, iC, u), b = mix(iC, iP2, u);
   vec3 d = normalize(b - a);
   vec3 o = normalize(cross(d, vec3(0.0, 1.0, 0.0)));
-  vW = mix(a, b, u) + vec3(0.0, aPos.y, 0.0) + o * (aPos.z + uZoff);
+  // HIT: pushed back by iB.x at its start, .y in the middle, .z at its end (a
+  // curve through the three), and a rail leans over as it goes: iB.w is how far
+  // (1 = torn off its posts and lying down). A concrete unit only slides (uLean 0).
+  float bc = 2.0 * iB.y - 0.5 * (iB.x + iB.z);
+  float back = mix(mix(iB.x, bc, u), mix(bc, iB.z, u), u);
+  float lean = uLean * iB.w * clamp(back / max(max(iB.x, max(iB.y, iB.z)), 0.001), 0.0, 1.0);
+  float y = aPos.y * (1.0 - 0.62 * lean);
+  vW = mix(a, b, u) + vec3(0.0, y, 0.0) + o * (aPos.z + uZoff + back + aPos.y * lean * 0.85);
   vN = d * aNrm.x + vec3(0.0, aNrm.y, 0.0) + o * aNrm.z;
   vU = aUv;
   gl_Position = uVP * vec4(vW, 1.0);
@@ -192,7 +204,7 @@ bool Props::canBarrier(const std::string &wall) const {
 }
 
 // Pieces of k, end to end along e. zoff: how far behind the foot line its middle stands.
-void Props::lay(PropKit &k, const Edge &e, double zoff, bool onlyFenced) {
+void Props::lay(PropKit &k, const Edge &e, double zoff, bool onlyFenced, bool gives) {
   const int n = (int)(e.p.size() / 3);
   if (n < 2) return;
   // arc length along the edge
@@ -214,8 +226,9 @@ void Props::lay(PropKit &k, const Edge &e, double zoff, bool onlyFenced) {
     return ((seg % n) + n) % n;
   };
   auto run = std::make_unique<PropRun>();
-  run->k = &k; run->zoff = (float)zoff;
-  std::vector<float> inst;
+  run->k = &k; run->zoff = (float)zoff; run->gives = gives; run->right = e.rightSide;
+  std::vector<float> &inst = run->data;
+  const bool ided = e.sample.size() == (size_t)n;
   const int PER = 12;                                               // pieces to a chunk
   PropRun::Chunk ch{0, 0, 0, 0, 0, 0};
   double lo[3] = {1e30, 1e30, 1e30}, hi[3] = {-1e30, -1e30, -1e30};
@@ -230,7 +243,7 @@ void Props::lay(PropKit &k, const Edge &e, double zoff, bool onlyFenced) {
   for (int q = 0; q < pieces; q++) {
     double a[3], mid[3], b[3];
     const int ia = at(q * L, a);
-    at((q + 0.5) * L, mid);
+    const int im = at((q + 0.5) * L, mid);
     const int ib = at((q + 1) * L, b);
     if (onlyFenced && !(e.fenced.size() == (size_t)n && e.fenced[(size_t)ia] && e.fenced[(size_t)ib])) { close(); continue; }
     double c[3];
@@ -241,6 +254,9 @@ void Props::lay(PropKit &k, const Edge &e, double zoff, bool onlyFenced) {
     for (int t = 0; t < 3; t++) inst.push_back((float)p0[t]);
     for (int t = 0; t < 3; t++) inst.push_back((float)c[t]);
     for (int t = 0; t < 3; t++) inst.push_back((float)p2[t]);
+    for (int t = 0; t < 4; t++) inst.push_back(0.0f);
+    const int sa = ided ? e.sample[(size_t)ia] : -1, sm = ided ? e.sample[(size_t)im] : -1, sb = ided ? e.sample[(size_t)ib] : -1;
+    run->ids.push_back(e.rightSide ? sa : sb); run->ids.push_back(sm); run->ids.push_back(e.rightSide ? sb : sa);
     for (const double *p : {a, mid, b}) for (int t = 0; t < 3; t++) { lo[t] = std::min(lo[t], p[t]); hi[t] = std::max(hi[t], p[t]); }
     if (++ch.count == PER) close();
   }
@@ -255,10 +271,10 @@ void Props::lay(PropKit &k, const Edge &e, double zoff, bool onlyFenced) {
   glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, st, (void *)(6 * sizeof(float)));
   glGenBuffers(1, &run->inst);
   glBindBuffer(GL_ARRAY_BUFFER, run->inst);
-  glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(inst.size() * 4), inst.data(), GL_STATIC_DRAW);
-  for (int t = 0; t < 3; t++) {
+  glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(inst.size() * 4), inst.data(), GL_DYNAMIC_DRAW);
+  for (int t = 0; t < 4; t++) {
     glEnableVertexAttribArray((GLuint)(3 + t));
-    glVertexAttribPointer((GLuint)(3 + t), 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void *)(size_t)(t * 3 * sizeof(float)));
+    glVertexAttribPointer((GLuint)(3 + t), t == 3 ? 4 : 3, GL_FLOAT, GL_FALSE, PIECE * sizeof(float), (void *)(size_t)(t * 3 * sizeof(float)));
     glVertexAttribDivisor((GLuint)(3 + t), 1);
   }
   glBindVertexArray(0);
@@ -274,10 +290,43 @@ void Props::buildWorld(const std::string &wall, const std::vector<Edge> &edges) 
   PropKit *f = kit("fence");
   if (!b) return;
   for (const Edge &e : edges) {
-    lay(*b, e, b->depth / 2, false);                                // its road face on the line the cars hit
-    if (f) lay(*f, e, b->depth + 0.25 + f->depth / 2, true);
+    lay(*b, e, b->depth / 2, false, true);                          // its road face on the line the cars hit
+    if (f) lay(*f, e, b->depth + 1.0 + f->depth / 2, true, false);  // a metre clear: where a bent rail ends up
   }
   barrier = !runs.empty();
+  wearSeen = 0;
+}
+
+void Props::deform(const std::vector<float> bend[2], const std::vector<char> broke[2], unsigned version) {
+  if (version == wearSeen) return;
+  wearSeen = version;
+  for (auto &rp : runs) {
+    PropRun &r = *rp;
+    if (!r.gives) continue;
+    const auto &B = bend[r.right ? 1 : 0];
+    const auto &K = broke[r.right ? 1 : 0];
+    const size_t pieces = r.ids.size() / 3;
+    bool changed = false;
+    for (size_t q = 0; q < pieces; q++) {
+      float v[4] = {0, 0, 0, 0};
+      bool torn = false;
+      for (int t = 0; t < 3; t++) {
+        const int id = r.ids[q * 3 + (size_t)t];
+        if (id < 0 || (size_t)id >= B.size()) continue;
+        v[t] = B[(size_t)id];
+        torn = torn || K[(size_t)id] != 0;
+      }
+      if (!r.k->bend) v[1] = (v[0] + v[2]) / 2;                     // a concrete unit does not bend: it turns
+      const float most = std::max(v[0], std::max(v[1], v[2]));
+      v[3] = torn ? 1.0f : std::min(0.55f, most / 0.90f * 0.55f);
+      float *d = &r.data[q * PIECE + 9];
+      if (std::memcmp(d, v, sizeof v) != 0) { std::memcpy(d, v, sizeof v); changed = true; }
+    }
+    if (changed) {
+      glBindBuffer(GL_ARRAY_BUFFER, r.inst);
+      glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(r.data.size() * 4), r.data.data());
+    }
+  }
 }
 
 void Props::frame(const Mat4 &vp, const float e[3], const Look &l, const Mat4 &sv, bool so) {
@@ -319,6 +368,7 @@ void Props::draw() {
     glUniform1f(uLen, (float)k.length);
     glUniform1f(uZoff, r.zoff);
     glUniform1i(uCut, k.cutout ? 1 : 0);
+    glUniform1f(glGetUniformLocation(prog, "uLean"), k.bend && r.gives ? 1.0f : 0.0f);
     glBindVertexArray(r.vao);
     glBindBuffer(GL_ARRAY_BUFFER, r.inst);
     for (const auto &c : r.chunks) {
@@ -331,8 +381,8 @@ void Props::draw() {
       if (cw < -c.rad || std::fabs(cxp) > std::fabs(cw) + c.rad * 2.2f) continue;
       const int nv = d < NEAR ? k.verts : k.farVerts;
       // (GL 3.3 has no base instance: point the three per-piece attributes at this chunk's first piece)
-      for (int t = 0; t < 3; t++)
-        glVertexAttribPointer((GLuint)(3 + t), 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void *)(size_t)((c.first * 9 + t * 3) * sizeof(float)));
+      for (int t = 0; t < 4; t++)
+        glVertexAttribPointer((GLuint)(3 + t), t == 3 ? 4 : 3, GL_FLOAT, GL_FALSE, PIECE * sizeof(float), (void *)(size_t)((c.first * PIECE + t * 3) * sizeof(float)));
       glDrawArraysInstanced(GL_TRIANGLES, 0, nv, c.count);
       tris += (size_t)(nv / 3) * (size_t)c.count;
     }

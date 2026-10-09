@@ -292,6 +292,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     S.driver = makeDriver(1, pilotTier, S.track.corners.empty() ? 24 : (int)S.track.corners.size());
     S.pilot = std::make_unique<Autopilot>(S.track, *S.lines, *S.spec, peakSlip(*S.spec), &S.driver);
   }
+  barrierWear().reset(S.track.n);      // new session, straight barriers (collide.hpp: the game's walls give)
   R.buildWorld(S.track, *S.world, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"),
                S.lines->race);
   R.buildCar(*S.spec);
@@ -921,6 +922,10 @@ int main(int argc, char **argv) {
     drawAll(f);
     glFinish();
     const bool ok = R.writePPM(shot);
+    // what the barriers took, for a crash photograph (XBR_FXCRASH)
+    { const BarrierWear &bw = barrierWear(); float most = 0; int bent = 0, torn = 0;
+      for (int k = 0; k < 2; k++) for (size_t i = 0; i < bw.bend[k].size(); i++) { most = std::max(most, bw.bend[k][i]); bent += bw.bend[k][i] > 0.02f; torn += bw.broke[k][i] != 0; }
+      if (bent) std::fprintf(stderr, "xbr: barriers: %d m bent, deepest %.2f m, %d m torn off its posts\n", bent * 2, most, torn * 2); }
     std::fprintf(stderr, "xbr: %s %s  (t=%.1fs, %.0f km/h, lap %d)\n", ok ? "wrote" : "FAILED to write", shot.c_str(), spool,
                  S.car->speed * 3.6, S.lap);
     return ok ? 0 : 1;

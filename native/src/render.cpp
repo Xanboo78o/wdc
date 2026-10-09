@@ -10,6 +10,7 @@
 #include "carmesh.hpp"
 #include "dress.hpp"
 #include "props.hpp"
+#include "collide.hpp"
 
 #include <ctime>
 #include <epoxy/gl.h>
@@ -946,6 +947,7 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
   // The downloaded barrier and fence: the foot of the wall on each side, sample by sample.
   if (props) {
     std::vector<Props::Edge> edges;
+    int folded = 0;
     if (modelWall) for (int side : {1, -1}) {
       Props::Edge e;
       e.rightSide = side < 0; e.closed = !track.open;
@@ -953,6 +955,16 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
         const double lat = side * (track.w[i] + std::max(0.05, side > 0 ? track.runL[i] : track.runR[i]));
         double q[3];
         P(i, lat, 0, q);
+        // THE FOLD. On the inside of a corner tighter than its own run-off, the
+        // edge drawn sample by sample doubles back through itself: a loop of
+        // rail standing on ground the physics calls open (collide.cpp's wall is
+        // "further from the road than its run-off", which has no loops). So a
+        // foot that is NEARER some other part of the road than its own run-off
+        // is not on the wall at all and is left out; the rail joins the points
+        // either side of it. That was the tangle at Monza's Rettifilo.
+        const Proj pj = track.project(q[0], q[1], i, 110);
+        if (std::fabs(pj.lat) < std::fabs(lat) - 0.35) { folded++; continue; }
+        e.sample.push_back(i);
         e.p.push_back((float)q[0]); e.p.push_back((float)q[2]); e.p.push_back((float)-q[1]);
         // a catch fence: all the way round a street circuit, and along the start straight of any other
         const double s = i * track.ds, fromLine = std::min(s, track.length - s);
@@ -961,6 +973,7 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
       edges.push_back(std::move(e));
     }
     props->buildWorld(track.wall, edges);
+    if (folded) std::fprintf(stderr, "props: %s — %d m of barrier line folded over itself on the inside of tight corners, left out\n", track.key.c_str(), folded * 2);
   }
   // the gantry over the line
   {
@@ -1834,7 +1847,7 @@ void Renderer::drawWorld(const FrameIn &f) {
   drawMesh(scenery, Mat4::identity());
   PROF.mark(2);
   if (dress) dress->drawWorld();
-  if (props) props->draw();
+  if (props) { const BarrierWear &bw = barrierWear(); if (bw.on) props->deform(bw.bend, bw.broke, bw.version); props->draw(); }
   PROF.mark(3);
 
   // The land, pushed a little AWAY in depth: where it runs level with the

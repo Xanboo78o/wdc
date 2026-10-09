@@ -220,7 +220,12 @@ CarHit resolveCars(Car &a, Car &b, double restitution) {
   return out;
 }
 
+BarrierWear &barrierWear() { static BarrierWear w; return w; }
+
 Hit resolveBarrier(Car &car, const Track &track, int hint) {
+  BarrierWear &wear = barrierWear();
+  const bool gives = wear.on && (int)wear.bend[0].size() == track.n;
+  int wI = 0;
   const Spec &S = *car.spec;
   const double hl = S.bodyL * 0.5, hw = S.bodyW * 0.5;
   const double cs0 = std::cos(car.hdg), sn0 = std::sin(car.hdg);
@@ -231,9 +236,10 @@ Hit resolveBarrier(Car &car, const Track &track, int hint) {
   for (const auto &c : local) {
     const double cx = car.x + c[0] * cs0 - c[1] * sn0, cy = car.y + c[0] * sn0 + c[1] * cs0;
     const Proj p = hint < 0 ? track.project(cx, cy) : track.project(cx, cy, hint, 8);
-    const double depth = std::fabs(p.lat) - (p.w + p.run);
+    double depth = std::fabs(p.lat) - (p.w + p.run);
+    if (gives) depth -= wear.bend[p.lat > 0 ? 0 : 1][(size_t)p.i];        // the wall is where the rail has been pushed to
     if (depth > 0 && (!any || depth > wDepth)) {
-      any = true;
+      any = true; wI = p.i;
       wDepth = depth; wSgn = sign(p.lat) != 0 ? sign(p.lat) : 1; wHdg = p.hdg; wLx = c[0]; wLy = c[1];
     }
   }
@@ -264,7 +270,30 @@ Hit resolveBarrier(Car &car, const Track &track, int hint) {
   hit.depth = wDepth; hit.closing = -vn; hit.part = region(wLx, wLy, S);
 
   if (vn < 0) {
-    const double e = bounceFor(track.wall);
+    double e = bounceFor(track.wall);
+    if (gives) {
+      // THE BARRIER GIVES (Adam: "make them bend or break on collisions strong
+      // enough, and bends do not give bounce bc the impact is absorbed in the
+      // bend"). Hit hard enough and the rail is pushed back: the car keeps a
+      // third of its speed INTO the barrier and rides it back to where the
+      // steel stops, and there it is simply stopped. Nothing is thrown back.
+      // A rail already bent has no spring left in it either.
+      const bool concrete = track.wall == "wall";
+      const double THR = concrete ? 8.0 : 4.5, CAP = concrete ? 0.45 : 0.90, PER = concrete ? 0.020 : 0.040, TEAR = concrete ? 1e9 : 19.0;
+      const int side = wSgn > 0 ? 0 : 1, n = track.n;
+      auto at = [&](int k) -> float & { return wear.bend[side][(size_t)(((wI + k) % n + n) % n)]; };
+      const double closing = -vn, had = at(0);
+      if (had > 0.02) e = concrete ? 0.08 : 0.0;
+      if (closing > THR && had < CAP - 1e-3) {
+        const double add = std::min(CAP - had, (closing - THR) * PER + 0.05);
+        // a dent is a few metres wide: full where it was hit, less to either side
+        const double share[5] = {0.25, 0.65, 1.0, 0.65, 0.25};
+        for (int k = -2; k <= 2; k++) at(k) = (float)std::min(CAP, std::max((double)at(k), had * share[k + 2] + add * share[k + 2]));
+        if (closing > TEAR) for (int k = -1; k <= 1; k++) wear.broke[side][(size_t)(((wI + k) % n + n) % n)] = 1;
+        wear.version++;
+        e = -0.35;                                             // 35% of the closing speed carries on into the bend
+      }
+    }
     const double rn = rx * ny - ry * nx;
     const double inv = 1 / S.m + (rn * rn) / S.Izz;
     const double j = -(1 + e) * vn / inv;
