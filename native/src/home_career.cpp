@@ -19,7 +19,9 @@ namespace xbr {
 namespace {
 
 const int A = Renderer::ANTON, RB = Renderer::RUBIK, MK = Renderer::MARKER;
-const Rgba BRONZE = hex("#c9803a"), SILVER = hex("#c9ced6"), GOLD = hex("#f5c542"), MOON = hex("#efe6c8"), NIGHT = hex("#07050b");
+const Rgba BRONZE = hex("#c9803a"), SILVER = hex("#c9ced6"), GOLD = hex("#f5c542"), MOON = hex("#efe6c8");
+// the hard shadow under a card: black in the night paddock, a soft deeper blue in the pro look
+static inline Rgba NIGHTC() { return STYLE_PRO ? alpha_(hex("#081d45"), 0.55f) : hex("#07050b"); }
 
 std::string upper(std::string s) { for (char &c : s) c = (char)std::toupper((unsigned char)c); return s; }
 std::string lapText(double s) {
@@ -78,6 +80,7 @@ struct Pen {
 
 // ---- a little Halloween, drawn small ------------------------------------------------------
 void pumpkin(const Pen &P, float cx, float cy, float s) {
+  if (STYLE_PRO) return;                     // the pro menus carry no props
   const Rgba OR = hex("#ff7a14"), DK = hex("#a8440a"), GL = hex("#ffe14d"), ST = hex("#3d6b1f");
   P.rect(cx - s * 0.04f, cy - s * 0.48f, s * 0.1f, s * 0.2f, ST);
   P.rr(cx - s * 0.42f, cy - s * 0.30f, s * 0.84f, s * 0.70f, s * 0.33f, DK);
@@ -87,6 +90,7 @@ void pumpkin(const Pen &P, float cx, float cy, float s) {
   P.rr(cx - s * 0.24f, cy + s * 0.12f, s * 0.48f, s * 0.10f, s * 0.05f, GL);
 }
 void moon(const Pen &P, float cx, float cy, float r) {
+  if (STYLE_PRO) return;                     // the pro menus carry no props
   P.circle(cx, cy, r * 1.9f, alpha_(MOON, 0.04f));
   P.circle(cx, cy, r * 1.45f, alpha_(MOON, 0.06f));
   P.circle(cx, cy, r * 1.15f, alpha_(MOON, 0.10f));
@@ -98,8 +102,9 @@ void moon(const Pen &P, float cx, float cy, float r) {
   P.circle(cx + r * 0.22f, cy - r * 0.50f, r * 0.08f, cr);
 }
 void bat(const Pen &P, float cx, float cy, float s, double clock, float phase) {
+  if (STYLE_PRO) return;                     // the pro menus carry no props
   const float f = (float)std::sin(clock * 5.0 + phase), up = s * 0.45f * f;
-  const Rgba c = NIGHT;
+  const Rgba c = NIGHTC();
   for (float d : {-1.0f, 1.0f}) {
     P.poly({cx, cy - s * 0.10f, cx + d * s * 0.55f, cy - s * 0.30f - up * 0.5f, cx + d * s * 0.50f, cy + s * 0.10f - up * 0.3f, cx, cy + s * 0.14f}, c);
     P.poly({cx + d * s * 0.50f, cy + s * 0.10f - up * 0.3f, cx + d * s * 0.55f, cy - s * 0.30f - up * 0.5f, cx + d * s * 1.05f, cy - s * 0.12f - up}, c);
@@ -109,6 +114,7 @@ void bat(const Pen &P, float cx, float cy, float s, double clock, float phase) {
 }
 // a cobweb in the top-right corner, and whoever lives in it
 void cobweb(const Pen &P, float size, double clock) {
+  if (STYLE_PRO) return;                     // the pro menus carry no props
   const Rgba c = alpha_(INK, 0.30f);
   const float ox = P.W, oy = 0;
   const int N = 5;
@@ -125,9 +131,9 @@ void cobweb(const Pen &P, float size, double clock) {
   // the spider: on a thread, going up and down very slowly, in no hurry
   const float sx = ox - size * 0.52f, len = size * (0.62f + 0.10f * (float)std::sin(clock * 0.45));
   P.path({sx, 0, sx, len}, 1.0f, c);
-  P.circle(sx, len + 5, 5, NIGHT);
-  P.circle(sx, len - 1, 3, NIGHT);
-  for (float d : {-1.0f, 1.0f}) for (int q = 0; q < 3; q++) P.path({sx, len + 3 + q * 2.0f, sx + d * 9, len - 2 + q * 5.0f}, 1.0f, NIGHT);
+  P.circle(sx, len + 5, 5, NIGHTC());
+  P.circle(sx, len - 1, 3, NIGHTC());
+  for (float d : {-1.0f, 1.0f}) for (int q = 0; q < 3; q++) P.path({sx, len + 3 + q * 2.0f, sx + d * 9, len - 2 + q * 5.0f}, 1.0f, NIGHTC());
 }
 void medalDisc(const Pen &P, float cx, float cy, float r, int medal, bool lit) {
   const Rgba c = medal == 3 ? GOLD : medal == 2 ? SILVER : BRONZE;
@@ -294,12 +300,21 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
   // ---- top bar: the name of the game, and what day it is
   {
     const float tw = P.width(30, "CHASING ", A, 0.03f) + P.width(30, "WDC", A, 0.03f), lw = 16 + 30 + 10 + tw + 16;
+    if (STYLE_PRO) {
+      // the pro menus: the mark, plainly, on a bar of the page's own colour
+      P.rect(0, 0, W, 6, RED);
+      P.rr(24, 20, lw, 58, 3, alpha_(PAPER, 0.92f));
+      const float w1 = P.text(24 + 18, 27, 30, "CHASING ", INK, LEFT, A, 0.03f);
+      P.text(24 + 18 + w1, 27, 30, "WDC", RED, LEFT, A, 0.03f);
+      P.text(24 + 18, 60, 10, "RACING FOR ALL", SOFT, LEFT, RB, 0.2f);
+    } else {
     P.rr(24, 20, lw, 58, 12, INK);
     pumpkin(P, 24 + 16 + 15, 20 + 29, 34);
     const float x = 24 + 16 + 40;
     const float w1 = P.text(x, 27, 30, "CHASING ", PAPER, LEFT, A, 0.03f);
     P.text(x + w1, 27, 30, "WDC", hex("#d9530a"), LEFT, A, 0.03f);
     P.text(x, 60, 10, "RACING FOR ALL", alpha_(PAPER, 0.7f), LEFT, RB, 0.2f);
+    }
     float cx = 24 + lw + 12;
     auto chip = [&](const std::string &small, const std::string &big, const Rgba &bg, const Rgba &fg, const Rgba &sm) {
       const float w = std::max(P.width(9, small, RB, 0.16f), P.width(19, big, A, 0.03f)) + 26;
@@ -315,7 +330,7 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
     std::tm today = lt; today.tm_hour = today.tm_min = today.tm_sec = 0;
     const int day = (int)std::floor(std::difftime(std::mktime(&today), std::mktime(&d0)) / 86400.0 + 0.5) + 1;
     if (day >= 1) chip("CHASING THE WDC", "DAY " + std::to_string(day), YELL, hex("#121212"), hex("#3d5210"));
-    if (lt.tm_mon == 9) { const int left = 31 - lt.tm_mday; chip("HALLOWEEN", left == 0 ? "TONIGHT" : std::to_string(left) + " NIGHT" + (left == 1 ? "" : "S"), CARD, INK, SOFT); }
+    if (lt.tm_mon == 9 && !STYLE_PRO) { const int left = 31 - lt.tm_mday; chip("HALLOWEEN", left == 0 ? "TONIGHT" : std::to_string(left) + " NIGHT" + (left == 1 ? "" : "S"), CARD, INK, SOFT); }
   }
 
   const EventDef *nx = career.next();
@@ -331,7 +346,7 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
     const float x = on ? 36 : 24, w = 430, h = 138;
     hot(24, y, w + 12, h, 0);
     P.rot(x + w / 2, y + h / 2, -2);
-    P.rr(x + 7, y + 9, w, h, 18, on ? INK : NIGHT);
+    P.rr(x + 7, y + 9, w, h, 18, on ? INK : NIGHTC());
     P.card(x, y, w, h, 18, 3, RED, INK);
     P.text(x + 24, y + 12, 70, "CAREER", ONRED, LEFT, A, 0.03f);
     if (nx) {
@@ -360,7 +375,7 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
       const float x = on ? 42 : 24, h = 66;
       hot(24, y, b.w + 18, h, 1 + i);
       P.rot(x + b.w / 2, y + h / 2, b.deg);
-      P.rr(x + 5, y + 7, b.w, h, 14, on ? RED : NIGHT);
+      P.rr(x + 5, y + 7, b.w, h, 14, on ? RED : NIGHTC());
       P.card(x, y, b.w, h, 14, 2.5f, on ? INK : CARD, INK);
       const float lw = P.text(x + 20, y + 13, 38, b.label, on ? PAPER : INK, LEFT, A, 0.03f);
       if (!b.sub.empty()) P.text(x + b.w - 18, y + 29, 10, P.fit(10, b.sub, RB, 0.12f, b.w - lw - 56), on ? alpha_(PAPER, 0.7f) : SOFT, RIGHT, RB, 0.12f);
@@ -375,7 +390,7 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
     const float pw = 392, ph = 536, px = W - 30 - pw, py = 112;
     hot(px, py, pw, ph, 6);
     P.rot(px + pw / 2, py + ph / 2, 1.4f);
-    P.rr(px + 7, py + 9, pw, ph, 16, on ? RED : NIGHT);
+    P.rr(px + 7, py + 9, pw, ph, 16, on ? RED : NIGHTC());
     P.card(px, py, pw, ph, 16, 3, CARD, INK);
     const float x0 = px + 22, iw = pw - 44;
     if (nx) {
@@ -441,15 +456,17 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
   // ---- the voice, and the strip along the bottom
   {
     const float bw = std::min(560.0f, P.width(18, sayText, MK) + 32), bx = 24, by = H - 38 - 22 - 38;
+    if (!STYLE_PRO) {                            // the pro menus do not talk to you
     P.rot(bx + bw / 2, by + 19, -1.2f);
     P.card(bx, by, bw, 38, 15, 2.5f, CARD, INK);
     P.text(bx + 16, by + 9, 18, P.fit(18, sayText, MK, 0, bw - 30), INK, LEFT, MK);
     P.unrot();
-    P.text(W - 30, H - 38 - 20, 9, "ARROWS  -  ENTER  -  G = TONIGHT'S EVENT  -  ESC LEAVES", alpha_(INK, 0.55f), RIGHT, RB, 0.16f);
+    }
+    P.text(W - 30, STYLE_PRO ? H - 26 : H - 38 - 20, 9, "ARROWS  -  ENTER  -  G = TONIGHT'S EVENT  -  ESC LEAVES", alpha_(INK, 0.55f), RIGHT, RB, 0.16f);
   }
-  {
+  if (!STYLE_PRO) {                              // ...and carry no ticker
     const float th = 38, ty = H - th;
-    P.rect(0, ty, W, th, alpha_(NIGHT, 0.94f));
+    P.rect(0, ty, W, th, alpha_(NIGHTC(), 0.94f));
     P.rect(0, ty, W, 2, RED);
     // the ticker: slow, in order, for ever
     const float sep = 56, speed = 34;
@@ -466,7 +483,7 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
         x += ws[i] + sep;
       }
     const float cw = P.width(15, "PADDOCK RADIO", A, 0.06f) + 34;
-    P.rect(0, ty, cw + 8, th, NIGHT);
+    P.rect(0, ty, cw + 8, th, NIGHTC());
     P.rect(0, ty + 2, cw, th - 2, YELL);
     P.text(17, ty + 11, 15, "PADDOCK RADIO", hex("#121212"), LEFT, A, 0.06f);
   }
@@ -560,8 +577,8 @@ void Home::drawCareer(Renderer &R, float k0, double clock) {
       const std::string kn = e.kind == "round" ? "ROUND " + std::to_string(e.round) : kindName(e.kind);
       const bool special = e.kind != "round";
       const float kw = 128;
-      if (special) P.rr(24 + 64, cy - 11, kw, 22, 7, e.kind == "the78" ? (on ? NIGHT : alpha_(MOON, 0.9f)) : on ? alpha_(PAPER, 0.85f) : alpha_(PLUM, 0.85f));
-      P.text(24 + 64 + (special ? kw / 2 : 0), cy - 7, 13, kn, special ? (e.kind == "the78" ? (on ? MOON : NIGHT) : INK) : sm, special ? CENTRE : LEFT, A, 0.08f);
+      if (special) P.rr(24 + 64, cy - 11, kw, 22, 7, e.kind == "the78" ? (on ? NIGHTC() : alpha_(MOON, 0.9f)) : on ? alpha_(PAPER, 0.85f) : alpha_(PLUM, 0.85f));
+      P.text(24 + 64 + (special ? kw / 2 : 0), cy - 7, 13, kn, special ? (e.kind == "the78" ? (on ? MOON : NIGHTC()) : INK) : sm, special ? CENTRE : LEFT, A, 0.08f);
       int laps = e.laps;
       const std::string trk = career.trackFor(e, &laps);
       const float tx = 24 + 64 + kw + 16, rightW = 190;
@@ -616,8 +633,8 @@ void Home::drawCareer(Renderer &R, float k0, double clock) {
       // the car, from the side, in its paint: a wedge, two wheels, a number
       const float u = std::min(1.5f, (hh - 44) / 40), cx = rx + 22, cy = y + hh - 22;
       P.poly({cx, cy - 6 * u, cx + 26 * u, cy - 22 * u, cx + 78 * u, cy - 26 * u, cx + 112 * u, cy - 12 * u, cx + 112 * u, cy - 2 * u, cx, cy - 2 * u}, hex(pt.col));
-      P.circle(cx + 24 * u, cy, 10 * u, NIGHT); P.circle(cx + 24 * u, cy, 4 * u, SOFT);
-      P.circle(cx + 92 * u, cy, 10 * u, NIGHT); P.circle(cx + 92 * u, cy, 4 * u, SOFT);
+      P.circle(cx + 24 * u, cy, 10 * u, NIGHTC()); P.circle(cx + 24 * u, cy, 4 * u, SOFT);
+      P.circle(cx + 92 * u, cy, 10 * u, NIGHTC()); P.circle(cx + 92 * u, cy, 4 * u, SOFT);
       P.text(cx + 60 * u, cy - 23 * u, 13 * u, "78", inkOn(hex(pt.col)), CENTRE, A);
       const float nx0 = cx + 112 * u + 30;
       P.text(nx0, y + 34, 30, pt.name, INK, LEFT, A, 0.03f);
@@ -660,7 +677,7 @@ void Home::drawCareer(Renderer &R, float k0, double clock) {
       const bool g78 = career.state("s3g1").met;
       P.circle(cx, by - 20, 17, g78 ? MOON : alpha_(INK, 0.16f));
       P.rect(cx - 17, by - 20, 34, 14, g78 ? MOON : alpha_(INK, 0.0f));
-      if (g78) { P.rr(cx - 2, by - 28, 20, 9, 3, NIGHT); P.text(cx - 8, by - 12, 9, "78", NIGHT, CENTRE, A); }
+      if (g78) { P.rr(cx - 2, by - 28, 20, 9, 3, NIGHTC()); P.text(cx - 8, by - 12, 9, "78", NIGHTC(), CENTRE, A); }
       else P.text(cx, by - 30, 15, "?", alpha_(INK, 0.4f), CENTRE, A);
     }
   }

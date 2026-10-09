@@ -2275,6 +2275,7 @@ void Renderer::hudVert(float x, float y, float u, float v, const float c[4]) {
   hud.insert(hud.end(), {x, y, u / ATLAS_W, v / ATLAS_H, c[0], c[1], c[2], c[3] * hudAlpha});
 }
 void Renderer::hudRot(float cx, float cy, float deg) {
+  if (hudFlat) deg = 0;                       // the pro menus: nothing tilts
   rotOn = deg != 0; rotCx = cx; rotCy = cy;
   rotC = std::cos(deg * (float)PI / 180); rotS = std::sin(deg * (float)PI / 180);
 }
@@ -2290,6 +2291,7 @@ void Renderer::poly(const float *xy, int n, const float c[4]) {
   }
 }
 void Renderer::rrect(float x, float y, float w, float h, float r, const float c[4]) {
+  if (hudFlat) r = std::min(r, 3.0f * (float)H / 900.0f);                 // the pro menus: a corner, not a blob
   r = std::max(0.0f, std::min(r, std::min(w, h) / 2));
   if (r < 0.5f) { rect(x, y, w, h, c); return; }
   std::vector<float> pts;
@@ -2304,6 +2306,13 @@ void Renderer::rrect(float x, float y, float w, float h, float r, const float c[
 }
 // a card: a line round a fill
 void Renderer::card(float x, float y, float w, float h, float r, float bw, const float fill[4], const float line[4]) {
+  if (hudFlat) {
+    // the pro menus: a panel with a hairline, not a sticker with an outline
+    const float hair[4] = {line[0], line[1], line[2], line[3] * 0.38f}, t = std::max(1.0f, (float)H / 900.0f);
+    rrect(x, y, w, h, r, hair);
+    rrect(x + t, y + t, w - 2 * t, h - 2 * t, r, fill);
+    return;
+  }
   rrect(x, y, w, h, r, line);
   rrect(x + bw, y + bw, w - 2 * bw, h - 2 * bw, std::max(0.0f, r - bw), fill);
 }
@@ -2329,6 +2338,7 @@ void Renderer::path(const float *xy, int n, float width, const float c[4], bool 
 // CSS-shaped text: `size` is the font-size in pixels, y the top of a line box
 // one `size` tall, `track` the letter-spacing in em. Returns the width drawn.
 float Renderer::widthPx(float size, const std::string &s, int font, float track) const {
+  if (hudFlat && font == MARKER) { font = RUBIK; size *= 0.84f; }
   const Font &F = fonts[font];
   const float k = size / FONT_PX;
   float w = 0;
@@ -2336,6 +2346,7 @@ float Renderer::widthPx(float size, const std::string &s, int font, float track)
   return s.empty() ? 0 : w - track * size;
 }
 float Renderer::textPx(float x, float y, float size, const std::string &s, const float c[4], Align al, int font, float track) {
+  if (hudFlat && font == MARKER) { font = RUBIK; size *= 0.84f; }           // the pro menus: no handwriting
   const Font &F = fonts[font];
   const float k = size / FONT_PX, w = widthPx(size, s, font, track);
   if (al == CENTRE) x -= w / 2; else if (al == RIGHT) x -= w;

@@ -96,7 +96,7 @@ static std::string sayFor(const std::string &row, const std::string &v) {
     {"TIME", "night", "lights on. everything is faster in the dark."}, {"TIME", "*", "nice light for it."},
     {"WEATHER", "rain", "oh no. oh no no no. (yes.)"}, {"WEATHER", "storm", "who ordered this."},
     {"WEATHER", "changing", "could be anything. bring a coat."}, {"WEATHER", "*", "weather noted."},
-    {"THEME", "light", "who turned the lights on."}, {"THEME", "dark", "ahh. better."}, {"THEME", "halloween", "boo. (sorry.)"},
+    {"THEME", "pro", "clean. quiet. fast."}, {"THEME", "dark", "ahh. better."}, {"THEME", "halloween", "boo. (sorry.)"},
     {"MUSIC", "off", "fine. silence. very dramatic."}, {"MUSIC", "low", "a little quieter. thinking music."}, {"MUSIC", "on", "there it is."},
     {"TEAM", "*", "good team. good people. probably."},
   };
@@ -265,7 +265,7 @@ std::string Home::get(const std::string &key) const {
   if (key == "field") return S.field;
   if (key == "time") return S.time;
   if (key == "weather") return S.weather;
-  if (key == "theme") return S.theme;
+  if (key == "theme") return S.theme == "light" ? "pro" : S.theme;
   if (key == "music") return S.music;
   if (key == "ffb") return std::to_string(S.ffb);
   if (key == "cam") return std::to_string(S.cam);
@@ -517,7 +517,7 @@ void Home::build() {
       if (!keys.empty() && S.teams[S.car] == keys[(size_t)cur()]) show("home"); else join();
     }, nullptr, nullptr});
   } else if (page == "settings") {
-    optItems({{"THEME", "theme", {{"light", "LIGHT"}, {"dark", "DARK"}, {"halloween", "HALLOWEEN"}}},
+    optItems({{"THEME", "theme", {{"pro", "PRO"}, {"dark", "NIGHT PADDOCK"}, {"halloween", "HALLOWEEN"}}},
               {"MUSIC", "music", {{"on", "ON"}, {"low", "QUIET"}, {"off", "OFF"}}},
               {"VIEW", "cam", {{"0", "ONBOARD"}, {"1", "CHASE"}, {"2", "NOSE"}, {"3", "T-CAM"}}},
               {"LOOK", "look", {{"film", "FILM (SHADOWS, BLOOM)"}, {"plain", "PLAIN (FASTER)"}}},
@@ -608,6 +608,8 @@ void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, con
 }
 
 // ---- drawing ---------------------------------------------------------------------------
+bool Home::style() const { return applyStyle(S.theme); }
+
 void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   now = clock;
   hots.clear();
@@ -631,7 +633,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     R.rrect((cx - s * 0.24f) * k, (cy + s * 0.12f) * k, s * 0.48f * k, s * 0.10f * k, s * 0.05f * k, GL);
   };
   const bool october = [] { const std::time_t t = std::time(nullptr); return std::localtime(&t)->tm_mon == 9; }();
-  const bool boo = S.theme == "halloween" || october;
+  const bool boo = !STYLE_PRO && (S.theme == "halloween" || october);
   const std::string tk = teamKey();
   const Team *team = tk.empty() ? nullptr : teamByKey(tk);
   auto cols = [&](const Team *t, Rgba &c1, Rgba &c2) {
@@ -642,6 +644,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   };
   auto sayBox = [&](float x, float y) {
     const float w = std::min(520.0f, width(17, sayText, MK) + 30);
+    if (STYLE_PRO) return w;                   // the pro menus do not talk to you
     R.hudRot((x + w / 2) * k, (y + 17) * k, -1.2f);
     R.card(x * k, y * k, w * k, 35 * k, 14 * k, 2.5f * k, CARD, INK);
     text(x + 15, y + 8, 17, sayText, INK, LEFT, MK);
@@ -714,7 +717,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     }
   };
 
-  if (page != "home") R.rect(0, 0, (float)R.W, (float)R.H, alpha_(PAPER, 0.88f));       // the wash: the race is still there, in the dark
+  if (page != "home") R.rect(0, 0, (float)R.W, (float)R.H, alpha_(PAPER, STYLE_PRO ? 0.84f : 0.88f));       // the wash: the race is still there, behind
 
   if (page == "home") { drawHub(R, k, clock); return; }
   if (page == "career") { drawCareer(R, k, clock); return; }
@@ -948,7 +951,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     title("SETTINGS");
     sayBox(W - 24 - std::min(520.0f, width(17, sayText, MK) + 30), 30);
     const std::vector<Opt> rows = {
-      {"THEME", "theme", {{"light", "LIGHT"}, {"dark", "DARK"}, {"halloween", "HALLOWEEN"}}},
+      {"THEME", "theme", {{"pro", "PRO"}, {"dark", "NIGHT PADDOCK"}, {"halloween", "HALLOWEEN"}}},
       {"MUSIC", "music", {{"on", "ON"}, {"low", "QUIET"}, {"off", "OFF"}}},
       {"VIEW", "cam", {{"0", "ONBOARD"}, {"1", "CHASE"}, {"2", "NOSE"}, {"3", "T-CAM"}}},
       {"IDEAL LINE", "line", {{"false", "HIDDEN"}, {"true", "SHOWN"}}},

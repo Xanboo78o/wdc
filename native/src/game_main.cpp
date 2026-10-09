@@ -908,12 +908,15 @@ int main(int argc, char **argv) {
     if (driving && R.mirrorWanted(f.camMode)) R.mirrorShow();
     R.hudBegin();
     R.drawRain(f);
+    // the menus' own look (homestyle.hpp): PRO draws square, level and plain
+    R.hudFlat = home.style() && (screen == HOME || screen == RESULTS);
     if (screen == HOME) home.draw(R, K, clock, liveOf());
     else if (screen == RESULTS && S.race) { hud.results(R, K, theme, *S.race, resTitle, resLine); home.drawOutcome(R, K); }
     else {
       hud.draw(R, K, theme, hudIn());
       if (screen == PAUSE) hud.pause(R, K, theme, pauseItems(), pauseAt, pauseSay);
     }
+    R.hudFlat = false;
     R.hudEnd();
   };
 

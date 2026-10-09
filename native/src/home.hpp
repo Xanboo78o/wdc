@@ -22,7 +22,7 @@ struct MenuSave {
   std::string track = "monza", car = "f1", mode = "race", tier = "medium", start = "mid";
   int grid = 22, laps = 3;
   bool noDnf = false;
-  std::string time = "live", weather = "live", battle = "medium", field = "f1", theme = "light", music = "on";
+  std::string time = "live", weather = "live", battle = "medium", field = "f1", theme = "pro", music = "on";
   std::map<std::string, std::string> teams;      // league -> team key ("" = none yet)
   int ffb = 50, cam = 0, volume = 8;             // native only. ffb: percent of the bridge's ceiling (Adam: "starts at 50%")
   bool line = false;
@@ -61,6 +61,8 @@ class Home {
   // the mouse, in device pixels: hovering lights a card, a click presses what is under it
   void mouse(float x, float y, bool click);
   void draw(Renderer &R, float k, double clock, const LiveTower &live);
+  // sets the menu's colours from the THEME setting; true when it is the pro look (homestyle.hpp)
+  bool style() const;
   bool overWorld() const { return page == "home"; }   // only HOME has the race behind it
   void say(const std::string &t) { if (!t.empty()) { sayText = t; sayAt = now; } }
   void show(const std::string &name, int keep = 0);

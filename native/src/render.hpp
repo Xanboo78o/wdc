@@ -138,6 +138,7 @@ class Renderer {
   // see-through, lit from inside, brightest at its edges. Read and cleared by drawCar.
   float ghost = 0;
   float scalePin = 0;           // > 0: draw the scene at this share of the window (--scale) instead of letting the governor choose
+  bool hudFlat = false;         // the pro menus: square corners, hairlines, no tilt, no handwriting (homestyle.hpp)
   bool post = true;             // false: the plain picture, as it was (SETTINGS - LOOK)
   bool postOk = true;           // false: this GPU could not build the look at all
   bool treeShadows = true;
