@@ -64,7 +64,11 @@ export function runLaps({ track, lines, spec, laps = 3, tier = 'hard', seed = 1,
   let offT = 0, worstLat = 0, maxSlip = 0, spinT = 0, vmax = 0, mistakes = 0;
   let wasMistake = false;
   const times = [];
-  const maxT = laps * 400 + 120;
+  // The Nordschleife is 20.8 km: an out-lap and one timed lap is 15 minutes,
+  // and the cap stopped the clock at 8:40 with no lap set. Laps over 10 km get
+  // time in proportion (25 m/s, out-lap included); every other circuit keeps
+  // exactly the cap it had.
+  const maxT = track.length > 10000 ? (laps + 1) * track.length / 25 : laps * 400 + 120;
 
   while (t < maxT && lap <= laps) {
     const proj = track.project(car.x, car.y, hint);

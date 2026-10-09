@@ -13,7 +13,8 @@
 // with each other; changing one tool would move the hill out from under the
 // road. A circuit listed in EXACT is projected with the WGS84 series instead,
 // by every tool, from its first bake.
-export const EXACT = new Set(['spa']);
+// 2026-10-08: the circuits tools/bakeosm.mjs makes are exact from their first bake.
+export const EXACT = new Set(['spa', 'nordschleife', 'lagunaseca', 'bathurst', 'brandshatch']);
 
 export function metresPerDegree(key, lat0) {
   const p = lat0 * Math.PI / 180;

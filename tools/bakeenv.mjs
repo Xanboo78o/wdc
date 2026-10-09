@@ -233,6 +233,8 @@ async function bake(key, force) {
   const bb = track.bbox;
   let lat0, lon0;
   if (fit) ({ lat0, lon0 } = fit);
+  // A circuit baked by tools/bakeosm.mjs carries its own projection origin.
+  else if (track.geo) ({ lat0, lon0 } = track.geo);
   else {
     const id = CIRCUITS[key];
     const gj = JSON.parse(fs.readFileSync(ROOT + 'data/f1-circuits.geojson', 'utf8'));

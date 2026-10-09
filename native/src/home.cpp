@@ -31,7 +31,8 @@ static const int N_TRACKS = 13;
 // when its data/tracks/<key>.json exists. A name left empty is read from that file.
 static const char *OPTIONAL[][3] = {
   {"gravenmoor", "Gravenmoor", "THE MOOR - ONLY EVER AT NIGHT"}, {"nordschleife", "Nordschleife", "GERMANY - 20.8 KM"},
-  {"bathurst", "", ""}, {"lagunaseca", "", ""}, {"lemans", "", ""}, {"brandshatch", "", ""}, {"macau", "", ""},
+  {"bathurst", "Mount Panorama", "AUSTRALIA - THE MOUNTAIN"}, {"lagunaseca", "Laguna Seca", "USA - THE CORKSCREW"}, {"lemans", "", ""},
+  {"brandshatch", "Brands Hatch", "UNITED KINGDOM"}, {"macau", "", ""},
 };
 static const char *LEAGUE_KEYS[3] = {"f1", "gt3", "f4"}, *LEAGUE_NAMES[3] = {"F1", "GT3", "F4"};
 static const char *leagueName(const std::string &k) { for (int i = 0; i < 3; i++) if (k == LEAGUE_KEYS[i]) return LEAGUE_NAMES[i]; return "F1"; }
@@ -76,6 +77,10 @@ static std::string sayFor(const std::string &row, const std::string &v) {
     {"CIRCUIT", "suzuka", "hachi no ji. best track. no notes."}, {"CIRCUIT", "baku", "two kilometres of straight and then a castle. obviously."},
     {"CIRCUIT", "monaco", "the walls are closer than they look. then closer than that."}, {"CIRCUIT", "nurburgring", "germany. precise. cold. probably foggy."},
     {"CIRCUIT", "sepang", "it will rain. it always rains."}, {"CIRCUIT", "gravenmoor", "the church tower is the braking point. the tree is the other one."},
+    {"CIRCUIT", "nordschleife", "20.8 kilometres. 75 corners. nobody learns it in a weekend. try anyway."},
+    {"CIRCUIT", "bathurst", "up the mountain between concrete walls. then down conrod, flat."},
+    {"CIRCUIT", "lagunaseca", "the corkscrew: five storeys down in two corners."},
+    {"CIRCUIT", "brandshatch", "paddock hill bend drops away under you. the rest is in the woods."},
     {"CIRCUIT", "nordschleife", "twenty kilometres. nobody has finished counting the corners."}, {"CIRCUIT", "spa", "seven kilometres of forest and one hill everybody talks about."},
     {"CAR", "f4", "small car. big dreams."}, {"CAR", "gt3", "the one with a roof."}, {"CAR", "f1", "the big one. hands at ten and two."},
     {"MODE", "hotlap", "just you and the clock. the clock is mean."}, {"MODE", "race", "wheel to wheel. elbows out."},
