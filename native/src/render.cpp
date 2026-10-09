@@ -10,6 +10,7 @@
 #include "carmesh.hpp"
 #include "dress.hpp"
 
+#include <ctime>
 #include <epoxy/gl.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -195,14 +196,36 @@ in vec3 vW, vN, vC, vT; in float vK;
 uniform vec3 uEye, uSun; uniform float uAlpha;
 uniform sampler2DArray uCol, uNrm; uniform int uHasTex;
 uniform vec3 uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop, uPaint; uniform float uFogK, uWet;
+uniform sampler2DShadow uShadow; uniform mat4 uShVP; uniform float uShOn, uHdr; uniform int uPass;
 out vec4 o;
+// how much of the sun reaches this point: four soft looks at the shadow map
+float sunVis(vec3 p, vec3 n){
+  if (uShOn < 0.5) return 1.0;
+  vec4 q = uShVP * vec4(p + n * 0.12, 1.0);
+  float edge = max(abs(q.x), abs(q.y));
+  if (edge >= 1.0 || abs(q.z) >= 1.0) return 1.0;
+  vec3 s = q.xyz * 0.5 + 0.5; s.z -= 0.0006;
+  float t = 0.85 / 2048.0;
+  float v = texture(uShadow, s + vec3(-t, -t, 0.0)) + texture(uShadow, s + vec3(t, -t, 0.0))
+          + texture(uShadow, s + vec3(-t, t, 0.0)) + texture(uShadow, s + vec3(t, t, 0.0));
+  return mix(v * 0.25, 1.0, smoothstep(0.82, 1.0, edge));
+}
 #define FOG uFog
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }
 void main(){
+  if (uPass == 1) { o = vec4(0.0); return; }      // the shadow map wants depth and nothing else
   int k = int(vK + 0.5);
-  if (k == 9) { o = vec4(mix(uFog, uSkyTop, vC.r), 1.0); return; }
+  if (k == 9) {
+    vec3 sky = mix(uFog, uSkyTop, vC.r);
+    if (uHdr > 0.5) {
+      // the sun itself, and the glare round it: brighter than white, so the film blooms
+      float sd = max(dot(normalize(vW - uEye), uSun), 0.0);
+      sky += uSunCol * (pow(sd, 2200.0) * 14.0 + pow(sd, 90.0) * 0.55 + pow(sd, 9.0) * 0.16);
+    }
+    o = vec4(sky, 1.0); return;
+  }
   if (k == 8) { o = vec4(vC, uAlpha); return; }
   vec3 V = uEye - vW; float dist = length(V); V /= dist;
   vec3 n = normalize(vN); if (dot(n, V) < 0.0) n = -n;
@@ -253,16 +276,101 @@ void main(){
     shine = uWet * pow(1.0 - max(dot(n, V), 0.0), 4.0);
   }
   vec3 amb = mix(uGndAmb, uSkyAmb, n.y * 0.5 + 0.5);
-  vec3 lit = c * (amb + uSunCol * ndl * 0.78);
+  float vis = sunVis(vW, normalize(vN) * (dot(normalize(vN), uSun) < 0.0 ? -1.0 : 1.0));
+  vec3 lit = c * (amb + uSunCol * ndl * 0.78 * vis);
+  if (uHdr > 1.5) { o = vec4(vec3(vis * 0.5), 1.0); return; }
   lit = mix(lit, uFog * 1.05, shine * 0.75);
-  if (uWet > 0.0 && shine > 0.0) { vec3 hw = normalize(uSun + V); lit += uSunCol * pow(max(dot(n, hw), 0.0), 90.0) * uWet * 0.9; }
+  if (uWet > 0.0 && shine > 0.0) { vec3 hw = normalize(uSun + V); lit += uSunCol * pow(max(dot(n, hw), 0.0), 90.0) * uWet * 0.9 * vis; }
   if (k == 6 || k == 12) {
     vec3 h = normalize(uSun + V);
-    lit += vec3(1.0) * pow(max(dot(n, h), 0.0), 48.0) * 0.55;
-    lit += FOG * 0.10 * pow(1.0 - max(dot(n, V), 0.0), 3.0);
+    if (uHdr > 0.5) {
+      // PAINT UNDER LACQUER: the sky mirrored more the flatter you look along
+      // the panel, and the sun as a hard point far brighter than white
+      float ndv = max(dot(n, V), 0.0);
+      vec3 R = reflect(-V, n);
+      vec3 sky = mix(uFog, uSkyTop, pow(clamp(R.y, 0.0, 1.0), 0.6)) * (R.y < 0.0 ? 0.35 : 1.0);
+      float fr = 0.05 + 0.95 * pow(1.0 - ndv, 5.0);
+      lit = mix(lit, sky * 1.15, fr * 0.6);
+      lit += uSunCol * (pow(max(dot(n, h), 0.0), 320.0) * 5.0 + pow(max(dot(n, h), 0.0), 40.0) * 0.25) * vis;
+    } else {
+      lit += vec3(1.0) * pow(max(dot(n, h), 0.0), 48.0) * 0.55;
+      lit += FOG * 0.10 * pow(1.0 - max(dot(n, V), 0.0), 3.0);
+    }
+  } else if (uHdr > 0.5 && (k == 1 || k == 10) && n.y > 0.5) {
+    // worn tarmac glares back at a low sun, when you look along it
+    vec3 h = normalize(uSun + V);
+    lit += uSunCol * pow(max(dot(n, h), 0.0), 55.0) * pow(1.0 - max(dot(n, V), 0.0), 3.0) * 1.6 * vis;
   }
   float f = 1.0 - exp(-dist * uFogK);
   o = vec4(mix(lit, FOG, f), uAlpha);
+}
+)";
+// ---- the look: developing the picture -----------------------------------------------
+// One triangle over the whole screen. The scene's numbers are display values
+// (the colours were authored by eye); they are squared-up to light here, the
+// film curve is applied to light, and the result goes back to display values.
+static const char *PVS = R"(#version 330 core
+out vec2 vU;
+void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); vU = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }
+)";
+// what is brighter than paper white, at a quarter of the size: the source of the bloom
+static const char *BRIGHT_FS = R"(#version 330 core
+in vec2 vU; uniform sampler2D uTex; uniform vec2 uPx; uniform float uExp; out vec4 o;
+vec3 lin(vec2 u){ vec3 c = max(texture(uTex, u).rgb, 0.0); return min(pow(c, vec3(2.2)) * uExp, vec3(12.0)); }
+void main(){
+  vec3 c = (lin(vU + uPx * vec2(-1, -1)) + lin(vU + uPx * vec2(1, -1)) + lin(vU + uPx * vec2(-1, 1)) + lin(vU + uPx * vec2(1, 1))) * 0.25;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  o = vec4(c * smoothstep(0.85, 1.6, l), 1.0);
+}
+)";
+static const char *BLUR_FS = R"(#version 330 core
+in vec2 vU; uniform sampler2D uTex; uniform vec2 uDir; out vec4 o;
+void main(){
+  vec3 c = texture(uTex, vU).rgb * 0.227027;
+  c += (texture(uTex, vU + uDir * 1.384615).rgb + texture(uTex, vU - uDir * 1.384615).rgb) * 0.316216;
+  c += (texture(uTex, vU + uDir * 3.230769).rgb + texture(uTex, vU - uDir * 3.230769).rgb) * 0.070270;
+  o = vec4(c, 1.0);
+}
+)";
+static const char *COMP_FS = R"(#version 330 core
+in vec2 vU; uniform sampler2D uTex, uBloom; uniform float uExp; out vec4 o;
+vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+void main(){
+  vec3 c = max(texture(uTex, vU).rgb, 0.0);
+  c = pow(c, vec3(2.2)) * uExp;                       // display value -> light
+  c += texture(uBloom, vU).rgb * 0.20;
+  c = aces(c * 1.05);
+  // the grade: shadows a little cool, highlights a little warm, colour a little richer
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(l), c, 0.96);
+  c *= mix(vec3(0.97, 0.99, 1.04), vec3(1.03, 1.0, 0.96), smoothstep(0.0, 0.7, l));
+  c = pow(max(c, 0.0), vec3(1.0 / 2.2));
+  c = c * 0.975 + 0.012;                              // film never quite reaches black
+  o = vec4(c, dot(c, vec3(0.299, 0.587, 0.114)));     // luma rides in alpha for the anti-aliasing
+}
+)";
+// FXAA (the short form), then the lens: a vignette and a grain you only notice if it is missing
+static const char *FXAA_FS = R"(#version 330 core
+in vec2 vU; uniform sampler2D uTex; uniform vec2 uPx; uniform float uTime; out vec4 o;
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+void main(){
+  vec4 m = texture(uTex, vU);
+  float lNW = texture(uTex, vU + uPx * vec2(-1, -1)).a, lNE = texture(uTex, vU + uPx * vec2(1, -1)).a;
+  float lSW = texture(uTex, vU + uPx * vec2(-1, 1)).a, lSE = texture(uTex, vU + uPx * vec2(1, 1)).a, lM = m.a;
+  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE))), lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  vec3 c = m.rgb;
+  if (lMax - lMin > max(0.03, lMax * 0.10)) {
+    vec2 d = vec2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
+    float red = max((lNW + lNE + lSW + lSE) * 0.03125, 0.0078125);
+    d = clamp(d / (min(abs(d.x), abs(d.y)) + red), vec2(-8.0), vec2(8.0)) * uPx;
+    vec4 a = 0.5 * (texture(uTex, vU + d * (1.0 / 3.0 - 0.5)) + texture(uTex, vU + d * (2.0 / 3.0 - 0.5)));
+    vec4 b = a * 0.5 + 0.25 * (texture(uTex, vU + d * -0.5) + texture(uTex, vU + d * 0.5));
+    c = (b.a < lMin || b.a > lMax) ? a.rgb : b.rgb;
+  }
+  vec2 v = vU - 0.5;
+  c *= 1.0 - 0.34 * smoothstep(0.30, 0.95, length(v * vec2(1.0, 0.82)) * 1.35);
+  c += (hash(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) * 0.012;
+  o = vec4(c, 1.0);
 }
 )";
 static const char *HVS = R"(#version 330 core
@@ -326,7 +434,25 @@ bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
   uDent = glGetUniformLocation(prog, "uDent"); uDentN = glGetUniformLocation(prog, "uDentN");
   uPaint = glGetUniformLocation(prog, "uPaint");
   uOrigin = glGetUniformLocation(prog, "uOrigin");
+  uShVP = glGetUniformLocation(prog, "uShVP"); uShOn = glGetUniformLocation(prog, "uShOn");
+  uPass = glGetUniformLocation(prog, "uPass"); uHdr = glGetUniformLocation(prog, "uHdr");
+  brightProg = link(PVS, BRIGHT_FS); blurProg = link(PVS, BLUR_FS); compProg = link(PVS, COMP_FS); fxaaProg = link(PVS, FXAA_FS);
+  if (!brightProg || !blurProg || !compProg || !fxaaProg) { std::fprintf(stderr, "xbr: the look's shaders did not build - plain picture\n"); post = postOk = false; }
+  // the shadow map exists always: the sampler must have something to look at
+  glGenTextures(1, &shTex);
+  glBindTexture(GL_TEXTURE_2D, shTex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 2048, 2048, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+  glGenFramebuffers(1, &shFbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, shFbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shTex, 0);
+  glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glGenVertexArrays(1, &fsVao);
   glUseProgram(prog);
+  glUniform1i(glGetUniformLocation(prog, "uShadow"), 3);
   glUniform1i(glGetUniformLocation(prog, "uCol"), 1);
   glUniform1i(glGetUniformLocation(prog, "uNrm"), 2);
   uHudSize = glGetUniformLocation(hudProg, "uSize");
@@ -960,6 +1086,8 @@ void Renderer::buildCar(const Spec &S) {
   wheelF.upload(cm.wheelF); wheelR.upload(cm.wheelR);
   wheelR_f = cm.wheelRadF; wheelR_r = cm.wheelRadR;
   carCabin = cm.cabin;
+  if (std::getenv("XBR_PROF")) std::fprintf(stderr, "car: body %zu tris, wings %zu + %zu, helmet %zu, wheels %zu + %zu each\n", cm.body.count() / 3,
+                                            cm.frontWing.count() / 3, cm.rearWing.count() / 3, cm.helmet.count() / 3, cm.wheelF.count() / 3, cm.wheelR.count() / 3);
   for (int k = 0; k < 3; k++) carEye[k] = cm.eye[k];
   // A BOLTED CAMERA MUST BE OUTSIDE THE CAR. The mounts are the single-seater's
   // (js/render.js); on the coupe the roof and the bonnet are higher than they
@@ -1018,10 +1146,17 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
   }
   glUniform3f(uPaint, paint[0], paint[1], paint[2]);
   setDents(&car);
-  drawMesh(carBody, carM);
-  if (!(car.hasLost && car.lostFrontWing)) drawMesh(carFrontWing, carM);
-  if (!(car.hasLost && car.lostRearWing)) drawMesh(carRearWing, carM);
-  if (helmet) drawMesh(carHelmet, carM);
+  // A car is skins inside skins (tub, halo, floor, wings), all two-sided: left
+  // alone, each pixel of it is lit four or five times over. So its depth goes
+  // down first, for nothing, and the lighting is then done once a pixel.
+  for (int pass = 0; pass < 2; pass++) {
+    if (pass == 0) { glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE); glUniform1i(uPass, 1); }
+    else { glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE); glUniform1i(uPass, 0); }
+    drawMesh(carBody, carM);
+    if (!(car.hasLost && car.lostFrontWing)) drawMesh(carFrontWing, carM);
+    if (!(car.hasLost && car.lostRearWing)) drawMesh(carRearWing, carM);
+    if (helmet) drawMesh(carHelmet, carM);
+  }
   setDents(nullptr);
   double Wp[4][2];
   wheelPos(S, Wp);
@@ -1090,16 +1225,163 @@ void Renderer::drawMesh(const GLMesh &m, const Mat4 &model, float alpha) {
   m.draw();
 }
 
+// ---------------------------------------------------------------------------
+// The look
+// ---------------------------------------------------------------------------
+// XBR_PROF=1: where a frame's milliseconds go. glFinish between sections, so
+// the total is slower than a real frame; the SHARES are what to read.
+namespace {
+struct Prof {
+  bool on = std::getenv("XBR_PROF") != nullptr;
+  double acc[8] = {0}, t0 = 0; long frames = 0;
+  static double now() { timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6; }
+  void begin() { if (on) { glFinish(); t0 = now(); } }
+  void mark(int i) { if (on) { glFinish(); const double t = now(); acc[i] += t - t0; t0 = t; } }
+  ~Prof() {
+    if (!on || !frames) return;
+    static const char *N[8] = {"shadow map", "ground+sky", "corridor+scenery", "woods", "your car", "decals+blob", "develop", "field (rivals)"};
+    for (int i = 0; i < 8; i++) std::fprintf(stderr, "prof: %-18s %6.2f ms\n", N[i], acc[i] / frames);
+  }
+} PROF;
+}
+static float sl0(const float v[3]) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
+
+static void colourTarget(unsigned &fb, unsigned &tex, int w, int h, GLenum fmt, GLenum base, GLenum type) {
+  if (!tex) glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexImage2D(GL_TEXTURE_2D, 0, (GLint)fmt, w, h, 0, base, type, nullptr);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  if (!fb) glGenFramebuffers(1, &fb);
+  glBindFramebuffer(GL_FRAMEBUFFER, fb);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+}
+
+void Renderer::ensurePost() {
+  if (postW == W && postH == H && sceneFbo) return;
+  postW = W; postH = H;
+  colourTarget(sceneFbo, sceneCol, W, H, GL_R11F_G11F_B10F, GL_RGB, GL_FLOAT);
+  if (!sceneDepth) glGenRenderbuffers(1, &sceneDepth);
+  glBindRenderbuffer(GL_RENDERBUFFER, sceneDepth);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, W, H);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, sceneDepth);
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { std::fprintf(stderr, "xbr: no float picture on this GPU - plain picture\n"); post = postOk = false; }
+  for (int i = 0; i < 2; i++) colourTarget(bloomFbo[i], bloomTex[i], std::max(1, W / 4), std::max(1, H / 4), GL_R11F_G11F_B10F, GL_RGB, GL_FLOAT);
+  colourTarget(ldrFbo, ldrTex, W, H, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+  glBindFramebuffer(GL_FRAMEBUFFER, post ? sceneFbo : fbo);
+}
+
+// THE SUN'S SHADOWS. One map, 256 m square, laid ahead of the camera. The world
+// does not move, so the map is only redrawn when the camera has gone a step of
+// 16 m (which is a whole number of its texels: nothing shimmers when it is).
+void Renderer::renderShadow(const Look &L, const float eye[3], const float fwd[3], double time) {
+  const float n = sl0(L.sun), sun[3] = {L.sun[0] / n, L.sun[1] / n, L.sun[2] / n};
+  const float R = 128, STEP = 16;
+  float r[3] = {sun[2], 0, -sun[0]};                       // up x sun
+  const float rl = std::sqrt(r[0] * r[0] + r[2] * r[2]) + 1e-6f;
+  r[0] /= rl; r[2] /= rl;
+  const float u[3] = {sun[1] * r[2] - sun[2] * r[1], sun[2] * r[0] - sun[0] * r[2], sun[0] * r[1] - sun[1] * r[0]};
+  const float F[3] = {eye[0] + fwd[0] * 72, eye[1], eye[2] + fwd[2] * 72};
+  auto snap = [&](const float a[3]) { return std::floor((F[0] * a[0] + F[1] * a[1] + F[2] * a[2]) / STEP + 0.5f) * STEP; };
+  const float ka = snap(r), kb = snap(u), kc = snap(sun);
+  if (shKey[0] == ka && shKey[1] == kb && shKey[2] == kc && shKey[3] == sun[0] && shKey[4] == sun[1] && shKey[5] == sun[2]) return;
+  shKey[0] = ka; shKey[1] = kb; shKey[2] = kc; shKey[3] = sun[0]; shKey[4] = sun[1]; shKey[5] = sun[2];
+  const float C[3] = {r[0] * ka + u[0] * kb + sun[0] * kc, r[1] * ka + u[1] * kb + sun[1] * kc, r[2] * ka + u[2] * kb + sun[2] * kc};
+  const float from[3] = {C[0] + sun[0] * 500, C[1] + sun[1] * 500, C[2] + sun[2] * 500}, up[3] = {0, 1, 0};
+  Mat4 P = Mat4::identity();
+  const float zn = 1, zf = 1000;
+  P.m[0] = 1 / R; P.m[5] = 1 / R; P.m[10] = -2 / (zf - zn); P.m[14] = -(zf + zn) / (zf - zn);
+  shVP = P * Mat4::lookAt(from, C, up);
+  GLint was = 0;
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &was);
+  glBindFramebuffer(GL_FRAMEBUFFER, shFbo);
+  glViewport(0, 0, 2048, 2048);
+  glClear(GL_DEPTH_BUFFER_BIT);
+  glEnable(GL_DEPTH_TEST); glDepthFunc(GL_LEQUAL); glDepthMask(GL_TRUE);
+  glEnable(GL_POLYGON_OFFSET_FILL);
+  glPolygonOffset(2.0f, 4.0f);
+  glUniform1i(uPass, 1);
+  glUniformMatrix4fv(uVP, 1, GL_FALSE, shVP.m);
+  setDents(nullptr);
+  drawMesh(corridor, Mat4::identity());
+  drawMesh(scenery, Mat4::identity());
+  // the woods cast too: the same draw, seen from the sun
+  if (dress && treeShadows) { dress->frame(shVP, C, L, time); dress->drawWorld(); glUseProgram(prog); }
+  glDisable(GL_POLYGON_OFFSET_FILL);
+  glUniform1i(uPass, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)was);
+  glViewport(0, 0, W, H);
+}
+
+// Develop the picture: bloom from what is brighter than white, the film curve
+// and the grade, then anti-aliasing and the lens, onto the screen.
+void Renderer::endScene(double time) {
+  PROF.mark(7);
+  if (!sceneOpen) return;
+  sceneOpen = false;
+  glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND); glDepthMask(GL_FALSE);
+  glBindVertexArray(fsVao);
+  glActiveTexture(GL_TEXTURE0);
+  const int bw = std::max(1, W / 4), bh = std::max(1, H / 4);
+  const float EXPOSURE = 1.0f;
+  glViewport(0, 0, bw, bh);
+  glBindFramebuffer(GL_FRAMEBUFFER, bloomFbo[0]);
+  glUseProgram(brightProg);
+  glBindTexture(GL_TEXTURE_2D, sceneCol);
+  glUniform2f(glGetUniformLocation(brightProg, "uPx"), 1.0f / (float)W, 1.0f / (float)H);
+  glUniform1f(glGetUniformLocation(brightProg, "uExp"), EXPOSURE);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+  glUseProgram(blurProg);
+  const GLint uDir = glGetUniformLocation(blurProg, "uDir");
+  for (int it = 0; it < 2; it++) {
+    const float sp = it == 0 ? 1.0f : 2.2f;                // the second round is wider: a core and a glow
+    glBindFramebuffer(GL_FRAMEBUFFER, bloomFbo[1]); glBindTexture(GL_TEXTURE_2D, bloomTex[0]);
+    glUniform2f(uDir, sp / (float)bw, 0); glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindFramebuffer(GL_FRAMEBUFFER, bloomFbo[0]); glBindTexture(GL_TEXTURE_2D, bloomTex[1]);
+    glUniform2f(uDir, 0, sp / (float)bh); glDrawArrays(GL_TRIANGLES, 0, 3);
+  }
+  glViewport(0, 0, W, H);
+  glBindFramebuffer(GL_FRAMEBUFFER, ldrFbo);
+  glUseProgram(compProg);
+  glUniform1i(glGetUniformLocation(compProg, "uTex"), 0); glUniform1i(glGetUniformLocation(compProg, "uBloom"), 1);
+  glUniform1f(glGetUniformLocation(compProg, "uExp"), EXPOSURE);
+  glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, bloomTex[0]);
+  glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, sceneCol);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);                  // the screen, or the photograph being taken
+  glUseProgram(fxaaProg);
+  glBindTexture(GL_TEXTURE_2D, ldrTex);
+  glUniform2f(glGetUniformLocation(fxaaProg, "uPx"), 1.0f / (float)W, 1.0f / (float)H);
+  glUniform1f(glGetUniformLocation(fxaaProg, "uTime"), (float)time);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+  glBindVertexArray(0);
+  glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST);
+  glUseProgram(prog);
+  PROF.mark(6);
+}
+
 void Renderer::drawWorld(const FrameIn &f) {
   const Car &car = *f.car;
   const Spec &S = *f.spec;
+  Look L = f.look;
+  PROF.frames++; PROF.begin();
+  if (post) {
+    // A HARDER SUN. With a film curve behind it the sun can be what it is —
+    // well over paper white — and the shade can be shade.
+    ensurePost();
+    for (int k = 0; k < 3; k++) { L.sunCol[k] *= 1.50f; L.skyAmb[k] *= 0.95f; L.gndAmb[k] *= 0.92f; }
+    glBindFramebuffer(GL_FRAMEBUFFER, sceneFbo);
+    sceneOpen = true;
+  }
   glViewport(0, 0, W, H);
-  const Look &L = f.look;
   glClearColor(L.fog[0], L.fog[1], L.fog[2], 1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glDisable(GL_CULL_FACE);
   glDisable(GL_BLEND);
   glUseProgram(prog);
+  glUniform1i(uPass, 0);
+  glUniform1f(uHdr, post ? (std::getenv("XBR_SHDEBUG") ? 2.0f : 1.0f) : 0.0f);
+  glUniform1f(uShOn, 0.0f);
 
   // ---- where the car is, in GL space
   // A grounded single-seater pitches and rolls by fractions of a degree. That
@@ -1142,6 +1424,17 @@ void Renderer::drawWorld(const FrameIn &f) {
   const Mat4 proj = Mat4::perspective(fov * (float)PI / 180, (float)W / (float)std::max(1, H), 0.12f, 12000.0f);
   const Mat4 view = Mat4::lookAt(eye, at, up);
   const Mat4 VP = proj * view;
+  static const bool noSh = std::getenv("XBR_NOSH") != nullptr;
+  if (std::getenv("XBR_NOTREESH")) treeShadows = false;
+  if (post && !noSh && L.sun[1] / sl0(L.sun) > 0.10f && L.sunCol[0] + L.sunCol[1] + L.sunCol[2] > 0.9f) {
+    const float fl = std::sqrt((at[0] - eye[0]) * (at[0] - eye[0]) + (at[2] - eye[2]) * (at[2] - eye[2])) + 1e-6f;
+    const float fwd[3] = {(at[0] - eye[0]) / fl, 0, (at[2] - eye[2]) / fl};
+    renderShadow(L, eye, fwd, f.time);
+    glUniform1f(uShOn, 1.0f);
+    glUniformMatrix4fv(uShVP, 1, GL_FALSE, shVP.m);
+  }
+  PROF.mark(0);
+  glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, shTex); glActiveTexture(GL_TEXTURE0);
   if (dress) dress->frame(VP, eye, L, f.time);
   glUniformMatrix4fv(uVP, 1, GL_FALSE, VP.m);
   glUniform3f(uEye, eye[0], eye[1], eye[2]);
@@ -1160,13 +1453,26 @@ void Renderer::drawWorld(const FrameIn &f) {
   glUniform3f(uPaint, 0.78f, 0.06f, 0.08f);
   setDents(nullptr);
 
-  // the sky writes no depth
-  glDisable(GL_DEPTH_TEST);
-  glDepthMask(GL_FALSE);
-  drawMesh(sky, Mat4::translate(eye[0], eye[1], eye[2]) * Mat4::scale(5000, 5000, 5000));
-  glDepthMask(GL_TRUE);
+  // NEAREST FIRST. Whatever is drawn early hides what is drawn later before
+  // its pixels are worked out, and the pixels are what this GPU pays for: the
+  // car, then the circuit, the scenery, the woods, the land, and the sky last.
   glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
   glDepthFunc(GL_LEQUAL);
+  const float RED[3] = {0.78f, 0.06f, 0.08f};
+  drawCar(car, S, f.groundH, f.gPitch, f.gRoll, f.paint[0] < 0 ? RED : f.paint, f.wheelAngle, f.camMode != 0);
+  glBindVertexArray(0);
+  glUseProgram(prog);
+  glUniform3f(uPaint, 0.78f, 0.06f, 0.08f);
+  setDents(nullptr);
+  PROF.mark(4);
+
+  drawMesh(corridor, Mat4::identity());
+  drawMesh(scenery, Mat4::identity());
+  PROF.mark(2);
+  if (dress) dress->drawWorld();
+  PROF.mark(3);
+
   // The land, pushed a little AWAY in depth: where it runs level with the
   // circuit the circuit wins, and a hill that is really in the way still hides
   // what is behind it.
@@ -1175,10 +1481,10 @@ void Renderer::drawWorld(const FrameIn &f) {
   drawMesh(sea, Mat4::identity());
   drawMesh(ground, Mat4::identity());
   glDisable(GL_POLYGON_OFFSET_FILL);
-
-  drawMesh(corridor, Mat4::identity());
-  drawMesh(scenery, Mat4::identity());
-  if (dress) dress->drawWorld();
+  // the sky: behind everything, and it writes no depth
+  glDepthMask(GL_FALSE);
+  drawMesh(sky, Mat4::translate(eye[0], eye[1], eye[2]) * Mat4::scale(5000, 5000, 5000));
+  PROF.mark(1);
 
   glEnable(GL_POLYGON_OFFSET_FILL);
   glPolygonOffset(-2.0f, -6.0f);
@@ -1187,18 +1493,13 @@ void Renderer::drawWorld(const FrameIn &f) {
   // a soft dark patch under the car: the cheapest thing that glues it down
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  glDepthMask(GL_FALSE);
   const float lift = (float)std::max(0.0, car.z);
   drawMesh(shadow, Mat4::translate((float)car.x, (float)f.groundH + 0.004f, (float)-car.y) * Mat4::rotY((float)car.hdg) * Mat4::rotZ((float)f.gPitch) * Mat4::rotX((float)f.gRoll),
            0.42f / (1.0f + lift * 1.5f));
   glDepthMask(GL_TRUE);
   glDisable(GL_BLEND);
   glDisable(GL_POLYGON_OFFSET_FILL);
-
-  // ---- the car
-  const float RED[3] = {0.78f, 0.06f, 0.08f};
-  drawCar(car, S, f.groundH, f.gPitch, f.gRoll, f.paint[0] < 0 ? RED : f.paint, f.wheelAngle, f.camMode != 0);
-  glBindVertexArray(0);
+  PROF.mark(5);
 }
 
 // ---------------------------------------------------------------------------

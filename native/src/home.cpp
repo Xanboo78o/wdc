@@ -111,7 +111,7 @@ void MenuSave::load(const std::string &path) {
     else if (k == "team.f1") teams["f1"] = v; else if (k == "team.gt3") teams["gt3"] = v; else if (k == "team.f4") teams["f4"] = v;
     else if (k == "ffb") ffbSeen = std::atoi(v.c_str()); else if (k == "ffbv") ffbVer = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
     else if (k == "volume") volume = std::atoi(v.c_str()); else if (k == "line") line = v == "1";
-    else if (k == "model") model = v;
+    else if (k == "model") model = v; else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
     else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
@@ -131,6 +131,7 @@ void MenuSave::save(const std::string &path) const {
     << "\nfield " << field << "\ntheme " << theme << "\nmusic " << music << "\nffbv 2\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
     << "\nline " << (line ? 1 : 0) << "\n";
   if (!model.empty()) f << "model " << model << "\n";
+  f << "look " << look << "\n";
   f << "xon " << (xOn ? 1 : 0) << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
   if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
   for (const auto &kv : teams) if (!kv.second.empty()) f << "team." << kv.first << " " << kv.second << "\n";
@@ -186,6 +187,7 @@ std::string Home::circuitId() const {
 std::string Home::xTrackKey() const { const std::string id = circuitId(); return id == "heiligen" ? S.xHeil : id; }
 std::string Home::get(const std::string &key) const {
   if (key == "model") return pack();
+  if (key == "look") return S.look;
   if (key == "modeX") return S.xOn ? "xingus" : S.mode;
   if (key == "xStyle") return S.xStyle;
   if (key == "xGears") return S.xGears == "auto" ? "auto" : "manual";
@@ -221,6 +223,7 @@ void Home::set(const std::string &key, const std::string &v) {
   else if (key == "ffb") S.ffb = std::atoi(v.c_str()); else if (key == "cam") S.cam = std::atoi(v.c_str());
   else if (key == "volume") S.volume = std::atoi(v.c_str()); else if (key == "line") S.line = v == "true";
   else if (key == "model") { S.model = v; dirty = true; }
+  else if (key == "look") S.look = v;
   else if (key == "modeX") { S.xOn = v == "xingus"; if (!S.xOn) S.mode = v == "race" ? "race" : "hotlap"; dirty = true; }
   else if (key == "xStyle") S.xStyle = xstyle(v).key; else if (key == "xGears") S.xGears = v;
   else if (key == "xBots") S.xBots = v == "style" ? 0 : std::atoi(v.c_str()); else if (key == "xField") S.xField = v;
@@ -386,6 +389,7 @@ void Home::build() {
     optItems({{"THEME", "theme", {{"light", "LIGHT"}, {"dark", "DARK"}, {"halloween", "HALLOWEEN"}}},
               {"MUSIC", "music", {{"on", "ON"}, {"low", "QUIET"}, {"off", "OFF"}}},
               {"VIEW", "cam", {{"0", "ONBOARD"}, {"1", "CHASE"}, {"2", "NOSE"}, {"3", "T-CAM"}}},
+              {"LOOK", "look", {{"film", "FILM (SHADOWS, BLOOM)"}, {"plain", "PLAIN (FASTER)"}}},
               {"IDEAL LINE", "line", {{"false", "HIDDEN"}, {"true", "SHOWN"}}},
               {"VOLUME", "volume", {{"0", "OFF"}, {"2", "20%"}, {"4", "40%"}, {"6", "60%"}, {"8", "80%"}, {"10", "100%"}}},
               {"WHEEL FORCE (THROUGH TOOLS/FFB.PY)", "ffb", {{"0", "OFF"}, {"20", "20%"}, {"35", "35%"}, {"50", "50%"}, {"65", "65%"}, {"80", "80%"}, {"100", "100%"}}}},

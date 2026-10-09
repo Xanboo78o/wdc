@@ -468,7 +468,7 @@ enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
   std::vector<std::string> pos;
-  std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg, modelArg, xingArg, xtrackArg, xheilArg;
+  std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg, modelArg, lookArg, xingArg, xtrackArg, xheilArg;
   bool autoDrive = false, lineArg = false, windowed = false, hidpi = false, noAudio = false, hidden = false;
   int camArg = -1, ffbArg = -1, winW = 1600, winH = 900, gridArg = 0, lapsArg = 0, startArg = 0;
   long maxFrames = 0;
@@ -499,6 +499,7 @@ int main(int argc, char **argv) {
     else if (a == "--shot") shot = val("--shot");
     else if (a == "--screen") screenArg = val("--screen");
     else if (a == "--model") modelArg = val("--model");
+    else if (a == "--look") lookArg = val("--look");           // film (the default) | plain
     else if (a == "--xingus") xingArg = val("--xingus");       // a Xingus STYLE (rally, rallycross, gt3, derby ...) for unattended checks
     else if (a == "--xtrack") xtrackArg = val("--xtrack");     // heiligen | speedway | a circuit; --xheil picks the Heiligen route
     else if (a == "--xheil") xheilArg = val("--xheil");
@@ -568,6 +569,7 @@ int main(int argc, char **argv) {
   if (pos.size() > 0) cfg.track = pos[0];
   if (pos.size() > 1) cfg.car = pos[1];
   if (!tierArg.empty()) cfg.tier = tierArg;
+  if (!lookArg.empty()) cfg.look = lookArg == "plain" ? "plain" : "film";
   if (!modeArg.empty()) cfg.mode = modeArg;
   else if (direct && offscreen) cfg.mode = "hotlap";
   if (gridArg) cfg.grid = std::max(2, std::min(61, gridArg));
@@ -787,8 +789,10 @@ int main(int argc, char **argv) {
                                     "FORCE FEEDBACK - " + std::to_string(cfg.ffb) + "%", "QUIT TO MENU"};
   };
   auto drawAll = [&](FrameIn &f) {
+    R.post = cfg.look != "plain" && R.postOk;
     R.drawWorld(f);
     drawField();
+    R.endScene(f.time);
     R.hudBegin();
     R.drawRain(f);
     if (screen == HOME) home.draw(R, K, clock, liveOf());

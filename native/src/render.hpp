@@ -102,6 +102,11 @@ class Renderer {
   const std::string &carPack() const { return packKey; }
   void snapCamera() { camReady = false; }
   void drawWorld(const FrameIn &f);
+  // After the world and every car: develop the picture onto the screen. The HUD goes on top afterwards.
+  void endScene(double time);
+  bool post = true;             // false: the plain picture, as it was (SETTINGS - LOOK)
+  bool postOk = true;           // false: this GPU could not build the look at all
+  bool treeShadows = true;
   // Another car on the circuit (a rival): same meshes, its own paint. Call
   // between drawWorld and the HUD.
   void drawCar(const Car &car, const Spec &S, double groundH, double gPitch, double gRoll, const float paint[3], double rolled,
@@ -164,6 +169,17 @@ class Renderer {
   void hudQuad(float x, float y, float w, float h, float u0, float v0, float u1, float v1, const float c[4], float skew = 0);
   std::vector<float> hud;
   unsigned fbo = 0, fboCol = 0, fboDepth = 0;
+  // ---- THE LOOK: the scene is drawn into a float picture, the sun casts real
+  // shadows from a map, and the picture is then developed like film (bloom,
+  // a filmic curve, a grade, anti-aliasing, a vignette). render.cpp, "the look".
+  unsigned sceneFbo = 0, sceneCol = 0, sceneDepth = 0, bloomFbo[2] = {0, 0}, bloomTex[2] = {0, 0}, ldrFbo = 0, ldrTex = 0;
+  unsigned shFbo = 0, shTex = 0, fsVao = 0, brightProg = 0, blurProg = 0, compProg = 0, fxaaProg = 0;
+  int postW = 0, postH = 0, uShVP = -1, uShOn = -1, uPass = -1, uHdr = -1;
+  float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
+  Mat4 shVP;
+  bool sceneOpen = false;
+  void ensurePost();
+  void renderShadow(const Look &L, const float eye[3], const float fwd[3], double time);
   bool camReady = false;
   double camYaw = 0;
   void drawMesh(const GLMesh &m, const Mat4 &model, float alpha = 1);
