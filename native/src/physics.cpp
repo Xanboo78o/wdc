@@ -258,6 +258,7 @@ static void heaveOf(Spec &S) {
 // THE VERTICAL AXIS
 // ---------------------------------------------------------------------------
 static double groundEffect(double z) { return z <= 0 ? 1 : std::exp(-z / 0.22); }
+static const double WING_SHARE = 0.45;      // how much of a car's downforce its wings make, rather than its floor
 static const double DIFFUSER_RAKE = 0.26, FLOOR_STALL = 0.09;
 static const double SPRING = 160e3, DAMP = 4500, TRAVEL = 0.055, BUMPSTOP = 6e6, FMAX = 2.2e5, RATE_MAX = 11;
 static const double SUSP_TAU = 0.055;
@@ -290,7 +291,9 @@ static AirV aeroVertical(const Car &car, double q, double v) {
   const Spec &S = *car.spec;
   const double vh = std::max(v, 0.001);
   const double fwd = vh > 1 ? car.vx / vh : 1;
-  const double down = -q * S.ClA * std::max(0.0, fwd) * groundEffect(car.z);
+  // in the air the wings still fly (js/physics.js aeroVertical)
+  const double wings = WING_SHARE * std::max(0.0, std::cos(car.pitch) * std::cos(car.roll));
+  const double down = -q * S.ClA * std::max(0.0, fwd) * (car.z <= 0 ? 1 : wings + (1 - WING_SHARE) * groundEffect(car.z));
 
   const double climb = std::atan2(car.vz, std::max(vh, 1.0));
   double alpha = car.pitch - climb;

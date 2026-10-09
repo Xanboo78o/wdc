@@ -252,6 +252,8 @@ const GRAV = 9.81;
 // being pushed back down — the downforce holding it there is the first thing
 // the accident takes away.
 const groundEffect = z => (z <= 0 ? 1 : Math.exp(-z / 0.22));
+// How much of a car's downforce is made by its wings rather than its floor.
+const WING_SHARE = 0.45;
 
 // The diffuser rakes upward by design, so a car travelling backwards is a ramp
 // facing the wind. This is the number behind every famous single-seater
@@ -321,7 +323,15 @@ function aeroVertical(car, q, v) {
   const fwd = vh > 1 ? car.vx / vh : 1;     // cos of the angle between nose and travel
   // Wings and a sealed floor push DOWN, and only while the car is pointing
   // roughly where it is going. Sideways, they do almost nothing.
-  const down = -q * S.ClA * Math.max(0, fwd) * groundEffect(car.z);
+  // IN THE AIR THE WINGS STILL FLY. The floor's share dies with the seal
+  // (groundEffect), but a wing does not know how high it is: it makes its load
+  // in free air, for as long as the car is the right way up and going forwards.
+  // Without this a car that left the ground was a cannonball, and every crest
+  // threw it as far as a stone of no particular weight (Adam, 2026-10-08: "the
+  // cars definitely weigh more right, and u have to add downforce to the
+  // equations"). With it, a heavy-downforce car comes back to the road early.
+  const wings = WING_SHARE * Math.max(0, Math.cos(car.pitch) * Math.cos(car.roll));
+  const down = -q * S.ClA * Math.max(0, fwd) * (car.z <= 0 ? 1 : wings + (1 - WING_SHARE) * groundEffect(car.z));
 
   // The underbody as a flat plate. The angle of attack is the floor's angle to
   // the air actually hitting it: the car's pitch, less the angle at which it
