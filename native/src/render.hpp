@@ -175,6 +175,7 @@ class Renderer {
   void setDents(const Car *car);
   GLMesh ground, sea, corridor, decals, lineMesh, scenery, sky, shadow;
   GLMesh carBody, carFrontWing, carRearWing, carHelmet, wheelF, wheelR;
+  GLMesh spinF, spinR;          // the spokes and the writing on the tyre wall: smeared round the wheel at speed
   double wheelR_f = 0.36, wheelR_r = 0.36;
   bool carCabin = true;
   float carEye[3] = {0.2f, 0.76f, 0};

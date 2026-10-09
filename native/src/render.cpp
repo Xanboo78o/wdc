@@ -594,7 +594,7 @@ bool Renderer::loadTextures(const std::string &texDir) {
 
 void Renderer::shutdown() {
   for (GLMesh *m : {&ground, &sea, &corridor, &decals, &lineMesh, &scenery, &sky, &shadow, &carBody, &carFrontWing,
-                    &carRearWing, &carHelmet, &wheelF, &wheelR}) m->free();
+                    &carRearWing, &carHelmet, &wheelF, &wheelR, &spinF, &spinR}) m->free();
 }
 
 // ---------------------------------------------------------------------------
@@ -1255,6 +1255,7 @@ void Renderer::buildCar(const Spec &S) {
   const CarMeshes cm = buildCarMeshes(S);
   carBody.upload(cm.body); carFrontWing.upload(cm.frontWing); carRearWing.upload(cm.rearWing); carHelmet.upload(cm.helmet);
   wheelF.upload(cm.wheelF); wheelR.upload(cm.wheelR);
+  spinF.upload(cm.spinF); spinR.upload(cm.spinR);
   wheelR_f = cm.wheelRadF; wheelR_r = cm.wheelRadR;
   carCabin = cm.cabin;
   if (std::getenv("XBR_PROF")) std::fprintf(stderr, "car: body %zu tris, wings %zu + %zu, helmet %zu, wheels %zu + %zu each\n", cm.body.count() / 3,
@@ -1390,6 +1391,21 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     if (i < 2) wm = wm * Mat4::rotY((float)car.steerEff);
     wm = wm * Mat4::rotZ((float)(-rolled / r));
     drawMesh(i < 2 ? wheelF : wheelR, wm);
+    // THE BLUR OF A TURNING WHEEL. What a camera sees of spokes and lettering
+    // is everything they passed through while the shutter was open (1/75 s):
+    // drawn seven to eighteen times across that angle, each that much less solid. Below a
+    // walking pace it is drawn once, sharp.
+    const GLMesh &sp2 = i < 2 ? spinF : spinR;
+    const float sweep = std::min(2.3f, (float)(std::fabs(car.vx) / std::max(0.2, r) * (1.0 / 75)));
+    if (gh > 0 || sweep < 0.09f) { drawMesh(sp2, wm); continue; }
+    const int N = 7 + (int)(sweep * 5);          // the wider the smear the more of them, or it reads as dots
+    const float solid = std::min(1.0f, std::max(1.55f / N, 1.0f - (sweep - 0.09f) * 3.2f));
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    for (int q = 0; q < N; q++) drawMesh(sp2, wm * Mat4::rotZ(((float)q / (N - 1) - 0.5f) * sweep), solid);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
   }
   if (gh > 0) { glUniform1f(uGhost, 0.0f); glDisable(GL_BLEND); }
 }

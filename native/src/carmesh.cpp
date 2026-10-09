@@ -488,18 +488,56 @@ Geo spokes(double r0, double r1, double halfW, double z) {
   return g;
 }
 
+// THE WRITING ON THE TYRE WALL (car.js tyreTexture: lettering round the
+// sidewall and the compound's colour). Here it is geometry: two arcs of the
+// compound's colour and "XBR" twice, in a five-by-three block alphabet laid
+// round the wall, a hair proud of the rubber. It is what the eye reads a wheel's
+// speed from: crisp at a standstill, a ring at two hundred.
+const Mat MARK_W = {0.93f, 0.93f, 0.90f, K_MATT, 0}, MARK_Y = {0.98f, 0.78f, 0.08f, K_MATT, 0};
+void tyreMarks(Soup &s, double R, double width, const Mat &band) {
+  const double hw = width / 2;
+  auto wallZ = [&](double r) { return hw * (0.92 + 0.08 * std::max(0.0, std::min(1.0, (r - 0.80 * R) / (0.13 * R)))) + 0.003; };
+  static const char *GLYPH[3][5] = {{"101", "101", "010", "101", "101"}, {"110", "101", "110", "101", "110"}, {"110", "101", "110", "101", "101"}};
+  const double r0 = 0.835 * R, r1 = 0.905 * R, dr = (r1 - r0) / 5, da = 0.046;
+  for (double sd : {1.0, -1.0}) {
+    auto cell = [&](Geo &g, double ra, double rb, double a0, double a1) {
+      const V3 p0 = {ra * std::cos(a0), ra * std::sin(a0), sd * wallZ(ra)}, p1 = {ra * std::cos(a1), ra * std::sin(a1), sd * wallZ(ra)};
+      const V3 p2 = {rb * std::cos(a1), rb * std::sin(a1), sd * wallZ(rb)}, p3 = {rb * std::cos(a0), rb * std::sin(a0), sd * wallZ(rb)};
+      Q4(g, p0, p1, p2, p3);
+    };
+    Geo text, arcs;
+    for (int rep = 0; rep < 2; rep++) {
+      const double mid = PI_ / 2 + rep * PI_;                    // at the top and at the bottom
+      for (int L = 0; L < 3; L++) for (int row = 0; row < 5; row++) for (int col = 0; col < 3; col++) {
+        if (GLYPH[L][row][col] != '1') continue;
+        const double u = (L * 4 + col) - 5.0;                    // columns from the middle of the word
+        // read from OUTSIDE the wheel: left to right is clockwise on one face and anticlockwise on the other
+        const double a = mid - sd * u * da, b = mid - sd * (u + 1) * da;
+        cell(text, r1 - (row + 1) * dr, r1 - row * dr, std::min(a, b), std::max(a, b));
+      }
+      // the compound: an arc each side of the word
+      for (int seg = 0; seg < 14; seg++) {
+        const double a = mid + PI_ / 2 - 0.62 + seg * (1.24 / 14);
+        cell(arcs, 0.915 * R, 0.935 * R, a, a + 1.24 / 14);
+      }
+    }
+    add(s, text, MARK_W); add(s, arcs, band);
+  }
+}
+
 // The single-seater's wheel: 18-inch rim behind a cover, a ring of the second
 // colour on it, and the wheel nut.
-void wheelSS(MeshB &out, double R, double width, double k) {
+void wheelSS(MeshB &out, MeshB &spin, double R, double width, double k) {
   const int SEG = 22;
   const double RIMK = 0.64, BORE = R * (RIMK + 0.005);
-  Soup s;
+  Soup s, t;
   tyre(s, R, width, RIMK, SEG);
+  tyreMarks(t, R, width, MARK_Y);
   for (double sd : {1.0, -1.0}) {
     const double zf = sd * width * 0.275;
     add(s, annulus(0, BORE, zf, SEG), COVER);
     add(s, annulus(BORE * 0.70, BORE * 0.80, zf + sd * 0.004, SEG), PAINT2);
-    add(s, spokes(0.045, BORE * 0.66, 0.020, zf + sd * 0.004), SPOKE);
+    add(t, spokes(0.045, BORE * 0.66, 0.020, zf + sd * 0.004), SPOKE);
     // the nut: a hexagon, 0.04 at its seat and 0.035 at its face
     Geo nut;
     const double z0 = zf, z1 = zf + sd * 0.027;
@@ -513,21 +551,25 @@ void wheelSS(MeshB &out, double R, double width, double k) {
     add(s, nut, NUT);
   }
   for (Poly &q : s) for (V3 &p : q.p) p = p * k;
+  for (Poly &q : t) for (V3 &p : q.p) p = p * k;
   emit(out, s);
+  emit(spin, t);
 }
 // The GT3's: a deeper tyre wall (rim at 0.58 R), an alloy lip and spokes.
-void wheelGT(MeshB &out, double R, double width) {
+void wheelGT(MeshB &out, MeshB &spin, double R, double width) {
   const int SEG = 22;
   const double BORE = R * 0.62;
-  Soup s;
+  Soup s, t;
   tyre(s, R, width, 0.58, SEG);
+  tyreMarks(t, R, width, MARK_W);
   for (double sd : {1.0, -1.0}) {
     const double zf = sd * width * 0.275;
     add(s, annulus(0, BORE, zf, SEG), GT_HUB);
     add(s, annulus(BORE * 0.86, BORE, zf + sd * 0.004, SEG), GT_RIM);
-    add(s, spokes(0.03, BORE * 0.88, 0.026, zf + sd * 0.004), GT_RIM);
+    add(t, spokes(0.03, BORE * 0.88, 0.026, zf + sd * 0.004), GT_RIM);
   }
   emit(out, s);
+  emit(spin, t);
 }
 
 // ---------------------------------------------------------------------------
@@ -739,8 +781,8 @@ void buildSingleSeater(const Spec &S, CarMeshes &M) {
   for (Soup *s : {&body, &fw, &rw, &helm}) for (Poly &q : *s) for (V3 &p : q.p) p = W(p);
   emit(M.body, body); emit(M.frontWing, fw); emit(M.rearWing, rw); emit(M.helmet, helm);
 
-  wheelSS(M.wheelF, R, 0.305, W.sv);
-  wheelSS(M.wheelR, R, 0.405, W.sv);
+  wheelSS(M.wheelF, M.spinF, R, 0.305, W.sv);
+  wheelSS(M.wheelR, M.spinR, R, 0.405, W.sv);
   M.wheelRadF = M.wheelRadR = R * W.sv;
   // car.js eye: low and far back, behind the halo, 14 cm under its loop
   const V3 eye = W({-0.22, 0.68, 0});
@@ -836,8 +878,8 @@ void buildCoupe(const Spec &S, CarMeshes &M) {
   }
 
   emit(M.body, body); emit(M.frontWing, fw); emit(M.rearWing, rw); emit(M.helmet, helm);
-  wheelGT(M.wheelF, R, 0.30);
-  wheelGT(M.wheelR, R, 0.33);
+  wheelGT(M.wheelF, M.spinF, R, 0.30);
+  wheelGT(M.wheelR, M.spinR, R, 0.33);
   M.wheelRadF = M.wheelRadR = R;
   // car.js: "a GT3 driver sits further forward, higher, and on the left" —
   // but its body is a shell with no interior (the tub loft is solid through
