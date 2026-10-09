@@ -12,6 +12,8 @@ Refetch with `node tools/getflora.mjs [name|all] [--force]`.
 | `seed-*` | [Foliage002](https://ambientcg.com/view?id=Foliage002) | dried seed heads, so the verge is not one plant repeated |
 | `needle-*` | [LeafSet019](https://ambientcg.com/view?id=LeafSet019) | fir sprigs — the conifer canopy, a sprig per card |
 | `leaf-*` | [LeafSet024](https://ambientcg.com/view?id=LeafSet024) | broadleaf leaves, built into branch cards at load |
+| `weed-*` | [LeafSet026](https://ambientcg.com/view?id=LeafSet026) | dandelion leaves — the undergrowth at the foot of a wood |
+| `ivy-*` | [LeafSet029](https://ambientcg.com/view?id=LeafSet029) | broad lobed leaves — the bushes and saplings of the tall banner |
 | `bark-*` | [Bark012](https://ambientcg.com/view?id=Bark012) | the trunks — deep vertical furrows, warm brown |
 | `dirt-*` | [Ground048](https://ambientcg.com/view?id=Ground048) | bare earth on a cut face — dark, loose, not sand |
 | `rock-*` | [Rock030](https://ambientcg.com/view?id=Rock030) | anything too steep to hold soil — layered, brown-grey |

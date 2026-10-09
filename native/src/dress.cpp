@@ -7,7 +7,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <array>
 #include <fstream>
+#include <functional>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 namespace xbr {
 
@@ -290,7 +294,377 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
 }
 
 // ---- the woods and the boards -----------------------------------------------------------
-struct Woods {};
+//
+// ADAM'S FOREST (LOOK.md, the 2026-09-23 amendment; js/forest.js + js/woods.js):
+//
+//   "3 rows of randomly resized and spun trees, between the 2nd and 3rd row a
+//    Short banner (paper thin 2d just flat) of flora, then a taller one behind
+//    the 3rd, then from then on 3 layers of cutout trees that slowly rotate to
+//    face the player, a little taller than the others, then a big superdark
+//    green background, remmber, as things get deeper, they get darker."
+//
+// Front to back from the TREELINE: row 1, row 2, SHORT BANNER, row 3, TALL
+// BANNER, paper 1 2 3, BACKDROP — each layer 0.64 of the light of the one in
+// front. The treelines come from the survey (walk out square to the track from
+// the run-off; the first wood you step into is where it begins, and how far
+// you can keep walking inside it is how deep it is).
+//
+// AND HOW IT GOES AWAY WITH DISTANCE (Adam, 2026-10-08: "fade the forests by
+// removing the back green layer first then the next, then the next then sparse
+// trees"): the backdrop goes first, then the paper rows from the back, then
+// the banners, and last the real rows thin to one tree in three. FADE below.
+namespace {
+
+const double ROW_GAP = 5.0, PAPER_SPACING = 2.6, PAPER_GAP_MIN = 2.5, PAPER_TALLER = 1.15;
+const double ROW_SPACING[3] = {5.2, 4.4, 3.8};
+const double SHORT_H = 2.4, TALL_H = 6.2, WALL_H = 9.0, LAYER_SHADE = 0.64;
+const double STEP = 5, SEARCH = 150, MARCH = 2, JUMP = 8, CLEAR = 1.5, HOLE = 12, FAR_CLEAR = 30, REACH = 700;
+const double CELL = 220, NEAR_TREES = 150;
+// fade ids
+enum { F_ROW = 0, F_SHORT = 1, F_TALL = 2, F_PAPER1 = 3, F_PAPER2 = 4, F_PAPER3 = 5, F_BACK = 6, F_FAR = 7, F_NEVER = 8, N_FADE = 9 };
+// metres from the eye: starts to go, gone; and the share that never goes (the sparse trees)
+const float FADE[N_FADE][3] = {
+  {650, 800, 0.34f},     // the real rows thin to one in three — last of all
+  {590, 650, 0},         // short banner
+  {590, 650, 0},         // tall banner
+  {520, 590, 0},         // paper 1
+  {450, 520, 0},         // paper 2
+  {380, 450, 0},         // paper 3
+  {300, 380, 0},         // the backdrop: first to go
+  {900, 1100, 0.5f},     // the woods beyond the treelines: half of them stay to the horizon
+  {1e9f, 1e9f, 1},       // boards
+};
+const float FAR0 = 1500, FAR1 = 1800;   // past this nothing of the wood is drawn at all
+// texture layers
+enum { L_LEAF = 0, L_NEEDLE = 1, L_SHORT = 2, L_TALL = 3, L_BARK = 4, L_BROAD = 5, L_CONE = 6, L_BOARD = 7, N_LAYER = 8 };
+const int TEX = 1024;
+
+struct Rnd {
+  unsigned s;
+  explicit Rnd(unsigned seed) : s(seed ? seed : 1) {}
+  double operator()() { s = s * 1664525u + 1013904223u; return s / 4294967296.0; }
+};
+struct Rect { double x, y, w, h; };
+
+// One vertex of a tree in the kit: pos3 nrm3 uv3 col3 sway1
+typedef std::vector<float> Kit;
+void kv(Kit &k, double x, double y, double z, double nx, double ny, double nz, double u, double v, double layer, double shade, double sway) {
+  const float f[13] = {(float)x, (float)y, (float)z, (float)nx, (float)ny, (float)nz, (float)u, (float)v, (float)layer, (float)shade, (float)shade, (float)shade, (float)sway};
+  k.insert(k.end(), f, f + 13);
+}
+// A bent card, which is every leaf and every sprig (js/forest.js card()).
+struct CardOpt { int rows = 2; double bend = 0, tilt = 0, yaw = 0, at[3] = {0, 0, 0}, shade = 1, droop = 0, roll = 0; bool cross = false; };
+void card(Kit &k, const Rect &r, int layer, double w, double h, CardOpt o) {
+  if (o.cross) {
+    CardOpt a = o; a.cross = false; card(k, r, layer, w, h, a);
+    a.shade = o.shade * 0.86; a.roll = o.roll + 3.14159265358979 / 2; card(k, r, layer, w, h, a);
+    return;
+  }
+  const double cy = std::cos(o.yaw), sy = std::sin(o.yaw), ct = std::cos(o.tilt), st = std::sin(o.tilt);
+  const double wx = std::cos(o.roll), wy = -std::sin(o.roll) * st, wz = std::sin(o.roll) * ct;
+  struct V { double p[3], n[3], u, v, c, s; };
+  std::vector<V> vs;
+  for (int row = 0; row <= o.rows; row++) {
+    const double t = (double)row / o.rows, lean = o.bend * t * t, y = h * t * ct - o.droop * t * t, z0 = h * t * st + lean;
+    const double sh = o.shade * (0.74 + 0.26 * t);
+    for (double sgn : {-0.5, 0.5}) {
+      const double x = sgn * w * (1 - 0.12 * t);
+      const double lx = x * wx, ly = y + x * wy, lz = z0 + x * wz;
+      V v;
+      v.p[0] = lx * cy - lz * sy + o.at[0]; v.p[1] = ly + o.at[1]; v.p[2] = lx * sy + lz * cy + o.at[2];
+      v.u = r.x + (sgn + 0.5) * r.w; v.v = 1 - (r.y + t * r.h);          // the atlas's rects count v up from the bottom; the picture is stored top first
+      if (o.roll == 0) { v.n[0] = -sy * 0.45; v.n[1] = 0.89; v.n[2] = cy * 0.45; }
+      else {
+        double nx = ct * wz - st * wy, ny = st * wx, nz = -ct * wx;
+        if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        ny += 0.55;
+        const double L = std::hypot(nx, std::hypot(ny, nz));
+        nx /= L; ny /= L; nz /= L;
+        v.n[0] = nx * cy - nz * sy; v.n[1] = ny; v.n[2] = nx * sy + nz * cy;
+      }
+      v.c = sh; v.s = t;
+      vs.push_back(v);
+    }
+  }
+  for (int row = 0; row < o.rows; row++) {
+    const int a = row * 2;
+    for (int i : {a, a + 1, a + 3, a, a + 3, a + 2}) { const V &v = vs[(size_t)i]; kv(k, v.p[0], v.p[1], v.p[2], v.n[0], v.n[1], v.n[2], v.u, v.v, layer, v.c, v.s); }
+  }
+}
+// A trunk or a branch: a tapered tube, bark at its true size (UVs are metres / 2).
+void trunk(Kit &k, double rBase, double rTop, double h, int sides, double lean, double shade, double yaw = 0, double y0 = 0) {
+  auto pt = [&](double a, double t, double out[3], double nn[3]) {
+    const double r = rBase + (rTop - rBase) * t;
+    double x = std::cos(a) * r, y = h * t, z = std::sin(a) * r;
+    // lean: turn about z, then yaw about y
+    const double cl = std::cos(lean), sl = std::sin(lean);
+    const double x2 = x * cl - y * sl, y2 = x * sl + y * cl;
+    const double cyw = std::cos(yaw), syw = std::sin(yaw);
+    out[0] = x2 * cyw + z * syw; out[1] = y2 + y0; out[2] = -x2 * syw + z * cyw;
+    const double nx = std::cos(a) * cl, ny = std::cos(a) * sl, nz = std::sin(a);
+    nn[0] = nx * cyw + nz * syw; nn[1] = ny; nn[2] = -nx * syw + nz * cyw;
+  };
+  const double circ = 2 * 3.14159265358979 * (rBase + rTop) * 0.5;
+  for (int s = 0; s < sides; s++) {
+    const double a0 = 2 * 3.14159265358979 * s / sides, a1 = 2 * 3.14159265358979 * (s + 1) / sides;
+    double p[4][3], n[4][3];
+    pt(a0, 0, p[0], n[0]); pt(a1, 0, p[1], n[1]); pt(a1, 1, p[2], n[2]); pt(a0, 1, p[3], n[3]);
+    const double u0 = circ * s / sides / 2, u1 = circ * (s + 1) / sides / 2, uu[4] = {u0, u1, u1, u0}, vv[4] = {0, 0, h / 2, h / 2};
+    for (int i : {0, 1, 2, 0, 2, 3}) kv(k, p[i][0], p[i][1], p[i][2], n[i][0], n[i][1], n[i][2], uu[i], vv[i], L_BARK, shade, 0);
+  }
+}
+struct Species { Kit mesh; double frame = 10; float tint[3] = {1, 1, 1}; int layer = L_BROAD; };
+
+void coniferFoliage(Kit &k, const std::vector<Rect> &rects, double h, double spread, int whorls, unsigned seed) {
+  Rnd r(seed);
+  for (int w = 0; w < whorls; w++) {
+    const double t = 0.2 + 0.8 * ((double)w / (whorls - 1)), reach = spread * std::pow(1 - t, 0.72) + 0.4, shade = 0.30 + 0.70 * t;
+    for (int j = 0; j < 2; j++) {
+      const double yaw = w * 2.3999 + j * 3.14159265358979 + r() * 0.4;
+      CardOpt o; o.rows = 2; o.tilt = 1.28 + r() * 0.2; o.bend = -reach * 0.18; o.yaw = yaw; o.shade = shade; o.cross = true; o.droop = reach * 0.22;
+      o.at[0] = std::cos(yaw) * reach * 0.18; o.at[1] = h * t; o.at[2] = std::sin(yaw) * reach * 0.18;
+      card(k, rects[(size_t)(w + j) % rects.size()], L_NEEDLE, reach * 2.3, reach * 1.45, o);
+    }
+  }
+  CardOpt top; top.rows = 2; top.yaw = 0.7; top.shade = 1; top.at[1] = h * 0.94;
+  card(k, rects[0], L_NEEDLE, spread * 0.7, spread * 1.1, top);
+}
+void palmFoliage(Kit &k, const std::vector<Rect> &rects, double h, double frond, int fronds, unsigned seed) {
+  Rnd r(seed);
+  for (int f = 0; f < fronds; f++) {
+    const double t = (double)f / (fronds - 1), yaw = f * 2.3999 + r() * 0.35;
+    const double len = frond * (0.75 + r() * 0.4) * (0.7 + 0.3 * std::sin(t * 3.14159265358979));
+    CardOpt o; o.rows = 4; o.tilt = 0.35 + t * 1.25 + r() * 0.2; o.yaw = yaw; o.cross = true; o.droop = len * (0.18 + 0.42 * t); o.shade = 0.95 - 0.45 * t; o.at[1] = h - 0.25;
+    card(k, rects[(size_t)f % rects.size()], L_NEEDLE, len * 0.34, len, o);
+  }
+}
+void broadFoliage(Kit &k, const std::vector<Rect> &rects, double h, double crown, double leaf, int cards, unsigned seed) {
+  Rnd r(seed);
+  for (int c = 0; c < cards; c++) {
+    const double t = (double)c / cards, yaw = c * 2.3999 + r() * 0.3;
+    const double up = 0.28 + 0.78 * std::sin(t * 3.14159265358979 * 1.6 + r() * 0.5);
+    const double out = crown * (0.42 + r() * 0.72) * std::max(0.35, std::sin(up * 3.14159265358979 * 0.85));
+    const double size = leaf * (0.78 + r() * 0.55);
+    // (0.16 at the darkest in the browser, where the leaf material also glows; here that is a black blob)
+    const double shade = 0.40 + 0.60 * std::min(1.0, (out / crown) * 0.55 + up * 0.7);
+    CardOpt o; o.rows = 2; o.tilt = 0.55 + r() * 1.0; o.bend = (r() - 0.5) * size * 0.5; o.yaw = yaw; o.shade = shade; o.droop = size * 0.18; o.cross = true;
+    o.at[0] = std::cos(yaw) * out; o.at[1] = h * 0.6 + up * crown; o.at[2] = std::sin(yaw) * out;
+    card(k, rects[(size_t)c % rects.size()], L_LEAF, size, size * 0.92, o);
+  }
+}
+
+// "Am I inside one of these polygons?", asked a hundred thousand times.
+struct PolyIndex {
+  std::vector<std::vector<std::pair<double, double>>> polys;
+  std::vector<std::array<double, 4>> box;
+  std::map<long long, std::vector<int>> cells;
+  static constexpr double G = 40;
+  static long long key(double x, double y) { return (long long)std::floor(x / G) * 100003LL + (long long)std::floor(y / G); }
+  void add(std::vector<std::pair<double, double>> p) {
+    if (p.size() < 3) return;
+    std::array<double, 4> b = {1e300, -1e300, 1e300, -1e300};
+    for (auto &q : p) { b[0] = std::min(b[0], q.first); b[1] = std::max(b[1], q.first); b[2] = std::min(b[2], q.second); b[3] = std::max(b[3], q.second); }
+    const int id = (int)polys.size();
+    for (double gx = std::floor(b[0] / G); gx <= std::floor(b[1] / G); gx++)
+      for (double gy = std::floor(b[2] / G); gy <= std::floor(b[3] / G); gy++) cells[(long long)gx * 100003LL + (long long)gy].push_back(id);
+    polys.push_back(std::move(p)); box.push_back(b);
+  }
+  bool in(double x, double y) const {
+    auto it = cells.find(key(x, y));
+    if (it == cells.end()) return false;
+    for (int id : it->second) {
+      const auto &b = box[(size_t)id];
+      if (x < b[0] || x > b[1] || y < b[2] || y > b[3]) continue;
+      const auto &p = polys[(size_t)id];
+      bool inside = false;
+      for (size_t j = 0, i = p.size() - 1; j < p.size(); i = j++)
+        if ((p[j].second > y) != (p[i].second > y) && x < (p[i].first - p[j].first) * (y - p[j].second) / (p[i].second - p[j].second) + p[j].first) inside = !inside;
+      if (inside) return true;
+    }
+    return false;
+  }
+};
+// What ESA WorldCover saw from orbit, 10 m to the pixel (data/env/cover).
+struct Cover {
+  int nx = 0, ny = 0; double x0 = 0, y0 = 0, cell = 10;
+  std::vector<unsigned char> cls;
+  bool load(const std::string &path) {
+    const Json j = Json::loadOpt(path);
+    if (!j.isObj()) return false;
+    nx = (int)j["nx"].n(); ny = (int)j["ny"].n(); x0 = j["x0"].n(); y0 = j["y0"].n(); cell = j["cell"].n(10);
+    cls.assign((size_t)nx * ny, 0);
+    const std::string rle = j["rle"].s();
+    size_t k = 0, p = 0;
+    while (p < rle.size() && k < cls.size()) {
+      char *e = nullptr;
+      const long v = std::strtol(rle.c_str() + p, &e, 10);
+      p = (size_t)(e - rle.c_str()) + 1;
+      const long n = std::strtol(rle.c_str() + p, &e, 10);
+      p = (size_t)(e - rle.c_str()) + 1;
+      for (long i = 0; i < n && k < cls.size(); i++) cls[k++] = (unsigned char)v;
+    }
+    return nx > 0 && ny > 0;
+  }
+  bool tree(double x, double y) const {
+    if (cls.empty()) return false;
+    const int i = (int)std::floor((x - x0) / cell), j = (int)std::floor((y - y0) / cell);
+    return i >= 0 && j >= 0 && i < nx && j < ny && cls[(size_t)j * nx + i] == 10;
+  }
+};
+// What grows, circuit by circuit: data/env/forest.js, copied.
+struct ForestSpec { const char *key; bool park; double conifer, depth, density, tall; bool palm, cover; };
+const ForestSpec FOREST[] = {
+  {"monza", false, 0.12, 90, 1.3, 2.3, false, true},   {"suzuka", false, 0.72, 60, 1.15, 1.7, false, true},
+  {"nurburgring", false, 0.92, 70, 1.15, 1.8, false, true}, {"sepang", true, 0.7, 90, 1.2, 1.3, true, true},
+  {"spa", false, 0.88, 90, 1.3, 2.1, false, true},      {"heiligen", false, 0.92, 400, 1.2, 2.0, false, false},
+  {"zandvoort", false, 0.75, 45, 0.85, 1.0, false, true}, {"monaco", true, 0.4, 30, 0.8, 1.0, false, false},
+  {"baku", true, 0.06, 30, 0.8, 1.0, false, false},     {"street", false, 0.45, 140, 1.3, 2.0, false, true},
+  {"kate2", false, 0.9, 200, 1.4, 2.4, false, false},   {"_", false, 0.5, 45, 1.0, 1.0, false, false},
+};
+
+const char *FLORA_VS = R"(#version 330 core
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNrm; layout(location=2) in vec3 aUv;
+layout(location=3) in vec3 aCol; layout(location=4) in vec4 aExt;
+layout(location=5) in vec4 iPos; layout(location=6) in vec4 iMore;     // instanced trees: xyz scale | yaw shade rnd fadeId
+uniform mat4 uVP; uniform vec3 uEye; uniform float uTime; uniform int uInst;
+uniform vec3 uFade[9]; uniform vec2 uFar;
+out vec3 vW, vN, vU, vC; out float vFade;
+void main(){
+  vec3 p = aPos, n = aNrm, pivot = aPos; float rnd = aExt.z; int id = int(aExt.y + 0.5); float shade = 1.0;
+  if (uInst == 1) {
+    float c = cos(iMore.x), s = sin(iMore.x);
+    vec3 q = aPos * iPos.w;
+    // a little wind in the top of the crown
+    float sw = aExt.x * sin(uTime * 1.3 + iPos.x * 0.37 + iPos.z * 0.21) * 0.035 * q.y * 0.1;
+    q.x += sw; q.z += sw * 0.6;
+    p = vec3(q.x * c + q.z * s, q.y, -q.x * s + q.z * c) + iPos.xyz;
+    n = vec3(aNrm.x * c + aNrm.z * s, aNrm.y, -aNrm.x * s + aNrm.z * c);
+    pivot = iPos.xyz; rnd = iMore.z; id = int(iMore.w + 0.5); shade = iMore.y;
+  } else if (aExt.x > 0.5) {
+    // a paper tree: one flat cut-out that turns to face you
+    vec3 to = uEye - aPos; to.y = 0.0; to = normalize(to);
+    p = aPos + vec3(to.z, 0.0, -to.x) * aNrm.x + vec3(0.0, aNrm.y, 0.0);
+    n = normalize(to + vec3(0.0, 1.2, 0.0));
+  }
+  float d = distance(uEye.xz, pivot.xz);
+  vec3 F = uFade[id];
+  float gone = rnd < F.z ? 0.0 : smoothstep(F.x, F.y, d);
+  vFade = (1.0 - gone) * (1.0 - smoothstep(uFar.x, uFar.y, d));
+  if (id == 6) vFade *= smoothstep(4.0, 22.0, d);       // you can stand in a wood without the wall going black on you
+  vW = p; vN = n; vU = aUv; vC = aCol * shade;
+  gl_Position = uVP * vec4(p, 1.0);
+}
+)";
+const char *FLORA_FS = R"(#version 330 core
+in vec3 vW, vN, vU, vC; in float vFade;
+uniform sampler2DArray uTex; uniform int uBake;
+uniform vec3 uEye, uSun, uSunCol, uSkyAmb, uGndAmb, uFog; uniform float uFogK;
+out vec4 o;
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+void main(){
+  if (vFade < 0.999 && vFade <= hash(gl_FragCoord.xy)) discard;
+  vec3 c = vC;
+  if (vU.z > -0.5) {
+    vec4 t = texture(uTex, vU);
+    if (vU.z < 3.5 || vU.z > 4.5) { if (t.a < (vU.z > 4.5 && vU.z < 6.5 ? 0.30 : 0.40)) discard; }      // everything but the bark is a cut-out
+    c *= t.rgb;
+  }
+  vec3 n = normalize(vN);
+  float ndl = max(dot(n, uSun), 0.0) * 0.75 + 0.25;                   // wrapped: a wood must not flicker black as the sun crosses it
+  vec3 amb = mix(uGndAmb, uSkyAmb, n.y * 0.5 + 0.5);
+  vec3 lit = c * (amb + uSunCol * ndl * 0.78);
+  if (uBake == 1) { o = vec4(lit, 1.0); return; }
+  float f = 1.0 - exp(-distance(uEye, vW) * uFogK);
+  o = vec4(mix(lit, uFog, f), 1.0);
+}
+)";
+
+struct CellMesh {
+  std::vector<float> deco, cards;           // 16 floats a vertex
+  std::vector<float> inst[2];               // 8 floats a tree, broadleaf then conifer
+  GLuint vao[2] = {0, 0}, vbo[2] = {0, 0}, ivao[2] = {0, 0}, ivbo[2] = {0, 0};
+  int n[2] = {0, 0}, ni[2] = {0, 0};
+  double cx = 0, cz = 0;
+};
+
+}  // namespace
+
+struct Woods {
+  GLuint tex = 0, kitVbo[2] = {0, 0};
+  int kitN[2] = {0, 0};
+  Species sp[2];
+  std::map<long long, CellMesh> cells;
+  bool ok = false;
+  size_t trees = 0, papers = 0;
+
+  static void sv(std::vector<float> &v, const double p[3], double nx, double ny, double nz, double u, double vv, double layer, const float col[3], double mode, int fade, double rnd) {
+    const float f[16] = {(float)p[0], (float)p[1], (float)p[2], (float)nx, (float)ny, (float)nz, (float)u, (float)vv, (float)layer, col[0], col[1], col[2], (float)mode, (float)fade, (float)rnd, 0};
+    v.insert(v.end(), f, f + 16);
+  }
+  CellMesh &cell(double x, double z) {
+    const long long gx = (long long)std::floor(x / CELL), gz = (long long)std::floor(z / CELL);
+    CellMesh &c = cells[gx * 100003LL + gz];
+    c.cx = (gx + 0.5) * CELL; c.cz = (gz + 0.5) * CELL;
+    return c;
+  }
+};
+
+static bool loadLayer(const std::string &path, int layer) {
+  int w, h;
+  std::vector<unsigned char> px;
+  if (!readPAM(path, w, h, px) || w != TEX || h != TEX) return false;
+  glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, TEX, TEX, 1, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+  return true;
+}
+
+// The braking boards' faces: the number IS the board, black on white, nothing
+// else on it, and a yellow cap on the 50 — the board you brake AT (js/furniture.js).
+static const int BOARD_N[6] = {50, 100, 150, 200, 250, 300};
+static std::vector<unsigned char> bakeBoards(const std::string &fontPath) {
+  std::vector<unsigned char> px((size_t)TEX * TEX * 4, 255);
+  for (size_t i = 0; i < px.size(); i += 4) { px[i] = 242; px[i + 1] = 242; px[i + 2] = 238; }
+  FT_Library ft = nullptr;
+  FT_Face face = nullptr;
+  const bool font = !FT_Init_FreeType(&ft) && !FT_New_Face(ft, fontPath.c_str(), 0, &face);
+  if (!font) std::fprintf(stderr, "dress: no font at %s — the braking boards will be blank\n", fontPath.c_str());
+  const int C = 256;
+  for (int k = 0; k < 6; k++) {
+    const int x0 = (k % 4) * C, y0 = (k / 4) * C;
+    for (int y = 0; y < 24; y++) for (int x = 0; x < C; x++) {
+      unsigned char *d = &px[((size_t)(y0 + y) * TEX + x0 + x) * 4];
+      if (BOARD_N[k] == 50) { d[0] = 245; d[1] = 197; d[2] = 24; } else { d[0] = 16; d[1] = 16; d[2] = 20; }
+    }
+    if (!font) continue;
+    const std::string txt = std::to_string(BOARD_N[k]);
+    int size = 210;
+    int width = 0, top = 0;
+    for (int pass = 0; pass < 2; pass++) {
+      FT_Set_Pixel_Sizes(face, 0, (FT_UInt)size);
+      width = 0; top = 0;
+      for (char ch : txt) { if (FT_Load_Char(face, (FT_ULong)ch, FT_LOAD_RENDER)) continue; width += (int)(face->glyph->advance.x >> 6); top = std::max(top, (int)face->glyph->bitmap_top); }
+      const double fit = std::min(0.90 * C / std::max(1, width), 0.72 * C / std::max(1, top));
+      if (pass == 0) size = std::max(20, (int)(size * fit));
+    }
+    int pen = x0 + (C - width) / 2;
+    const int base = y0 + (C + 24) / 2 + top / 2;
+    for (char ch : txt) {
+      if (FT_Load_Char(face, (FT_ULong)ch, FT_LOAD_RENDER)) continue;
+      const FT_GlyphSlot g = face->glyph;
+      for (int y = 0; y < (int)g->bitmap.rows; y++) for (int x = 0; x < (int)g->bitmap.width; x++) {
+        const int X = pen + g->bitmap_left + x, Y = base - g->bitmap_top + y;
+        if (X < x0 || X >= x0 + C || Y < y0 || Y >= y0 + C) continue;
+        const int a = g->bitmap.buffer[(size_t)y * g->bitmap.pitch + x];
+        unsigned char *d = &px[((size_t)Y * TEX + X) * 4];
+        const int ink[3] = {12, 13, 16};
+        for (int c = 0; c < 3; c++) d[c] = (unsigned char)((d[c] * (255 - a) + ink[c] * a) / 255);
+      }
+      pen += (int)(g->advance.x >> 6);
+    }
+  }
+  if (face) FT_Done_Face(face);
+  if (ft) FT_Done_FreeType(ft);
+  return px;
+}
 
 Dress::Dress() = default;
 Dress::~Dress() = default;
@@ -298,13 +672,485 @@ Dress::~Dress() = default;
 bool Dress::init(const std::string &data, const std::string &tex) {
   dataDir = data; texDir = tex;
   carProg = linkD(CAR_VS, CAR_FS);
-  return carProg != 0;
+  floraProg = linkD(FLORA_VS, FLORA_FS);
+  return carProg != 0 && floraProg != 0;
 }
 void Dress::frame(const Mat4 &vp, const float e[3], const Look &l, double t) {
   VP = vp; look = l; time = t;
   for (int k = 0; k < 3; k++) eye[k] = e[k];
 }
-void Dress::buildWorld(const Track &, const World &, const Json &) {}
-void Dress::drawWorld() {}
+bool Dress::hasWoods() const { return woods && woods->ok; }
+
+static void staticVao(GLuint &vao, GLuint &vbo, const std::vector<float> &v) {
+  glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo);
+  glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(v.size() * 4), v.data(), GL_STATIC_DRAW);
+  const GLsizei st = 16 * sizeof(float);
+  const int size[5] = {3, 3, 3, 3, 4}, off[5] = {0, 3, 6, 9, 12};
+  for (int a = 0; a < 5; a++) { glEnableVertexAttribArray((GLuint)a); glVertexAttribPointer((GLuint)a, size[a], GL_FLOAT, GL_FALSE, st, (void *)(off[a] * sizeof(float))); }
+}
+// A tree of the kit, drawn once for every entry in an instance buffer.
+static void instVao(GLuint &vao, GLuint kitVbo, GLuint instVbo) {
+  glGenVertexArrays(1, &vao);
+  glBindVertexArray(vao);
+  glBindBuffer(GL_ARRAY_BUFFER, kitVbo);
+  const GLsizei st = 13 * sizeof(float);
+  const int size[5] = {3, 3, 3, 3, 1}, off[5] = {0, 3, 6, 9, 12};
+  for (int a = 0; a < 5; a++) { glEnableVertexAttribArray((GLuint)a); glVertexAttribPointer((GLuint)a, size[a], GL_FLOAT, GL_FALSE, st, (void *)(off[a] * sizeof(float))); }
+  glBindBuffer(GL_ARRAY_BUFFER, instVbo);
+  for (int a = 0; a < 2; a++) {
+    glEnableVertexAttribArray((GLuint)(5 + a));
+    glVertexAttribPointer((GLuint)(5 + a), 4, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(a * 4 * sizeof(float)));
+    glVertexAttribDivisor((GLuint)(5 + a), 1);
+  }
+}
+
+void Dress::buildWorld(const Track &t, const World &world, const Json &env, const Line &line) {
+  woods = std::make_unique<Woods>();
+  Woods &W = *woods;
+  worldTris = 0;
+  if (!floraProg) return;
+  const ForestSpec *S = &FOREST[sizeof(FOREST) / sizeof(FOREST[0]) - 1];
+  for (const ForestSpec &f : FOREST) if (t.key == f.key) S = &f;
+
+  // ---- the photographs -----------------------------------------------------------
+  glGenTextures(1, &W.tex);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, W.tex);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, TEX, TEX, N_LAYER, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  static const char *FILES[5] = {"/flora-leaf.pam", "/flora-needle.pam", "/flora-short.pam", "/flora-tall.pam", "/flora-bark.pam"};
+  for (int i = 0; i < 5; i++)
+    if (!loadLayer(texDir + FILES[i], i)) { std::fprintf(stderr, "dress: no %s%s (run make) — no woods, no numbered boards\n", texDir.c_str(), FILES[i]); return; }
+  { const std::vector<unsigned char> b = bakeBoards(dataDir + "/fonts/anton.woff2"); glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, L_BOARD, TEX, TEX, 1, GL_RGBA, GL_UNSIGNED_BYTE, b.data()); }
+
+  // ---- the cut-outs, measured (data/flora/atlas.json) --------------------------------
+  const Json atlas = Json::loadOpt(dataDir + "/flora/atlas.json");
+  auto rects = [&](const char *name) {
+    std::vector<Rect> r;
+    for (const Json &it : atlas[name]["items"].arr) r.push_back({it["x"].n(), it["y"].n(), it["w"].n(), it["h"].n()});
+    return r;
+  };
+  std::vector<Rect> needle = rects("needle"), leaves = rects("leaf"), leaf;
+  // two by two leaves out of the atlas make a cluster card
+  std::sort(leaves.begin(), leaves.end(), [](const Rect &a, const Rect &b) { return a.x != b.x ? a.x < b.x : a.y < b.y; });
+  for (size_t i = 0; i + 4 <= leaves.size(); i += 2) {
+    double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (size_t k = i; k < i + 4; k++) { x0 = std::min(x0, leaves[k].x); y0 = std::min(y0, leaves[k].y); x1 = std::max(x1, leaves[k].x + leaves[k].w); y1 = std::max(y1, leaves[k].y + leaves[k].h); }
+    leaf.push_back({x0, y0, x1 - x0, y1 - y0});
+  }
+  if (leaf.empty()) leaf = leaves;
+  if (needle.empty() || leaf.empty()) { std::fprintf(stderr, "dress: data/flora/atlas.json has no leaves — no woods\n"); return; }
+
+  // ---- the kit: one broadleaf, one fir (or palm), grown to this circuit's trees (js/forest.js makeKit)
+  {
+    const double tall = S->tall, hB = 9.5 * tall, crown = 3.6 * std::pow(tall, 0.85), lf = 3.6 * std::pow(tall, 0.55);
+    const double hC = 15 * std::pow(tall, 0.8), girth = std::pow(tall, 0.4), bark = 0.62 / std::pow(tall, 0.7);
+    Kit &b = W.sp[0].mesh, &c = W.sp[1].mesh;
+    trunk(b, 0.42 * girth, 0.22 * girth, hB, 6, 0, bark);
+    Rnd r(12);
+    for (int k = 0; k < 4; k++) { const double len = crown * 0.97 * (0.85 + r() * 0.5), lean = 0.62 + r() * 0.25; trunk(b, 0.17, 0.07, len, 4, lean, bark, k * 1.7 + r() * 0.5, hB * 0.62); }
+    broadFoliage(b, leaf, hB, crown, lf, std::min(72, (int)std::lround(30 * std::pow(crown / 3.6, 2) / std::pow(lf / 3.6, 2))), 11);
+    if (S->palm) {
+      const double hP = 11 * std::pow(tall, 0.8);
+      trunk(c, 0.3 * girth, 0.22 * girth, hP, 7, 0.03, bark * 0.9);
+      palmFoliage(c, needle, hP, 4.8 * std::pow(tall, 0.5), 20, 5);
+    } else {
+      trunk(c, 0.34 * girth, 0.1, hC, 6, 0, bark);
+      coniferFoliage(c, needle, hC, 3.0 * std::pow(tall, 0.55), (int)std::lround(16 * std::pow(tall, 0.6)), 3);
+    }
+    const float TINT[2][3] = {{0.573f, 0.627f, 0.459f}, {0.576f, 0.639f, 0.459f}};
+    for (int s = 0; s < 2; s++) {
+      Species &sp = W.sp[s];
+      sp.layer = s ? L_CONE : L_BROAD;
+      double half = 0, top = 0;
+      for (size_t i = 0; i + 12 < sp.mesh.size(); i += 13) {
+        half = std::max({half, (double)std::fabs(sp.mesh[i]), (double)std::fabs(sp.mesh[i + 2])}); top = std::max(top, (double)sp.mesh[i + 1]);
+        if ((int)(sp.mesh[i + 8] + 0.5f) != L_BARK) for (int k = 0; k < 3; k++) sp.mesh[i + 9 + k] *= TINT[s][k] * 1.9f;   // the scans are pale; the tint and this bring them to a living green
+        else { sp.mesh[i + 9] *= 0.62f; sp.mesh[i + 10] *= 0.50f; sp.mesh[i + 11] *= 0.40f; }
+      }
+      sp.frame = std::max(top, 2 * half) * 1.04;
+      glGenBuffers(1, &W.kitVbo[s]);
+      glBindBuffer(GL_ARRAY_BUFFER, W.kitVbo[s]);
+      glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sp.mesh.size() * 4), sp.mesh.data(), GL_STATIC_DRAW);
+      W.kitN[s] = (int)(sp.mesh.size() / 13);
+    }
+  }
+
+  // The leaves have to be readable BEFORE the trees are photographed: a
+  // texture with no mip chain reads as opaque black, and so did the first trees.
+  glBindTexture(GL_TEXTURE_2D_ARRAY, W.tex);
+  glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  // ---- a photograph of each tree, for the paper rows and for trees too far to draw leaf by leaf
+  {
+    GLint wasFbo = 0, vp[4], wasProg = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &wasFbo); glGetIntegerv(GL_VIEWPORT, vp); glGetIntegerv(GL_CURRENT_PROGRAM, &wasProg);
+    // Into a sheet of its own, then copied across: a texture cannot be drawn
+    // into while the leaves being drawn are read out of it (it came out black).
+    GLuint fbo = 0, rb = 0, ivbo = 0, sheet = 0;
+    glGenTextures(1, &sheet); glBindTexture(GL_TEXTURE_2D, sheet);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, TEX, TEX, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, W.tex);
+    glGenFramebuffers(1, &fbo); glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sheet, 0);
+    glGenRenderbuffers(1, &rb); glBindRenderbuffer(GL_RENDERBUFFER, rb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, TEX, TEX);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rb);
+    glUseProgram(floraProg);
+    glUniform1i(glGetUniformLocation(floraProg, "uTex"), 0);
+    glUniform1i(glGetUniformLocation(floraProg, "uInst"), 1);
+    glUniform1i(glGetUniformLocation(floraProg, "uBake"), 1);
+    glUniform1f(glGetUniformLocation(floraProg, "uTime"), 0);
+    float far[N_FADE * 3];
+    for (int i = 0; i < N_FADE; i++) { far[i * 3] = 1e9f; far[i * 3 + 1] = 2e9f; far[i * 3 + 2] = 1; }
+    glUniform3fv(glGetUniformLocation(floraProg, "uFade"), N_FADE, far);
+    glUniform2f(glGetUniformLocation(floraProg, "uFar"), 1e9f, 2e9f);
+    // the bake keeps the leaf's own colour and its place in the crown; the sun is added when it is drawn
+    glUniform3f(glGetUniformLocation(floraProg, "uSun"), 0, 1, 0);
+    glUniform3f(glGetUniformLocation(floraProg, "uSunCol"), 0, 0, 0);
+    glUniform3f(glGetUniformLocation(floraProg, "uSkyAmb"), 1, 1, 1);
+    glUniform3f(glGetUniformLocation(floraProg, "uGndAmb"), 1, 1, 1);
+    const float one[8] = {0, 0, 0, 1, 0.6f, 1, 0, (float)F_NEVER};
+    glGenBuffers(1, &ivbo); glBindBuffer(GL_ARRAY_BUFFER, ivbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof one, one, GL_STATIC_DRAW);
+    glViewport(0, 0, TEX, TEX);
+    glEnable(GL_DEPTH_TEST); glDisable(GL_BLEND); glDisable(GL_CULL_FACE);
+    for (int s = 0; s < 2; s++) {
+      if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { std::fprintf(stderr, "dress: cannot photograph the trees\n"); break; }
+      glClearColor(0.17f, 0.25f, 0.11f, 0);      // the leaves' own green, so a small mip of the edge is not a dark fringe
+      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+      const float Sf = (float)W.sp[s].frame;
+      Mat4 O = Mat4::identity();
+      O.m[0] = 2 / Sf; O.m[5] = 2 / Sf; O.m[10] = -1 / Sf; O.m[13] = -0.96f;
+      glUniformMatrix4fv(glGetUniformLocation(floraProg, "uVP"), 1, GL_FALSE, O.m);
+      glUniform3f(glGetUniformLocation(floraProg, "uEye"), 0, Sf / 2, 1000);
+      GLuint vao = 0;
+      instVao(vao, W.kitVbo[s], ivbo);
+      glDrawArraysInstanced(GL_TRIANGLES, 0, W.kitN[s], 1);
+      glDeleteVertexArrays(1, &vao);
+      glCopyTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, s ? L_CONE : L_BROAD, 0, 0, TEX, TEX);
+    }
+    glBindVertexArray(0);
+    glDeleteBuffers(1, &ivbo); glDeleteRenderbuffers(1, &rb); glDeleteFramebuffers(1, &fbo); glDeleteTextures(1, &sheet);
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)wasFbo);
+    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    glUseProgram((GLuint)wasProg);
+  }
+  glBindTexture(GL_TEXTURE_2D_ARRAY, W.tex);
+  glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  // alpha-tested leaves thin out in the small mips; do not let the far ones use the smallest
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 3);
+  if (epoxy_has_gl_extension("GL_EXT_texture_filter_anisotropic") || epoxy_gl_version() >= 46)
+    glTexParameterf(GL_TEXTURE_2D_ARRAY, 0x84FE, 4.0f);
+
+  // XBR_DUMP=dir writes every layer of the wood's texture there (PAM), to look at what was baked
+  if (const char *dump = std::getenv("XBR_DUMP")) {
+    std::vector<unsigned char> all((size_t)TEX * TEX * 4 * N_LAYER);
+    glGetTexImage(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA, GL_UNSIGNED_BYTE, all.data());
+    for (int l = 0; l < N_LAYER; l++) {
+      std::ofstream o(std::string(dump) + "/layer" + std::to_string(l) + ".pam", std::ios::binary);
+      o << "P7\nWIDTH " << TEX << "\nHEIGHT " << TEX << "\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n";
+      o.write((const char *)&all[(size_t)l * TEX * TEX * 4], (std::streamsize)TEX * TEX * 4);
+    }
+  }
+  // ---- where the woods are ---------------------------------------------------------------
+  PolyIndex wood, built;
+  auto poly = [](const Json &pts) { std::vector<std::pair<double, double>> p; for (const Json &q : pts.arr) p.push_back({q[(size_t)0].n(), q[(size_t)1].n()}); return p; };
+  for (const Json &a : env["areas"].arr) { const std::string k = a["k"].s(); if (k == "forest" || (S->park && k == "park")) wood.add(poly(a["p"])); }
+  for (const Json &b : env["buildings"].arr) built.add(poly(b["p"]));
+  Cover cover;
+  if (S->cover) cover.load(dataDir + "/env/cover/" + t.key + ".json");
+  auto inWood = [&](double x, double y) { return wood.in(x, y) || cover.tree(x, y); };
+  // metres to the outer edge of the nearest run-off, any leg of the lap; `g` is how far it can see
+  auto slackOn = [&](double g) {
+    auto cells = std::make_shared<std::map<long long, std::vector<int>>>();
+    for (int i = 0; i < t.n; i++) (*cells)[(long long)std::floor(t.x[(size_t)i] / g) * 100003LL + (long long)std::floor(t.y[(size_t)i] / g)].push_back(i);
+    return [cells, g, &t](double x, double y) {
+      const long long gx = (long long)std::floor(x / g), gy = (long long)std::floor(y / g);
+      double best = 1e300;
+      for (long long dx = -1; dx <= 1; dx++) for (long long dy = -1; dy <= 1; dy++) {
+        auto it = cells->find((gx + dx) * 100003LL + gy + dy);
+        if (it == cells->end()) continue;
+        for (int i : it->second) best = std::min(best, std::hypot(t.x[(size_t)i] - x, t.y[(size_t)i] - y) - (t.w[(size_t)i] + std::max(t.runL[(size_t)i], t.runR[(size_t)i])));
+      }
+      return best;
+    };
+  };
+  const auto slack = slackOn(40), slackFar = slackOn(350);
+  auto clear = [&](double x, double y) { return slack(x, y) >= CLEAR && !built.in(x, y); };
+  const double lift = std::pow(S->tall, 0.75);
+  Rnd rnd(7);
+  auto shadeOf = [](double layer) { return std::pow(LAYER_SHADE, layer); };
+
+  auto tree = [&](double x, double y, bool con, double scale, double shade, int fade) {
+    const double gy = world.groundY(x, y) - 0.15, yaw = rnd() * 6.2831853, r = rnd();
+    CellMesh &c = W.cell(x, -y);
+    const float in[8] = {(float)x, (float)gy, (float)-y, (float)scale, (float)yaw, (float)shade, (float)r, (float)fade};
+    c.inst[con ? 1 : 0].insert(c.inst[con ? 1 : 0].end(), in, in + 8);
+    // and the same tree as two crossed photographs of itself, for when it is far away
+    const Species &sp = W.sp[con ? 1 : 0];
+    const double Sz = sp.frame * scale, y0 = gy - 0.02 * Sz, y1 = gy + 0.98 * Sz;
+    const float col[3] = {(float)shade, (float)shade, (float)shade};
+    for (int k = 0; k < 2; k++) {
+      const double a = yaw + k * 1.5707963, dx = std::cos(a) * Sz / 2, dz = std::sin(a) * Sz / 2;
+      const double p[4][3] = {{x - dx, y0, -y - dz}, {x + dx, y0, -y + dz}, {x + dx, y1, -y + dz}, {x - dx, y1, -y - dz}};
+      const double uu[4] = {0, 1, 1, 0}, vv[4] = {0, 0, 1, 1};
+      for (int i : {0, 1, 2, 0, 2, 3}) Woods::sv(c.cards, p[i], -dz * 0.3, 0.9, dx * 0.3, uu[i], vv[i], sp.layer, col, 0, fade, r);
+    }
+    W.trees++;
+  };
+  auto paper = [&](double x, double y, bool con, double scale, double shade, int fade) {
+    const Species &sp = W.sp[con ? 1 : 0];
+    const double gy = world.groundY(x, y) - 0.15, Sz = sp.frame * PAPER_TALLER * scale, r = rnd();
+    const double p[3] = {x, gy, -y};
+    const float col[3] = {(float)shade, (float)shade, (float)shade};
+    const double ox[4] = {-Sz / 2, Sz / 2, Sz / 2, -Sz / 2}, oy[4] = {-0.02 * Sz, -0.02 * Sz, 0.98 * Sz, 0.98 * Sz}, uu[4] = {0, 1, 1, 0}, vv[4] = {0, 0, 1, 1};
+    CellMesh &c = W.cell(x, -y);
+    for (int i : {0, 1, 2, 0, 2, 3}) Woods::sv(c.deco, p, ox[i], oy[i], 0, uu[i], vv[i], sp.layer, col, 1, fade, r);
+    W.papers++;
+  };
+
+  // ---- the treelines, and the stack planted along each -----------------------------------
+  struct Sample { double x, y, nx, ny, d, t0; };
+  auto plant = [&](const std::vector<Sample> &L) {
+    if (L.size() < 2) return;
+    // walk the line at `offset` behind the treeline, calling fn every `spacing` metres
+    auto walk = [&](double spacing, double offset, const std::function<void(double, double, double, double, double)> &fn) {
+      double pos = spacing * rnd();
+      for (size_t k = 0; k + 1 < L.size(); k++) {
+        const Sample &A = L[k], &B = L[k + 1];
+        const double ax = A.x + A.nx * offset, ay = A.y + A.ny * offset, bx = B.x + B.nx * offset, by = B.y + B.ny * offset;
+        const double len = std::hypot(bx - ax, by - ay);
+        if (len < 1e-6) continue;
+        while (pos < len) {
+          const double f = pos / len;
+          fn(ax + (bx - ax) * f, ay + (by - ay) * f, A.d + (B.d - A.d) * f, A.nx + (B.nx - A.nx) * f, A.ny + (B.ny - A.ny) * f);
+          pos += spacing * (0.75 + 0.5 * rnd());
+        }
+        pos -= len;
+      }
+    };
+    for (int r = 0; r < 3; r++) {
+      const double off = r * ROW_GAP;
+      walk(ROW_SPACING[r] / S->density, off, [&](double x, double y, double d, double nx, double ny) {
+        if (off > d + 0.5) return;
+        x += (rnd() - 0.5) * 1.6; y += (rnd() - 0.5) * 1.6;
+        if (!clear(x, y)) return;
+        tree(x, y, rnd() < S->conifer, 0.7 + 0.6 * rnd(), shadeOf(r) * (0.9 + 0.1 * rnd()), F_ROW);
+      });
+    }
+    walk(PAPER_SPACING, 3 * ROW_GAP, [&](double x, double y, double d, double nx, double ny) {
+      const double pg = std::clamp((d - 3 * ROW_GAP) / 3, PAPER_GAP_MIN, ROW_GAP);
+      for (int p = 0; p < 3; p++) {
+        const double off = 3 * ROW_GAP + p * pg;
+        if (off > d + 0.5) break;
+        const double px = x + nx * p * pg + (rnd() - 0.5) * 1.2, py = y + ny * p * pg + (rnd() - 0.5) * 1.2;
+        if (!clear(px, py)) continue;
+        paper(px, py, rnd() < S->conifer, 0.85 + 0.3 * rnd(), shadeOf(3 + p), F_PAPER1 + p);
+      }
+    });
+    // the two banners and the backdrop: flat sheets that follow the treeline
+    double arc = 0;
+    for (size_t k = 0; k + 1 < L.size(); k++) {
+      const Sample &A = L[k], &B = L[k + 1];
+      const double seg = std::hypot(B.x - A.x, B.y - A.y), dmin = std::min(A.d, B.d);
+      struct Ban { double off, h; int layer, fade; double shade; };
+      const Ban bans[2] = {{1.5 * ROW_GAP, SHORT_H, L_SHORT, F_SHORT, shadeOf(1.5)}, {2.5 * ROW_GAP, TALL_H * lift, L_TALL, F_TALL, shadeOf(2.5)}};
+      for (const Ban &b : bans) {
+        if (b.off > dmin + 0.5) continue;
+        const double ax = A.x + A.nx * b.off, ay = A.y + A.ny * b.off, bx = B.x + B.nx * b.off, by = B.y + B.ny * b.off;
+        if (!clear(ax, ay) || !clear(bx, by)) continue;
+        const double ga = world.groundY(ax, ay) - 0.1, gb = world.groundY(bx, by) - 0.1, wide = b.h * 4;
+        const double p[4][3] = {{ax, ga, -ay}, {bx, gb, -by}, {bx, gb + b.h, -by}, {ax, ga + b.h, -ay}};
+        const double uu[4] = {arc / wide, (arc + seg) / wide, (arc + seg) / wide, arc / wide}, vv[4] = {0.99, 0.99, 0.01, 0.01};
+        // the strips are photographs in full sun; the wood's own shade and green go over them
+        const float col[3] = {(float)(b.shade * 1.25), (float)(b.shade * 1.30), (float)(b.shade * 1.05)};
+        CellMesh &c = W.cell((ax + bx) / 2, -(ay + by) / 2);
+        for (int i : {0, 1, 2, 0, 2, 3}) Woods::sv(c.deco, p[i], -A.nx * 0.5, 0.86, A.ny * 0.5, uu[i], vv[i], b.layer, col, 0, b.fade, 0);
+      }
+      if (dmin >= 3 * ROW_GAP + 3 * PAPER_GAP_MIN) {
+        const double ax = A.x + A.nx * A.d, ay = A.y + A.ny * A.d, bx = B.x + B.nx * B.d, by = B.y + B.ny * B.d;
+        const double ga = world.groundY(ax, ay) - 0.3, gb = world.groundY(bx, by) - 0.3, h = WALL_H * lift;
+        const float col[3] = {0.030f, 0.046f, 0.026f};      // "the green bg should be like BLACK and still blend in"
+        const double p[4][3] = {{ax, ga, -ay}, {bx, gb, -by}, {bx, gb + h, -by}, {ax, ga + h, -ay}};
+        CellMesh &c = W.cell((ax + bx) / 2, -(ay + by) / 2);
+        for (int i : {0, 1, 2, 0, 2, 3}) Woods::sv(c.deco, p[i], -A.nx * 0.4, 0.9, A.ny * 0.4, 0, 0, -1, col, 0, F_BACK, 0);
+        // and a lid of canopy going back from its top, so nothing shows over the wall
+        const double q[4][3] = {{ax, ga + h, -ay}, {bx, gb + h, -by}, {bx + B.nx * 40, gb + h, -(by + B.ny * 40)}, {ax + A.nx * 40, ga + h, -(ay + A.ny * 40)}};
+        for (int i : {0, 1, 2, 0, 2, 3}) Woods::sv(c.deco, q[i], 0, 1, 0, 0, 0, -1, col, 0, F_BACK, 0);
+      }
+      arc += seg;
+    }
+  };
+  const int stepN = std::max(1, (int)std::lround(STEP / t.ds));
+  size_t lines = 0, samples = 0;
+  for (int side : {1, -1}) {
+    std::vector<Sample> cur;
+    double prevT = -1e9;
+    for (int i = 0; i < t.n; i += stepN) {
+      const double h = t.hdg[(size_t)i], nx = -std::sin(h) * side, ny = std::cos(h) * side;
+      const double base = t.w[(size_t)i] + (side > 0 ? t.runL[(size_t)i] : t.runR[(size_t)i]) + CLEAR;
+      bool found = false;
+      double t0 = 0, px = 0, py = 0;
+      for (double tt = 0; tt <= SEARCH; tt += MARCH) {
+        px = t.x[(size_t)i] + nx * (base + tt); py = t.y[(size_t)i] + ny * (base + tt);
+        if (tt > 4 && slack(px, py) < CLEAR) break;          // another leg of the lap is in the way
+        if (inWood(px, py) && !built.in(px, py)) { found = true; t0 = tt; break; }
+      }
+      if (!found || std::fabs(t0 - prevT) > JUMP) { plant(cur); if (cur.size() >= 2) lines++; cur.clear(); }
+      if (found) {
+        double d = 0, hole = 0;
+        bool road = false;
+        for (double u = 0; u < S->depth; u += MARCH) {
+          const double qx = px + nx * u, qy = py + ny * u;
+          if (u > 4 && slack(qx, qy) < CLEAR) { road = true; break; }
+          if (inWood(qx, qy)) { d = u; hole = 0; } else { hole += MARCH; if (hole > HOLE) break; }
+        }
+        if (road) d *= 0.5;                                    // a wood between two roads: each side gets half of it
+        cur.push_back({px, py, nx, ny, std::max(4.0, d), t0});
+        prevT = t0; samples++;
+      } else prevT = -1e9;
+    }
+    plant(cur);
+    if (cur.size() >= 2) lines++;
+  }
+
+  // ---- the survey's own single trees (Monza's avenue of planes), standing where they stand
+  size_t singles = 0;
+  for (const Json &tr : env["trees"].arr) {
+    if (singles >= 2100) break;
+    const double x = tr[(size_t)0].n(), y = tr[(size_t)1].n();
+    if (slack(x, y) < 2.5 || built.in(x, y)) continue;
+    tree(x, y, rnd() < S->conifer, 0.75 + 0.5 * rnd(), 0.92, F_ROW);
+    singles++;
+  }
+  // ---- the woods beyond the treelines: paper trees, thinning to nothing with distance
+  {
+    double x0 = 1e300, x1 = -1e300, y0 = 1e300, y1 = -1e300;
+    for (int i = 0; i < t.n; i++) { x0 = std::min(x0, t.x[(size_t)i]); x1 = std::max(x1, t.x[(size_t)i]); y0 = std::min(y0, t.y[(size_t)i]); y1 = std::max(y1, t.y[(size_t)i]); }
+    const double sp = 13 / std::sqrt(S->density);
+    size_t far = 0;
+    for (double gx = x0 - REACH; gx < x1 + REACH && far < 14000; gx += sp)
+      for (double gy = y0 - REACH; gy < y1 + REACH && far < 14000; gy += sp) {
+        const double x = gx + rnd() * sp, y = gy + rnd() * sp;
+        if (!inWood(x, y)) continue;
+        const double sl = slackFar(x, y);
+        if (sl < FAR_CLEAR || sl > REACH || built.in(x, y)) continue;
+        paper(x, y, rnd() < S->conifer, 0.8 + 0.5 * rnd(), 0.72 + 0.2 * rnd(), F_FAR);      // a wood seen from afar is its sunlit canopy
+        far++;
+      }
+  }
+
+  // ---- braking boards (js/furniture.js buildBoards): only where the solved lap really brakes
+  size_t boards = 0;
+  {
+    double lastEnd = -1e9;
+    const float WHITE[3] = {1, 1, 1}, DARK[3] = {0.16f, 0.18f, 0.20f};
+    for (const Corner &c : t.corners) {
+      const double vApex = line.v[(size_t)t.idx(c.s)];
+      double vMax = vApex;
+      for (double s = c.s0 - 380; s < c.s0; s += t.ds) vMax = std::max(vMax, line.v[(size_t)t.idx(s)]);
+      if (vMax - vApex < 22) continue;                         // not a braking zone
+      const bool boarded = c.s0 - lastEnd < 160;               // the second half of a chicane
+      lastEnd = c.s1;
+      if (boarded) continue;
+      const int side = c.dir < 0 ? -1 : 1;
+      static const int LONG[6] = {300, 250, 200, 150, 100, 50}, SHORT[4] = {200, 150, 100, 50};
+      const int *marks = vMax > 78 ? LONG : SHORT, nm = vMax > 78 ? 6 : 4;
+      for (int m = 0; m < nm; m++) {
+        const int d = marks[m], i = t.idx(c.s0 - d);
+        const double run = side > 0 ? t.runL[(size_t)i] : t.runR[(size_t)i], w = t.w[(size_t)i];
+        const double lat = run > 5 ? side * (w + std::clamp(run * 0.35, 2.6, 5.5)) : side * (w + run) - side * std::min(1.6, run * 0.25);
+        const double h = t.hdg[(size_t)i];
+        const double sx = t.x[(size_t)i] - std::sin(h) * lat, sy = t.y[(size_t)i] + std::cos(h) * lat;
+        const double gy = world.trackY(i) + (world.bank.empty() ? 0 : bankY(world.bank, t, i, lat));
+        // square to the oncoming car, toed a little toward the road
+        const double lx = -std::sin(h), lz = -std::cos(h), tw = -side * 0.35;
+        double ux = lx + std::cos(h) * tw, uz = lz - std::sin(h) * tw;
+        const double un = std::hypot(ux, uz);
+        ux /= un; uz /= un;
+        const double half = 0.75, y0 = 0.62, y1 = 2.12, px = sx, pz = -sy;
+        int cellIx = 0;
+        for (int k = 0; k < 6; k++) if (BOARD_N[k] == d) cellIx = k;
+        const double u0 = (cellIx % 4) * 0.25, u1 = u0 + 0.25, v0 = (cellIx / 4) * 0.25, v1 = v0 + 0.25;
+        // which way the car comes from: the face looks back down the track
+        const double fx = -std::cos(h), fz = std::sin(h);
+        const double p[4][3] = {{px + ux * half, gy + y0, pz + uz * half}, {px - ux * half, gy + y0, pz - uz * half}, {px - ux * half, gy + y1, pz - uz * half}, {px + ux * half, gy + y1, pz + uz * half}};
+        const double uu[4] = {u0, u1, u1, u0}, vv[4] = {v1, v1, v0, v0};
+        CellMesh &cm = W.cell(px, pz);
+        for (int q : {0, 1, 2, 0, 2, 3}) Woods::sv(cm.deco, p[q], fx * 0.6, 0.8, fz * 0.6, uu[q], vv[q], L_BOARD, WHITE, 0, F_NEVER, 0);
+        // a plain back, a hand's breadth behind, so the number is not read backwards from the far side
+        for (int q : {0, 1, 2, 0, 2, 3}) { const double b[3] = {p[q][0] - fx * 0.03, p[q][1], p[q][2] - fz * 0.03}; Woods::sv(cm.deco, b, -fx * 0.6, 0.8, -fz * 0.6, 0, 0, -1, DARK, 0, F_NEVER, 0); }
+        for (double e : {0.5, -0.5}) {
+          const double bx = px + ux * e, bz = pz + uz * e;
+          const double l[4][3] = {{bx - ux * 0.045, gy, bz - uz * 0.045}, {bx + ux * 0.045, gy, bz + uz * 0.045}, {bx + ux * 0.045, gy + y0, bz + uz * 0.045}, {bx - ux * 0.045, gy + y0, bz - uz * 0.045}};
+          for (int q : {0, 1, 2, 0, 2, 3}) Woods::sv(cm.deco, l[q], fx * 0.6, 0.8, fz * 0.6, 0, 0, -1, DARK, 0, F_NEVER, 0);
+        }
+        boards++;
+      }
+    }
+  }
+
+  // ---- to the card -------------------------------------------------------------------------------
+  for (auto &kv2 : W.cells) {
+    CellMesh &c = kv2.second;
+    const std::vector<float> *src[2] = {&c.deco, &c.cards};
+    for (int k = 0; k < 2; k++) if (!src[k]->empty()) { staticVao(c.vao[k], c.vbo[k], *src[k]); c.n[k] = (int)(src[k]->size() / 16); worldTris += (size_t)c.n[k] / 3; }
+    for (int s = 0; s < 2; s++) if (!c.inst[s].empty()) {
+      glGenBuffers(1, &c.ivbo[s]); glBindBuffer(GL_ARRAY_BUFFER, c.ivbo[s]);
+      glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(c.inst[s].size() * 4), c.inst[s].data(), GL_STATIC_DRAW);
+      instVao(c.ivao[s], W.kitVbo[s], c.ivbo[s]);
+      c.ni[s] = (int)(c.inst[s].size() / 8);
+    }
+    c.deco.clear(); c.deco.shrink_to_fit(); c.cards.clear(); c.cards.shrink_to_fit();
+    for (auto &v : c.inst) { v.clear(); v.shrink_to_fit(); }
+  }
+  glBindVertexArray(0);
+  W.ok = true;
+  std::fprintf(stderr, "woods: %s — %zu treelines (%zu samples), %zu real trees (%zu the survey's own), %zu paper trees, %zu braking boards, %zu cells; a tree is %d + %d triangles\n",
+               S->key, lines, samples, W.trees, singles, W.papers, boards, W.cells.size(), W.kitN[0] / 3, W.kitN[1] / 3);
+}
+
+void Dress::drawWorld() {
+  if (!woods || !woods->ok) return;
+  Woods &W = *woods;
+  GLint was = 0;
+  glGetIntegerv(GL_CURRENT_PROGRAM, &was);
+  glUseProgram(floraProg);
+  lights(floraProg);
+  glUniform1i(glGetUniformLocation(floraProg, "uTex"), 0);
+  glUniform1i(glGetUniformLocation(floraProg, "uBake"), 0);
+  glUniform1f(glGetUniformLocation(floraProg, "uTime"), (float)time);
+  glUniform3fv(glGetUniformLocation(floraProg, "uFade"), N_FADE, &FADE[0][0]);
+  glUniform2f(glGetUniformLocation(floraProg, "uFar"), FAR0, FAR1);
+  const GLint uInst = glGetUniformLocation(floraProg, "uInst");
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, W.tex);
+  const double R = CELL * 0.71;
+  for (auto &kv2 : W.cells) {
+    const CellMesh &c = kv2.second;
+    const double dx = c.cx - eye[0], dz = c.cz - eye[2], d = std::hypot(dx, dz) - R;
+    if (d > FAR1) continue;
+    // behind the camera, or well off to one side of what it sees
+    const float cw = VP.m[3] * (float)c.cx + VP.m[7] * eye[1] + VP.m[11] * (float)c.cz + VP.m[15];
+    const float cxp = VP.m[0] * (float)c.cx + VP.m[4] * eye[1] + VP.m[8] * (float)c.cz + VP.m[12];
+    if (cw < -R || std::fabs(cxp) > std::fabs(cw) + R * 2.2) continue;
+    glUniform1i(uInst, 0);
+    if (c.n[0]) { glBindVertexArray(c.vao[0]); glDrawArrays(GL_TRIANGLES, 0, c.n[0]); }
+    if (d < NEAR_TREES) {
+      glUniform1i(uInst, 1);
+      for (int s = 0; s < 2; s++) if (c.ni[s]) { glBindVertexArray(c.ivao[s]); glDrawArraysInstanced(GL_TRIANGLES, 0, W.kitN[s], c.ni[s]); }
+    } else if (c.n[1]) { glBindVertexArray(c.vao[1]); glDrawArrays(GL_TRIANGLES, 0, c.n[1]); }
+  }
+  glBindVertexArray(0);
+  glUseProgram((GLuint)was);
+}
 
 }  // namespace xbr

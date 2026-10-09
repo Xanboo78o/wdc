@@ -56,6 +56,16 @@ const SETS = {
     id: 'LeafSet024', kind: 'atlas', res: 1024, thresh: 12,
     why: 'broadleaf leaves, built into branch cards at load',
   },
+  // The two banners of Adam's forest (tools/bakestrips.mjs) are laid out of
+  // these: photographs of real plants, not a render of the tree kit.
+  weed: {
+    id: 'LeafSet026', kind: 'atlas', res: 1024, thresh: 12,
+    why: 'dandelion leaves — the undergrowth at the foot of a wood',
+  },
+  ivy: {
+    id: 'LeafSet029', kind: 'atlas', res: 1024, thresh: 12,
+    why: 'broad lobed leaves — the bushes and saplings of the tall banner',
+  },
   bark: {
     id: 'Bark012', kind: 'surface', res: 512,
     why: 'the trunks — deep vertical furrows, warm brown',

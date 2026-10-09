@@ -45,7 +45,8 @@ class Dress {
                 const double *sag, bool glassPass);
 
   // ---- the woods and the boards ------------------------------------------------
-  void buildWorld(const Track &track, const World &world, const Json &env);
+  void buildWorld(const Track &track, const World &world, const Json &env, const Line &raceLine);
+  bool hasWoods() const;     // false: the photographs are missing, draw the old trees and boards
   void drawWorld();          // opaque + cut-out: call with depth test on, blend off
   size_t worldTris = 0;
 

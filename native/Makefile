@@ -29,7 +29,28 @@ GAME_LIBS   := $(shell pkg-config --libs sdl3 epoxy freetype2) -lm
 TEXN := tarmac grass gravel concrete plaster apron sand
 TEX  := $(foreach t,$(TEXN),$(BUILD)/tex/$(t)-c.ppm $(BUILD)/tex/$(t)-n.ppm)
 
-all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX)
+# The plant photographs (data/flora, CC0 from ambientCG) and the two banners
+# laid out of them (tools/bakestrips.mjs), as plain PAMs with their cut-out in
+# the alpha: dress.cpp's woods.
+FLORA := $(foreach t,leaf needle short tall bark,$(BUILD)/tex/flora-$(t).pam)
+
+all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA)
+
+$(BUILD)/tex/flora-leaf.pam: ../data/flora/leaf-c.jpg ../data/flora/leaf-a.png | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $^ -alpha off -compose CopyOpacity -composite -resize 1024x1024! -depth 8 pam:$@
+$(BUILD)/tex/flora-needle.pam: ../data/flora/needle-c.jpg ../data/flora/needle-a.png | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $^ -alpha off -compose CopyOpacity -composite -resize 1024x1024! -depth 8 pam:$@
+$(BUILD)/tex/flora-short.pam: ../data/flora/strip-short.png | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $< -resize 1024x1024! -depth 8 pam:$@
+$(BUILD)/tex/flora-tall.pam: ../data/flora/strip-tall.png | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $< -resize 1024x1024! -depth 8 pam:$@
+$(BUILD)/tex/flora-bark.pam: ../data/flora/bark-c.jpg | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $< -resize 1024x1024! -alpha opaque -depth 8 pam:$@
 # the headless tools alone (what native/check.sh needs): `make -C native sim`
 sim: $(BUILD)/xbr-drive $(BUILD)/xbr-race
 

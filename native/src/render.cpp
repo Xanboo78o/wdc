@@ -749,9 +749,13 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
       m.beam(p0, p1, 0.5, LAMP, 0);
     }
   }
+  // The woods and the numbered braking boards (dress.cpp). If its photographs
+  // are missing, the plain bars and cone trees below stand in.
+  if (dress) dress->buildWorld(track, world, env, raceLine);
+  const bool dressed = dress && dress->hasWoods();
   // braking boards: three, two, one bar at 150, 100 and 50 m before a real
   // corner, on the outside, where the eye already is
-  {
+  if (!dressed) {
     const float BOARD[3] = {0.93f, 0.93f, 0.90f}, BAR[3] = {0.06f, 0.06f, 0.07f}, POST[3] = {0.20f, 0.20f, 0.22f};
     for (const auto &c : track.corners) {
       if (c.R <= 0 || c.R > 160 || c.dir == 0) continue;
@@ -867,13 +871,13 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
     for (int i : earclip(p)) sc.vert(p[(size_t)i][0], p[(size_t)i][1], top, 0, 0, 1, roof, 0);
     nBuild++;
   }
-  for (const auto &t : env["trees"].arr) {
+  if (!dressed) for (const auto &t : env["trees"].arr) {
     const double x = t[(size_t)0].n(), y = t[(size_t)1].n();
     if (onCircuit(x, y, 2.5)) continue;
     tree(x, y, 7 + 6 * hash2(x, y));
     nTree++;
   }
-  {
+  if (!dressed) {
     // woods: one tree per cell of a jittered grid inside each forest polygon,
     // the spacing chosen so the whole map stays inside a fixed budget.
     std::vector<std::vector<P2>> woods;
@@ -1159,6 +1163,7 @@ void Renderer::drawWorld(const FrameIn &f) {
 
   drawMesh(corridor, Mat4::identity());
   drawMesh(scenery, Mat4::identity());
+  if (dress) dress->drawWorld();
 
   glEnable(GL_POLYGON_OFFSET_FILL);
   glPolygonOffset(-2.0f, -6.0f);
