@@ -458,6 +458,7 @@ static GLuint link(const char *vs, const char *fs) {
 }
 
 bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
+  dataRoot = dataDir;
   loadFonts(dataDir);
   hasTex = loadTextures(texDir);
   if (!hasTex) std::fprintf(stderr, "xbr: no textures in %s (run make) — drawing procedural surfaces\n", texDir.c_str());
@@ -1018,6 +1019,8 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
     }
   };
   size_t nBuild = 0, nTree = 0;
+  std::vector<std::array<double, 3>> gateposts;
+  const bool livedIn = env["key"].s("") == "gravenmoor";
   for (const auto &bd : env["buildings"].arr) {
     const std::vector<P2> p = polyOf(bd["p"]);
     if (p.size() < 3) continue;
@@ -1027,10 +1030,48 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
     if (clash) continue;
     cx /= p.size(); cy /= p.size();
     if (onCircuit(cx, cy, 1.5)) continue;
-    const double hgt = std::max(3.0, bd["h"].n(7));
+    // An authored world says what a thing is (`k`) and may give its colours:
+    // a headstone is as tall as it is, a gatepost keeps its stone, and the
+    // hanging tree is drawn as a tree.
+    const std::string kind = bd["k"].s("");
+    const bool small = kind == "grave" || kind == "gatepost";
+    const double hgt = small ? std::max(0.3, bd["h"].n(1)) : std::max(3.0, bd["h"].n(7));
     const double t = hash2(cx * 0.13, cy * 0.29);
-    const float wall[3] = {(float)(0.58 + 0.26 * t), (float)(0.55 + 0.22 * t), (float)(0.50 + 0.18 * hash2(cy, cx))};
-    const float roof[3] = {(float)(0.34 + 0.20 * t), (float)(0.28 + 0.10 * t), (float)(0.26 + 0.08 * t)};
+    float wall[3] = {(float)(0.58 + 0.26 * t), (float)(0.55 + 0.22 * t), (float)(0.50 + 0.18 * hash2(cy, cx))};
+    float roof[3] = {(float)(0.34 + 0.20 * t), (float)(0.28 + 0.10 * t), (float)(0.26 + 0.08 * t)};
+    auto hexTo = [](const std::string &h, float *o) {
+      if (h.size() != 7 || h[0] != '#') return;
+      for (int q = 0; q < 3; q++) o[q] = (float)std::strtol(h.substr(1 + 2 * (size_t)q, 2).c_str(), nullptr, 16) / 255.0f;
+    };
+    hexTo(bd["c"].s(""), wall); hexTo(bd["rc"].s(""), roof);
+    if (kind == "grave") { const float g = (float)(0.80 + 0.35 * t); for (float &v : wall) v *= g; roof[0] = wall[0] * 0.9f; roof[1] = wall[1] * 0.9f; roof[2] = wall[2] * 0.9f; }
+    if (kind == "gatepost") gateposts.push_back({cx, cy, hgt});
+    if (kind == "deadtree") {
+      // THE HANGING TREE: one enormous dead tree, every branch put there by hand.
+      const double g0 = world.groundY(cx, cy) - 0.5, H = bd["h"].n(21);
+      const float BARK[3] = {0.075f, 0.065f, 0.06f};
+      const double base[3] = {cx, cy, g0}, fork[3] = {cx + 0.5, cy - 0.3, g0 + H * 0.46}, crown[3] = {cx - 0.9, cy + 0.6, g0 + H * 0.80};
+      sc.beam(base, fork, 2.3, BARK, 0); sc.beam(fork, crown, 1.5, BARK, 0);
+      // {from height (share of H), bearing, reach out, rise, thickness}
+      static const double LIMB[11][5] = {{0.40, 0.3, 9.5, 1.5, 0.95}, {0.46, 2.5, 8.0, 4.5, 0.85}, {0.50, 4.3, 10.5, 2.0, 0.80}, {0.58, 1.3, 7.0, 5.5, 0.62},
+                                         {0.62, 5.5, 6.5, 5.0, 0.60}, {0.68, 3.4, 6.0, 6.0, 0.50}, {0.74, 0.9, 4.8, 5.2, 0.42}, {0.78, 4.9, 4.4, 4.6, 0.40},
+                                         {0.80, 2.2, 3.6, 5.6, 0.36}, {0.80, 6.0, 3.0, 6.4, 0.32}, {0.33, 3.9, 6.5, -0.4, 0.70}};
+      for (const auto &L : LIMB) {
+        const double zf = g0 + H * L[0], ca = std::cos(L[1]), sa = std::sin(L[1]);
+        const double a[3] = {cx + ca * 0.4, cy + sa * 0.4, zf}, b[3] = {cx + ca * L[2] * 0.55, cy + sa * L[2] * 0.55, zf + L[3] * 0.35};
+        const double c[3] = {cx + ca * L[2] + sa * 1.2, cy + sa * L[2] - ca * 1.2, zf + L[3]};
+        sc.beam(a, b, L[4], BARK, 0); sc.beam(b, c, L[4] * 0.55, BARK, 0);
+        // and the twigs at the end of it
+        const double d[3] = {c[0] + ca * 1.6 - sa * 1.4, c[1] + sa * 1.6 + ca * 1.4, c[2] + 1.5}, e[3] = {c[0] + ca * 1.9 + sa * 1.1, c[1] + sa * 1.9 - ca * 1.1, c[2] - 0.5};
+        sc.beam(c, d, L[4] * 0.25, BARK, 0); sc.beam(c, e, L[4] * 0.22, BARK, 0);
+      }
+      // the rope. Nobody is on it.
+      const double r0[3] = {cx + std::cos(0.3) * 6.2, cy + std::sin(0.3) * 6.2, g0 + H * 0.40 + 0.9}, r1[3] = {r0[0], r0[1], r0[2] - 3.4};
+      const float ROPE[3] = {0.42f, 0.36f, 0.24f};
+      sc.beam(r0, r1, 0.07, ROPE, 0);
+      nBuild++;
+      continue;
+    }
     // a building stands on its own ground: walls from below the lowest corner
     // of its footprint to a level roof above the highest
     double gLo = 1e300, gHi = -1e300;
@@ -1040,9 +1081,92 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
       const P2 &u = p[i], &w = p[(i + 1) % p.size()];
       const double a[3] = {u[0], u[1], gLo - 1}, b[3] = {w[0], w[1], gLo - 1}, c[3] = {w[0], w[1], top}, d[3] = {u[0], u[1], top};
       sc.quad(a, b, c, d, wall, 5);
+      // A VILLAGE THAT IS AWAKE: some of the windows are lit. Only where somebody lives.
+      if (livedIn && (kind == "house" || kind == "church")) {
+        const double L = std::hypot(w[0] - u[0], w[1] - u[1]);
+        if (L < 4.5) continue;
+        const double ex = (w[0] - u[0]) / L, ey = (w[1] - u[1]) / L, nx = -ey, ny = ex;
+        const int nW = (int)(L / 3.6), floors = hgt > 6.5 ? 2 : 1;
+        const float WARM[3] = {1.0f, 0.74f, 0.32f}, COLD[3] = {0.55f, 0.75f, 0.70f};
+        for (int fl = 0; fl < floors; fl++) for (int q = 0; q < nW; q++) {
+          const double hsh = hash2(u[0] * 0.7 + q * 3.1 + fl * 9.7, u[1] * 0.9 + i * 5.3);
+          if (hsh > 0.42) continue;
+          const double m = (q + 0.5) * L / nW, z0 = gHi + 1.3 + fl * 3.0, hw = 0.55;
+          for (int side = -1; side <= 1; side += 2) {
+            const double ox = nx * 0.05 * side, oy = ny * 0.05 * side;
+            const double qa[3] = {u[0] + ex * (m - hw) + ox, u[1] + ey * (m - hw) + oy, z0}, qb[3] = {u[0] + ex * (m + hw) + ox, u[1] + ey * (m + hw) + oy, z0};
+            const double qc[3] = {qb[0], qb[1], z0 + 1.25}, qd[3] = {qa[0], qa[1], z0 + 1.25};
+            sc.quad(qa, qb, qc, qd, hsh < 0.05 ? COLD : WARM, 8);
+          }
+        }
+      }
     }
     for (int i : earclip(p)) sc.vert(p[(size_t)i][0], p[(size_t)i][1], top, 0, 0, 1, roof, 0);
     nBuild++;
+  }
+  // A LYCHGATE: two stone posts with a pitched roof across the road between them
+  if (gateposts.size() == 2) {
+    const auto &A = gateposts[0], &B = gateposts[1];
+    const double g = std::max(world.groundY(A[0], A[1]), world.groundY(B[0], B[1])), eave = g + std::max(A[2], B[2]), ridge = eave + 2.1;
+    const double dx = B[0] - A[0], dy = B[1] - A[1], l = std::hypot(dx, dy) + 1e-9, nx = -dy / l, ny = dx / l, over = 1.9;
+    const float SLATE[3] = {0.20f, 0.21f, 0.24f}, BEAM[3] = {0.16f, 0.11f, 0.08f};
+    for (int side = -1; side <= 1; side += 2) {
+      const double a[3] = {A[0] + nx * over * side, A[1] + ny * over * side, eave}, b[3] = {B[0] + nx * over * side, B[1] + ny * over * side, eave};
+      const double c[3] = {B[0], B[1], ridge}, d[3] = {A[0], A[1], ridge};
+      sc.quad(a, b, c, d, SLATE, 0);
+    }
+    const double e0[3] = {A[0], A[1], eave}, e1[3] = {B[0], B[1], eave};
+    sc.beam(e0, e1, 0.45, BEAM, 0);
+  }
+  // WHAT AN AUTHORED WORLD LEAVES ABOUT (data/landmarks/<key>.json): jack-o'-lanterns
+  // with a light inside, and lamp masts. Everything else in that file is the browser's.
+  {
+    const Json lm = Json::loadOpt(dataRoot + "/landmarks/" + env["key"].s("") + ".json");
+    for (const auto &it : lm["items"].arr) {
+      const std::string ty = it["type"].s("");
+      if (ty == "pumpkins") for (const auto &q : it["list"].arr) {
+        const double x = q[(size_t)0].n(), y = q[(size_t)1].n(), r = q[(size_t)2].n(0.5), fa = q[(size_t)3].n(0);
+        { int ti; if (distToTrack(x, y, ti) < track.w[ti] + r + 0.5) continue; }      // never on the tarmac; the verge is where they live
+        // on a fence post, so it looks over the barrier at the road
+        const double g0p = world.groundY(x, y) - 0.3, g = g0p + 1.55;
+        { const float WOOD[3] = {0.20f, 0.14f, 0.09f}; sc.box(x - 0.16, x + 0.16, y - 0.16, y + 0.16, g0p, g + 0.02, WOOD, 0); sc.box(x - r * 0.6, x + r * 0.6, y - r * 0.6, y + r * 0.6, g - 0.08, g, WOOD, 0); }
+        const float ORANGE[3] = {0.95f, 0.42f, 0.06f}, DARK[3] = {0.62f, 0.24f, 0.03f}, STEM[3] = {0.20f, 0.33f, 0.10f}, FIRE[3] = {1.0f, 0.82f, 0.25f};
+        // eight ribs round a squashed ball
+        const int N = 8;
+        for (int s8 = 0; s8 < N; s8++) {
+          const double a0 = 2 * PI * s8 / N, a1 = 2 * PI * (s8 + 1) / N;
+          const double ring[4][2] = {{0.55, 0.0}, {1.0, 0.42}, {0.92, 0.95}, {0.35, 1.28}};
+          for (int v = 0; v < 3; v++) {
+            const double p0[3] = {x + std::cos(a0) * r * ring[v][0], y + std::sin(a0) * r * ring[v][0], g + r * ring[v][1]};
+            const double p1[3] = {x + std::cos(a1) * r * ring[v][0], y + std::sin(a1) * r * ring[v][0], g + r * ring[v][1]};
+            const double p2[3] = {x + std::cos(a1) * r * ring[v + 1][0], y + std::sin(a1) * r * ring[v + 1][0], g + r * ring[v + 1][1]};
+            const double p3[3] = {x + std::cos(a0) * r * ring[v + 1][0], y + std::sin(a0) * r * ring[v + 1][0], g + r * ring[v + 1][1]};
+            sc.quad(p0, p1, p2, p3, (s8 & 1) ? ORANGE : DARK, 0);
+          }
+        }
+        sc.box(x - r * 0.08, x + r * 0.08, y - r * 0.08, y + r * 0.08, g + r * 1.2, g + r * 1.5, STEM, 0);
+        // the face: two eyes and a grin, lit from inside, a little proud of the skin
+        const double fx = std::cos(fa), fy = std::sin(fa), sx = -fy, sy = fx, out = r * 1.03;
+        auto glow = [&](double u0, double u1, double z0, double z1, double zt) {
+          const double a[3] = {x + fx * out + sx * u0 * r, y + fy * out + sy * u0 * r, g + z0 * r}, b[3] = {x + fx * out + sx * u1 * r, y + fy * out + sy * u1 * r, g + z0 * r};
+          const double c[3] = {x + fx * out * 0.97 + sx * (u0 + u1) / 2 * r, y + fy * out * 0.97 + sy * (u0 + u1) / 2 * r, g + zt * r};
+          sc.tri(a, b, c, FIRE, 8);
+          if (z1 > z0) { const double d[3] = {b[0], b[1], g + z1 * r}, e[3] = {a[0], a[1], g + z1 * r}; sc.quad(a, b, d, e, FIRE, 8); }
+        };
+        glow(-0.46, -0.14, 0.72, 0.72, 0.98); glow(0.14, 0.46, 0.72, 0.72, 0.98);
+        glow(-0.42, 0.42, 0.34, 0.47, 0.34);
+      }
+      else if (ty == "floodtowers") for (const auto &q : it["list"].arr) {
+        const double x = q[(size_t)0].n(), y = q[(size_t)1].n(), H = q[(size_t)3].n(28);
+        if (onCircuit(x, y, 2.0)) continue;
+        const double g = world.groundY(x, y) - 0.5;
+        const float STEEL[3] = {0.30f, 0.31f, 0.33f}, LAMP[3] = {1.0f, 0.96f, 0.86f};
+        const double a[3] = {x, y, g}, b[3] = {x, y, g + H};
+        sc.beam(a, b, 0.5, STEEL, 0);
+        sc.box(x - 1.6, x + 1.6, y - 1.6, y + 1.6, g + H, g + H + 0.5, STEEL, 0);
+        sc.box(x - 1.3, x + 1.3, y - 1.3, y + 1.3, g + H - 0.22, g + H - 0.02, LAMP, 8);
+      }
+    }
   }
   if (!dressed) for (const auto &t : env["trees"].arr) {
     const double x = t[(size_t)0].n(), y = t[(size_t)1].n();

@@ -181,6 +181,7 @@ class Renderer {
   // the least height the three bolted cameras (roof, nose, T-bar) may sit at and still be OUTSIDE this body
   float camFloor[3] = {0, 0, 0};
   float onboardX = -0.34f;
+  std::string dataRoot;         // data/, for the few things a world reads for itself (landmarks)
   unsigned hudVao = 0, hudVbo = 0, fontTex = 0;
   struct Glyph { float x = 0, y = 0, w = 0, h = 0, bx = 0, by = 0, adv = 0; };
   struct Font { Glyph g[95]; float cap = 50, asc = 50, desc = 14; };
