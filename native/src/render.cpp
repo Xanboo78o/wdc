@@ -370,12 +370,31 @@ void main(){
 }
 )";
 static const char *COMP_FS = R"(#version 330 core
-in vec2 vU; uniform sampler2D uTex, uBloom; uniform float uExp, uSharp; uniform vec2 uK, uPx; out vec4 o;
+in vec2 vU; uniform sampler2D uTex, uBloom, uDepth; uniform float uExp, uSharp, uFar; uniform vec2 uK, uPx; out vec4 o;
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 void main(){
   vec2 u = min(vU * uK, uK - uPx * 0.5);
   vec3 c = max(texture(uTex, u).rgb, 0.0);
-  if (uSharp > 0.0) {
+  // THE DISTANCE GOES SOFT (Adam: "add the blur effect at long distance to keep it
+  // clean"). A fence four hundred metres off is wires thinner than a pixel, and
+  // drawn sharp it crawls. So the far part of the picture is averaged over a
+  // small ring, growing from nothing at 140 m to its full width by 650 m. The
+  // near field, where you are looking for your braking point, is untouched.
+  float soft = 0.0;
+  if (uFar > 0.0) {
+    float z = texture(uDepth, u).r * 2.0 - 1.0;
+    float dist = 2.0 * 0.12 * 12000.0 / (12000.0 + 0.12 - z * (12000.0 - 0.12));    // the projection's near and far
+    soft = smoothstep(140.0, 650.0, dist) * step(z, 0.99999);                       // the sky is already as soft as it gets
+    if (soft > 0.01) {
+      vec2 r = uPx * uFar * soft;
+      vec3 a = texture(uTex, u + r * vec2(1.0, 0.0)).rgb + texture(uTex, u + r * vec2(-1.0, 0.0)).rgb
+             + texture(uTex, u + r * vec2(0.0, 1.0)).rgb + texture(uTex, u + r * vec2(0.0, -1.0)).rgb
+             + texture(uTex, u + r * vec2(0.7, 0.7)).rgb + texture(uTex, u + r * vec2(-0.7, 0.7)).rgb
+             + texture(uTex, u + r * vec2(0.7, -0.7)).rgb + texture(uTex, u + r * vec2(-0.7, -0.7)).rgb;
+      c = mix(c, max((c + a) / 9.0, 0.0), soft);
+    }
+  }
+  if (uSharp > 0.0 && soft < 0.5) {
     // drawn smaller than the window: give back the edge the enlargement softened
     vec3 n = texture(uTex, u + vec2(uPx.x, 0.0)).rgb + texture(uTex, u - vec2(uPx.x, 0.0)).rgb
            + texture(uTex, u + vec2(0.0, uPx.y)).rgb + texture(uTex, u - vec2(0.0, uPx.y)).rgb;
@@ -1555,10 +1574,13 @@ void Renderer::ensurePost() {
   if (postW == W && postH == H && sceneFbo) return;
   postW = W; postH = H;
   colourTarget(sceneFbo, sceneCol, W, H, GL_R11F_G11F_B10F, GL_RGB, GL_FLOAT);
-  if (!sceneDepth) glGenRenderbuffers(1, &sceneDepth);
-  glBindRenderbuffer(GL_RENDERBUFFER, sceneDepth);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, W, H);
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, sceneDepth);
+  // the depth is a texture, not a renderbuffer: developing the picture reads how far away each pixel is
+  if (!sceneDepth) glGenTextures(1, &sceneDepth);
+  glBindTexture(GL_TEXTURE_2D, sceneDepth);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, W, H, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, sceneDepth, 0);
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { std::fprintf(stderr, "xbr: no float picture on this GPU - plain picture\n"); post = postOk = false; }
   for (int i = 0; i < 2; i++) colourTarget(bloomFbo[i], bloomTex[i], std::max(1, W / 4), std::max(1, H / 4), GL_R11F_G11F_B10F, GL_RGB, GL_FLOAT);
   colourTarget(ldrFbo, ldrTex, W, H, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
@@ -1644,6 +1666,11 @@ void Renderer::endScene(double time) {
   glUniform2f(glGetUniformLocation(compProg, "uK"), kx, ky);
   glUniform2f(glGetUniformLocation(compProg, "uPx"), 1.0f / (float)W, 1.0f / (float)H);
   glUniform1f(glGetUniformLocation(compProg, "uSharp"), scale < 0.999f ? (1.0f - scale) * 1.6f : 0.0f);
+  // the soft distance: a ring this many pixels wide at its widest, on a 900-line picture. XBR_FAR=0 turns it off.
+  static const float farSoft = std::getenv("XBR_FAR") ? (float)std::atof(std::getenv("XBR_FAR")) : 1.7f;
+  glUniform1i(glGetUniformLocation(compProg, "uDepth"), 2);
+  glUniform1f(glGetUniformLocation(compProg, "uFar"), farSoft * (float)H / 900.0f);
+  glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, sceneDepth);
   glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, bloomTex[0]);
   glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, sceneCol);
   glDrawArrays(GL_TRIANGLES, 0, 3);
