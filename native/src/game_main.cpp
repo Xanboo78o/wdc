@@ -44,6 +44,7 @@
 #include "collide.hpp"
 #include "driver.hpp"
 #include "drivers.hpp"
+#include "fx.hpp"
 #include "grid.hpp"
 #include "home.hpp"
 #include "physics.hpp"
@@ -171,6 +172,8 @@ struct RaceSetup {
   // XINGUS: which tune, and the style's switches (js/home.js xingusUrl)
   bool xingus = false, xsolo = false, xderby = false, xstakes = false, xloose = false;
   std::string xcar = "gt";
+  std::function<void()> customField;   // a career event hands the grid its own field (career.hpp); empty = the usual one
+  bool freePace = false;               // THE 78: nobody is held near you (RaceOptions.duel off); the other car drives its own race
 };
 
 struct Session {
@@ -254,13 +257,14 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
   if (rs) {
     // You take a seat in your team, and its other car is your teammate.
     setField(cls == "f1" ? rs->field : cls);
-    setPlayerTeam(rs->standIn ? "" : rs->teamKey, rs->grid);
+    if (rs->customField) rs->customField(); else setPlayerTeam(rs->standIn ? "" : rs->teamKey, rs->grid);
     RaceOptions o;
     o.track = &S.track; o.lines = S.lines.get(); o.spec = S.spec;
     o.slots = gridSlots(S.track, rs->grid);
     o.laps = rs->laps; o.grid = rs->grid; o.playerGrid = rs->slot; o.tier = rs->tier; o.player = true;
     o.battle = rs->battle; o.noDnf = rs->noDnf; o.seed = rs->seed; o.standIn = rs->standIn;
     o.playerTeam = rs->standIn ? nullptr : teamByKey(rs->teamKey);
+    if (rs->freePace) o.duel = false;
     o.xingus = rs->xingus; o.xopt.car = rs->xcar; o.xopt.solo = rs->xsolo; o.xopt.derby = rs->xderby;
     o.xopt.stakes = rs->xstakes; o.xopt.loose = rs->xloose;
     S.xingus = rs->xingus;
@@ -469,7 +473,9 @@ enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A
 int main(int argc, char **argv) {
   std::vector<std::string> pos;
   std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg, modelArg, lookArg, xingArg, xtrackArg, xheilArg;
-  bool autoDrive = false, lineArg = false, windowed = false, hidpi = false, noAudio = false, hidden = false;
+  std::string eventArg, careerArg;     // --event KEY starts a career event or an EVENTS mode unattended; --career-state FILE shows a prepared career (never saved)
+  int cardArg = -1;                    // --card N: the story card `--screen story` shows
+  bool autoDrive = false, lineArg = false, windowed = false, hidpi = false, noAudio = false, hidden = false, hauntArg = false;
   int camArg = -1, ffbArg = -1, winW = 1600, winH = 900, gridArg = 0, lapsArg = 0, startArg = 0;
   long maxFrames = 0;
   double spool = 0, seedArg = 0, scaleArg = 0;
@@ -500,11 +506,15 @@ int main(int argc, char **argv) {
     else if (a == "--screen") screenArg = val("--screen");
     else if (a == "--model") modelArg = val("--model");
     else if (a == "--look") lookArg = val("--look");
+    else if (a == "--haunt") hauntArg = true;                    // the haunted night on any circuit, and car 2 of the grid as a ghost (for shots)
     else if (a == "--scale") scaleArg = std::atof(val("--scale").c_str());   // pin the drawing scale (0.6..1) instead of letting the governor choose           // film (the default) | plain
     else if (a == "--xingus") xingArg = val("--xingus");       // a Xingus STYLE (rally, rallycross, gt3, derby ...) for unattended checks
     else if (a == "--xtrack") xtrackArg = val("--xtrack");     // heiligen | speedway | a circuit; --xheil picks the Heiligen route
     else if (a == "--xheil") xheilArg = val("--xheil");
     else if (a == "--spool") spool = std::atof(val("--spool").c_str());
+    else if (a == "--event") eventArg = val("--event");
+    else if (a == "--career-state") careerArg = val("--career-state");
+    else if (a == "--card") cardArg = std::atoi(val("--card").c_str());
     else if (a == "--time") timeArg = val("--time");
     else if (a == "--weather") weatherArg = val("--weather");
     else if (a == "--size") { windowed = true; if (std::sscanf(val("--size").c_str(), "%dx%d", &winW, &winH) != 2) { std::fprintf(stderr, "xbr: --size wants WxH\n"); return 2; } }
@@ -518,7 +528,7 @@ int main(int argc, char **argv) {
   if (!modeArg.empty() && modeArg != "race" && modeArg != "hotlap") { std::fprintf(stderr, "xbr: --mode is race or hotlap\n"); return 2; }
   static const std::vector<std::string> TIMES = {"live", "night", "dawn", "sunrise", "morning", "day", "evening", "sunset", "dusk"},
                                         WEATHERS = {"live", "clear", "cloudy", "overcast", "rain", "storm", "changing"},
-                                        SCREENS = {"home", "setup", "garage", "settings", "pause", "results", "heiligen"};
+                                        SCREENS = {"home", "setup", "garage", "settings", "pause", "results", "heiligen", "career", "events", "story", "debrief"};
   auto oneOf = [](const std::vector<std::string> &v, const std::string &s) { return std::find(v.begin(), v.end(), s) != v.end(); };
   if (!timeArg.empty() && !oneOf(TIMES, timeArg)) { std::fprintf(stderr, "xbr: no --time '%s'\n", timeArg.c_str()); return 2; }
   if (!weatherArg.empty() && !oneOf(WEATHERS, weatherArg)) { std::fprintf(stderr, "xbr: no --weather '%s'\n", weatherArg.c_str()); return 2; }
@@ -561,8 +571,10 @@ int main(int argc, char **argv) {
     }
   }
   Home home(dataDir, savePath);
+  if (!careerArg.empty()) { home.career.loadState(careerArg, false); home.show("home"); }
+  home.shotCard = cardArg;
   MenuSave &cfg = home.S;
-  const bool direct = !pos.empty() || (!xingArg.empty() && screenArg.empty()) || maxFrames > 0 || autoDrive || (shotMode && (screenArg.empty() || screenArg == "pause" || screenArg == "results"));
+  const bool direct = !pos.empty() || (!xingArg.empty() && screenArg.empty()) || maxFrames > 0 || autoDrive || (shotMode && (screenArg.empty() || screenArg == "pause" || screenArg == "results" || screenArg == "debrief")) || !eventArg.empty();
   if (!modelArg.empty()) { cfg.model = modelArg; cfg.car = "gt3"; }      // a downloaded car takes the GT3 seat
   if (!xingArg.empty()) { cfg.xOn = true; cfg.xStyle = xstyle(xingArg).key; }
   if (!xtrackArg.empty()) cfg.xTrack = xtrackArg;
@@ -584,6 +596,7 @@ int main(int argc, char **argv) {
     if (!pos.empty()) { std::fprintf(stderr, "xbr: no circuit '%s' in %s/tracks\n", cfg.track.c_str(), dataDir.c_str()); return 1; }
     cfg.track = "monza";
   }
+  if (!eventArg.empty() && !home.startKey(eventArg)) { std::fprintf(stderr, "xbr: no event '%s' (or its circuit is not here)\n", eventArg.c_str()); return 1; }
 
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
@@ -634,6 +647,7 @@ int main(int argc, char **argv) {
   std::string bgCar;
   WeatherDirector wd("clear", 1);
   std::string wdMode;
+  Fx fx;                           // the crash drama (fx.hpp): reads the cars, draws into the scene
 
   auto showLoading = [&](const std::string &text) {
     glBindFramebuffer(GL_FRAMEBUFFER, offscreen ? R.offscreenFbo() : 0);
@@ -674,6 +688,10 @@ int main(int argc, char **argv) {
     rs.battle = cfg.tier == "supercasual" ? cfg.battle : "";
     rs.noDnf = cfg.noDnf; rs.teamKey = cfg.teams[cfg.car]; rs.field = cfg.field;
     rs.seed = seedArg > 0 ? seedArg : 1 + std::rand() % 9973;
+    // A CAREER EVENT (career.hpp): the menu's record already says most of it; this is the rest
+    const Launch *ev = home.event();
+    if (ev && seedArg <= 0) rs.seed = ev->seed;
+    if (ev && ev->custom) { rs.slot = startArg > 0 ? rs.slot : ev->slot; rs.teamKey = "cx-you"; rs.customField = [&home] { home.career.fieldUp(); }; rs.freePace = ev->freePace; }
     std::string trk = cfg.track, car = cfg.car;
     bool racing = cfg.mode == "race";
     if (cfg.xOn) {
@@ -695,6 +713,7 @@ int main(int argc, char **argv) {
     bgOn = false;
     hud.reset();
     toast = {};
+    if (ev) { home.career.started(SP->race.get()); toast = {home.eventBrief(), 7}; if (ev->custom) theme = home.eventTheme(); }
     R.snapCamera(); acc = 0;
     screen = DRIVE;
     return true;
@@ -706,7 +725,7 @@ int main(int argc, char **argv) {
   // ---- the light and the air
   auto phaseNow = [&]() -> std::string {
     std::string t = cfg.time;
-    if (bgOn) t = "day";
+    if (bgOn) t = "night";                                      // the front door is a paddock at night
     if (t == "live") {
       // where the sun really is, here, now (New Hampshire, where this is driven)
       const Sun sun = solarPosition((double)std::time(nullptr) * 1000.0, 43.13, -71.46);
@@ -736,8 +755,10 @@ int main(int argc, char **argv) {
     S.terrain->under(*S.car, S.proj, S.gnd);
     f.groundH = S.terrain->h(S.proj.s, S.proj.lat); f.gPitch = S.gnd.pitch; f.gRoll = S.gnd.roll;
     f.look = lookNow(dt);
+    if (S.key == "gravenmoor" || hauntArg || (home.haunted() && !bgOn)) haunt(f.look);       // the moor is only ever raced at night, in its own weather
     if (S.race) paintOf(S.race->me->col, f.paint);
     else { const Team *t = teamByKey(home.teamKey()); if (t) paintOf(t->col, f.paint); }
+    fx.tint(*S.car, f.paint);
     return f;
   };
   // everyone else on the circuit
@@ -747,8 +768,10 @@ int main(int argc, char **argv) {
       if (e.isPlayer) continue;
       float paint[3];
       paintOf(e.col, paint);
+      fx.tint(e.car, paint);
       Gnd g;
       S.terrain->under(e.car, e.proj, g);
+      if (e.ghost || (hauntArg && S.race->entries.size() == 2)) R.ghost = 0.9f;      // THE 78: see render.hpp `ghost`
       R.drawCar(e.car, *S.spec, S.terrain->h(e.proj.s, e.proj.lat), g.pitch, g.roll, paint, std::fmod(S.race->progress(e), 1000.0));
     }
     // the safety car, when it is out: the same body in silver, until its own is drawn
@@ -760,6 +783,14 @@ int main(int argc, char **argv) {
       S.terrain->under(sc.car, p, g);
       R.drawCar(sc.car, *S.spec, S.terrain->h(p.s, p.lat), g.pitch, g.roll, silver, std::fmod(sc.prog, 1000.0));
     }
+  };
+  // the crash effects watch every car, once a frame (fx.hpp): they read, and never write
+  auto fxTick = [&](double dt) {
+    fx.begin(SP.get(), S.track, S.world.get(), S.terrain.get(), *S.spec);
+    float pc[3] = {-1, 0, 0};
+    if (S.race) for (Entry &e : S.race->entries) { paintOf(e.col, pc); fx.car(e.car, e.proj, pc, e.isPlayer, dt); }
+    else { const Team *t = teamByKey(home.teamKey()); if (t) paintOf(t->col, pc); fx.car(*S.car, S.proj, pc, true, dt); }
+    fx.end(dt);
   };
   auto hudIn = [&]() {
     HudIn h;
@@ -794,11 +825,12 @@ int main(int argc, char **argv) {
     R.scalePin = (float)scaleArg;
     R.drawWorld(f);
     drawField();
+    fx.draw(R, f.time);
     R.endScene(f.time);
     R.hudBegin();
     R.drawRain(f);
     if (screen == HOME) home.draw(R, K, clock, liveOf());
-    else if (screen == RESULTS && S.race) hud.results(R, K, theme, *S.race, resTitle, resLine);
+    else if (screen == RESULTS && S.race) { hud.results(R, K, theme, *S.race, resTitle, resLine); home.drawOutcome(R, K); }
     else {
       hud.draw(R, K, theme, hudIn());
       if (screen == PAUSE) hud.pause(R, K, theme, pauseItems(), pauseAt, pauseSay);
@@ -806,6 +838,14 @@ int main(int argc, char **argv) {
     R.hudEnd();
   };
 
+  // the rules a career event adds from outside the race (career.hpp): a car out a lap, a medal for a lap time
+  auto eventTick = [&]() {
+    if (!home.event() || bgOn) return;
+    std::string m;
+    if (S.race) m = home.career.tick(*S.race);
+    else if (S.hasBest) m = home.career.lapSet(S.best, S.lines->race.lapTime);
+    if (!m.empty()) toast = {m, 4};
+  };
   if (shotMode) {
     HandsIn none;
     const long steps = (long)(spool / FIXED_DT);
@@ -814,9 +854,28 @@ int main(int argc, char **argv) {
     for (long i = 0; i < steps; i++) {
       if (S.race) raceStep(S, none, true, false, toast); else simStep(S, none, true, false, toast);
       if (i % 8 == 0) S.box->update(8 * FIXED_DT, S.car->speed * 3.6, S.car->throttle);
+      if (i % 8 == 0) eventTick();
     }
     clock = spool; S.t = spool;
+    // XBR_FXTEST / XBR_FXCRASH (fx.hpp): let the effects run for a moment before the photograph
+    if (const double ft = Fx::testSeconds(); ft > 0) {
+      double kmh = 0, deg = 0;
+      const bool crash = std::getenv("XBR_FXCRASH") && std::sscanf(std::getenv("XBR_FXCRASH"), "%lf,%lf", &kmh, &deg) == 2;
+      const bool hold = std::getenv("XBR_FXHOLD") != nullptr;
+      if (crash) { S.car->hdg = S.proj.hdg + deg * PI / 180; S.car->vx = kmh / 3.6; S.car->vy = 0; S.car->r = 0; }
+      if (hold) { S.car->vx = 0.001; S.car->vy = 0; S.car->r = 0; }
+      FrameIn f0 = frameOf(1.0 / 60);
+      R.snapCamera(); drawAll(f0);                              // one frame first: the effects cull by where the camera is
+      double a2 = 0;
+      for (int k = 0; k < (int)(ft * 60); k++) {
+        for (a2 += 1.0 / 60; a2 >= FIXED_DT && !hold; a2 -= FIXED_DT) { if (S.race) raceStep(S, none, !crash, false, toast); else simStep(S, none, !crash, false, toast); }
+        fxTick(1.0 / 60);
+      }
+      clock += ft; S.t += ft;
+    }
     if (screenArg == "pause") { screen = PAUSE; pauseSay = "breathe."; }
+    if ((screenArg == "results" || screenArg == "debrief") && home.event()) home.eventResult(S.race.get(), S.hasBest, S.best, S.lines->race.lapTime);
+    if (screenArg == "debrief") { home.leaveEvent(S.race.get(), S.hasBest, S.best, S.lines->race.lapTime); screen = HOME; home.show(home.landing()); }
     if (screenArg == "results" && S.race) { screen = RESULTS; resultMood(S.race->me->pos, (int)S.race->entries.size(), S.race->me->retired, resTitle, resLine); }
     FrameIn f = frameOf(1.0 / 60);
     R.snapCamera();
@@ -851,8 +910,8 @@ int main(int argc, char **argv) {
   bool actPrev[A_COUNT] = {false};
   double repeatAt[A_COUNT] = {0};
 
-  auto toHome = [&]() { bridge.release(); screen = HOME; home.show("home"); if (startBackdrop()) audio.setClass(home.voice()); prev = SDL_GetTicksNS(); };
-  auto lightsOut = [&]() { bridge.release(); if (startSession()) { audio.setClass(home.voice()); autoDrive = false; } else { home.say("that one would not load."); startBackdrop(); } prev = SDL_GetTicksNS(); };
+  auto toHome = [&]() { bridge.release(); screen = HOME; home.leaveEvent(S.race.get(), S.hasBest, S.best, S.lines->race.lapTime); home.show(home.landing()); if (startBackdrop()) audio.setClass(home.voice()); prev = SDL_GetTicksNS(); };
+  auto lightsOut = [&]() { bridge.release(); if (startSession()) { audio.setClass(home.voice()); autoDrive = false; } else { home.cancelEvent(); home.say("that one would not load."); startBackdrop(); } prev = SDL_GetTicksNS(); };
 
   while (running) {
     bool act[A_COUNT] = {false};
@@ -1030,14 +1089,16 @@ int main(int argc, char **argv) {
       }
       if (steps == 60) acc = 0;                       // never chase a stall
       S.t += dt;
+      fxTick(dt);
+      eventTick();
       S.box->update(dt, S.car->speed * 3.6, S.car->throttle);
       if (toast.t > 0) toast.t -= dt;
       if (S.race) {
         // YOUR overtake that stuck: the tower row flashes
         if (!S.race->cheers.empty()) { S.passAt = S.race->time; S.race->cheers.clear(); }
-        if (S.race->state == RaceState::Over) {
+        if (S.race->state == RaceState::Over || (home.career.wantsEnd && !bgOn)) {
           if (bgOn) { startBackdrop(); prev = SDL_GetTicksNS(); }      // the backdrop race just runs again
-          else if (screen == DRIVE) { screen = RESULTS; bridge.release(); resultMood(S.race->me->pos, (int)S.race->entries.size(), S.race->me->retired, resTitle, resLine); }
+          else if (screen == DRIVE) { screen = RESULTS; bridge.release(); home.eventResult(S.race.get(), S.hasBest, S.best, S.lines->race.lapTime); resultMood(S.race->me->pos, (int)S.race->entries.size(), S.race->me->retired, resTitle, resLine); }
         }
       }
     }
@@ -1052,6 +1113,7 @@ int main(int argc, char **argv) {
       // behind HOME the race is silent, as it is in the browser (sound=0)
       si.volume = (hidden || bgOn || screen == RESULTS) ? 0 : cfg.volume / 10.0;
       audio.update(si);
+      if (const double boom = fx.takeBoom(); boom > 0 && screen == DRIVE) audio.hit(boom);     // an explosion, before the knock that set it off
       if (S.lastHit > 0) { if (screen == DRIVE) { audio.hit(S.lastHit); bridge.hit(S.lastHit / 14); } S.lastHit = 0; }
     }
     // the wheel: only while YOU are driving, and only if you switched it on
@@ -1092,6 +1154,7 @@ int main(int argc, char **argv) {
   }
   bridge.release();
   if (bridgePid > 0) { SDL_Delay(120); kill(bridgePid, SIGTERM); waitpid(bridgePid, nullptr, 0); }   // the bridge we started goes with us; its last act is to zero the wheel
+  home.cancelEvent();                                           // an event's settings are not the menu's: put the menu's own back before it is kept
   if (!savePath.empty()) cfg.save(savePath);
   if (maxFrames > 0) {
     // What the rig contributed: with --hidden there is no vsync, no compositor

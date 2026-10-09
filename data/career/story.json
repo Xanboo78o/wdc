@@ -1,0 +1,98 @@
+{
+ "about": "The story of CHASING THE WDC, one card at a time. `at` is when a card is shown: intro (the first time CAREER is opened), pre:<event> (before that event's first start), post:<event> (after its first finish). `if` narrows a post card: met / missed (the objective), champ / notchamp (top of the table when it is shown). `who` empty = the marker pen. At most three short lines a card. ASCII only: the fonts have no other glyphs.",
+ "people": {
+  "DAD": {"col": "#ff7a18", "tag": "DAD", "sub": "drives the van"},
+  "ODD": {"col": "#b6ff3c", "tag": "ODD", "sub": "race engineer"},
+  "JUNO": {"col": "#19c9b0", "tag": "JUNO", "sub": "car 7"},
+  "BRAMBLE": {"col": "#7cb518", "tag": "BRAMBLE", "sub": "car 13"},
+  "CROW": {"col": "#8d6bd6", "tag": "CROW", "sub": "car 66"}
+ },
+ "cards": [
+  {"at": "intro", "who": "", "lines": ["ok. so. you want to be world champion.", "by twenty.", "it is good to have a plan."]},
+  {"at": "intro", "who": "", "lines": ["current assets: one borrowed formula 4 car,", "one white van whose door only opens from the inside,", "one dad."]},
+  {"at": "intro", "who": "DAD", "lines": ["I did a spreadsheet for the budget.", "It says we have minus four hundred dollars and a ham sandwich.", "I think the sandwich is in the wrong column."]},
+  {"at": "intro", "who": "", "lines": ["the car is number 78.", "it was the only number left on the sticker sheet.", "(remember that. it comes back.)"]},
+  {"at": "intro", "who": "ODD", "lines": ["I am Odd. It is a real name. I checked.", "I will be your engineer.", "I have brought my own chair."]},
+
+  {"at": "pre:s1r1", "who": "", "lines": ["round one. kate mascoi circuit.", "twelve cars. eleven of them have done this before."]},
+  {"at": "pre:s1r1", "who": "JUNO", "lines": ["Hi! You're the new one. I'm Juno. Car seven.", "I'll be at the front if you need anything."]},
+  {"at": "post:s1r1", "if": "met", "who": "ODD", "lines": ["You finished. The car is the same shape as this morning.", "By our standards this is a triumph."]},
+  {"at": "post:s1r1", "if": "missed", "who": "ODD", "lines": ["That was not the top ten.", "I have written it down. I write everything down.", "It is mostly this sort of thing."]},
+  {"at": "post:s1r1", "who": "DAD", "lines": ["I filmed the whole race.", "My thumb is in most of it.", "It's a good thumb, though."]},
+
+  {"at": "pre:s1h1", "who": "ODD", "lines": ["Today is a test day. We are testing you.", "The car has already passed."]},
+
+  {"at": "pre:s1r2", "who": "", "lines": ["zandvoort. banking. in the dunes.", "dad drove the van onto the beach by mistake.", "we do not talk about the beach."]},
+  {"at": "post:s1r2", "who": "JUNO", "lines": ["Good race! You're braking too early for turn three, though.", "Sorry. Is that annoying? My dad says I'm annoying."]},
+  {"at": "post:s1r2", "who": "", "lines": ["she is right about turn three.", "that is the annoying part."]},
+
+  {"at": "pre:s1r3", "who": "DAD", "lines": ["Home race. Half the street came.", "Mrs. Albright brought a folding chair and an air horn.", "Please don't crash in front of Mrs. Albright."]},
+  {"at": "post:s1r3", "who": "ODD", "lines": ["I measured the crowd. Eleven people.", "Mrs. Albright accounted for six of them."]},
+
+  {"at": "pre:s1l1", "who": "ODD", "lines": ["We start last today. There was a paperwork issue.", "The issue is that your father did the paperwork."]},
+  {"at": "pre:s1l1", "who": "DAD", "lines": ["In my defence, the form had two sides."]},
+
+  {"at": "pre:s1r4", "who": "", "lines": ["suzuka. the track crosses over itself.", "nobody told the van's satnav.", "the van's satnav has not recovered."]},
+  {"at": "post:s1r4", "who": "JUNO", "lines": ["You sat right behind me for a whole lap.", "Nobody's done that all year.", "...Do it again next time. That was fun."]},
+
+  {"at": "pre:s1r5", "who": "", "lines": ["last round. monza. flat out, brake, pray, repeat.", "juno has won this series twice already.", "the table is not finished yet."]},
+  {"at": "post:s1r5", "who": "DAD", "lines": ["Season one. Done. We did not run out of money.", "We ran out of sandwiches in round two.", "But not money."]},
+  {"at": "post:s1r5", "who": "", "lines": ["then a letter came. black envelope. no stamp.", "GRAVENMOOR. OCTOBER 31. MIDNIGHT.", "BRING THE 78."]},
+
+  {"at": "pre:s1g1", "who": "ODD", "lines": ["Gravenmoor. A village circuit. Closed since 1978.", "Car 78 went into the fog on Dead Man's Mile", "and did not come out of the other side."]},
+  {"at": "pre:s1g1", "who": "ODD", "lines": ["The timing loop still counts one lap, every Halloween.", "I do not believe in ghosts.", "I do believe in timing loops."]},
+  {"at": "pre:s1g1", "who": "DAD", "lines": ["Your grandad was a marshal here. Did I never say?", "...Huh.", "Thought I'd said."]},
+  {"at": "post:s1g1", "who": "", "lines": ["it came out of the fog with no lights on.", "it has your number. literally.", "you never saw it brake."]},
+  {"at": "post:s1g1", "who": "ODD", "lines": ["I timed its lap. Then I checked my watch against a second watch.", "Both watches are now frightened."]},
+
+  {"at": "pre:s2r1", "who": "", "lines": ["winter. the phone rang.", "dad answered it with 'van'."]},
+  {"at": "pre:s2r1", "who": "", "lines": ["halloran gt need a second driver.", "theirs broke a wrist falling off a podium.", "their first driver is juno."]},
+  {"at": "pre:s2r1", "who": "JUNO", "lines": ["I told them to call you.", "Don't make it weird."]},
+  {"at": "pre:s2r1", "who": "ODD", "lines": ["I come with the driver. It is in my contract.", "I wrote the contract.", "Nobody has read it."]},
+  {"at": "post:s2r1", "who": "DAD", "lines": ["They have a truck. With a kitchen in it.", "I'm still bringing the van.", "For morale."]},
+
+  {"at": "pre:s2e1", "who": "", "lines": ["the off-weekend 'fun race'.", "the last car over the line each lap goes home.", "nobody here knows what fun is."]},
+  {"at": "pre:s2r3", "who": "JUNO", "lines": ["Up the hill, flat. Everybody says flat.", "Promise me you'll at least think about lifting.", "I never do. That's why I'm telling you."]},
+  {"at": "post:s2r3", "who": "", "lines": ["the team 'found' you a newer car.", "nobody will say where.", "it smells faintly of someone else's air freshener."]},
+  {"at": "pre:s2n1", "who": "ODD", "lines": ["Night. Rain. Monaco.", "Three things I would not combine.", "I have combined them. For science."]},
+  {"at": "pre:s2r4", "who": "", "lines": ["the nordschleife. twenty kilometres of it.", "one lap. that is the whole race.", "nobody has ever finished counting the corners."]},
+  {"at": "pre:s2d1", "who": "", "lines": ["team-building day.", "somebody booked a demolition derby."]},
+  {"at": "pre:s2d1", "who": "ODD", "lines": ["It was me. I have feelings too.", "They are mostly this."]},
+  {"at": "pre:s2r6", "who": "", "lines": ["last round. you and juno. same car, same team.", "next year the team has one seat in formula 1.", "one."]},
+  {"at": "post:s2r6", "who": "", "lines": ["they gave the seat to juno.", "it had been decided in march. sponsors, and their truck.", "it was never about the points."]},
+  {"at": "post:s2r6", "who": "JUNO", "lines": ["I found out the same day you did.", "I asked them to take both of us. They laughed.", "I wasn't joking."]},
+  {"at": "post:s2r6", "who": "DAD", "lines": ["Van's outside when you're ready.", "No rush. I parked it badly.", "We've got time."]},
+
+  {"at": "pre:s2g1", "who": "", "lines": ["october 31. the black envelope came to the van this time.", "it does not care whose truck you arrived in."]},
+  {"at": "post:s2g1", "who": "ODD", "lines": ["Its lap was the same as last year. To the thousandth.", "It is not getting slower. You are getting faster.", "I resent how pleased I am."]},
+
+  {"at": "pre:s3r1", "who": "", "lines": ["february. no seat.", "dad made a new spreadsheet. it had one cell.", "the cell said 'hmm'."]},
+  {"at": "pre:s3r1", "who": "ODD", "lines": ["Pemberton Grand Prix have finished last in the world. Twice.", "They cannot afford a good driver. They can afford you.", "I have already said yes for both of us."]},
+  {"at": "pre:s3r1", "who": "", "lines": ["formula 1. the big one. hands at ten and two.", "your garage is the one next to the bins."]},
+  {"at": "post:s3r1", "who": "DAD", "lines": ["They gave me a team shirt. And a lanyard.", "I'm never taking off the lanyard."]},
+
+  {"at": "pre:s3u1", "who": "JUNO", "lines": ["Media day. They want us to race each other for the cameras.", "Three laps. Same car. Loser buys chips.", "I like the big chips."]},
+  {"at": "post:s3u1", "if": "met", "who": "", "lines": ["juno bought the chips.", "she got the big ones anyway.", "she ate most of yours."]},
+  {"at": "post:s3u1", "if": "missed", "who": "", "lines": ["you bought the chips.", "the big chips are eleven euros.", "dad has opened a new column in the spreadsheet."]},
+
+  {"at": "pre:s3x1", "who": "", "lines": ["summer break.", "odd's idea of a holiday is a gravel car park in the mountains.", "he has brought his chair."]},
+  {"at": "pre:s3r5", "who": "JUNO", "lines": ["If it comes down to the last race: no favours. Promise.", "I'd never forgive you if you let me win."]},
+  {"at": "pre:s3h1", "who": "ODD", "lines": ["Qualifying practice. One lap.", "Do not think. Thinking is my job.", "You have seen how that goes."]},
+
+  {"at": "pre:s3r7", "who": "", "lines": ["the last round. kate mascoi circuit 2. seven laps.", "it comes down to this. it was always going to.", "this time it really is about the points."]},
+  {"at": "pre:s3r7", "who": "DAD", "lines": ["Whatever happens.", "Minus four hundred dollars and a ham sandwich. Look where we are.", "Go on. Lights out."]},
+  {"at": "post:s3r7", "if": "champ", "who": "", "lines": ["world champion.", "you. number 78. the kid from the van.", "odd has written it down. he underlined it. twice."]},
+  {"at": "post:s3r7", "if": "champ", "who": "JUNO", "lines": ["Second in the world. To you, of all people.", "...Good.", "Now I've got something to chase."]},
+  {"at": "post:s3r7", "if": "notchamp", "who": "", "lines": ["not this year.", "dad had the banner printed early. it says CHAMPION.", "he is putting it up anyway. 'for next season.'"]},
+  {"at": "post:s3r7", "if": "notchamp", "who": "JUNO", "lines": ["That was the best race of my life.", "Same again next year?", "No favours."]},
+
+  {"at": "pre:s3g1", "who": "", "lines": ["one more envelope.", "nothing inside this time. only the date."]},
+  {"at": "pre:s3g1", "who": "DAD", "lines": ["Your grandad waved the last flag that car ever saw.", "He always said somebody should go and finish that race with it.", "So. Go on."]},
+  {"at": "post:s3g1", "if": "missed", "who": "", "lines": ["it waited on the line until you had crossed. then it left.", "it will be there next halloween.", "it is very patient."]},
+  {"at": "post:s3g1", "if": "met", "who": "", "lines": ["you led it over the line.", "the first time in forty-eight years that it crossed at all."]},
+  {"at": "post:s3g1", "if": "met", "who": "", "lines": ["it pulled alongside. it lifted one hand.", "then the fog.", "then only the fog."]},
+  {"at": "post:s3g1", "if": "met", "who": "ODD", "lines": ["The loop counted one lap. Then it stopped counting.", "I am not crying. It is condensation.", "From the fog."]},
+  {"at": "post:s3g1", "if": "met", "who": "DAD", "lines": ["It wasn't the only number left on the sheet, you know.", "I just liked how it looked on you."]},
+  {"at": "post:s3g1", "if": "met", "who": "", "lines": ["the end.", "(it is never the end. one more race.)", "racing for all."]}
+ ]
+}

@@ -251,8 +251,12 @@ Roster &roster() {
 }  // namespace
 
 const std::vector<Team> &allTeams() { return tables().teams; }
+// the career's own field (setCustomField): empty until the game hands one over
+struct Custom { std::vector<DriverProfile> drivers; std::vector<Team> teams; };
+static Custom &custom() { static Custom C; return C; }
 const Team *teamByKey(const std::string &key) {
   for (const auto &t : tables().teams) if (t.key == key) return &t;
+  for (const auto &t : custom().teams) if (t.key == key) return &t;
   return nullptr;
 }
 std::vector<std::string> teamsIn(const std::string &league) {
@@ -280,6 +284,15 @@ void setField(const std::string &kind) {
     : kind == "gt3" ? roundRobin(ptrs(T.gt3))
     : kind == "f4" ? roundRobin(ptrs(T.f4))
     : ptrs(kDrivers);
+}
+
+void setCustomField(const std::vector<DriverProfile> &drivers, const std::vector<Team> &teams, bool fill) {
+  Custom &C = custom();
+  Roster &R = roster();
+  C.drivers = drivers; C.teams = teams;
+  List L = ptrs(C.drivers);
+  if (fill) L.insert(L.end(), R.base.begin(), R.base.end());
+  if (!L.empty()) R.active = L;        // base is left alone: the next setField / setPlayerTeam starts from it as always
 }
 
 std::vector<const DriverProfile *> driversOf(const std::string &key) {

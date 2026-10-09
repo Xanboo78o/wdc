@@ -36,6 +36,13 @@ const StyleRow *styleOf(const std::string &name);
 void setField(const std::string &kind);              // "classic" | "fantasy" | "all" | "gt3" | "f4" | anything else = 2026
 const DriverProfile *setPlayerTeam(const std::string &key, int n = 22);   // returns your teammate, or null
 const DriverProfile &driverAt(int i);
+// NOT IN THE JS (native only, the career): hand the grid a field of your own.
+// `drivers` become the roster, in the order given, and `teams` are found by
+// teamByKey after the built-in ones (give them keys nothing else uses). With
+// `fill`, the roster setField last chose follows them, so a big grid still has
+// a name in every car. Nothing changes until this is called, and the next
+// setField puts everything back; the copies live until the next call.
+void setCustomField(const std::vector<DriverProfile> &drivers, const std::vector<Team> &teams, bool fill = false);
 std::vector<const DriverProfile *> driversOf(const std::string &key);
 const Team &teamOf(const DriverProfile &d);
 // [background, ink, primary, secondary]; false when the team has no UI colours

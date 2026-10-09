@@ -10,6 +10,7 @@
 #include <fstream>
 
 #include "driver.hpp"
+#include "homestyle.hpp"
 #include "drivers.hpp"
 #include "json.hpp"
 #include "physics.hpp"
@@ -26,7 +27,12 @@ static const char *TRACKS[][3] = {
   {"nurburgring", "Nurburgring", "GERMANY"}, {"sepang", "Sepang", "MALAYSIA"}, {"spa", "Spa-Francorchamps", "BELGIUM"},
 };
 static const int N_TRACKS = 13;
-static int trackIdx(const std::string &id) { for (int i = 0; i < N_TRACKS; i++) if (id == TRACKS[i][0]) return i; return 5; }
+// Circuits that may or may not be on this machine yet: each joins the list only
+// when its data/tracks/<key>.json exists. A name left empty is read from that file.
+static const char *OPTIONAL[][3] = {
+  {"gravenmoor", "Gravenmoor", "THE MOOR - ONLY EVER AT NIGHT"}, {"nordschleife", "Nordschleife", "GERMANY - 20.8 KM"},
+  {"bathurst", "", ""}, {"lagunaseca", "", ""}, {"lemans", "", ""}, {"brandshatch", "", ""}, {"macau", "", ""},
+};
 static const char *LEAGUE_KEYS[3] = {"f1", "gt3", "f4"}, *LEAGUE_NAMES[3] = {"F1", "GT3", "F4"};
 static const char *leagueName(const std::string &k) { for (int i = 0; i < 3; i++) if (k == LEAGUE_KEYS[i]) return LEAGUE_NAMES[i]; return "F1"; }
 
@@ -69,7 +75,8 @@ static std::string sayFor(const std::string &row, const std::string &v) {
     {"CIRCUIT", "monza", "flat out. brake. pray. repeat."}, {"CIRCUIT", "zandvoort", "banking! in the dunes! who allowed this."},
     {"CIRCUIT", "suzuka", "hachi no ji. best track. no notes."}, {"CIRCUIT", "baku", "two kilometres of straight and then a castle. obviously."},
     {"CIRCUIT", "monaco", "the walls are closer than they look. then closer than that."}, {"CIRCUIT", "nurburgring", "germany. precise. cold. probably foggy."},
-    {"CIRCUIT", "sepang", "it will rain. it always rains."}, {"CIRCUIT", "spa", "seven kilometres of forest and one hill everybody talks about."},
+    {"CIRCUIT", "sepang", "it will rain. it always rains."}, {"CIRCUIT", "gravenmoor", "the church tower is the braking point. the tree is the other one."},
+    {"CIRCUIT", "nordschleife", "twenty kilometres. nobody has finished counting the corners."}, {"CIRCUIT", "spa", "seven kilometres of forest and one hill everybody talks about."},
     {"CAR", "f4", "small car. big dreams."}, {"CAR", "gt3", "the one with a roof."}, {"CAR", "f1", "the big one. hands at ten and two."},
     {"MODE", "hotlap", "just you and the clock. the clock is mean."}, {"MODE", "race", "wheel to wheel. elbows out."},
     {"LAPS", "2", "a sprint. blink and it is over."}, {"LAPS", "10", "ten laps. hydrate."},
@@ -142,6 +149,16 @@ Home::Home(const std::string &dataDir_, const std::string &savePath_) : dataDir(
   const Json idx = Json::loadOpt(dataDir + "/cars/index.json");
   if (idx.isArr()) for (size_t i = 0; i < idx.size(); i++) packs.push_back({idx[i]["key"].s(""), idx[i]["title"].s(""), idx[i]["klass"].s("gt3")});
   hmap = Json::loadOpt(dataDir + "/build/heiligen-map.json");
+  career.load(dataDir);
+  for (auto &o : OPTIONAL) {
+    std::ifstream f(dataDir + "/tracks/" + o[0] + ".json");
+    if (!f) continue;
+    std::string tag = o[2];
+    if (tag.empty()) { const Json j = Json::loadOpt(dataDir + "/tracks/" + o[0] + ".json"); tag = j["country"].s(""); }
+    extra.push_back({o[0], *o[1] ? std::string(o[1]) : career.trackName(o[0]), tag});
+  }
+  // the career's save sits beside the menu's; an unattended run has no path and writes nothing
+  if (savePath.size() > 8 && savePath.compare(savePath.size() - 8, 8, "menu.txt") == 0) career.loadState(savePath.substr(0, savePath.size() - 8) + "career.txt", true);
   sayText = greeting();
   build();
 }
@@ -176,13 +193,20 @@ std::vector<Home::Circuit> Home::circuits() const {
   std::vector<Circuit> L;
   if (S.xOn) { L.push_back({"heiligen", "Heiligen Auto Circuit", "VALCORSA - 14 ROUTES"}); L.push_back({"speedway", "Xingus Speedway", "OVAL - DRAFT - PIT (P)"}); }
   for (int i = 0; i < N_TRACKS; i++) L.push_back({TRACKS[i][0], TRACKS[i][1], TRACKS[i][2]});
+  for (const Circuit &c : extra) L.push_back(c);
   return L;
 }
 std::string Home::circuitId() const {
   if (!S.xOn) return S.track;
   if (S.xTrack == "heiligen" || S.xTrack == "speedway") return S.xTrack;
   for (int i = 0; i < N_TRACKS; i++) if (S.xTrack == TRACKS[i][0]) return S.xTrack;
+  for (const Circuit &c : extra) if (S.xTrack == c.id) return S.xTrack;
   return S.track;
+}
+std::string Home::circuitName(const std::string &key) {
+  for (int i = 0; i < N_TRACKS; i++) if (key == TRACKS[i][0]) return TRACKS[i][1];
+  for (const Circuit &c : extra) if (key == c.id) return c.name;
+  return career.trackName(key);
 }
 std::string Home::xTrackKey() const { const std::string id = circuitId(); return id == "heiligen" ? S.xHeil : id; }
 std::string Home::get(const std::string &key) const {
@@ -291,12 +315,14 @@ void Home::show(const std::string &name, int keep) {
   page = name;
   build();
   at = std::max(0, std::min((int)items.size() - 1, keep));
-  if (!savePath.empty()) S.save(savePath);
+  if (name == "debrief") at = 1;                                       // CONTINUE
+  if (name == "career" && keep == 0) { const EventDef *e = career.next(); if (e && e->season == viewSeason) at = e->index; }
+  if (!savePath.empty() && !eventOn) S.save(savePath);
 }
 
 void Home::lightsOut() {
   if (!S.xOn && S.teams[S.car].empty()) { show("garage"); say("pick a team first. then we race."); return; }
-  if (!savePath.empty()) S.save(savePath);
+  if (!savePath.empty() && !eventOn) S.save(savePath);
   wantStart = true;
 }
 
@@ -321,15 +347,69 @@ void Home::build() {
     }
   };
   if (page == "home") {
-    items.push_back({[this] { lightsOut(); }, nullptr, nullptr});                                        // RACE: what you came for
-    items.push_back({[this] { show("setup"); }, nullptr, nullptr});                                      // NEXT UP
-    items.push_back({[this] { show("setup"); }, nullptr, nullptr});                                      // SETUP
-    items.push_back({[this] { show("garage"); }, nullptr, nullptr});                                     // GARAGE
-    const char *notYet = "that room is not built in the native edition yet.";
-    items.push_back({[this] { S.xOn = true; dirty = true; show("setup"); say("xingus mode. grip, drift, no spins."); }, nullptr, nullptr});   // XINGUS
-    for (int i = 0; i < 4; i++) items.push_back({[this, notYet] { say(notYet); }, nullptr, nullptr});    // SHOWROOM BUILDER JUKEBOX iPAD DASH
-    items.push_back({[this] { show("settings"); }, nullptr, nullptr});                                   // SETTINGS
-    items.push_back({[this] { show("garage"); }, nullptr, nullptr});                                     // the YOU DRIVE FOR card
+    // THE HUB: a stack down the left, tonight's poster on the right
+    auto side = [this] { at = 6; };
+    items.push_back({[this] { show("career"); }, nullptr, side});
+    items.push_back({[this] { if (S.xOn) { S.xOn = false; dirty = true; } show("setup"); }, nullptr, side});
+    items.push_back({[this] { show("events"); }, nullptr, side});
+    items.push_back({[this] { S.xOn = true; dirty = true; show("setup"); say("xingus mode. grip, drift, no spins."); }, nullptr, side});
+    items.push_back({[this] { show("garage"); }, nullptr, side});
+    items.push_back({[this] { show("settings"); }, nullptr, side});
+    items.push_back({[this] { const EventDef *e = career.next(); if (e && career.unlocked(*e)) launchCareer(*e); else show("career"); },
+                     [this] { at = 0; }, nullptr, [this] {}, [this] {}});
+  } else if (page == "career") {
+    if (viewSeason < 0 || viewSeason >= (int)career.seasons.size()) viewSeason = career.currentSeason();
+    auto turn = [this](int d) {
+      const int n = (int)career.seasons.size();
+      viewSeason = std::max(0, std::min(n - 1, viewSeason + d));
+      show("career", 0);
+      const SeasonDef &sd = career.seasons[(size_t)viewSeason];
+      say(career.seasonOpen(viewSeason) ? sd.blurb : "locked. finish the season before it. top " + std::to_string(career.seasons[(size_t)viewSeason - 1].promote) + " of the table.");
+    };
+    if (!career.seasons.empty())
+      for (const EventDef &e : career.seasons[(size_t)viewSeason].events) {
+        const EventDef *ep = &e;
+        items.push_back({[this, ep] { launchCareer(*ep); }, [turn] { turn(-1); }, [turn] { turn(1); }});
+      }
+    auto paint = [this](int d) {
+      std::vector<const Paint *> own;
+      for (const Paint &p : career.paints) if (career.owns(p.key)) own.push_back(&p);
+      int i = 0;
+      for (size_t q = 0; q < own.size(); q++) if (own[q]->key == career.paint) i = (int)q;
+      const int n = (int)own.size();
+      const Paint &p = *own[(size_t)((i + d + n) % n)];
+      career.paint = p.key; career.saveState();
+      say(n < 2 ? "one paint so far. the events have more." : p.line);
+    };
+    items.push_back({[paint] { paint(1); }, [paint] { paint(-1); }, [paint] { paint(1); }});
+    items.push_back({[this] {
+      const auto v = career.soFar();
+      if (v.empty()) say("nothing has happened yet. go and make something happen.");
+      else story(v, "THE STORY SO FAR", [this] { show("career", (int)items.size() - 2); }, true);
+    }, nullptr, nullptr});
+    items.push_back({[this] { const EventDef *e = career.next(); if (e) launchCareer(*e); else say("that is all of it. for now."); }, nullptr, nullptr});
+  } else if (page == "events") {
+    const int n = (int)career.modes.size();
+    for (int i = 0; i < n; i++) {
+      const EventDef *m = &career.modes[(size_t)i];
+      items.push_back({[this, m] {
+        if (!career.modeOpen(*m)) { const EventDef *l = career.find(m->lock); say("locked. the career opens it: " + (l ? l->title : std::string("keep going")) + "."); return; }
+        if (!startEvent(*m, false)) say("that circuit is not on this machine yet.");
+      }, nullptr, nullptr, [this, i] { if (i >= 4) at = i - 4; }, [this, i, n] { at = i + 4 < n ? i + 4 : n; }});
+    }
+    items.push_back({[this] { if (S.xOn) { S.xOn = false; dirty = true; } show("setup"); say("pick the circuit and the car. then come back."); }, nullptr, nullptr, [this, n] { at = std::max(0, n - 4); }, nullptr});
+  } else if (page == "story") {
+    back = [this] { storyStep(999); };
+    items.push_back({[this] { storyStep(1); }, [this] { storyStep(-1); }, [this] { storyStep(1); }});
+  } else if (page == "debrief") {
+    back = [this] { afterDebrief(); };
+    items.push_back({[this] {
+      const EventDef *e = career.find(career.out.key);
+      const bool inCareer = career.out.career;
+      career.out = Outcome{};
+      if (!e || !startEvent(*e, inCareer)) show(inCareer ? "career" : "events");
+    }, nullptr, nullptr});
+    items.push_back({[this] { afterDebrief(); }, nullptr, nullptr});
   } else if (page == "setup") {
     auto step = [this](int d) {
       const auto L = circuits();
@@ -401,7 +481,7 @@ void Home::build() {
 
 void Home::input(Nav n) {
   if (n == Nav::Back) { if (back) back(); else wantQuit = true; return; }
-  if (n == Nav::Go) { if (page == "home" || page == "setup") lightsOut(); return; }
+  if (n == Nav::Go) { if (page == "setup") lightsOut(); else if (page == "home") { const EventDef *e = career.next(); if (e && career.unlocked(*e)) launchCareer(*e); else show("career"); } return; }
   if (items.empty()) return;
   const Item it = items[(size_t)at];
   if (n == Nav::Ok) { if (it.ok) it.ok(); return; }
@@ -411,6 +491,8 @@ void Home::input(Nav n) {
     else at = std::max(0, std::min((int)items.size() - 1, at + (n == Nav::Left ? -1 : 1)));
     return;
   }
+  const auto &v = n == Nav::Up ? it.up : it.down;
+  if (v) { v(); at = std::max(0, std::min((int)items.size() - 1, at)); return; }
   at = std::max(0, std::min((int)items.size() - 1, at + (n == Nav::Up ? -1 : 1)));
 }
 
@@ -449,16 +531,6 @@ const Home::Outline &Home::outline(const std::string &id) {
   return outlines.emplace(id, std::move(o)).first->second;
 }
 
-static Rgba alpha_(const Rgba &a, float t) { Rgba r = a; r.c[3] *= t; return r; }
-// THE NIGHT PADDOCK (Adam, 2026-10-08: "ui reskin as in new look and style not
-// this setup no more, and halloweeny a lil bit"). The page is the dark; the
-// race behind it shows through. Cards are aubergine, the ink is bone, the one
-// loud colour is pumpkin and the second is slime. The names are the old ones
-// (PAPER the page, CARD a panel, INK the line and the lettering, RED the loud
-// one, YELL the chip) so every page follows at once.
-static const Rgba PAPER = hex("#0f0b16"), CARD = hex("#1c1527"), INK = hex("#f2e9d8"), SOFT = hex("#a99dbb"), RED = hex("#ff7a18"),
-                  ONRED = hex("#170b02"), YELL = hex("#b6ff3c"), PLUM = hex("#7b3cff");
-
 void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, const std::string &id, bool car, double clock) {
   // .frame: 7% ink on the card, the outline inside 8 px of padding, north up
   R.rrect(x * k, y * k, w * k, h * k, 8 * k, mix(INK, CARD, 0.07f));
@@ -488,6 +560,7 @@ void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, con
 void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   now = clock;
   hots.clear();
+  (void)live;      // the hub has no tower: tonight's poster stands where it was
   auto hot = [&](float x, float y, float w, float h, int item, std::function<void()> fn = nullptr) { hots.push_back({x * k, y * k, w * k, h * k, item, std::move(fn)}); };
   const float W = (float)R.W / k, H = (float)R.H / k;
   const int A = Renderer::ANTON, RB = Renderer::RUBIK, MK = Renderer::MARKER;
@@ -496,15 +569,6 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   };
   auto width = [&](float size, const std::string &s, int font = 1, float track = 0) { return R.widthPx(size * k, s, font, track) / k; };
   auto upper = [](std::string s) { for (char &c : s) c = (char)std::toupper((unsigned char)c); return s; };
-  // The one shape: a card. Rounded, an ink line, flat. Chosen = solid ink, a
-  // hop of three pixels and a hard red lip under it.
-  auto chunk = [&](float x, float &y, float w, float h, bool on, const Rgba &fill, float r = 12, float bw = 2.5f, const Rgba *lip = &RED, bool solid = true) {
-    if (on) {
-      y -= 3;
-      if (lip) R.rrect(x * k, (y + 5) * k, w * k, h * k, r * k, *lip);
-      R.card(x * k, y * k, w * k, h * k, r * k, bw * k, solid ? INK : fill, INK);
-    } else R.card(x * k, y * k, w * k, h * k, r * k, bw * k, fill, INK);
-  };
   auto pumpkin = [&](float cx, float cy, float s) {      // it is October
     const Rgba OR = hex("#ff7a14"), DK = hex("#a8440a"), GL = hex("#ffe14d"), ST = hex("#3d6b1f");
     R.rect((cx - s * 0.04f) * k, (cy - s * 0.48f) * k, s * 0.1f * k, s * 0.2f * k, ST);
@@ -514,11 +578,6 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     const float e2[6] = {(cx + s * 0.24f) * k, (cy - s * 0.02f) * k, (cx + s * 0.10f) * k, (cy - s * 0.13f) * k, (cx + s * 0.06f) * k, (cy + s * 0.02f) * k};
     R.poly(e1, 3, GL); R.poly(e2, 3, GL);
     R.rrect((cx - s * 0.24f) * k, (cy + s * 0.12f) * k, s * 0.48f * k, s * 0.10f * k, s * 0.05f * k, GL);
-  };
-  auto flag = [&](float x, float y, float s, const Rgba &pole) {       // the flag from his GO! button
-    R.rect((x + s * 0.24f) * k, (y + s * 0.12f) * k, s * 0.07f * k, s * 0.8f * k, pole);
-    for (int cy = 0; cy < 3; cy++) for (int cx = 0; cx < 4; cx++)
-      R.rect((x + s * 0.31f + cx * s * 0.14f) * k, (y + s * 0.14f + cy * s * 0.13f) * k, s * 0.14f * k, s * 0.13f * k, ((cx + cy) & 1) ? hex("#111111") : hex("#ffffff"));
   };
   const bool october = [] { const std::time_t t = std::time(nullptr); return std::localtime(&t)->tm_mon == 9; }();
   const bool boo = S.theme == "halloween" || october;
@@ -606,166 +665,11 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
 
   if (page != "home") R.rect(0, 0, (float)R.W, (float)R.H, alpha_(PAPER, 0.88f));       // the wash: the race is still there, in the dark
 
-  if (page == "home") {
-    const int ti = trackIdx(S.track);
-    // ---- top bar
-    {
-      const float tw = width(30, "CHASING ", A, 0.03f) + width(30, "WDC", A, 0.03f), lw = 16 + 30 + 10 + tw + 16;
-      R.rrect(24 * k, 20 * k, lw * k, 58 * k, 12 * k, INK);
-      if (boo) pumpkin(24 + 16 + 15, 20 + 29, 34); else flag(24 + 12, 20 + 13, 34, PAPER);
-      const float x = 24 + 16 + 40;
-      const float w1 = text(x, 27, 30, "CHASING ", PAPER, LEFT, A, 0.03f);
-      text(x + w1, 27, 30, "WDC", RED, LEFT, A, 0.03f);
-      text(x, 60, 10, "RACING FOR ALL", alpha_(PAPER, 0.7f), LEFT, RB, 0.2f);
-      float cx = 24 + lw + 12;
-      auto chip = [&](const std::string &small, const std::string &big, const Rgba &bg, const Rgba &fg, bool jack = false) {
-        const float w = std::max(width(9, small, RB, 0.16f), width(19, big, A, 0.03f)) + 26 + (jack ? 38 : 0);
-        R.card(cx * k, 28 * k, w * k, 42 * k, 12 * k, 2.5f * k, bg, INK);
-        if (jack) pumpkin(cx + 24, 49, 30);
-        text(cx + 13 + (jack ? 38 : 0), 34, 9, small, alpha_(fg, 0.7f), LEFT, RB, 0.16f);
-        text(cx + 13 + (jack ? 38 : 0), 45, 19, big, fg, LEFT, A, 0.03f);
-        cx += w + 12;
-      };
-      // series: "Day N of chasing the WDC" began on 2026-10-03
-      const std::time_t tt = std::time(nullptr);
-      std::tm lt = *std::localtime(&tt);
-      std::tm d0{}; d0.tm_year = 126; d0.tm_mon = 9; d0.tm_mday = 3;
-      std::tm today = lt; today.tm_hour = today.tm_min = today.tm_sec = 0;
-      const int day = (int)std::floor(std::difftime(std::mktime(&today), std::mktime(&d0)) / 86400.0 + 0.5) + 1;
-      if (day >= 1) chip("CHASING THE WDC", "DAY " + std::to_string(day), YELL, hex("#121212"));
-      if (S.theme == "halloween" && lt.tm_mon == 9) { const int left = 31 - lt.tm_mday; chip("HALLOWEEN", left == 0 ? "TONIGHT" : std::to_string(left) + " NIGHT" + (left == 1 ? "" : "S"), hex("#ff7a14"), hex("#1a1220"), true); }
-      if (lt.tm_mon == 9) chip("RACETOBER", "DAY " + std::to_string(lt.tm_mday), INK, PAPER);
-      // the radio (the soundtrack is not in the native edition yet, and it says so)
-      const std::string np = "MUSIC OFF";
-      const float w = std::max(width(9, "ON THE RADIO", RB, 0.16f), width(19, np, A, 0.03f)) + 26;
-      R.card((W - 24 - w) * k, 28 * k, w * k, 42 * k, 12 * k, 2.5f * k, CARD, INK);
-      text(W - 24 - w + 13, 34, 9, "ON THE RADIO", SOFT, LEFT, RB, 0.16f);
-      text(W - 24 - w + 13, 45, 19, np, INK, LEFT, A, 0.03f);
-    }
-    sayBox(24, 92);
-    // ---- mid: who you drive for, and the race going on behind all this
-    {
-      const bool on = at == 10;
-      float y = 141;
-      chunk(24, y, 250, 116, on, CARD);
-      hot(24, 141, 250, 116, 10);
-      const Rgba fg = on ? PAPER : INK, sm = on ? alpha_(PAPER, 0.75f) : SOFT;
-      std::string no = "?";
-      if (team) { const auto dv = driversOf(tk); if (!dv.empty()) no = std::to_string(dv[0]->num); }
-      R.circle((24 + 250 - 15 - 27) * k, (y + 13 + 27) * k, 27 * k, INK);
-      R.circle((24 + 250 - 15 - 27) * k, (y + 13 + 27) * k, 24.5f * k, hex("#ffffff"));
-      text(24 + 250 - 15 - 27, y + 13 + 15, 24, no, hex("#121212"), CENTRE, A);
-      text(39, y + 14, 10, team ? std::string(leagueName(team->league)) + " - YOU DRIVE FOR" : "NO TEAM YET", sm, LEFT, RB, 0.16f);
-      std::string tn = team ? upper(team->name) : "PICK A TEAM";
-      while (tn.size() > 4 && width(30, tn, A, 0.02f) > 160) tn.pop_back();
-      text(39, y + 30, 30, tn, fg, LEFT, A, 0.02f);
-      Rgba c1, c2;
-      cols(team, c1, c2);
-      R.rrect(39 * k, (y + 70) * k, 220 * k, 12 * k, 6 * k, INK);
-      R.rrect(39 * k, (y + 70) * k, 220 * 0.90f * k, 12 * k, 6 * k, c2);
-      R.rrect(39 * k, (y + 70) * k, 220 * 0.66f * k, 12 * k, 6 * k, c1);
-      text(39, y + 90, 12, team ? carSpec(S.car).full : "the garage is that way ->", sm);
-      // the tower
-      const float tx = W - 24 - 240, th = 11 + 19 + 21 * (float)std::max<size_t>(1, std::min<size_t>(7, live.rows.size())) + 8;
-      R.card(tx * k, 141 * k, 240 * k, (live.up ? th : 40) * k, 12 * k, 2.5f * k, CARD, INK);
-      if (!live.up) text(tx + 14, 153, 10, "LIVE - WARMING UP...", SOFT, LEFT, RB, 0.16f);
-      else {
-        R.circle((tx + 18) * k, 158 * k, 4 * k, RED);
-        std::string tn = upper(live.track);
-        const std::string tail = " - LAP " + std::to_string(live.lap) + "/" + std::to_string(live.laps);
-        while (tn.size() > 3 && width(10, "LIVE - " + tn + tail, RB, 0.16f) > 198) tn.pop_back();
-        text(tx + 28, 153, 10, "LIVE - " + tn + tail, SOFT, LEFT, RB, 0.16f);
-        float ry = 141 + 11 + 19;
-        for (size_t i = 0; i < live.rows.size() && i < 7; i++) {
-          const LiveRow &r = live.rows[i];
-          text(tx + 30, ry + 3, 13, std::to_string(r.p), INK, RIGHT, A);
-          R.rrect((tx + 38) * k, (ry + 3) * k, 5 * k, 14 * k, 2 * k, hex(r.col));
-          std::string nm = r.you ? "YOUR SEAT (BOT)" : r.name;
-          while (nm.size() > 3 && width(13, nm, RB) > 120) nm.pop_back();
-          text(tx + 51, ry + 3, 13, nm, INK, LEFT, RB);
-          text(tx + 240 - 14, ry + 4, 11, r.gap, SOFT, RIGHT, RB);
-          ry += 21;
-        }
-      }
-    }
-    // ---- the dock
-    {
-      const float bottom = H - 22;
-      // NEXT UP
-      {
-        const bool on = at == 1;
-        float y = bottom - 180;
-        chunk(24, y, 250, 180, on, CARD);
-        hot(24, bottom - 180, 250, 180, 1);
-        const Rgba fg = on ? PAPER : INK, sm = on ? alpha_(PAPER, 0.75f) : SOFT;
-        text(37, y + 12, 10, "NEXT UP", sm, LEFT, RB, 0.16f);
-        const std::string nid = S.xOn ? xTrackKey() : S.track;
-        std::string cname = TRACKS[ti][1], ctag = TRACKS[ti][2];
-        for (const Circuit &c : circuits()) if (c.id == circuitId()) { cname = c.name; ctag = c.tag; }
-        drawMap(R, k, 37, y + 29, 224, 96, nid, true, clock);
-        std::string nm = upper(cname);
-        while (nm.size() > 4 && width(26, nm, A, 0.02f) > 224) nm.pop_back();
-        text(37, y + 131, 26, nm, fg, LEFT, A, 0.02f);
-        const Outline &o = outline(nid);
-        char km[32];
-        std::snprintf(km, sizeof km, " - %.3f KM", o.len / 1000);
-        text(37, y + 160, 10, ctag + (o.ok ? km : ""), sm, LEFT, RB, 0.16f);
-      }
-      // RACE
-      {
-        const bool on = at == 0;
-        float y = bottom - 112;
-        const float x = W - 24 - 236;
-        if (on) { y -= 3; R.rrect(x * k, (y + 6) * k, 236 * k, 112 * k, 16 * k, INK); }
-        R.card(x * k, y * k, 236 * k, 112 * k, 16 * k, 3 * k, RED, INK);
-        hot(x, bottom - 112, 236, 112, 0);
-        text(x + 118, y + 18, 58, "RACE", ONRED, CENTRE, A, 0.04f);
-        char sub[96];
-        if (S.xOn) { std::string cn = TRACKS[ti][1]; for (const Circuit &c : circuits()) if (c.id == circuitId()) cn = c.name; std::snprintf(sub, sizeof sub, "XINGUS - %s - %s", xstyle(S.xStyle).label, upper(cn).c_str()); }
-        else if (S.mode == "race") std::snprintf(sub, sizeof sub, "%d LAPS - %d CARS - %s", S.laps, S.grid, upper(TRACKS[ti][1]).c_str());
-        else std::snprintf(sub, sizeof sub, "HOT LAP - %s", upper(TRACKS[ti][1]).c_str());
-        std::string sb = sub;
-        while (sb.size() > 6 && width(11, sb, RB, 0.14f) > 212) sb.pop_back();
-        text(x + 118, y + 84, 11, sb, ONRED, CENTRE, RB, 0.14f);
-      }
-      // the tiles
-      {
-        static const char *LBL[8] = {"SETUP", "GARAGE", "XINGUS", "SHOWROOM", "BUILDER", "JUKEBOX", "iPAD DASH", "SETTINGS"};
-        const float x0 = 24 + 250 + 14, x1 = W - 24 - 236 - 14, avail = x1 - x0;
-        const int per = std::max(1, std::min(8, (int)((avail + 10) / 108)));
-        const int rowsN = (8 + per - 1) / per;
-        for (int i = 0; i < 8; i++) {
-          const int row = i / per, inRow = std::min(per, 8 - row * per), col = i % per;
-          const float rw = (float)inRow * 98 + (float)(inRow - 1) * 10;
-          float x = x0 + (avail - rw) / 2 + (float)col * 108, y = bottom - 90 - (float)(rowsN - 1 - row) * 100;
-          const bool on = at == 2 + i;
-          hot(x, y, 98, 90, 2 + i);
-          chunk(x, y, 98, 90, on, CARD);
-          const Rgba fg = on ? PAPER : INK, g1 = on ? hex("#d9d9d9") : hex("#5a5a5a"), g2 = on ? hex("#9a9a9a") : hex("#9c9c9c");
-          const float cx = x + 49, cy = y + 34;
-          // the icons: flat fills and fat strokes, grey as the page draws them
-          switch (i) {
-            case 0: flag(cx - 22, cy - 20, 40, g1); break;
-            case 1: { const float rf[6] = {(cx - 22) * k, (cy - 2) * k, cx * k, (cy - 20) * k, (cx + 22) * k, (cy - 2) * k}; R.poly(rf, 3, g1);
-                      R.rect((cx - 16) * k, (cy - 2) * k, 32 * k, 20 * k, g2); R.rect((cx - 6) * k, (cy + 6) * k, 12 * k, 12 * k, g1); break; }
-            case 2: if (boo) pumpkin(cx, cy, 40); else { R.circle((cx - 10) * k, (cy + 10) * k, 7 * k, g1); R.circle((cx + 12) * k, (cy + 6) * k, 7 * k, g1);
-                      R.rect((cx - 5) * k, (cy - 16) * k, 3 * k, 26 * k, g1); R.rect((cx + 17) * k, (cy - 20) * k, 3 * k, 26 * k, g1); R.rect((cx - 5) * k, (cy - 20) * k, 25 * k, 5 * k, g1); } break;
-            case 3: R.rrect((cx - 24) * k, (cy - 2) * k, 48 * k, 12 * k, 4 * k, g2); R.rrect((cx - 12) * k, (cy - 12) * k, 22 * k, 12 * k, 4 * k, g2);
-                    R.circle((cx - 13) * k, (cy + 10) * k, 7 * k, g1); R.circle((cx + 14) * k, (cy + 10) * k, 7 * k, g1); break;
-            case 4: { const float hd[8] = {(cx - 8) * k, (cy - 20) * k, (cx + 20) * k, (cy - 8) * k, (cx + 14) * k, (cy + 2) * k, (cx - 14) * k, (cy - 10) * k}; R.poly(hd, 4, g2);
-                      const float hn[4] = {(cx - 12) * k, (cy + 18) * k, (cx + 4) * k, (cy - 10) * k}; R.path(hn, 2, 6 * k, g1, false); break; }
-            case 5: R.circle((cx - 10) * k, (cy + 10) * k, 7 * k, g1); R.circle((cx + 12) * k, (cy + 6) * k, 7 * k, g1);
-                    R.rect((cx - 5) * k, (cy - 16) * k, 3 * k, 26 * k, g1); R.rect((cx + 17) * k, (cy - 20) * k, 3 * k, 26 * k, g1); R.rect((cx - 5) * k, (cy - 20) * k, 25 * k, 5 * k, g1); break;
-            case 6: R.rrect((cx - 22) * k, (cy - 16) * k, 44 * k, 32 * k, 3 * k, g2); R.rect((cx - 14) * k, (cy + 2) * k, 6 * k, 8 * k, g1);
-                    R.rect((cx - 3) * k, (cy - 5) * k, 6 * k, 15 * k, g1); R.rect((cx + 8) * k, (cy - 10) * k, 6 * k, 20 * k, g1); break;
-            default: for (int q = 0; q < 3; q++) { R.rect((cx - 20) * k, (cy - 13 + q * 12) * k, 40 * k, 4 * k, g2); R.circle((cx - 8 + q * 9 * (q == 1 ? 1.4f : -0.2f)) * k, (cy - 11 + q * 12) * k, 6 * k, g1); } break;
-          }
-          text(cx, y + 63, 15, LBL[i], fg, CENTRE, A, 0.04f);
-        }
-      }
-    }
-    return;
-  }
+  if (page == "home") { drawHub(R, k, clock); return; }
+  if (page == "career") { drawCareer(R, k, clock); return; }
+  if (page == "events") { drawEvents(R, k, clock); return; }
+  if (page == "story") { drawStory(R, k, clock); return; }
+  if (page == "debrief") { drawDebrief(R, k, clock); return; }
 
   if (page == "setup") {
     const auto L = circuits();

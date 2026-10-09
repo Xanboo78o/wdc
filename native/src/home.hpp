@@ -10,9 +10,13 @@
 #include <string>
 #include <vector>
 
+#include "career.hpp"
 #include "render.hpp"
 
 namespace xbr {
+
+struct HudTheme;
+class Race;
 
 struct MenuSave {
   std::string track = "monza", car = "f1", mode = "race", tier = "medium", start = "mid";
@@ -63,10 +67,29 @@ class Home {
   std::string voice() const;
   std::string xTrackKey() const;                  // the circuit a Xingus session loads (a Heiligen route, the oval, or the usual one)
 
+  // ---- THE CAREER AND THE EVENTS (career.hpp; the pages are in home_career.cpp)
+  Career career;
+  // An event is started by putting what it needs into S for as long as it runs
+  // (the game reads S for everything), and the menu's own record is put back
+  // when it is over. `event()` is what S cannot say: the field, the slot, the ghost.
+  const Launch *event() const { return eventOn ? &career.L : nullptr; }
+  bool startEvent(const EventDef &e, bool inCareer);          // true: wantStart is set
+  bool startKey(const std::string &key);                      // --event KEY, for unattended runs
+  bool haunted() const { return eventOn && career.L.haunted; }
+  std::string eventBrief() const;                             // the line for the middle of the screen as it starts
+  HudTheme eventTheme() const;
+  void eventResult(Race *race, bool hasBest, double best, double ideal);   // the race is over: what did it mean
+  // leaving the session for the menu, by any door: settle a hot lap, put the menu's record back
+  void leaveEvent(Race *race, bool hasBest, double best, double ideal);
+  void cancelEvent() { if (eventOn) { S = S0; eventOn = false; career.clear(); } }   // it never started, or the game is closing
+  std::string landing();                                      // the page to come back to (read once)
+  void drawOutcome(Renderer &R, float k);                     // the strip over the RESULTS screen
+  int shotCard = -1;                                          // --card N: the story card `--screen story` shows
+
  private:
   struct Pack { std::string key, title, klass; };
   std::vector<Pack> packs;      // data/cars/index.json: what tools/bakecar.mjs has baked on this machine
-  struct Item { std::function<void()> ok, left, right; };
+  struct Item { std::function<void()> ok, left, right, up = nullptr, down = nullptr; };
   struct Hot { float x, y, w, h; int item; std::function<void()> fn; };
   std::vector<Hot> hots;        // rebuilt by every draw
   std::vector<Item> items;
@@ -85,10 +108,31 @@ class Home {
   std::vector<Opt> setupRows() const;
   std::vector<Opt> heilRows() const;
   struct Circuit { std::string id, name, tag; };
+  std::vector<Circuit> extra;                     // optional circuits found on this machine (home.cpp OPTIONAL)
   std::vector<Circuit> circuits() const;          // the circuit row: in Xingus, Heiligen and the oval come first
   std::string circuitId() const;
   Json hmap;                                      // data/build/heiligen-map.json
   std::string get(const std::string &key) const;
+  // ---- the career's pages
+  bool eventOn = false;
+  MenuSave S0;                                    // the menu's own record while an event has S
+  std::string landPage;
+  int viewSeason = -1;
+  std::vector<int> storyQ;                        // the cards being shown
+  int storyAt = 0;
+  bool storyReplay = false;
+  std::string storyHead;
+  std::function<void()> storyThen;
+  void story(const std::vector<int> &cards, const std::string &head, std::function<void()> then, bool replay = false);
+  void storyStep(int d);
+  void launchCareer(const EventDef &e);
+  void afterDebrief();
+  std::string circuitName(const std::string &key);
+  void drawHub(Renderer &R, float k, double clock);
+  void drawCareer(Renderer &R, float k, double clock);
+  void drawEvents(Renderer &R, float k, double clock);
+  void drawStory(Renderer &R, float k, double clock);
+  void drawDebrief(Renderer &R, float k, double clock);
   void set(const std::string &key, const std::string &v);
 };
 

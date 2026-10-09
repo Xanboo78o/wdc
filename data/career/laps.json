@@ -1,0 +1,251 @@
+{
+ "about": "HOT LAP CHALLENGE targets, from the game's own reference drivers: gold = the HARD driver's best lap, silver = MEDIUM's, bronze = CASUAL's plus 3%. A circuit that is not here gets its targets from the ideal line at run time (career.cpp medalTimes).",
+ "command": "for each track and class: native/build/xbr-drive <track> 2 <class> all   (best of two laps a tier; 2026-10-08)",
+ "laps": {
+  "kate": {
+   "f4": {
+    "bronze": 102.758,
+    "silver": 98.121,
+    "gold": 97.342
+   },
+   "gt3": {
+    "bronze": 88.294,
+    "silver": 83.512,
+    "gold": 82.307
+   },
+   "f1": {
+    "bronze": 70.737,
+    "silver": 67.075,
+    "gold": 66.212
+   }
+  },
+  "kate2": {
+   "f4": {
+    "bronze": 149.638,
+    "silver": 142.187,
+    "gold": 140.95
+   },
+   "gt3": {
+    "bronze": 128.397,
+    "silver": 121.005,
+    "gold": 119.04
+   },
+   "f1": {
+    "bronze": 102.224,
+    "silver": 97.11,
+    "gold": 96.112
+   }
+  },
+  "street": {
+   "f4": {
+    "bronze": 189.265,
+    "silver": 178.802,
+    "gold": 177.377
+   },
+   "gt3": {
+    "bronze": 169.715,
+    "silver": 159.11,
+    "gold": 156.462
+   },
+   "f1": {
+    "bronze": 140.044,
+    "silver": 129.84,
+    "gold": 126.627
+   }
+  },
+  "monza": {
+   "f4": {
+    "bronze": 139.248,
+    "silver": 133.134,
+    "gold": 132.077
+   },
+   "gt3": {
+    "bronze": 124.359,
+    "silver": 117.48,
+    "gold": 115.78
+   },
+   "f1": {
+    "bronze": 99.809,
+    "silver": 94.095,
+    "gold": 93.16
+   }
+  },
+  "zandvoort": {
+   "f4": {
+    "bronze": 131.729,
+    "silver": 122.772,
+    "gold": 121.167
+   },
+   "gt3": {
+    "bronze": 118.666,
+    "silver": 110.22,
+    "gold": 107.532
+   },
+   "f1": {
+    "bronze": 93.397,
+    "silver": 86.822,
+    "gold": 84.485
+   }
+  },
+  "suzuka": {
+   "f4": {
+    "bronze": 157.716,
+    "silver": 149.32,
+    "gold": 147.97
+   },
+   "gt3": {
+    "bronze": 148.418,
+    "silver": 138.195,
+    "gold": 134.78
+   },
+   "f1": {
+    "bronze": 110.67,
+    "silver": 103.032,
+    "gold": 100.947
+   }
+  },
+  "baku": {
+   "f4": {
+    "bronze": 164.697,
+    "silver": 154.495,
+    "gold": 152.1
+   },
+   "gt3": {
+    "bronze": 149.793,
+    "silver": 139.467,
+    "gold": 136.335
+   },
+   "f1": {
+    "bronze": 116.933,
+    "silver": 109.935,
+    "gold": 108.17
+   }
+  },
+  "monaco": {
+   "f4": {
+    "bronze": 117.71,
+    "silver": 112.926,
+    "gold": 112.03
+   },
+   "gt3": {
+    "bronze": 116.987,
+    "silver": 108.265,
+    "gold": 105.255
+   },
+   "f1": {
+    "bronze": 97.044,
+    "silver": 90.07,
+    "gold": 88.1
+   }
+  },
+  "nurburgring": {
+   "f4": {
+    "bronze": 159.874,
+    "silver": 148.48,
+    "gold": 144.692
+   },
+   "gt3": {
+    "bronze": 143.574,
+    "silver": 133.28,
+    "gold": 130.24
+   },
+   "f1": {
+    "bronze": 111.052,
+    "silver": 103.765,
+    "gold": 101.635
+   }
+  },
+  "sepang": {
+   "f4": {
+    "bronze": 166.669,
+    "silver": 155.242,
+    "gold": 151.837
+   },
+   "gt3": {
+    "bronze": 149.81,
+    "silver": 138.992,
+    "gold": 135.357
+   },
+   "f1": {
+    "bronze": 114.268,
+    "silver": 106.95,
+    "gold": 104.487
+   }
+  },
+  "spa": {
+   "f4": {
+    "bronze": 180.072,
+    "silver": 172.665,
+    "gold": 171.295
+   },
+   "gt3": {
+    "bronze": 168.273,
+    "silver": 157.082,
+    "gold": 153.59
+   },
+   "f1": {
+    "bronze": 129.313,
+    "silver": 121.632,
+    "gold": 119.735
+   }
+  },
+  "nordschleife": {
+   "f1": {
+    "bronze": 388.137,
+    "silver": 359.39,
+    "gold": 350.215
+   }
+  },
+  "bathurst": {
+   "gt3": {
+    "bronze": 146.267,
+    "silver": 136.712,
+    "gold": 133.66
+   },
+   "f4": {
+    "bronze": 162.101,
+    "silver": 152.635,
+    "gold": 150.177
+   },
+   "f1": {
+    "bronze": 120.495,
+    "silver": 111.75,
+    "gold": 108.192
+   }
+  },
+  "lagunaseca": {
+   "gt3": {
+    "bronze": 100.971,
+    "silver": 94.155,
+    "gold": 92.04
+   },
+   "f4": {
+    "bronze": 110.055,
+    "silver": 103.247,
+    "gold": 101.627
+   },
+   "f1": {
+    "bronze": 86.654,
+    "silver": 79.945,
+    "gold": 77.582
+   }
+  },
+  "gravenmoor": {
+   "gt3": {
+    "bronze": 115.89,
+    "silver": 107.932,
+    "gold": 105.345
+   },
+   "f4": {
+    "bronze": 128.142,
+    "silver": 120.115,
+    "gold": 118.465
+   },
+   "f1": {
+    "bronze": 92.887,
+    "silver": 85.117,
+    "gold": 82.287
+   }
+  }
+ }
+}
