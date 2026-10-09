@@ -18,7 +18,7 @@ import path from 'path';
 
 const ROOT = new URL('../', import.meta.url).pathname;
 const args = process.argv.slice(2);
-const KNOWN = new Set(['--out', '--q', '--size', '--eval', '--audio', '--port', '--tag', '--play']);
+const KNOWN = new Set(['--out', '--q', '--size', '--eval', '--audio', '--port', '--tag', '--play', '--force', '--seq']);
 for (const a of args) if (a.startsWith('--') && !KNOWN.has(a)) { console.error('unknown flag ' + a); process.exit(2); }
 const flag = (n, d = null) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : d; };
 const pos = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && ['--out', '--q', '--size', '--eval', '--port', '--tag', '--play'].includes(args[i - 1])));
@@ -39,7 +39,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // refuse to load the machine while the owner's game is running
-try { execFileSync('pgrep', ['-x', 'xbr'], { stdio: 'ignore' }); console.error('xbr is running — not starting a headless render. Try again later.'); process.exit(3); } catch { /* not running */ }
+if (!args.includes('--force')) try { execFileSync('pgrep', ['-x', 'xbr'], { stdio: 'ignore' }); console.error('xbr is running — not starting a headless render. Try again later.'); process.exit(3); } catch { /* not running */ }
 
 let server = null;
 try { execFileSync('bash', ['-c', `exec 3<>/dev/tcp/127.0.0.1/${PORT}`], { stdio: 'ignore' }); }
@@ -127,9 +127,11 @@ try {
     for (const t of times) {
       const now = await ev(`window.__adSeek(${t})`);
       const shot = await send('Page.captureScreenshot', { format: 'png' });
-      const f = path.join(OUT, `${which}${TAG ? '-' + TAG : ''}-${String(t).replace('.', '_').padStart(5, '0')}.png`);
+      // --seq: numbered in order, for making a film of them (tools/admovie.sh)
+      const f = args.includes('--seq') ? path.join(OUT, `f${String(times.indexOf(t)).padStart(5, '0')}.png`)
+        : path.join(OUT, `${which}${TAG ? '-' + TAG : ''}-${String(t).replace('.', '_').padStart(5, '0')}.png`);
       fs.writeFileSync(f, Buffer.from(shot.data, 'base64'));
-      console.log(`[${el()}] ${f}  ${JSON.stringify(now)}`);
+      if (!args.includes('--seq') || times.indexOf(t) % 30 === 0) console.log(`[${el()}] ${f}  ${JSON.stringify(now)}`);
     }
   }
 } catch (e) { console.error('FAILED:', e.message); code = 1; }

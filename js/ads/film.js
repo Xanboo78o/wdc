@@ -218,4 +218,58 @@ export async function runFilm(def) {
   card.addEventListener('click', go);
   $('again').addEventListener('click', go);
   addEventListener('keydown', go);
+
+  // ---- THE FILM AS A FILE (Adam, 2026-10-09: "lemmi download the ads") -------
+  // Drawing 4,000 frames one at a time in software was measured at one to two
+  // minutes a frame, so the film is recorded as it plays instead: the browser
+  // captures THIS TAB (picture, captions and sound together), and when the
+  // film ends the recording is saved as a file. Full screen first, so what is
+  // captured is the picture and nothing else. ?rec=1 puts the button in focus.
+  const slug = (def.title || 'ad').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').replace(/^xbr-/, 'ad-');
+  const recBtn = document.createElement('button');
+  recBtn.textContent = 'RECORD + DOWNLOAD';
+  recBtn.style.cssText = 'margin-top:2.2em;padding:.8em 1.8em .7em;font:400 1.5em/1 "Anton","Arial Narrow",Impact,sans-serif;letter-spacing:.14em;' +
+    'color:#fff;background:#ff2d46;border:0;border-radius:.3em;cursor:pointer;pointer-events:auto';
+  const recNote = document.createElement('div');
+  recNote.style.cssText = 'margin-top:1em;font:400 1.1em/1.4 "Rubik",system-ui,sans-serif;letter-spacing:.08em;opacity:.6;text-align:center;max-width:46em';
+  recNote.textContent = 'plays the film once and saves it as a video. when the browser asks, share THIS TAB with its audio.';
+  card.append(recBtn, recNote);
+  async function record() {
+    if (playing) return;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 60, displaySurface: 'browser', cursor: 'never' }, audio: true,
+        preferCurrentTab: true, selfBrowserSurface: 'include', systemAudio: 'include',
+      });
+    } catch (e) { recNote.textContent = 'recording was not allowed (' + (e.name || e) + '). press anywhere to just watch.'; return; }
+    try { await document.documentElement.requestFullscreen(); } catch { /* it records the tab as it is */ }
+    await new Promise(r => setTimeout(r, 700));                 // the window settles at its new size
+    const types = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const type = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+    const rec = new MediaRecorder(stream, { mimeType: type || undefined, videoBitsPerSecond: 16e6, audioBitsPerSecond: 256e3 });
+    const parts = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
+    const done = new Promise(r => { rec.onstop = r; });
+    const hadAudio = stream.getAudioTracks().length > 0;
+    rec.start(1000);
+    await new Promise(r => setTimeout(r, 400));                 // a breath of black before the first frame
+    start(0);
+    await new Promise(r => { const iv = setInterval(() => { if (ended || !stream.active) { clearInterval(iv); r(); } }, 100); });
+    await new Promise(r => setTimeout(r, 1300));                // let the last note ring out
+    if (rec.state !== 'inactive') rec.stop();
+    await done;
+    stream.getTracks().forEach(t => t.stop());
+    if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch { /* fine */ } }
+    const ext = (type || 'video/webm').includes('mp4') ? 'mp4' : 'webm';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(parts, { type: type || 'video/webm' }));
+    a.download = `XBR-${slug}.${ext}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    card.classList.remove('gone');
+    say(hadAudio ? `SAVED · XBR-${slug}.${ext} · PRESS TO PLAY` : `SAVED WITHOUT SOUND · TICK "SHARE TAB AUDIO" NEXT TIME`);
+  }
+  recBtn.addEventListener('click', e => { e.stopPropagation(); record(); });
+  recBtn.addEventListener('keydown', e => e.stopPropagation());
+  if (Q.get('rec') === '1') recBtn.focus();
 }
