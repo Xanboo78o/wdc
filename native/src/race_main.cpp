@@ -101,7 +101,9 @@ int main(int argc, char **argv) {
   bool probeOn = false;
   bool pits = true, rules = true, duel = true, drs = true, noDnf = false, standIn = false, trace = false, aero = false;
   bool xsolo = false, xderby = false, xloose = false, xstakes = false, rolling = true, joker = true;
-  bool multi = false;
+  bool multi = false, real = false;
+  double spinAhead = 500;
+  double spinLat = NaN, spinDeg = 90;            // --spin LAT[,DEG]: you, stopped on the road ahead of the whole field
   const auto isNum = [](const char *s) { char *e; std::strtod(s, &e); return e != s && *e == 0; };
   for (int i = 1; i < argc; i++) {
     const std::string s = argv[i];
@@ -129,6 +131,8 @@ int main(int argc, char **argv) {
     else if (s == "--xloose") xloose = true;
     else if (s == "--xstakes") xstakes = true;
     else if (s == "--aero") aero = true;
+    else if (s == "--real") real = true;                         // RaceOptions.real: the racing the game runs
+    else if (s == "--spin") { const char *v = val(); if (std::sscanf(v, "%lf,%lf,%lf", &spinLat, &spinDeg, &spinAhead) < 1) { std::fprintf(stderr, "xbr-race: --spin LAT[,DEG[,METRES_AHEAD]]\n"); return 2; } }
     else if (s == "--multi") multi = true;                       // GT MODE: hyper + gt3 + gt4 on one grid (the class argument = yours)
     else if (s == "--wet") wet = std::atof(val());
     else if (s == "--rainat") rainAt = std::atof(val());
@@ -179,6 +183,7 @@ int main(int argc, char **argv) {
   o.xingus = !xcar.empty(); if (!xcar.empty()) o.xopt.car = xcar;
   o.xopt.solo = xsolo; o.xopt.derby = xderby; o.xopt.loose = xloose; o.xopt.stakes = xstakes;
   o.xopt.rolling = rolling; o.xopt.joker = joker;
+  o.real = real;
   GtField gf;
   if (multi) {
     gf = gtField(track, grid, gtClassOf(cls), 0.5);
@@ -259,12 +264,49 @@ int main(int argc, char **argv) {
   const auto t0 = std::chrono::steady_clock::now();
   double simT = 0;
   long kk = 0;
+  double spinAt = -1, spinS = 0; int hits0 = 0;
+  std::vector<double> gone, slowest;
   const double maxT = maxTime > 0 ? maxTime : laps * 260 + 90;
   while (race.state != RaceState::Over && simT < maxT) {
     if (rainAt >= 0 && simT < rainAt && simT + FIXED_DT >= rainAt) setWetness(1);
     if (weave) weaveAt(++kk);
     race.tick(FIXED_DT, in);
     simT += FIXED_DT;
+    // THE SPIN TEST: as the lights go out you are put down stopped, 500 m up the road from the leader
+    // (later, and a car parked on the grid has already called out the safety car: the test would measure that).
+    if (!std::isnan(spinLat) && race.me && race.state == RaceState::Green) {
+      Entry &me = *race.me;
+      if (spinAt < 0 && race.time - race.greenT > 0.5) {
+        double lead = -1e18; const Entry *L = nullptr;
+        for (const Entry &e : race.entries) if (&e != &me && race.progress(e) > lead) { lead = race.progress(e); L = &e; }
+        const double s = std::fmod(L->proj.s + spinAhead, track.length);
+        double px, py, ph; int pi;
+        track.point(s, spinLat, px, py, ph, pi);
+        Car &c = me.car;
+        c.x = px; c.y = py; c.hdg = ph + spinDeg * PI / 180; c.vx = 0; c.vy = 0; c.r = 0;
+        me.hint = pi; me.proj = track.project(px, py);         // or the race goes on looking for you where you were
+        spinAt = simT; spinS = s; hits0 = me.contacts;
+        gone.assign(race.entries.size(), -1); slowest.assign(race.entries.size(), 1e9);
+      } else if (spinAt >= 0) {
+        for (const Entry &e : race.entries) {
+          if (&e == &me || e.retired || gone[(size_t)e.idx] >= 0) continue;
+          const double ds = track.gap(me.proj.s, e.proj.s);      // + : it is still behind you
+          if (ds > 0 && ds < 60) slowest[(size_t)e.idx] = std::min(slowest[(size_t)e.idx], e.car.speed);
+          if (ds < -8 && ds > -200) gone[(size_t)e.idx] = simT - spinAt;
+        }
+      }
+    }
+  }
+  if (spinAt >= 0 && std::getenv("XBR_SPINDBG")) for (const Entry &e : race.entries) std::printf("  car %d s %.0f lat %.1f w %.1f v %.1f lap %d ret %d cap %.1f oDs %.1f oV %.1f bias %.1f goR %.0f ahead %d rc %s %s\n", e.idx, e.proj.s, e.proj.lat, e.proj.w, e.car.speed, e.lap, e.retired ? 1 : 0, e.ctx.speedCap, e.ctx.obstDs, e.ctx.obstV, e.ctx.offBias, e.goRound, e.ahead ? e.ahead->idx : -1, rcModeName(race.rc.mode), e.isPlayer ? "YOU" : "");
+  if (spinAt >= 0) {
+    int by = 0, n = 0; double last = 0, slow = 1e9, sum = 0;
+    for (const Entry &e : race.entries) {
+      if (&e == race.me) continue;
+      n++;
+      if (gone[(size_t)e.idx] >= 0) { by++; last = std::max(last, gone[(size_t)e.idx]); slow = std::min(slow, slowest[(size_t)e.idx]); sum += slowest[(size_t)e.idx]; }
+    }
+    std::printf("SPIN lat %.1f deg %.0f at s=%.0f: %d of %d went by you; the last %.1f s after you stopped; slowest pass %.0f km/h, mean %.0f km/h; touched you %d times\n\n",
+                spinLat, spinDeg, spinS, by, n, last, by ? slow * 3.6 : 0, by ? sum / by * 3.6 : 0, race.me->contacts - hits0);
   }
   const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 

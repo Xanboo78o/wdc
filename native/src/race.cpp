@@ -179,6 +179,7 @@ Race::Race(const RaceOptions &o)
     openEnd = !c.empty() ? c[k].s1 + OPEN_AFTER : 600;
   }
   multi = !o.seats.empty();
+  real = o.real;
   duel = o.duel;
   drsRule = o.drs && o.duel && spec->drs;
   peak = peakSlip(*spec);
@@ -816,8 +817,11 @@ void Race::racecraft(Entry &e) {
   // A car is 2 m wide; 2.6 is that plus a door. A cautious driver leaves up to 2.4 m more.
   const double ROOM = 2.6 + 2.4 * stSpace;
   double yieldTo = NaN;
+  // REAL: you, stopped on the road or hanging off the edge of it — a place for the taking (below)
+  const bool meParked = real && me && me != &e && !me->retired && !loose && me->car.speed < 4 && std::fabs(me->proj.lat) <= me->proj.w + 2.5;
   for (Entry &o : entries) {
     if (&o == &e || o.retired || o.inPit || loose) continue;
+    if (meParked && &o == me) continue;          // the way round a parked you is worked out whole, not door by door
     if (std::fabs(t.gap(o.proj.s, e.proj.s)) > 7) continue;
     const double dl = o.proj.lat - e.proj.lat;   // + = they are on my left
     const double keep = dl > 0 ? (o.proj.lat - ROOM) - lineOff
@@ -848,6 +852,7 @@ void Race::racecraft(Entry &e) {
     double bd = 200;
     for (Entry &o : entries) {
       if (&o == &e || o.retired || o.inPit) continue;
+      if (real && &o == me && o.car.speed < 4) continue;      // REAL: a car spun at turn one — on the road or in the gravel — is not the back of the queue
       const double ds = t.gap(o.proj.s, e.proj.s);
       if (ds > spec->bodyL * OPEN_PAIR && ds < bd) { bd = ds; A = &o; }
     }
@@ -882,6 +887,51 @@ void Race::racecraft(Entry &e) {
   {
     // (not in a demo derby: there, nobody is careful round anybody)
     Entry *m = loose ? nullptr : me;
+    // REAL — YOU HAVE SPUN AND STOPPED (Adam: "they js wait, and dont take an oppurtuinity").
+    // A stopped car is not a hazard to queue behind, it is a free place. However you
+    // have come to rest — straight, sideways, half on the grass — the driver measures
+    // how much road you block, picks the open side once, and goes. HOW is the driver's
+    // own: the brave go by flat with half a metre of air, the cautious lift and leave two.
+    if (meParked) {
+      const Car &mc = m->car;
+      const double dh = mc.hdg - t.hdg[(size_t)m->proj.i];
+      const double bw = spec->bodyW != 0 ? spec->bodyW : 2.0, bl = spec->bodyL != 0 ? spec->bodyL : 4.6;
+      const double hw = std::fabs(std::sin(dh)) * bl / 2 + std::fabs(std::cos(dh)) * bw / 2;      // road you block, either side of your middle
+      const double hl = std::fabs(std::cos(dh)) * bl / 2 + std::fabs(std::sin(dh)) * bw / 2;      // and along it
+      const double ds = t.gap(m->proj.s, e.proj.s);
+      if (ds > -(hl + bl / 2 + 1.5) && ds < 220) {
+        const double W = m->proj.w;
+        const double freeL = W - (m->proj.lat + hw), freeR = W + (m->proj.lat - hw);              // lat + is left
+        const double need = bw + 0.5;
+        const double dlm = e.proj.lat - m->proj.lat;
+        if (std::isnan(e.goRound) || time - e.goRoundAt > 6) {
+          const double mine = dlm > 0 ? freeL : freeR;
+          e.goRound = std::fabs(dlm) > hw + 0.5 && mine >= need ? sign(dlm) : freeL >= freeR ? 1 : -1;
+        }
+        e.goRoundAt = time;
+        const double fr = e.goRound > 0 ? freeL : freeR;
+        const double v = e.car.speed;
+        const double room = ds - hl - bl / 2 - 2.5;
+        if (fr >= need) {
+          const double air = std::min(0.45 + 2.0 * stSpace, std::max(0.25, fr - bw - 0.25));
+          const double tgt = m->proj.lat + e.goRound * (hw + bw / 2 + air) - lines->race.off[(size_t)i];
+          bias = e.goRound > 0 ? std::max(bias, tgt) : std::min(bias, tgt);
+          // not yet clear of you across the road: be able to stop short if the gap does not open
+          if (ds > 0 && std::fabs(dlm) < hw + bw / 2 + 0.15) {
+            const double cap = room > 0 ? std::sqrt(2 * 8 * room) : 0;
+            speedCap = capMin(speedCap, cap);
+            if (std::isnan(obstDs) || room < obstDs) { obstDs = std::max(0.0, room); obstV = 0; }
+          }
+          // the cautious lift for a stopped car; the brave do not
+          if (ds > 0 && ds < 70 && stSpace > 0.12) speedCap = capMin(speedCap, std::max(22.0, 80 - 75 * stSpace));
+        } else if (ds > 0) {
+          // you have shut the road: there is nothing to take, and they stop short of you
+          speedCap = capMin(speedCap, room > 0 ? std::sqrt(2 * 8 * room) : 0);
+          if (std::isnan(obstDs) || room < obstDs) { obstDs = std::max(0.0, room); obstV = 0; }
+        }
+      }
+      m = nullptr;
+    }
     if (m && m != &e && !m->retired) {
       const double ds = t.gap(m->proj.s, e.proj.s);
       if (ds > 0 && ds < 300) {

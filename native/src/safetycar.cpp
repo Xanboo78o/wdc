@@ -365,7 +365,11 @@ void Director::limit(Entry &e, DriveCtx &ctx) {
   const double vl = vLine(i), L = r.spec->bodyL;
   bool pred = false;
   double gap = INF, vPred = 0;
-  if (e.ahead && !e.ahead->unlap) { pred = true; gap = t.gap(e.ahead->proj.s, e.proj.s); vPred = e.ahead->car.speed; }
+  // REAL: you, stopped on the road, are the incident and not the queue. Yellows, a
+  // VSC, the safety car: none of them means park behind the car being waved (it did — the
+  // whole field sat 7 m behind a spun car; xbr-race --spin shows it). A red flag still does.
+  const bool wreck = r.real && mode != RcMode::Red && e.ahead && e.ahead->isPlayer && e.ahead->car.speed < 4;
+  if (e.ahead && !e.ahead->unlap && !wreck) { pred = true; gap = t.gap(e.ahead->proj.s, e.proj.s); vPred = e.ahead->car.speed; }
   if (sc.out && !sc.inLane) {
     const double g = t.gap(sc.s, e.proj.s);
     if (g > 0 && g < gap) { pred = true; gap = g; vPred = sc.v; }

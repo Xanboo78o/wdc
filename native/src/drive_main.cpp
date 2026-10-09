@@ -49,6 +49,8 @@ struct Result {
 static Result runLaps(const Track &track, Lines &lines, Spec &spec, int laps, const std::string &tier, double seed = 1) {
   const double peak = peakSlip(spec);
   Driver driver = makeDriver(seed, tier, track.corners.empty() ? 24 : (int)track.corners.size());
+  // XBR_GRIP=0.95: pin the grip fraction (a ceiling sweep, as tools/ceiling.mjs does it)
+  if (const char *g = std::getenv("XBR_GRIP")) if (*g) driver.gripOverride = std::atof(g);
   Autopilot drive(track, lines, spec, peak, &driver);
   const Line &line = lines.at(driver.T->line, driver.grip);
   Car car = makeCar(spec.key);

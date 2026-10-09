@@ -271,6 +271,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     if (rs->freePace) o.duel = false;
     o.xingus = rs->xingus; o.xopt.car = rs->xcar; o.xopt.solo = rs->xsolo; o.xopt.derby = rs->xderby;
     o.xopt.stakes = rs->xstakes; o.xopt.loose = rs->xloose;
+    o.real = true;                       // RACING REALISM (race.hpp): the game always races for real
     if (rs->multi && gtClassOf(cls) >= 0) {
       S.gt = gtField(S.track, rs->grid, gtClassOf(cls), rs->grid > 1 ? (rs->slot - 1.0) / (rs->grid - 1.0) : 0);
       o.seats = S.gt.seats; o.playerGrid = S.gt.playerGrid;

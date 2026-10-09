@@ -71,6 +71,9 @@ struct RaceOptions {
   // one class, everybody in `spec` on `lines`, exactly as the JS runs it.
   struct Seat { Spec *spec = nullptr; Lines *lines = nullptr; int klass = 0; };
   std::vector<Seat> seats;
+  // RACING REALISM (not in the JS; Adam 2026-10-09). The game turns it on; a
+  // harness leaves it off unless asked, so the parity gate still compares like with like.
+  bool real = false;
   // XINGUS. The JS reads these off the page's address when it has one; Node has
   // none, and these are the values Node gets.
   bool xingus = false;
@@ -101,6 +104,7 @@ class Race {
   std::vector<Fork> detours;
   bool jokerRule = false;
   bool stock = false;
+  bool real = false;                   // RaceOptions.real
   bool multi = false;                  // MULTICLASS: the grid was handed seats (RaceOptions.seats)
   int stockStint = 0;                  // laps a set of tyres is good for (this.stock.stint)
   double openEnd = 600;
