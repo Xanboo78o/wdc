@@ -186,6 +186,7 @@ int main(int argc, char **argv) {
   o.xopt.solo = xsolo; o.xopt.derby = xderby; o.xopt.loose = xloose; o.xopt.stakes = xstakes;
   o.xopt.rolling = rolling; o.xopt.joker = joker;
   o.real = real;
+  if (real && gtClassOf(cls) >= 0) setField("gt3");      // the GT teams and their cars, as the game fields them
   GtField gf;
   if (multi || (real && gtClassOf(cls) >= 0 && xcar.empty())) {
     // --real in a GT class: the rivals are in proSpec cars, as the game seats them

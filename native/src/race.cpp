@@ -227,6 +227,22 @@ Race::Race(const RaceOptions &o)
     // WHO this is, WHAT they drive, and HOW they drive it — one table.
     const DriverProfile &prof = driverAt(who);
     const Team &team = teamOf(prof);
+    // REAL — SOME CARS ARE BETTER THAN OTHERS (physics.hpp proSpecAt). The car is the TEAM's:
+    // where its pace stands among the teams of its league puts it on a curve — one in ten has
+    // the best engine, one in ten the worst, a third are ordinary.
+    static const bool SAME_CARS = std::getenv("XBR_SAMECARS") != nullptr;      // A/B: every rival in the ordinary car
+    if (real && !SAME_CARS && !isPlayer && es->pro) {
+      int better = 0, nt = 0;
+      for (const Team &q : allTeams()) if (q.league == team.league) { nt++; if (q.pace > team.pace) better++; }
+      const double p = nt > 1 ? (double)better / (nt - 1) : 0.5;
+      const int lv = p < 0.10 ? 0 : p < 0.32 ? 1 : p < 0.68 ? 2 : p < 0.90 ? 3 : 4;
+      if (lv != 2) {
+        Spec *ts = &proSpecAt(es->key, lv);
+        auto &L = carLines[ts];
+        if (!L) { L = std::make_unique<Lines>(buildLines(t, *ts)); L->track = &t; }
+        es = ts; e.lines = L.get(); e.car.spec = ts;
+      }
+    }
     if (isPlayer) {
       if (standIn) { e.driver = makeDriver(seed * 17 + 3, o.tier, nCorners); e.hasDriver = true; }
     } else {

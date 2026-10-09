@@ -125,6 +125,18 @@ void realTune() {
   M["hyper"].mu *= 1.03;
   for (const char *k : {"gt3", "gt4", "hyper"}) { Spec &s = M[k]; s.heaveK = 0; s.rideFree = 0; s.vRef = 0; s.pk = 0; }
 }
+Spec &proSpecAt(const std::string &key, int level) {
+  level = level < 0 ? 0 : level > 4 ? 4 : level;
+  Spec &base = proSpec(key);
+  if (level == 2 || !base.pro) return base;
+  static std::map<std::pair<std::string, int>, Spec> P;
+  auto it = P.find({key, level});
+  if (it != P.end()) return it->second;
+  Spec s = base;
+  s.Pmax *= CAR_POWER[level]; s.Fdrive *= CAR_POWER[level];
+  s.heaveK = 0; s.rideFree = 0; s.vRef = 0; s.pk = 0;
+  return P[{key, level}] = s;
+}
 Spec &proSpec(const std::string &key) {
   static std::map<std::string, Spec> P;
   auto it = P.find(key);

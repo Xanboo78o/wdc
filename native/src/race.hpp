@@ -11,6 +11,7 @@
 #pragma once
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -125,6 +126,7 @@ class Race {
   bool jokerRule = false;
   bool stock = false;
   bool real = false;                   // RaceOptions.real
+  std::map<const Spec *, std::unique_ptr<Lines>> carLines;      // a better or a worse car (proSpecAt) has a racing line solved for it
   // THE THINKING DRIVER (brain.cpp). cast(): who is who, once. think(): several times a
   // second a driver imagines the next few seconds for each thing it could do, with the
   // cars it can SEE, and picks. aware(): does `e` know `o` is there?

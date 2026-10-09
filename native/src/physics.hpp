@@ -52,6 +52,13 @@ bool hasCarSpec(const std::string &key);
 // leaves 7% of an ideal lap on the table; the car gives it back. Other classes: carSpec.
 void realTune();
 Spec &proSpec(const std::string &key);
+// SOME CARS ARE BETTER THAN OTHERS (Adam: "by like a curve, not tooo too much but just enough
+// where cornering is most of how u get past a faster car"). A rival's car comes in five levels,
+// 0 the best, 2 the ordinary one (proSpec itself). What differs is the ENGINE — 4.5% more power
+// at the top, 3% less at the bottom, about 4 km/h either way at the end of a straight — and
+// nothing in the corners. So a better car is one you cannot out-drag, and can out-corner.
+Spec &proSpecAt(const std::string &key, int level);
+constexpr double CAR_POWER[5] = {1.045, 1.02, 1.0, 0.985, 0.97};
 
 namespace SURFACE {
 constexpr double track = 1.0, kerb = 0.93, runoff = 0.58, grass = 0.42;
