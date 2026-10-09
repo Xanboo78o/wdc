@@ -68,7 +68,11 @@ class Home {
   std::string dataDir;
   // the downloaded car you chose, if this league has one ("" = the built-in body), and the kind of engine it has
   std::string pack() const;
-  bool gt() const { return S.gtOn && !S.xOn && !eventOn; }   // GT MODE is what LIGHTS OUT will start
+  bool gt() const { return S.gtOn && S.car == "gt3" && !S.xOn && !eventOn; }   // GT MULTICLASS is what LIGHTS OUT will start
+  // THE CAR YOU SIT IN. The setup page picks the car first, then the mode (Adam: "maybe just do car
+  // type then mode"): F4, F1, GT3, GT4 or HYPERCAR, and any of them alone on a hot lap. The three GT
+  // cars share the GT3 league (its teams, its garage); which of them is yours is S.gtClass.
+  std::string seatCar() const { return eventOn || S.xOn || S.car != "gt3" ? S.car : S.gtClass; }
   std::string voice() const;
   std::string xTrackKey() const;                  // the circuit a Xingus session loads (a Heiligen route, the oval, or the usual one)
 

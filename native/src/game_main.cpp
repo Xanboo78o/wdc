@@ -596,7 +596,9 @@ int main(int argc, char **argv) {
   if (!xheilArg.empty()) cfg.xHeil = xheilArg;
   if (pos.size() > 0) cfg.track = pos[0];
   if (pos.size() > 1) cfg.car = pos[1];
-  if (multiArg) { cfg.gtOn = true; cfg.xOn = false; if (gtClassOf(cfg.car) >= 0) cfg.gtClass = cfg.car; }
+  // a GT car on the command line takes its seat the way the menu's CAR row does: the GT3 league, and the class
+  if ((pos.size() > 1 || !modelArg.empty()) && gtClassOf(cfg.car) >= 0) { cfg.gtClass = cfg.car; cfg.car = "gt3"; }
+  if (multiArg) { cfg.gtOn = true; cfg.xOn = false; }
   if (!tierArg.empty()) cfg.tier = tierArg;
   if (!lookArg.empty()) cfg.look = lookArg == "plain" ? "plain" : "film";
   if (!modeArg.empty()) cfg.mode = modeArg;
@@ -690,10 +692,10 @@ int main(int argc, char **argv) {
     rs.seed = 1 + std::rand() % 9973;
     auto N = std::make_unique<Session>();
     const std::string bk = SMALL[std::rand() & 1];
-    if (!loadSession(*N, R, dataDir, std::filesystem::exists(dataDir + "/tracks/" + bk + ".json") ? bk : "monza", home.gt() ? cfg.gtClass : cfg.car, "hard", &rs)) return false;
+    if (!loadSession(*N, R, dataDir, std::filesystem::exists(dataDir + "/tracks/" + bk + ".json") ? bk : "monza", home.seatCar(), "hard", &rs)) return false;
     SP = std::move(N);
     usePack();
-    bgOn = true; bgCar = (home.gt() ? cfg.gtClass : cfg.car) + "/" + home.pack();
+    bgOn = true; bgCar = home.seatCar() + "/" + home.pack();
     R.snapCamera(); acc = 0;
     return true;
   };
@@ -711,7 +713,7 @@ int main(int argc, char **argv) {
     const Launch *ev = home.event();
     if (ev && seedArg <= 0) rs.seed = ev->seed;
     if (ev && ev->custom) { rs.slot = startArg > 0 ? rs.slot : ev->slot; rs.teamKey = "cx-you"; rs.customField = [&home] { home.career.fieldUp(); }; rs.freePace = ev->freePace; }
-    std::string trk = cfg.track, car = cfg.car;
+    std::string trk = cfg.track, car = home.seatCar();
     bool racing = cfg.mode == "race";
     if (gtMode && !cfg.xOn) {
       // GT MODE: always a race, in the class you chose, with the other two around you
@@ -1051,7 +1053,7 @@ int main(int argc, char **argv) {
       if (act[A_GO]) home.input(Nav::Go);
       if (home.wantQuit) running = false;
       if (home.wantStart) { home.wantStart = false; lightsOut(); }
-      else if (home.dirty) { home.dirty = false; if (bgOn && bgCar != (home.gt() ? cfg.gtClass : cfg.car) + "/" + home.pack()) { startBackdrop(); audio.setClass(home.voice()); prev = SDL_GetTicksNS(); } }
+      else if (home.dirty) { home.dirty = false; if (bgOn && bgCar != home.seatCar() + "/" + home.pack()) { startBackdrop(); audio.setClass(home.voice()); prev = SDL_GetTicksNS(); } }
     } else if (screen == PAUSE) {
       const int n = (int)pauseItems().size();
       if (act[A_UP]) pauseAt = (pauseAt + n - 1) % n;
