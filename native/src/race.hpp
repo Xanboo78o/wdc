@@ -105,6 +105,14 @@ class Race {
   bool jokerRule = false;
   bool stock = false;
   bool real = false;                   // RaceOptions.real
+  // THE THINKING DRIVER (brain.cpp). cast(): who is who, once. think(): several times a
+  // second a driver imagines the next few seconds for each thing it could do, with the
+  // cars it can SEE, and picks. aware(): does `e` know `o` is there?
+  struct Thought { double want = 0, lunge = 0, pressure = 0, cap = NaN; };      // cap: the speed its chosen future needs in the next second (NaN = none)
+  void cast();
+  Thought think(Entry &e, int i, double lim, double lineOff, bool noAtk, bool noDef);
+  bool aware(Entry &e, const Entry &o);
+  const char *brainTag(const Entry &e) const;      // "SMART - ZEN", or "" for an ordinary racer
   bool multi = false;                  // MULTICLASS: the grid was handed seats (RaceOptions.seats)
   int stockStint = 0;                  // laps a set of tyres is good for (this.stock.stint)
   double openEnd = 600;

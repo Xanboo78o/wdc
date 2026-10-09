@@ -156,7 +156,8 @@ int main(int argc, char **argv) {
   if (multi && gtClassOf(cls) < 0) { std::fprintf(stderr, "xbr-race: --multi wants hyper, gt3 or gt4 as the class\n"); return 2; }
   if (std::string(tierFor(tier)->key) != tier) { std::fprintf(stderr, "xbr-race: no tier '%s'\n", tier.c_str()); return 2; }
   if (!battle.empty() && !battleFor(battle)) { std::fprintf(stderr, "xbr-race: no battle '%s' (easy, medium, hard)\n", battle.c_str()); return 2; }
-  if (input != "park" && input != "floor" && input != "weave") { std::fprintf(stderr, "xbr-race: --input is park, floor or weave\n"); return 2; }
+  if (input != "park" && input != "floor" && input != "weave" && input != "bot") { std::fprintf(stderr, "xbr-race: --input is park, floor, weave or bot\n"); return 2; }
+  if (input == "bot") standIn = true;            // a driver in YOUR seat (XBR_GRIP pins how good): the stand-in for a human coming through the field
   if (!xcar.empty() && xcar != "gt" && xcar != "rally") { std::fprintf(stderr, "xbr-race: --xingus is gt or rally\n"); return 2; }
   if (laps < 1 || grid < 1 || every <= 0) { std::fprintf(stderr, "xbr-race: laps, grid and the trace interval must be positive\n"); return 2; }
 
@@ -269,9 +270,22 @@ int main(int argc, char **argv) {
   double spinAt = -1, spinS = 0; int hits0 = 0;
   std::vector<double> gone, slowest;
   const double maxT = maxTime > 0 ? maxTime : laps * 260 + 90;
+  std::unique_ptr<Autopilot> seat;
+  PlayerInput botIn;
+  if (input == "bot" && race.me) {
+    if (const char *g = std::getenv("XBR_GRIP")) if (*g) race.me->driver.gripOverride = std::atof(g);
+    seat = std::make_unique<Autopilot>(track, lines, spec, peakSlip(spec), &race.me->driver);
+    in = &botIn;
+  }
   while (race.state != RaceState::Over && simT < maxT) {
     if (rainAt >= 0 && simT < rainAt && simT + FIXED_DT >= rainAt) setWetness(1);
     if (weave) weaveAt(++kk);
+    if (seat) {
+      Entry &me = *race.me;
+      seat->drive(me.car, me.proj, FIXED_DT, me.hasCtx ? &me.ctx : nullptr);
+      if (race.state == RaceState::Grid) { me.car.throttle = 0; me.car.brake = 1; }
+      botIn.throttle = me.car.throttle; botIn.brake = me.car.brake; botIn.delta = me.car.delta;
+    }
     race.tick(FIXED_DT, in);
     simT += FIXED_DT;
     // THE SPIN TEST: as the lights go out you are put down stopped, 500 m up the road from the leader
@@ -314,8 +328,8 @@ int main(int argc, char **argv) {
 
   std::printf("POS DRIVER          BEST LAP   LAPS  PEN  WARN  HITS  DMG\n");
   for (const Entry *e : race.standings)
-    std::printf("%3d %s %10s %5d %4s %5d %5d %5.2f %s\n", e->pos, padEnd(e->name, 14).c_str(), fmt(e->bestLap).c_str(), e->lap,
-                jsNum(e->penalty).c_str(), e->warnings, e->contacts, e->car.damage, e->retired ? " RETIRED" : "");
+    std::printf("%3d %s %10s %5d %4s %5d %5d %5.2f %s  grid %2d  %s\n", e->pos, padEnd(e->name, 14).c_str(), fmt(e->bestLap).c_str(), e->lap,
+                jsNum(e->penalty).c_str(), e->warnings, e->contacts, e->car.damage, e->retired ? " RETIRED" : "", e->gridPos, race.brainTag(*e));
 
   int fin = 0, moved = 0;
   double best = 1e9;

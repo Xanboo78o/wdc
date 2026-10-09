@@ -33,8 +33,29 @@ struct Bump { bool has = false; const char *what = ""; double closing = 0, harm 
 struct Recover { bool on = false; double t = 0, x0 = 0, y0 = 0, h0 = 0, toX = 0, toY = 0, toHdg = 0; };
 struct OnDetour { bool on = false; int d = 0, i = 0, from = 0; };
 
+// THE DRIVER'S MIND (race.hpp `real`, brain.cpp; not in the JS). Who this driver is,
+// what it can see right now, and what it has decided to do about it.
+struct Brain {
+  int tier = 0;                    // 0 an ordinary racer, 1 SMART, 2 DUMB, 3 SONNY HAYES
+  int mood = 0;                    // 0 none, 1 MAD, 2 HAPPY, 3 ZEN
+  int lost = -1;                   // the one thing it loses when it locks on: 0 mirrors, 1 brake point, 2 line, 3 cars alongside; -1 nothing (zen)
+  double horizon = 2.5, every = 0.35, caution = 1, margin = 2.2, wAtk = 1, wDef = 1, noise = 0, dive = 1, glance = 1.4;
+  // what it saw the last time it looked in the mirrors
+  Entry *rear = nullptr;
+  double rearAt = -9, rearDs = 0, rearLat = 0, rearV = 0, glanceAt = -9;
+  // what it has decided: 0 the line, 1 a lane of its own (planLat), and whether it brakes late into the next corner
+  int plan = 0;
+  double planLat = 0, planAt = -9, planLate = 0, planCap = NaN;
+  double pressT = 0;               // how long somebody has been filling the mirrors it looks in
+  Entry *grudge = nullptr;         // MAD: who did this to me
+  unsigned rng = 1;
+  bool sideSeen = true;            // a car alongside, right now: seen or not
+  double sideAt = -9;
+};
+
 struct Entry {
   Car car;
+  Brain brain;
   bool hasDriver = false;            // false = the JS's `driver: null` (you, without a stand-in)
   Driver driver;
   std::unique_ptr<Autopilot> drive;  // null for YOUR car, stand-in or not

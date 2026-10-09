@@ -3,6 +3,7 @@
 // in the JS file, next to the same code; the short ones here point at them.
 //
 // Do not tidy this file against the JS. A reordered sum is a different race.
+#include <cstdlib>
 #include "race.hpp"
 
 #include <algorithm>
@@ -244,8 +245,10 @@ Race::Race(const RaceOptions &o)
         }
         const std::string &tk = e.driver.tier;
         const double base = tk == "hard" ? 1.0 : tk == "medium" ? 0.88 : tk == "casual" ? 0.76 : 0.64;
-        const double r = nk > 1 ? (double)rk / (nk - 1) : 0;
-        e.driver.gripFrac = base * (1 - 0.18 * std::pow(r, 1.25));
+        static const bool REV = std::getenv("XBR_REVGRID") != nullptr;      // a test: the fastest start LAST, so the whole field has someone to pass
+        static const bool FASTLAST = std::getenv("XBR_FASTLAST") != nullptr;      // a test: the grid as it is, and the LAST car as fast as the first
+        const double r0 = nk > 1 ? (double)rk / (nk - 1) : 0, r = FASTLAST && k == n - 1 ? 0 : REV ? 1 - r0 : r0;
+        e.driver.gripFrac = base * (1 - 0.13 * std::pow(r, 1.25));
         e.driver.paceMul = NaN;
       }
     }
@@ -362,6 +365,7 @@ Race::Race(const RaceOptions &o)
   // Pace matching around you happens in every tier when you are racing.
   duelOn = duel && me != nullptr;
   order();
+  if (real) cast();                    // who thinks how (brain.cpp)
   // RACE CONTROL. `rules: false` is the race before it; Xingus has none at all.
   rc.init(this, o.rules && !xingus, Mulberry(seed * 7919 + 11));
   sideRng = Mulberry(seed * 313 + 5);
@@ -753,7 +757,17 @@ void Race::racecraft(Entry &e) {
   // Under a safety car, a VSC, a red flag, a yellow nobody attacks; nobody races after the flag.
   const bool parade = state == RaceState::Formation;      // nobody races on the formation lap
   const bool noAtk = rc.noAttack(e) || e.finished || zip || parade, noDef = rc.noDefend(e) || e.finished || zip || parade;
-  if (!pitting && !noAtk && e.ahead && e.aheadGapT < reach && !e.inPit) {
+  // REAL: no rule decides the attack or the defence. The driver imagines what happens
+  // next for each thing it could do, with the cars it can see, and chooses (brain.cpp).
+  static const bool NO_BRAIN = std::getenv("XBR_NOBRAIN") != nullptr;      // A/B: the rules it replaces
+  double thinkCap = NaN;
+  const bool brainOn = real && !NO_BRAIN && e.drive && !loose && !pitting && !e.inPit;
+  if (brainOn) {
+    const Thought th = think(e, i, lim, lineOff, noAtk, noDef);
+    want += th.want; lunge = th.lunge; pressure = th.pressure;
+    thinkCap = th.cap;
+  }
+  if (!brainOn && !pitting && !noAtk && e.ahead && e.aheadGapT < reach && !e.inPit) {
     Entry *o = e.ahead;
     const double ds = t.gap(o->proj.s, e.proj.s);
     const bool braking = brakingZone(e.proj.s, 130);
@@ -792,7 +806,7 @@ void Race::racecraft(Entry &e) {
   // YOUR TEAMMATE does not defend against you.
   // MULTICLASS: nobody defends against another class. It is not their race.
   const bool otherClass = multi && e.behind && e.behind->klass != e.klass;
-  if (!pitting && !noDef && !otherClass && e.behind && e.behindGapT < defendT && !e.inPit && !(e.mate && e.behind == me)) {
+  if (!brainOn && !pitting && !noDef && !otherClass && e.behind && e.behindGapT < defendT && !e.inPit && !(e.mate && e.behind == me)) {
     Entry *o = e.behind;
     const double ds = t.gap(e.proj.s, o->proj.s);          // + : they are behind me
     const double dl = o->proj.lat - e.proj.lat;
@@ -829,7 +843,7 @@ void Race::racecraft(Entry &e) {
     ? (state == RaceState::Green && waited ? MERGE_RATE * (stNone ? 1 : 0.35 + 2.4 * stLaunch) * NEIGH_EVERY * FIXED_DT : 0)
     : (3.0 + 2.5 * d.aggression) * NEIGH_EVERY * FIXED_DT;
   // SIDE BY SIDE: a locked pair holds its lanes, inside and outside.
-  SideFight *sb = sideBySide(e, noAtk || pitting);
+  SideFight *sb = brainOn ? nullptr : sideBySide(e, noAtk || pitting);
   if (sb) want = sb->lane * lim * 0.62 - lineOff;
   // Race control's say on the lane.
   want = rc.wantBias(e, want, lineOff, lim);
@@ -844,6 +858,7 @@ void Race::racecraft(Entry &e) {
   for (Entry &o : entries) {
     if (&o == &e || o.retired || o.inPit || loose) continue;
     if (meParked && &o == me) continue;          // the way round a parked you is worked out whole, not door by door
+    if (brainOn && !aware(e, o)) continue;       // REAL: nobody leaves room for a car they have not seen
     if (std::fabs(t.gap(o.proj.s, e.proj.s)) > 7) continue;
     const double dl = o.proj.lat - e.proj.lat;   // + = they are on my left
     const double keep = dl > 0 ? (o.proj.lat - ROOM) - lineOff
@@ -859,9 +874,16 @@ void Race::racecraft(Entry &e) {
   }
 
   // Car-following: THE CAR AHEAD IN YOUR LANE, not the nearest car ahead (the duel).
+  // ...but not off the grid or through the first corners: twenty-two cars on cold tyres in one
+  // braking zone is where the old caution earns its keep (eight lap-one shunts in one race without it).
+  const bool close = brainOn && !zip && state == RaceState::Green && time - greenT > 12;
   Entry *A = e.ahead;
   if (duel) {
-    Entry *la = laneAhead(e, brakingZone(e.proj.s, 140) ? std::max(4.5, t.w[(size_t)i] * 1.1) : 3.4);
+    // REAL: a driver who has pulled out IS out. Its lane is a car and a bit wide, on a straight
+    // and under braking alike — or nobody can ever go down the inside (measured: the fastest car
+    // on the grid, started last, took five laps to pass three).
+    // (and what it imagined tells it when a car that is NOT in its lane yet is about to be: thinkCap, below)
+    Entry *la = laneAhead(e, close ? 2.2 : brakingZone(e.proj.s, 140) ? std::max(4.5, t.w[(size_t)i] * 1.1) : 3.4);
     A = la ? la : e.ahead;
   }
   // You, off the road, are not the car to follow.
@@ -885,15 +907,19 @@ void Race::racecraft(Entry &e) {
     const double vA = A->car.speed, v = e.car.speed;
     const double closing = v - vA;
     const bool braking = brakingZone(e.proj.s, 140);
-    const double zone = braking ? 1.7 : 1.0;
+    // REAL: how close to follow is the driver's own business, and it is CLOSE — the old rule kept
+    // 30 m back through every braking zone, which is exactly where a quicker car makes its time
+    // (traced: the fastest car on the grid sat 33 m behind a backmarker, 5 m/s under its own line speed).
+    const double zone = close ? 1.0 : braking ? 1.7 : 1.0;
     // ...and the same caution behind: up to a car length more headway.
-    const double headway = (6.5 + v * 0.28 + std::max(0.0, closing) * 1.4) * zone + stSpace * spec->bodyL;
+    const double headway = close ? 4.0 + v * 0.14 + std::max(0.0, closing) * 1.0 + stSpace * spec->bodyL
+                                   : (6.5 + v * 0.28 + std::max(0.0, closing) * 1.4) * zone + stSpace * spec->bodyL;
     // Into a braking zone the road narrows onto one line: widen the gate to most of the road.
-    const double latGate = zip ? INF : braking ? std::max(4.5, t.w[(size_t)i] * 1.1) : 3.4;
+    const double latGate = zip ? INF : close ? 2.2 : braking ? std::max(4.5, t.w[(size_t)i] * 1.1) : 3.4;
     // You own the road when you have OVERLAP.
     const bool overlap = !zip && ds < spec->bodyL * 1.15 && dl > 1.9;
     // BRAKE FOR THE CAR AHEAD, NOT JUST THE LINE (the duel).
-    if (duel && !overlap && ds > 0 && ds < 150 && dl < latGate) { obstDs = ds - spec->bodyL * 1.15 - (zip ? 1.5 + v * OPEN_T : 0); obstV = vA; }
+    if (duel && !overlap && ds > 0 && ds < (close ? headway * 1.6 : 150) && dl < latGate) { obstDs = ds - spec->bodyL * 1.15 - (zip ? 1.5 + v * OPEN_T : 0); obstV = vA; }
     // `ds < headway * 1.3` is load-bearing: beyond following distance you are not following anyone.
     if (!overlap && ds > 0 && ds < headway * 1.3 && dl < latGate) {
       // With room, a bounded run — that is the overtake. Without it, actively SLOWER.
@@ -954,6 +980,16 @@ void Race::racecraft(Entry &e) {
       }
       m = nullptr;
     }
+    // REAL: at racing speed you are a car like any other — dived at, squeezed, followed
+    // as closely as they follow each other. The rule below is for you sliding or crawling.
+    if (real && m && m != &e && !m->retired) {
+      const Car &mc = m->car;
+      const bool onRoad = std::fabs(m->proj.lat) <= m->proj.w + 1.0;
+      const double vP = std::max(0.0, mc.speed * std::cos(mc.hdg - t.hdg[(size_t)m->proj.i]));
+      const bool erratic = onRoad && (std::fabs(mc.vy) > 2 || std::fabs(std::sin(mc.hdg - t.hdg[(size_t)m->proj.i])) > 0.35);
+      const bool slow = onRoad && !erratic && vP < std::max(20.0, e.car.speed * 0.6);
+      if (onRoad && !erratic && !slow) m = nullptr;
+    }
     if (m && m != &e && !m->retired) {
       const double ds = t.gap(m->proj.s, e.proj.s);
       if (ds > 0 && ds < 300) {
@@ -999,6 +1035,7 @@ void Race::racecraft(Entry &e) {
     }
   }
 
+  if (!std::isnan(thinkCap)) speedCap = capMin(speedCap, thinkCap);
   // The yield goes on last, so the car-following cap above cannot undo it.
   if (!std::isnan(yieldTo)) speedCap = capMin(speedCap, yieldTo);
   if (loose) {
