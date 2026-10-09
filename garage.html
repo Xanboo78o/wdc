@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>XBR Garage</title>
+<!--
+  garage.html — the downloaded cars, as the game will see them.
+
+  Reads the packs tools/bakecar.mjs writes into data/cars/ (car.json + car.bin
+  + textures) and nothing else: no glTF loader, no game. What is on screen is
+  the baked car, so a wheel in the wrong place here is a wheel in the wrong
+  place in a race.
+
+    garage.html?car=p911&yaw=35&pitch=10&dist=7
+      car    a key from data/cars/index.json
+      paint  a colour (hex, no #) to respray the paintwork; absent = as it came
+      spin   0 stops the wheels
+      steer  degrees of lock on the front wheels
+
+  Drag to look round, wheel to zoom. window.__garage is true once a car is drawn.
+-->
+<style>
+  html,body{margin:0;height:100%;background:#15171b;overflow:hidden;font:600 14px/1.2 Rubik,system-ui,sans-serif;color:#e8e6e0}
+  canvas{display:block;width:100%;height:100%}
+  #cars{position:fixed;left:14px;top:14px;display:flex;flex-direction:column;gap:6px}
+  #cars button{all:unset;cursor:pointer;padding:9px 14px;background:#14161ad9;border-radius:6px;letter-spacing:.04em}
+  #cars button small{display:block;font-weight:500;color:#8a8f98;margin-top:2px}
+  #cars button.on{background:#d6001c;color:#fff}
+  #cars button.on small{color:#ffd9de}
+  #paint{position:fixed;left:14px;bottom:14px;display:flex;gap:6px;flex-wrap:wrap;max-width:330px}
+  #paint i{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid #0006;box-sizing:border-box}
+  #paint i.orig{background:conic-gradient(#d6001c,#ffcc00,#2fb34a,#47c7fc,#6a2fb0,#d6001c)}
+  #info{position:fixed;right:14px;top:14px;text-align:right;background:#14161ad9;border-radius:6px;padding:10px 14px;font-weight:500;color:#a9adb3;line-height:1.55}
+  #info b{color:#fff;font-size:17px;font-weight:700}
+  #info a{color:#a9adb3}
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="cars"></div>
+<div id="paint"></div>
+<div id="info"></div>
+<script type="module">
+import * as THREE from 'three';
+
+const q = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('cv'), antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+
+// The sky the game races under (data/sky, CC0 from Poly Haven) lights the car
+// and stands behind it, so the paint reflects something real.
+const skies = await (await fetch('./data/sky/skies.json')).json().catch(() => ({}));
+const sky = await new THREE.TextureLoader().loadAsync('./data/sky/cloud.jpg');
+sky.mapping = THREE.EquirectangularReflectionMapping;
+sky.colorSpace = THREE.SRGBColorSpace;
+scene.background = sky;
+scene.backgroundBlurriness = 0.12;
+const pm = new THREE.PMREMGenerator(renderer);
+scene.environment = pm.fromEquirectangular(sky).texture;
+scene.environmentIntensity = 1.15;
+
+const sun = new THREE.DirectionalLight(0xfff2e0, 2.6);
+const sd = skies.skies?.cloud?.sun ?? null;
+sun.position.set(6, 11, 5);
+if (Array.isArray(sd) && sd.length === 3) sun.position.set(sd[0] * 14, Math.max(4, sd[1] * 14), sd[2] * 14);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 40 });
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02;
+scene.add(sun);
+
+// A pad of the game's own tarmac for the car to stand and throw a shadow on.
+const tl = new THREE.TextureLoader();
+const tarmac = await tl.loadAsync('./data/tex/tarmac-c.jpg').catch(() => null);
+const tarmacN = await tl.loadAsync('./data/tex/tarmac-n.jpg').catch(() => null);
+for (const t of [tarmac, tarmacN]) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(26, 26); t.anisotropy = 8; }
+if (tarmac) tarmac.colorSpace = THREE.SRGBColorSpace;
+const pad = new THREE.Mesh(new THREE.CircleGeometry(30, 96), new THREE.MeshStandardMaterial({ map: tarmac, normalMap: tarmacN, color: tarmac ? 0xffffff : 0x3a3d42, roughness: 0.92, metalness: 0 }));
+pad.rotation.x = -Math.PI / 2;
+pad.receiveShadow = true;
+scene.add(pad);
+
+// ---- a baked car -> meshes ------------------------------------------------------------
+const texCache = new Map();
+function tex(dir, name) {
+  const k = dir + name;
+  if (!texCache.has(k)) {
+    const t = tl.load(dir + name);
+    t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    texCache.set(k, t);
+  }
+  return texCache.get(k);
+}
+function makeMaterial(m, dir) {
+  const col = new THREE.Color().setRGB(m.color[0], m.color[1], m.color[2]);
+  const map = m.map ? tex(dir, m.map) : null;
+  let mat;
+  switch (m.role) {
+    case 'paint': mat = new THREE.MeshPhysicalMaterial({ color: col, map, roughness: 0.34, metalness: 0.25, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.1 }); break;
+    case 'glass': mat = new THREE.MeshPhysicalMaterial({ color: 0x0b0e12, roughness: 0.04, metalness: 0.2, transparent: true, opacity: 0.55, envMapIntensity: 1.6, depthWrite: false }); break;
+    case 'tyre': mat = new THREE.MeshStandardMaterial({ color: map ? 0xffffff : 0x111214, map, roughness: 0.9, metalness: 0 }); break;
+    case 'rim': mat = new THREE.MeshStandardMaterial({ color: map ? 0xffffff : (col.getHSL({}).l < 0.02 ? new THREE.Color(0x2a2c30) : col), map, roughness: 0.32, metalness: 0.85 }); break;
+    case 'chrome': mat = new THREE.MeshStandardMaterial({ color: 0xd6d8dc, map, roughness: 0.12, metalness: 1 }); break;
+    case 'tail': mat = new THREE.MeshStandardMaterial({ color: map ? 0xffffff : 0x8a0a08, map, emissive: 0x5a0606, emissiveIntensity: 0.9, emissiveMap: map, roughness: 0.25 }); break;
+    case 'lamp': mat = new THREE.MeshStandardMaterial({ color: 0xe8eef5, emissive: 0xbfd4ee, emissiveIntensity: 0.6, roughness: 0.15, metalness: 0.3 }); break;
+    default: mat = new THREE.MeshStandardMaterial({ color: col, map, roughness: Math.max(0.42, m.rough), metalness: Math.min(0.6, m.metal) * (map ? 0 : 1) });
+  }
+  if (m.alpha !== undefined && m.role !== 'glass') { mat.transparent = true; mat.opacity = Math.max(0.35, m.alpha); mat.depthWrite = false; }
+  if (m.cutout) { mat.alphaTest = 0.5; }
+  mat.side = THREE.DoubleSide;      // downloaded bodywork is often one skin thick
+  mat.userData.role = m.role;
+  mat.userData.orig = { color: mat.color.clone(), map: mat.map };
+  return mat;
+}
+async function loadCar(key) {
+  const dir = `./data/cars/${key}/`;
+  const car = await (await fetch(dir + 'car.json')).json();
+  const buf = await (await fetch(dir + 'car.bin')).arrayBuffer();
+  const V = new Float32Array(buf, 0, car.verts * 8), I = new Uint32Array(buf, car.indexAt, car.tris * 3);
+  const mats = car.materials.map(m => makeMaterial(m, dir));
+  const root = new THREE.Group();
+  const hubs = {}, spins = {};
+  for (const w of ['fl', 'fr', 'rl', 'rr']) {
+    hubs[w] = new THREE.Group(); hubs[w].position.fromArray(car.wheels[w].c);
+    spins[w] = new THREE.Group(); hubs[w].add(spins[w]); root.add(hubs[w]);
+  }
+  for (const G of car.groups) {
+    const geo = new THREE.BufferGeometry();
+    const ib = new THREE.InterleavedBuffer(V.subarray(G.v0 * 8, (G.v0 + G.vn) * 8), 8);
+    geo.setAttribute('position', new THREE.InterleavedBufferAttribute(ib, 3, 0));
+    geo.setAttribute('normal', new THREE.InterleavedBufferAttribute(ib, 3, 3));
+    geo.setAttribute('uv', new THREE.InterleavedBufferAttribute(ib, 2, 6));
+    geo.setIndex(new THREE.BufferAttribute(I.subarray(G.i0, G.i0 + G.in), 1));
+    const mesh = new THREE.Mesh(geo, mats[G.mat]);
+    mesh.castShadow = !mats[G.mat].transparent; mesh.receiveShadow = true;
+    if (mats[G.mat].transparent) mesh.renderOrder = 2;
+    const w = G.part.slice(0, 2);
+    (G.part === 'body' ? root : G.part.endsWith('.hub') ? hubs[w] : spins[w]).add(mesh);
+  }
+  return { car, root, hubs, spins, mats };
+}
+
+// ---- the room ------------------------------------------------------------------------------
+const PAINTS = ['d6001c', 'ff5a1f', 'ffcc00', 'cfff1a', '2fb34a', '0b5b46', '00d2be', '47c7fc', '1a55d8', '0e1c43', '6a2fb0', 'ff5fa2', 'f2f2ee', '9a9ea4', '15161a'];
+let now = null, paint = q.get('paint');
+function respray() {
+  if (!now) return;
+  for (const m of now.mats) if (m.userData.role === 'paint') {
+    if (paint) { m.color.set('#' + paint); m.map = null; } else { m.color.copy(m.userData.orig.color); m.map = m.userData.orig.map; }
+    m.needsUpdate = true;
+  }
+}
+const index = await (await fetch('./data/cars/index.json')).json().catch(() => []);
+const carsEl = document.getElementById('cars'), infoEl = document.getElementById('info'), paintEl = document.getElementById('paint');
+async function show(key) {
+  window.__garage = false;
+  const next = await loadCar(key);
+  if (now) scene.remove(now.root);
+  now = next;
+  scene.add(now.root);
+  respray();
+  for (const b of carsEl.children) b.classList.toggle('on', b.dataset.key === key);
+  const c = now.car;
+  infoEl.innerHTML = `<b>${c.title}</b><br>${c.klass.toUpperCase()} &middot; ${c.tris.toLocaleString()} triangles<br>` +
+    `${c.size[0].toFixed(2)} m long &middot; ${c.size[2].toFixed(2)} wide &middot; ${c.size[1].toFixed(2)} high<br>wheelbase ${c.wheelbase.toFixed(2)} m &middot; tyres ${(c.wheels.fl.r * 200).toFixed(0)} cm<br>` +
+    (c.credit.author ? `model by ${c.credit.author.replace(/\s*\(http.*/, '')} &middot; ${c.credit.licence ? c.credit.licence.replace(/\s*\(http.*/, '') : ''}` : '');
+  target.set(0, c.size[1] * 0.42, 0);
+  history.replaceState(null, '', `?car=${key}` + (paint ? `&paint=${paint}` : ''));
+}
+for (const c of index) {
+  const b = document.createElement('button');
+  b.dataset.key = c.key;
+  b.innerHTML = `${c.title}<small>${c.klass.toUpperCase()}</small>`;
+  b.onclick = () => show(c.key);
+  carsEl.appendChild(b);
+}
+for (const p of [null, ...PAINTS]) {
+  const i = document.createElement('i');
+  if (p) i.style.background = '#' + p; else { i.className = 'orig'; i.title = 'as it came'; }
+  i.onclick = () => { paint = p; respray(); history.replaceState(null, '', `?car=${now.car.key}` + (paint ? `&paint=${paint}` : '')); };
+  paintEl.appendChild(i);
+}
+
+const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 400);
+const target = new THREE.Vector3(0, 0.5, 0);
+let yaw = (+(q.get('yaw') ?? 35)) * Math.PI / 180, pitch = (+(q.get('pitch') ?? 10)) * Math.PI / 180, dist = +(q.get('dist') ?? 7.2);
+const cv = renderer.domElement;
+let drag = false;
+cv.addEventListener('pointerdown', e => { drag = true; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointerup', () => { drag = false; });
+cv.addEventListener('pointermove', e => { if (drag) { yaw += e.movementX * 0.006; pitch = Math.min(1.45, Math.max(0.01, pitch + e.movementY * 0.005)); } });
+cv.addEventListener('wheel', e => { dist = Math.min(30, Math.max(2.2, dist * Math.exp(e.deltaY * 0.001))); e.preventDefault(); }, { passive: false });
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize);
+resize();
+
+const spin = q.get('spin') !== '0', steer = (+(q.get('steer') || 0)) * Math.PI / 180;
+let frames = 0, last = performance.now();
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000); last = t;
+  if (now) {
+    for (const w of ['fl', 'fr', 'rl', 'rr']) {
+      if (spin) now.spins[w].rotation.z -= dt * 2.2;                 // rolling forward, slowly: to see that it is round and centred
+      if (w[0] === 'f') now.hubs[w].rotation.y = -steer;
+    }
+    if (++frames > 3) window.__garage = true;
+  }
+  // the car's nose is +X and its right is +Z; yaw 0 looks at it from dead ahead
+  camera.position.set(target.x + Math.cos(yaw) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, target.z + Math.sin(yaw) * Math.cos(pitch) * dist);
+  camera.lookAt(target);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+if (index.length) await show(index.some(c => c.key === q.get('car')) ? q.get('car') : index[0].key);
+else infoEl.innerHTML = '<b>No cars baked yet</b><br>node tools/bakecar.mjs &lt;key&gt; &lt;folder&gt;';
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
