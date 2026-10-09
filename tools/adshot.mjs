@@ -18,7 +18,7 @@ import path from 'path';
 
 const ROOT = new URL('../', import.meta.url).pathname;
 const args = process.argv.slice(2);
-const KNOWN = new Set(['--out', '--q', '--size', '--eval', '--audio', '--port', '--tag', '--play', '--force', '--seq']);
+const KNOWN = new Set(['--out', '--q', '--size', '--eval', '--audio', '--port', '--tag', '--play', '--force', '--seq', '--gtx', '--jpg']);
 for (const a of args) if (a.startsWith('--') && !KNOWN.has(a)) { console.error('unknown flag ' + a); process.exit(2); }
 const flag = (n, d = null) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : d; };
 const pos = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && ['--out', '--q', '--size', '--eval', '--port', '--tag', '--play'].includes(args[i - 1])));
@@ -50,7 +50,18 @@ if (!PLAY) q.set('frame', String(times[0] ?? 0));
 const url = `http://127.0.0.1:${PORT}/ad-${which}.html?${q}`;
 const CDP = 9500 + Math.floor(Math.random() * 400);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'adshot-'));
-const chrome = spawn('/usr/bin/chromium', [
+// --gtx: a REAL window on the GTX 1060, by the one route Adam has confirmed works
+// (tools/gtx-test.sh, x11 mode: XWayland + PRIME offload). Not headless: the
+// window is on his screen while it works. Thousands of frames in minutes
+// instead of days; never any other GPU route from here (wdc-perf notes).
+const GTX = args.includes('--gtx');
+const chrome = GTX
+  ? spawn('/usr/bin/chromium', [
+    '--ozone-platform=x11', '--force-device-scale-factor=1', '--no-first-run', '--mute-audio', '--disable-extensions',
+    '--autoplay-policy=no-user-gesture-required', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
+    '--disable-background-timer-throttling', `--window-size=${W},${H}`, `--remote-debugging-port=${CDP}`, `--user-data-dir=${profile}`, url,
+  ], { stdio: ['ignore', 'ignore', 'ignore'], env: { ...process.env, __NV_PRIME_RENDER_OFFLOAD: '1', __GLX_VENDOR_LIBRARY_NAME: 'nvidia', __VK_LAYER_NV_optimus: 'NVIDIA_only' } })
+  : spawn('/usr/bin/chromium', [
   '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
   '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader',
   '--hide-scrollbars', '--mute-audio', '--disable-extensions', '--autoplay-policy=no-user-gesture-required',
@@ -126,9 +137,10 @@ try {
   } else {
     for (const t of times) {
       const now = await ev(`window.__adSeek(${t})`);
-      const shot = await send('Page.captureScreenshot', { format: 'png' });
-      // --seq: numbered in order, for making a film of them (tools/admovie.sh)
-      const f = args.includes('--seq') ? path.join(OUT, `f${String(times.indexOf(t)).padStart(5, '0')}.png`)
+      const JPG = args.includes('--jpg');
+      const shot = await send('Page.captureScreenshot', JPG ? { format: 'jpeg', quality: 97 } : { format: 'png' });
+      // --seq: numbered in order, for making a film of them
+      const f = args.includes('--seq') ? path.join(OUT, `f${String(times.indexOf(t)).padStart(5, '0')}.${JPG ? 'jpg' : 'png'}`)
         : path.join(OUT, `${which}${TAG ? '-' + TAG : ''}-${String(t).replace('.', '_').padStart(5, '0')}.png`);
       fs.writeFileSync(f, Buffer.from(shot.data, 'base64'));
       if (!args.includes('--seq') || times.indexOf(t) % 30 === 0) console.log(`[${el()}] ${f}  ${JSON.stringify(now)}`);
