@@ -56,6 +56,10 @@ class Fx {
 
   // A car that has burned is not the colour it was: darkens `paint` in place.
   void tint(const Car &car, float paint[3]) const;
+  // 0 sound, 1 on fire, 2 a wreck that has exploded. The game retires a wreck: nothing drives away from that.
+  int phaseOf(const Car &car) const;
+  // This car has been replaced by a new one (a reset): it is not on fire any more. What it left on the circuit stays.
+  void forget(const Car &car);
   // An explosion since the last call, as a closing speed for EngineAudio::hit
   // (already faded by its distance from the camera); 0 = none.
   double takeBoom();

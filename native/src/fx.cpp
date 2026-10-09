@@ -1134,6 +1134,15 @@ double Fx::testSeconds() {
 
 double Fx::takeBoom() { const double b = d->boom; d->boom = 0; return b; }
 
+void Fx::forget(const Car &car) {
+  for (size_t i = 0; i < d->cars.size(); i++) if (d->cars[i].car == &car) { d->cars.erase(d->cars.begin() + (long)i); break; }
+}
+
+int Fx::phaseOf(const Car &car) const {
+  const CarSt *st = d->find(&car);
+  return st ? st->phase : 0;
+}
+
 void Fx::tint(const Car &car, float paint[3]) const {
   const CarSt *st = d->find(&car);
   if (!st || st->burn <= 0) return;

@@ -647,7 +647,8 @@ int main(int argc, char **argv) {
   std::string bgCar;
   WeatherDirector wd("clear", 1);
   std::string wdMode;
-  Fx fx;                           // the crash drama (fx.hpp): reads the cars, draws into the scene
+  Fx fx;
+  double boomAt = -1;          // when your own car exploded, plus a few seconds: then the results (or a new car)                           // the crash drama (fx.hpp): reads the cars, draws into the scene
 
   auto showLoading = [&](const std::string &text) {
     glBindFramebuffer(GL_FRAMEBUFFER, offscreen ? R.offscreenFbo() : 0);
@@ -712,7 +713,7 @@ int main(int argc, char **argv) {
     if (SP->xmanual) SP->box->manual = 0;
     bgOn = false;
     hud.reset();
-    toast = {};
+    toast = {}; boomAt = -1;
     if (ev) { home.career.started(SP->race.get()); toast = {home.eventBrief(), 7}; if (ev->custom) theme = home.eventTheme(); }
     R.snapCamera(); acc = 0;
     screen = DRIVE;
@@ -791,6 +792,17 @@ int main(int argc, char **argv) {
     if (S.race) for (Entry &e : S.race->entries) { paintOf(e.col, pc); fx.car(e.car, e.proj, pc, e.isPlayer, dt); }
     else { const Team *t = teamByKey(home.teamKey()); if (t) paintOf(t->col, pc); fx.car(*S.car, S.proj, pc, true, dt); }
     fx.end(dt);
+    // NOTHING DRIVES AWAY FROM AN EXPLOSION. A car that has gone up is out of the
+    // race, where it stands; yours takes you to the results a few seconds later,
+    // and on a hot lap you are given another car.
+    if (S.race) {
+      for (Entry &e : S.race->entries) if (!e.retired && !e.finished && fx.phaseOf(e.car) == 2) {
+        e.retired = true;
+        S.race->log("crash", e.name + " - THE CAR IS DESTROYED", &e, "boom");
+        if (e.isPlayer && !bgOn) { toast = {"THAT IS THE CAR GONE.", 4}; boomAt = clock + 4.5; }
+      }
+    } else if (!bgOn && boomAt < 0 && fx.phaseOf(*S.car) == 2) { toast = {"THAT IS THE CAR GONE. HERE IS ANOTHER.", 4}; boomAt = clock + 4.5; }
+    if (boomAt > 0 && clock >= boomAt && !S.race) { boomAt = -1; fx.forget(*S.car); resetCar(S); R.snapCamera(); }
   };
   auto hudIn = [&]() {
     HudIn h;
@@ -1042,7 +1054,7 @@ int main(int argc, char **argv) {
         pauseSay = (hurt ? HURT : CALM)[std::rand() % 3];
       }
       if (act[A_CAM]) { cfg.cam = (cfg.cam + 1) % 4; R.snapCamera(); }
-      if (act[A_RESET]) { if (S.race) rejoin(S); else resetCar(S); R.snapCamera(); }
+      if (act[A_RESET]) { if (S.race) rejoin(S); else { fx.forget(*S.car); boomAt = -1; resetCar(S); } R.snapCamera(); }
       if (act[A_DRS]) drsTap = true;
       // THE PADDLES (js/main.js). In Xingus with manual gears they ARE the
       // gearbox: a downshift that would bury the needle is refused, down from
@@ -1096,7 +1108,8 @@ int main(int argc, char **argv) {
       if (S.race) {
         // YOUR overtake that stuck: the tower row flashes
         if (!S.race->cheers.empty()) { S.passAt = S.race->time; S.race->cheers.clear(); }
-        if (S.race->state == RaceState::Over || (home.career.wantsEnd && !bgOn)) {
+        if (S.race->state == RaceState::Over || (home.career.wantsEnd && !bgOn) || (boomAt > 0 && clock >= boomAt && !bgOn)) {
+          boomAt = -1;
           if (bgOn) { startBackdrop(); prev = SDL_GetTicksNS(); }      // the backdrop race just runs again
           else if (screen == DRIVE) { screen = RESULTS; bridge.release(); home.eventResult(S.race.get(), S.hasBest, S.best, S.lines->race.lapTime); resultMood(S.race->me->pos, (int)S.race->entries.size(), S.race->me->retired, resTitle, resLine); }
         }
