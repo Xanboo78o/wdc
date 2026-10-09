@@ -209,6 +209,10 @@ class Renderer {
   int uLampPos = -1, uLampDir = -1, uLampOn = -1, uTime = -1, uCloud = -1, uNight = -1;
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;
+  // motion blur (render.cpp COMP_FS): the camera's travel in view space, the view itself, and the cars to leave sharp
+  float mbVel[3] = {0, 0, 0}, mbTan = 0.6f, mbAmt = 0, mbHole[4] = {-1, -1, -1, -1};
+  Mat4 mbView;
+  std::vector<float> mbSpots;
   bool sceneOpen = false;
   // THE GOVERNOR. The scene is drawn at `scale` of the window and enlarged when
   // it is developed; the scale follows what the GPU is measured to take, so the

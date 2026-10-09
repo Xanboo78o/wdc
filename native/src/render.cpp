@@ -372,10 +372,53 @@ void main(){
 )";
 static const char *COMP_FS = R"(#version 330 core
 in vec2 vU; uniform sampler2D uTex, uBloom, uDepth; uniform float uExp, uSharp, uFar; uniform vec2 uK, uPx; out vec4 o;
+// MOTION BLUR (js/speedfx.js SpeedBlur): the camera's own travel, known, and every pixel's real distance
+uniform vec3 uMbVel; uniform float uMbTan, uMbAsp, uMbAmt, uMbShutter, uMbMax; uniform vec4 uMbCar[8]; uniform int uMbN; uniform vec4 uMbHole;
+vec3 viewAt(vec2 v01, vec2 us){
+  float z = texture(uDepth, us).r * 2.0 - 1.0;
+  float d = z >= 0.99999 ? 3000.0 : 2.0 * 0.12 * 12000.0 / (12000.0 + 0.12 - z * (12000.0 - 0.12));
+  vec2 n = v01 * 2.0 - 1.0;
+  return vec3(n.x * uMbTan * uMbAsp * d, n.y * uMbTan * d, -d);
+}
+// a car travels WITH the camera (yours) or nearly (a rival beside you): a real lens does not smear it
+bool inCar(vec3 P){ for (int i = 0; i < uMbN; i++) if (distance(P, uMbCar[i].xyz) < uMbCar[i].w) return true; return false; }
+// ...and the road right round it comes back into the blur gradually, not at a line
+float nearCar(vec3 P){ float k = 1.0; for (int i = 0; i < uMbN; i++) k = min(k, smoothstep(uMbCar[i].w, uMbCar[i].w * 2.2, distance(P, uMbCar[i].xyz))); return k; }
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 void main(){
   vec2 u = min(vU * uK, uK - uPx * 0.5);
   vec3 c = max(texture(uTex, u).rgb, 0.0);
+  // 350 km/h, as a camera records it: each pixel streaked along the way the
+  // world went past it during the shutter. Nothing at the point you are driving
+  // towards, longest in the lower corners; the centre of the frame — where you
+  // are looking — stays sharp whatever the numbers say, and so do the cars.
+  if (uMbAmt > 0.01 && !(vU.x > uMbHole.x && vU.x < uMbHole.z && vU.y > uMbHole.y && vU.y < uMbHole.w)) {
+    vec2 q = (vU - 0.5) * vec2(uMbAsp, 1.0);
+    float edge = smoothstep(0.22, 0.78, length(q) / length(vec2(uMbAsp, 1.0) * 0.5)) * uMbAmt;
+    if (edge > 0.01) {
+      vec3 P0 = viewAt(vU, u);
+      if (!inCar(P0)) {
+        vec3 P = P0 - uMbVel * uMbShutter;
+        if (-P.z > 0.05) {
+          vec2 d = vec2(P.x / (-P.z) / (uMbTan * uMbAsp), P.y / (-P.z) / uMbTan) * 0.5 + 0.5 - vU;
+          float L = length(d * vec2(uMbAsp, 1.0));
+          if (L > uMbMax) d *= uMbMax / L;
+          d *= edge * nearCar(P0);
+          if (length(d / uPx) > 1.2) {
+            vec3 acc = c; float wsum = 1.0;
+            for (int i = 0; i < 10; i++) {
+              vec2 t = vU + d * ((float(i) + 0.5) / 10.0 - 0.5);
+              if (t.x < 0.0 || t.y < 0.0 || t.x > 1.0 || t.y > 1.0) continue;
+              vec2 ts = min(t * uK, uK - uPx * 0.5);
+              if (inCar(viewAt(t, ts))) continue;                 // do not smear a car in
+              acc += max(texture(uTex, ts).rgb, 0.0); wsum += 1.0;
+            }
+            c = acc / wsum;
+          }
+        }
+      }
+    }
+  }
   // THE DISTANCE GOES SOFT (Adam: "add the blur effect at long distance to keep it
   // clean"). A fence four hundred metres off is wires thinner than a pixel, and
   // drawn sharp it crawls. So the far part of the picture is averaged over a
@@ -1448,6 +1491,8 @@ const Renderer::Susp &Renderer::suspOf(const Car &car, const Spec &S) {
 
 void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPitch, double gRoll, const float paint[3], double rolled,
                        bool helmet) {
+  // where every car drawn this frame is: the motion blur leaves them sharp
+  if (mbSpots.size() < 24) { mbSpots.push_back((float)car.x); mbSpots.push_back((float)(groundH + std::max(0.0, car.z) + 0.5)); mbSpots.push_back((float)-car.y); }
   const float gain = car.airborne ? 1.0f : 3.0f;
   const float gp = car.airborne ? 0.0f : (float)gPitch, gr = car.airborne ? 0.0f : (float)gRoll;
   const Mat4 wheelsM = Mat4::translate((float)car.x, (float)(groundH + std::max(0.0, car.z)), (float)-car.y)
@@ -1720,6 +1765,25 @@ void Renderer::endScene(double time) {
   // the soft distance: a ring this many pixels wide at its widest, on a 900-line picture. XBR_FAR=0 turns it off.
   static const float farSoft = std::getenv("XBR_FAR") ? (float)std::atof(std::getenv("XBR_FAR")) : 1.7f;
   glUniform1i(glGetUniformLocation(compProg, "uDepth"), 2);
+  // motion blur: XBR_BLUR=0 off, 0.5 gentler, 1.5 the most
+  static const float blurK = std::getenv("XBR_BLUR") ? std::min(1.5f, (float)std::atof(std::getenv("XBR_BLUR"))) : 1.0f;
+  {
+    float cars[32]; int nc = 0;
+    for (size_t i = 0; i + 2 < mbSpots.size() && nc < 8; i += 3, nc++) {
+      const float x = mbSpots[i], y = mbSpots[i + 1], z = mbSpots[i + 2], *m = mbView.m;
+      cars[nc * 4] = m[0] * x + m[4] * y + m[8] * z + m[12]; cars[nc * 4 + 1] = m[1] * x + m[5] * y + m[9] * z + m[13];
+      cars[nc * 4 + 2] = m[2] * x + m[6] * y + m[10] * z + m[14]; cars[nc * 4 + 3] = 2.9f;
+    }
+    glUniform1i(glGetUniformLocation(compProg, "uMbN"), nc);
+    if (nc) glUniform4fv(glGetUniformLocation(compProg, "uMbCar"), nc, cars);
+    glUniform3fv(glGetUniformLocation(compProg, "uMbVel"), 1, mbVel);
+    glUniform1f(glGetUniformLocation(compProg, "uMbTan"), mbTan);
+    glUniform1f(glGetUniformLocation(compProg, "uMbAsp"), (float)W / (float)std::max(1, H));
+    glUniform1f(glGetUniformLocation(compProg, "uMbAmt"), std::min(1.5f, mbAmt * blurK));
+    glUniform1f(glGetUniformLocation(compProg, "uMbShutter"), 1.0f / 100);
+    glUniform1f(glGetUniformLocation(compProg, "uMbMax"), 0.07f * blurK);
+    glUniform4fv(glGetUniformLocation(compProg, "uMbHole"), 1, mbHole);
+  }
   glUniform1f(glGetUniformLocation(compProg, "uFar"), farSoft * (float)H / 900.0f);
   glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, sceneDepth);
   glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, bloomTex[0]);
@@ -1821,6 +1885,16 @@ void Renderer::drawWorld(const FrameIn &f) {
   }
   const Mat4 proj = Mat4::perspective(fov * (float)PI / 180, (float)W / (float)std::max(1, H), 0.12f, 12000.0f);
   const Mat4 view = Mat4::lookAt(eye, at, up);
+  // for the motion blur (endScene): how the camera is travelling, in its own frame.
+  // Fades in from 110 to 260 km/h, as the browser game's does.
+  {
+    const double bt = std::atan2(car.vy, std::max(std::fabs(car.vx), 1.0)), dir = car.hdg + bt;
+    const float wv[3] = {(float)(std::cos(dir) * car.speed), 0, (float)(-std::sin(dir) * car.speed)};
+    for (int k = 0; k < 3; k++) mbVel[k] = view.m[k] * wv[0] + view.m[4 + k] * wv[1] + view.m[8 + k] * wv[2];
+    mbView = view; mbTan = std::tan(fov * (float)PI / 360);
+    mbAmt = car.speed > 30 ? (float)std::min(1.0, std::max(0.0, (car.speed * 3.6 - 110) / 150)) : 0;
+    mbSpots.clear();
+  }
   const Mat4 VP = proj * view;
   static const bool noSh = std::getenv("XBR_NOSH") != nullptr;
   if (std::getenv("XBR_NOTREESH")) treeShadows = false;
