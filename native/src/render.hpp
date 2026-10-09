@@ -109,6 +109,13 @@ class Renderer {
   const std::string &carPack() const { return packKey; }
   void snapCamera() { camReady = false; }
   void drawWorld(const FrameIn &f);
+  // the mirror (render.cpp): mirrorBegin, drawWorld + the rivals, mirrorEnd; then mirrorShow after endScene
+  bool mirrorOn = true;                       // the player's switch (M)
+  bool mirrorWanted(int camMode) const;
+  void mirrorBegin();
+  void mirrorEnd();
+  void mirrorShow();
+  void mirrorClear() { mirHas = false; }
   // After the world and every car: develop the picture onto the screen. The HUD goes on top afterwards.
   void endScene(double time);
   // THE SUSPENSION YOU CAN SEE. The sim keeps the wheels on the road; this is
@@ -209,6 +216,9 @@ class Renderer {
   int uLampPos = -1, uLampDir = -1, uLampOn = -1, uTime = -1, uCloud = -1, uNight = -1;
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;
+  static constexpr int MIR_W = 840, MIR_H = 200;
+  unsigned mirFbo = 0, mirTex = 0, mirDepth = 0;
+  bool mirrorPass = false, mirHas = false;
   // motion blur (render.cpp COMP_FS): the camera's travel in view space, the view itself, and the cars to leave sharp
   float mbVel[3] = {0, 0, 0}, mbTan = 0.6f, mbAmt = 0, mbHole[4] = {-1, -1, -1, -1};
   Mat4 mbView;

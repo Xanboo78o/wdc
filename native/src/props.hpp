@@ -48,6 +48,7 @@ class Props {
   void deform(const std::vector<float> bend[2], const std::vector<char> broke[2], unsigned version);
   void draw();                     // depth test on, blend off; the sun's shadow map on texture unit 3
   size_t tris = 0;                 // drawn last frame
+  bool farOnly = false;            // the mirror's small picture: only ever the distant version
 
  private:
   std::string dataDir, texDir;

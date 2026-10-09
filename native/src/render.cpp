@@ -1492,7 +1492,7 @@ const Renderer::Susp &Renderer::suspOf(const Car &car, const Spec &S) {
 void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPitch, double gRoll, const float paint[3], double rolled,
                        bool helmet) {
   // where every car drawn this frame is: the motion blur leaves them sharp
-  if (mbSpots.size() < 24) { mbSpots.push_back((float)car.x); mbSpots.push_back((float)(groundH + std::max(0.0, car.z) + 0.5)); mbSpots.push_back((float)-car.y); }
+  if (!mirrorPass && mbSpots.size() < 24) { mbSpots.push_back((float)car.x); mbSpots.push_back((float)(groundH + std::max(0.0, car.z) + 0.5)); mbSpots.push_back((float)-car.y); }
   const float gain = car.airborne ? 1.0f : 3.0f;
   const float gp = car.airborne ? 0.0f : (float)gPitch, gr = car.airborne ? 0.0f : (float)gRoll;
   const Mat4 wheelsM = Mat4::translate((float)car.x, (float)(groundH + std::max(0.0, car.z)), (float)-car.y)
@@ -1804,12 +1804,61 @@ void Renderer::endScene(double time) {
   PROF.mark(6);
 }
 
+// ---- THE MIRROR (js/render.js _mirror): one wide glass at the top of the screen, in every
+// view you drive from. The world is drawn a second time, small, looking back; game_main
+// calls mirrorBegin, drawWorld, its rivals, mirrorEnd — on alternate frames, as ACC's does —
+// and mirrorShow lays the picture on the finished frame, left and right swapped as glass swaps them.
+bool Renderer::mirrorWanted(int camMode) const {
+  static const bool off = std::getenv("XBR_MIRROR") && std::string(std::getenv("XBR_MIRROR")) == "0";
+  return mirrorOn && !off && camMode != 1;
+}
+void Renderer::mirrorBegin() {
+  if (!mirFbo) {
+    glGenFramebuffers(1, &mirFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, mirFbo);
+    glGenTextures(1, &mirTex);
+    glBindTexture(GL_TEXTURE_2D, mirTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, MIR_W, MIR_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mirTex, 0);
+    glGenRenderbuffers(1, &mirDepth);
+    glBindRenderbuffer(GL_RENDERBUFFER, mirDepth);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, MIR_W, MIR_H);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mirDepth);
+  }
+  mirrorPass = true;
+}
+void Renderer::mirrorEnd() {
+  mirrorPass = false; mirHas = true;
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(0, 0, W, H);
+}
+void Renderer::mirrorShow() {
+  if (!mirHas || !mirFbo) return;
+  // a third of the screen wide, 4.2 to 1, ten pixels down from the top
+  const int w = (int)std::min(W * 0.34f, 560.0f * H / 900.0f), h = (int)(w / 4.2f), x = (W - w) / 2, y = H - h - (int)(10.0f * H / 900.0f);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glEnable(GL_SCISSOR_TEST);
+  glScissor(x - 3, y - 3, w + 6, h + 6);
+  glClearColor(0.02f, 0.02f, 0.025f, 1);
+  glClear(GL_COLOR_BUFFER_BIT);                       // the housing
+  glDisable(GL_SCISSOR_TEST);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, mirFbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+  glBlitFramebuffer(MIR_W, 0, 0, MIR_H, x, y, x + w, y + h, GL_COLOR_BUFFER_BIT, GL_LINEAR);     // left and right swapped
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+}
+
 void Renderer::drawWorld(const FrameIn &f) {
   const Car &car = *f.car;
   const Spec &S = *f.spec;
   Look L = f.look;
-  PROF.frames++; PROF.begin();
-  if (post) {
+  if (!mirrorPass) { PROF.frames++; PROF.begin(); }
+  if (mirrorPass) {
+    // THE MIRROR'S PICTURE: the same world, small, looking back (mirrorBegin).
+    glBindFramebuffer(GL_FRAMEBUFFER, mirFbo);
+    glViewport(0, 0, MIR_W, MIR_H);
+  } else if (post) {
     // A HARDER SUN. With a film curve behind it the sun can be what it is —
     // well over paper white — and the shade can be shade.
     ensurePost();
@@ -1834,13 +1883,14 @@ void Renderer::drawWorld(const FrameIn &f) {
     glViewport(0, 0, sw(), sh());
   } else
   glViewport(0, 0, W, H);
+  const bool hdr = post && !mirrorPass;
   glClearColor(L.fog[0], L.fog[1], L.fog[2], 1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glDisable(GL_CULL_FACE);
   glDisable(GL_BLEND);
   glUseProgram(prog);
   glUniform1i(uPass, 0);
-  glUniform1f(uHdr, post ? (std::getenv("XBR_SHDEBUG") ? 2.0f : 1.0f) : 0.0f);
+  glUniform1f(uHdr, hdr ? (std::getenv("XBR_SHDEBUG") ? 2.0f : 1.0f) : 0.0f);
   glUniform1f(uShOn, 0.0f);
 
   // ---- where the car is, in GL space
@@ -1883,11 +1933,18 @@ void Renderer::drawWorld(const FrameIn &f) {
     eye[0] = (float)(car.x - cx * 4.9); eye[1] = carY + 1.28f; eye[2] = (float)-(car.y - cy * 4.9);
     at[0] = (float)(car.x + cx * 15); at[1] = carY + 0.62f; at[2] = (float)-(car.y + cy * 15);
   }
-  const Mat4 proj = Mat4::perspective(fov * (float)PI / 180, (float)W / (float)std::max(1, H), 0.12f, 12000.0f);
+  if (mirrorPass) {
+    // from just above your head, straight back down the road: one wide glass
+    // (Adam: "also add mirrors" — a race you cannot see behind is a race against ghosts)
+    const float e[3] = {-0.9f + shift, 1.12f, 0}, t[3] = {e[0] - 40, e[1] - 1.6f, 0}, u[3] = {0, 1, 0};
+    xform(carM, e, 1, eye); xform(carM, t, 1, at); xform(carM, u, 0, up);
+    fov = 24;
+  }
+  const Mat4 proj = Mat4::perspective(fov * (float)PI / 180, mirrorPass ? (float)MIR_W / (float)MIR_H : (float)W / (float)std::max(1, H), 0.12f, 12000.0f);
   const Mat4 view = Mat4::lookAt(eye, at, up);
   // for the motion blur (endScene): how the camera is travelling, in its own frame.
   // Fades in from 110 to 260 km/h, as the browser game's does.
-  {
+  if (!mirrorPass) {
     const double bt = std::atan2(car.vy, std::max(std::fabs(car.vx), 1.0)), dir = car.hdg + bt;
     const float wv[3] = {(float)(std::cos(dir) * car.speed), 0, (float)(-std::sin(dir) * car.speed)};
     for (int k = 0; k < 3; k++) mbVel[k] = view.m[k] * wv[0] + view.m[4 + k] * wv[1] + view.m[8 + k] * wv[2];
@@ -1899,7 +1956,7 @@ void Renderer::drawWorld(const FrameIn &f) {
   static const bool noSh = std::getenv("XBR_NOSH") != nullptr;
   if (std::getenv("XBR_NOTREESH")) treeShadows = false;
   bool shadowOnNow = false;
-  if (post && !noSh && L.sun[1] / sl0(L.sun) > 0.10f && L.sunCol[0] + L.sunCol[1] + L.sunCol[2] > 0.9f) {
+  if (post && !mirrorPass && !noSh && L.sun[1] / sl0(L.sun) > 0.10f && L.sunCol[0] + L.sunCol[1] + L.sunCol[2] > 0.9f) {
     shadowOnNow = true;
     const float fl = std::sqrt((at[0] - eye[0]) * (at[0] - eye[0]) + (at[2] - eye[2]) * (at[2] - eye[2])) + 1e-6f;
     const float fwd[3] = {(at[0] - eye[0]) / fl, 0, (at[2] - eye[2]) / fl};
@@ -1948,7 +2005,7 @@ void Renderer::drawWorld(const FrameIn &f) {
   glDepthMask(GL_TRUE);
   glDepthFunc(GL_LEQUAL);
   const float RED[3] = {0.78f, 0.06f, 0.08f};
-  drawCar(car, S, f.groundH, f.gPitch, f.gRoll, f.paint[0] < 0 ? RED : f.paint, f.wheelAngle, f.camMode != 0);
+  if (!mirrorPass) drawCar(car, S, f.groundH, f.gPitch, f.gRoll, f.paint[0] < 0 ? RED : f.paint, f.wheelAngle, f.camMode != 0);   // the glass is above your own car
   glBindVertexArray(0);
   glUseProgram(prog);
   glUniform3f(uPaint, 0.78f, 0.06f, 0.08f);
@@ -1958,8 +2015,9 @@ void Renderer::drawWorld(const FrameIn &f) {
   drawMesh(corridor, Mat4::identity());
   drawMesh(scenery, Mat4::identity());
   PROF.mark(2);
-  if (dress) dress->drawWorld();
-  if (props) { const BarrierWear &bw = barrierWear(); if (bw.on) props->deform(bw.bend, bw.broke, bw.version); props->draw(); }
+  // (in the mirror: every tree as its two photographs and every rail as its big faces — a small picture needs no more)
+  if (dress) { if (mirrorPass) dress->drawShadow(); else dress->drawWorld(); }
+  if (props) { props->farOnly = mirrorPass; const BarrierWear &bw = barrierWear(); if (bw.on) props->deform(bw.bend, bw.broke, bw.version); props->draw(); }
   PROF.mark(3);
 
   // The land, pushed a little AWAY in depth: where it runs level with the

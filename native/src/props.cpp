@@ -379,7 +379,8 @@ void Props::draw() {
       const float cw = VP.m[3] * c.cx + VP.m[7] * c.cy + VP.m[11] * c.cz + VP.m[15];
       const float cxp = VP.m[0] * c.cx + VP.m[4] * c.cy + VP.m[8] * c.cz + VP.m[12];
       if (cw < -c.rad || std::fabs(cxp) > std::fabs(cw) + c.rad * 2.2f) continue;
-      const int nv = d < NEAR ? k.verts : k.farVerts;
+      if (farOnly && d > 400) continue;
+      const int nv = d < NEAR && !farOnly ? k.verts : k.farVerts;
       // (GL 3.3 has no base instance: point the three per-piece attributes at this chunk's first piece)
       for (int t = 0; t < 4; t++)
         glVertexAttribPointer((GLuint)(3 + t), t == 3 ? 4 : 3, GL_FLOAT, GL_FALSE, PIECE * sizeof(float), (void *)(size_t)((c.first * PIECE + t * 3) * sizeof(float)));

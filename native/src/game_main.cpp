@@ -895,10 +895,17 @@ int main(int argc, char **argv) {
   auto drawAll = [&](FrameIn &f) {
     R.post = cfg.look != "plain" && R.postOk;
     R.scalePin = (float)scaleArg;
+    // the mirror first, on alternate frames: the same world, looking back
+    static unsigned mirrorTick = 0;
+    const bool driving = screen != HOME && screen != RESULTS;
+    if (driving && R.mirrorWanted(f.camMode)) {
+      if (mirrorTick++ % 3 == 0) { R.mirrorBegin(); R.drawWorld(f); drawField(); R.mirrorEnd(); }
+    } else R.mirrorClear();
     R.drawWorld(f);
     drawField();
     fx.draw(R, f.time);
     R.endScene(f.time);
+    if (driving && R.mirrorWanted(f.camMode)) R.mirrorShow();
     R.hudBegin();
     R.drawRain(f);
     if (screen == HOME) home.draw(R, K, clock, liveOf());
@@ -1029,6 +1036,7 @@ int main(int argc, char **argv) {
             case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: if (screen == DRIVE) S.hands.selector = S.hands.selector < 0 ? 1 : -1; break;
             case SDL_SCANCODE_R: if (!menuish) act[A_RESET] = true; break;
             case SDL_SCANCODE_C: if (!menuish) act[A_CAM] = true; break;
+            case SDL_SCANCODE_M: if (!menuish) { R.mirrorOn = !R.mirrorOn; toast = {R.mirrorOn ? "MIRROR ON" : "MIRROR OFF", 2}; } break;
             case SDL_SCANCODE_P: if (!menuish) act[A_PIT] = true; break;
             case SDL_SCANCODE_E: if (!menuish) act[A_SHUP] = true; break;
             case SDL_SCANCODE_Q: if (!menuish) act[A_SHDN] = true; break;
