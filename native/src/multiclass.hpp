@@ -26,7 +26,9 @@ struct GtField {
   int playerGrid = 1;                          // 1-based, inside your class's block
 };
 // `where` 0..1: how far back in your own class you start.
-GtField gtField(const Track &track, int grid, int playerClass, double where);
+// single: the whole grid is your class. pro: the rivals drive proSpec cars on their own
+// lines, and (hasPlayer) your own slot is left as an empty seat — the race's own spec and line.
+GtField gtField(const Track &track, int grid, int playerClass, double where, bool single = false, bool pro = false, bool hasPlayer = true);
 
 // Position within its class (1-based) of every entry, by race position.
 int classPos(const Race &race, const Entry &e);

@@ -178,7 +178,7 @@ Race::Race(const RaceOptions &o)
     while (k + 1 < c.size() && k < 3 && c[k + 1].s0 - c[k].s1 < 250) k++;
     openEnd = !c.empty() ? c[k].s1 + OPEN_AFTER : 600;
   }
-  multi = !o.seats.empty();
+  for (const auto &s : o.seats) if (s.klass != o.seats[0].klass) multi = true;
   real = o.real;
   duel = o.duel;
   drsRule = o.drs && o.duel && spec->drs;
@@ -213,8 +213,10 @@ Race::Race(const RaceOptions &o)
     const bool seated = (size_t)k < o.seats.size() && o.seats[(size_t)k].spec && o.seats[(size_t)k].lines;
     Spec *es = seated ? o.seats[(size_t)k].spec : spec;
     e.lines = seated ? o.seats[(size_t)k].lines : lines;
-    e.klass = seated ? o.seats[(size_t)k].klass : 0;
+    e.klass = (size_t)k < o.seats.size() ? o.seats[(size_t)k].klass : 0;      // a seat with no car in it is YOURS: the race's own spec and line
     e.car = makeCar(es->key);
+    // a rival's car (proSpec) shares its class's key: hand it the spec itself, and the constants rather than the player's aero map
+    if (es->pro) { e.car.spec = es; e.car.aero = nullptr; }
     Car &car = e.car;
     double px, py, ph;
     int pi;
@@ -230,6 +232,22 @@ Race::Race(const RaceOptions &o)
       e.driver = makeDriver(seed * 131 + who, o.tier, nCorners);
       applyProfile(e.driver, prof, team);
       e.hasDriver = true;
+      // REAL — THE GRID IS LEAGUES APART (Adam: "getting ahead should feel like im in the
+      // big leageus now"). Where you start is how good you are: the front of each class
+      // drives at the ceiling, and it falls away behind, gently through the top five and
+      // then steeply. The difficulty moves the whole grid, never one end of it.
+      if (real) {
+        int nk = 0, rk = 0;                                     // cars in this car's class, and how many of them start ahead of it
+        for (int q = 0; q < n; q++) {
+          const int kq = (size_t)q < o.seats.size() ? o.seats[(size_t)q].klass : 0;
+          if (kq == e.klass) { nk++; if (q < k) rk++; }
+        }
+        const std::string &tk = e.driver.tier;
+        const double base = tk == "hard" ? 1.0 : tk == "medium" ? 0.88 : tk == "casual" ? 0.76 : 0.64;
+        const double r = nk > 1 ? (double)rk / (nk - 1) : 0;
+        e.driver.gripFrac = base * (1 - 0.18 * std::pow(r, 1.25));
+        e.driver.paceMul = NaN;
+      }
     }
     e.isPlayer = isPlayer; e.idx = k; e.box = k;
     e.name = isPlayer ? "YOU" : prof.n;
@@ -352,6 +370,10 @@ Race::Race(const RaceOptions &o)
 // ---- the OVERTAKES band ------------------------------------------------------------
 // Where in its grip window each rival drives, from how far it is from you.
 void Race::band() {
+  // REAL: no rubber band (Adam: "cars arent slowing down to battle u theyre speeding up to
+  // catch the next car, theyre motivated to win"). Nobody's grip is trimmed toward you, nobody
+  // far ahead is held on a leash, and your going off does not wake the field up.
+  if (real) return;
   const Battle *B = battle;
   const bool hasMe = me && !me->retired;
   const double pMe = hasMe ? progress(*me) : 0;

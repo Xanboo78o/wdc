@@ -174,6 +174,10 @@ int main(int argc, char **argv) {
   try { track = Track::load(dataDir, key); }
   catch (const std::exception &e) { std::fprintf(stderr, "xbr-drive: %s\n", e.what()); return 1; }
   Spec &spec = carSpec(cls);
+  // Tuning knobs for a sweep, no rebuild: XBR_MU / XBR_P / XBR_CL scale grip, power and downforce; XBR_AERO=1 loads the aero map.
+  const auto envF = [](const char *n) { const char *v = std::getenv(n); return v && *v ? std::atof(v) : 1.0; };
+  spec.mu *= envF("XBR_MU"); spec.Pmax *= envF("XBR_P"); spec.Fdrive *= envF("XBR_P"); spec.ClA *= envF("XBR_CL"); spec.ClFloor *= envF("XBR_CL");
+  if (std::getenv("XBR_AERO")) { const Json aj = Json::loadOpt(dataDir + "/aero/" + cls + ".json"); static AeroMap map; if (aj.isObj()) { map = AeroMap::fromJson(aj); registerAero(cls, &map); } else std::printf("(no aero map for %s)\n", cls.c_str()); }
   Lines lines = buildLines(track, spec);
   const double peak = peakSlip(spec);
 

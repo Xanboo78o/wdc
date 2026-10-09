@@ -163,6 +163,7 @@ int main(int argc, char **argv) {
   Track track;
   try { track = Track::load(dataDir, key); }
   catch (const std::exception &e) { std::fprintf(stderr, "xbr-race: %s\n", e.what()); return 1; }
+  if (real) realTune();
   Spec &spec = carSpec(cls);
   static AeroMap map;
   if (aero) {
@@ -185,8 +186,9 @@ int main(int argc, char **argv) {
   o.xopt.rolling = rolling; o.xopt.joker = joker;
   o.real = real;
   GtField gf;
-  if (multi) {
-    gf = gtField(track, grid, gtClassOf(cls), 0.5);
+  if (multi || (real && gtClassOf(cls) >= 0 && xcar.empty())) {
+    // --real in a GT class: the rivals are in proSpec cars, as the game seats them
+    gf = gtField(track, grid, gtClassOf(cls), playerSlot > 0 && grid > 1 ? (playerSlot - 1.0) / (grid - 1.0) : 0.5, !multi, real, playerSlot > 0);
     o.seats = gf.seats;
     if (playerSlot > 0) o.playerGrid = gf.playerGrid;
   }

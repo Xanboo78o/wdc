@@ -272,10 +272,12 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     o.xingus = rs->xingus; o.xopt.car = rs->xcar; o.xopt.solo = rs->xsolo; o.xopt.derby = rs->xderby;
     o.xopt.stakes = rs->xstakes; o.xopt.loose = rs->xloose;
     o.real = true;                       // RACING REALISM (race.hpp): the game always races for real
-    if (rs->multi && gtClassOf(cls) >= 0) {
-      S.gt = gtField(S.track, rs->grid, gtClassOf(cls), rs->grid > 1 ? (rs->slot - 1.0) / (rs->grid - 1.0) : 0);
+    // GT MODE seats three classes; any other race in a GT class seats one, so that the
+    // rivals are in the cars real racing asks of them (physics.hpp proSpec). Not Xingus: its cars are its own.
+    if (gtClassOf(cls) >= 0 && !rs->xingus && !rs->customField) {
+      S.gt = gtField(S.track, rs->grid, gtClassOf(cls), rs->grid > 1 ? (rs->slot - 1.0) / (rs->grid - 1.0) : 0, !rs->multi, true, true);
       o.seats = S.gt.seats; o.playerGrid = S.gt.playerGrid;
-      S.multi = true;
+      S.multi = rs->multi;
     }
     S.xingus = rs->xingus;
     S.race = std::make_unique<Race>(o);
@@ -481,6 +483,7 @@ enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A
 
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
+  realTune();                          // RACING REALISM: the GT classes at their real lap times (physics.hpp), before anything reads a spec
   std::vector<std::string> pos;
   bool multiArg = false;
   std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg, modelArg, lookArg, xingArg, xtrackArg, xheilArg;

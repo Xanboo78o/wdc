@@ -50,6 +50,14 @@ void Hands::update(double dt, const HandsIn &in) {
 // car, measured by tools/ceiling.mjs. Re-run it after any physics change and
 // carry the numbers across.
 static double ceilingFor(const Track &track, const Spec &spec) {
+  // A RIVAL'S CAR (proSpec): the grip fraction with the fastest clean lap, swept natively
+  // per circuit (scratch ceil.sh: XBR_GRIP 0.66..0.94 on xbr-drive, 2026-10-09). Re-sweep after any change to proSpec.
+  if (spec.pro) {
+    struct Pro { const char *key; double gt3, gt4, hyper; };
+    static const Pro P[] = { {"adam1", 0.66, 0.66, 0.66}, {"baku", 0.86, 0.82, 0.94}, {"bathurst", 0.94, 0.90, 0.94}, {"brandshatch", 0.78, 0.66, 0.94}, {"gravenmoor", 0.86, 0.78, 0.94}, {"kate", 0.90, 0.90, 0.90}, {"kate2", 0.90, 0.86, 0.94}, {"lagunaseca", 0.94, 0.86, 0.94}, {"monaco", 0.94, 0.94, 0.94}, {"monza", 0.90, 0.86, 0.94}, {"nordschleife", 0.82, 0.74, 0.94}, {"nurburgring", 0.78, 0.70, 0.94}, {"sepang", 0.78, 0.86, 0.94}, {"spa", 0.86, 0.82, 0.94}, {"street", 0.86, 0.82, 0.94}, {"suzuka", 0.90, 0.94, 0.94}, {"zandvoort", 0.82, 0.78, 0.94} };
+    for (const auto &r : P) if (track.key == r.key) return spec.key == "gt4" ? r.gt4 : spec.key == "hyper" ? r.hyper : r.gt3;
+    return 0.78;
+  }
   struct Row { const char *key; double f4, f1; };
   static const Row T[] = {
     {"monza", 0.88, 0.92}, {"zandvoort", 0.78, 0.95}, {"suzuka", 0.88, 1.01}, {"monaco", 0.98, 0.95},

@@ -112,6 +112,32 @@ static std::map<std::string, Spec> &specs() {
 }
 
 bool hasCarSpec(const std::string &key) { return specs().count(key) > 0; }
+// Fitted with XBR_MU / XBR_P on xbr-drive against real pole laps (2026-10-09):
+//   GT3 ideal line, mean over Spa Monza Zandvoort Nurburgring Suzuka Brands Laguna Bathurst Sepang: +2.6% -> +0.5%
+//   GT4 (five circuits) +1.2% -> about 0;  hypercar (Spa Monza Laguna) +1.0% -> about 0
+static bool REAL_TUNED = false;
+void realTune() {
+  if (REAL_TUNED) return;
+  REAL_TUNED = true;
+  auto &M = specs();
+  M["gt3"].mu *= 1.07; M["gt3"].Pmax *= 1.03; M["gt3"].Fdrive *= 1.03;
+  M["gt4"].mu *= 1.03;
+  M["hyper"].mu *= 1.03;
+  for (const char *k : {"gt3", "gt4", "hyper"}) { Spec &s = M[k]; s.heaveK = 0; s.rideFree = 0; s.vRef = 0; s.pk = 0; }
+}
+Spec &proSpec(const std::string &key) {
+  static std::map<std::string, Spec> P;
+  auto it = P.find(key);
+  if (it != P.end()) return it->second;
+  if (key != "gt3" && key != "gt4" && key != "hyper") return carSpec(key);
+  Spec s = carSpec(key);
+  // over the tuned car: a rival at its grip ceiling then laps within about 1% of the real pole (ceilings: driver.cpp)
+  const double mu = key == "hyper" ? 1.20 : 1.25, pw = key == "hyper" ? 1.06 : 1.085;
+  s.mu *= mu; s.Pmax *= pw; s.Fdrive *= pw;
+  s.pro = true;
+  s.heaveK = 0; s.rideFree = 0; s.vRef = 0; s.pk = 0;      // derived values are cached on a spec: this one derives its own
+  return P[key] = s;
+}
 Spec &carSpec(const std::string &key) {
   auto &M = specs();
   auto it = M.find(key);

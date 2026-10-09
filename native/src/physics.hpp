@@ -31,6 +31,7 @@ inline double clampd(double v, double lo, double hi) { return v < lo ? lo : v > 
 struct Spec {
   std::string key, name, full;
   bool gt = false;              // shape: 'gt' — a closed car
+  bool pro = false;             // a rival's car (proSpec): not in the JS
   double m, Izz, L, a, b, bodyL, bodyW, h;
   double ClA, CdA, rho, aeroBal;
   double Pmax, Fdrive, Fbrake, brakeBal, rollRes;
@@ -44,6 +45,13 @@ struct Spec {
 
 Spec &carSpec(const std::string &key);        // "f4" | "f1" | "gt3" (unknown -> f4)
 bool hasCarSpec(const std::string &key);
+// RACING REALISM (not in the JS). realTune(): once, the GT classes are brought to
+// the lap times their real cars set (fitted on nine circuits; numbers in physics.cpp).
+// proSpec(): the car a RIVAL drives in a real race — the same class with the tyre and
+// the power its driving model needs to lap where a real professional does. The model
+// leaves 7% of an ideal lap on the table; the car gives it back. Other classes: carSpec.
+void realTune();
+Spec &proSpec(const std::string &key);
 
 namespace SURFACE {
 constexpr double track = 1.0, kerb = 0.93, runoff = 0.58, grass = 0.42;
