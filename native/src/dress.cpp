@@ -382,6 +382,36 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
     glBindVertexArray(G.vao);
     glDrawElements(GL_TRIANGLES, G.count, GL_UNSIGNED_INT, nullptr);
   }
+  // WHEELS AT SPEED (Adam: "make the wheels blur when going fast, like js the
+  // rims and the words on them"). Over each wheel drawn once sharp, the same
+  // wheel again across the angle it turns through while a 1/75 s shutter is
+  // open, each copy faint: spokes smear into a disc, lettering into a ring.
+  // Only for cars close enough to see it; a pack wheel is a lot of triangles.
+  const float dx = carM.m[12] - eye[0], dy = carM.m[13] - eye[1], dz = carM.m[14] - eye[2];
+  if (!glassPass && wheelSweep > 0.09f && dx * dx + dy * dy + dz * dz < 40.0f * 40.0f) {
+    const int N = std::clamp((int)(7 + wheelSweep * 5), 7, 18);
+    glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(-1.0f, -2.0f);
+    for (const PackGroup &G : pc.groups) {
+      if (G.part < 1 || G.part > 4) continue;
+      const PackMat &M = pc.mats[(size_t)G.mat];
+      const int w = G.part - 1;
+      if (M.see || (lost && lost[w])) continue;
+      glUniform1i(uHasMap, M.map ? 1 : 0); glUniform1i(uRole, M.role); glUniform1i(uLivOn, 0); glUniform1i(uCutout, M.cutout ? 1 : 0);
+      glUniform3fv(uColor, 1, M.col);
+      glUniform1f(uOpacity, 1.55f / N);
+      if (M.map) glBindTexture(GL_TEXTURE_2D, M.map);
+      glBindVertexArray(G.vao);
+      for (int k = 0; k < N; k++) {
+        const float off = ((k + 0.5f) / N - 0.5f) * wheelSweep;
+        glUniformMatrix4fv(uModel, 1, GL_FALSE, (hub[w] * Mat4::rotZ((float)(-rolled / pc.wr[w]) + off)).m);
+        glDrawElements(GL_TRIANGLES, G.count, GL_UNSIGNED_INT, nullptr);
+      }
+    }
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glDepthMask(GL_TRUE); glDisable(GL_BLEND);
+  }
   if (glassPass) { glDepthMask(GL_TRUE); glDisable(GL_BLEND); }
   glBindVertexArray(0);
   glUseProgram((GLuint)was);

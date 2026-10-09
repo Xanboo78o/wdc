@@ -48,6 +48,8 @@ class Dress {
   // colour passed to drawPack choose (the default). XBR_LIVERY=N or =off overrides.
   void setLivery(int index) { liveryIx = index; }
   size_t liveryCount(const PackCar &pc) const;
+  // How far the wheels turn while the shutter is open, radians (0 = sharp): the next drawPack smears them by it.
+  void setWheelSweep(float radians) { wheelSweep = radians; }
 
   // ---- the woods and the boards ------------------------------------------------
   void buildWorld(const Track &track, const World &world, const Json &env, const Line &raceLine);
@@ -61,6 +63,7 @@ class Dress {
   unsigned carProg = 0, floraProg = 0, sheet = 0;
   bool sheetTried = false, liveryOn = true;
   int liveryIx = -1;
+  float wheelSweep = 0;
   Mat4 VP;
   float eye[3] = {0, 0, 0};
   Look look;

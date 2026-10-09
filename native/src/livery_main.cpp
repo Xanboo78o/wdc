@@ -25,6 +25,7 @@ int main(int argc, char **argv) {
   const std::string key = argv[1], out = argv[2];
   int from = 0, count = 20, cols = 5, tw = 384, th = 216, stride = 1;
   std::string view = "front";
+  float dress_sweep = 0;
   for (int i = 3; i < argc; i++) {
     const std::string a = argv[i];
     auto val = [&]() -> std::string { if (i + 1 >= argc) { std::fprintf(stderr, "xbr-livery: %s needs a value\n", a.c_str()); std::exit(2); } return argv[++i]; };
@@ -33,6 +34,7 @@ int main(int argc, char **argv) {
     else if (a == "--cols") cols = std::atoi(val().c_str());
     else if (a == "--step") stride = std::max(1, std::atoi(val().c_str()));      // every Nth livery (--from 3 --step 8: the pride cars)
     else if (a == "--view") view = val();
+    else if (a == "--sweep") dress_sweep = (float)std::atof(val().c_str());      // wheel blur, radians, to look at it
     else if (a == "--tile") { if (std::sscanf(val().c_str(), "%dx%d", &tw, &th) != 2) { std::fprintf(stderr, "xbr-livery: --tile WxH\n"); return 2; } }
     else { std::fprintf(stderr, "xbr-livery: unknown option %s\n", a.c_str()); return 2; }
   }
@@ -86,6 +88,7 @@ int main(int argc, char **argv) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     dress.frame(VP, eye, look, 0);
     dress.setLivery(from + k * stride);
+    dress.setWheelSweep(dress_sweep);
     dress.drawPack(*pc, Mat4::identity(), 0.22, 0, nullptr, none, nullptr, false);
     dress.drawPack(*pc, Mat4::identity(), 0.22, 0, nullptr, none, nullptr, true);
   }
