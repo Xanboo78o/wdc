@@ -107,7 +107,7 @@ void Race::cast() {
     if (b.tier == 1) { b.horizon = 3.5; b.every = 0.2; b.glance *= 0.7; }
     if (b.tier == 2) { b.horizon = 1.2; b.every = 0.7; b.noise = 0.22; b.glance *= 2.0; b.wDef = 0.6; }
     if (b.tier == 3) { b.horizon = 3.5; b.every = 0.2; b.caution = 0.4; b.margin = 1.9; b.dive = 1.8; b.glance *= 0.6; b.wAtk = 1.3; }
-    if (b.mood == 1) { b.caution *= 0.45; b.wAtk *= 1.5; b.wDef *= 1.5; b.lost = rnd(b.rng) < 0.5 ? 1 : 3; }
+    if (b.mood == 1) { b.anger = 1.6; b.seesRed = true; b.lost = rnd(b.rng) < 0.5 ? 1 : 3; }      // MAD: it arrived angry (what anger does: think())
     if (b.mood == 2) { b.margin += 0.2; }
     if (b.mood == 3) { b.lost = -1; b.caution *= 0.9; b.glance = 0.35; b.every = std::min(b.every, 0.2); }
     if (b.lost == 0) b.glance *= 3.5;                      // loses its mirrors: looks once in a long while
@@ -162,6 +162,38 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
   const bool hounded = b.rear && time - b.rearAt < b.glance + 0.5 && b.rearDs < std::max(9.0, e.car.speed * 0.55);
   b.pressT = hounded ? std::min(40.0, b.pressT + dtR) : std::max(0.0, b.pressT - 2 * dtR);
   out.pressure = std::min(1.0, b.pressT / 14) * (b.mood == 3 ? 0.25 : 1);
+
+  // ---- TEMPER (Adam: "make them get angry after cut offs or crashes"). A touch is most of the way
+  // to furious, and whoever did it is remembered. Being chopped — a car coming across your nose
+  // while you are closing on it — is a third of the way. ZEN shrugs most of it off. It cools slowly.
+  {
+    const double gain = b.mood == 3 ? 0.35 : b.mood == 2 ? 0.8 : 1.0;
+    if (e.contacts > b.hitsSeen) {
+      b.anger += 0.9 * gain * (e.contacts - b.hitsSeen);
+      if (e.hitBy && e.hitBy != &e) b.grudge = e.hitBy;
+    }
+    b.hitsSeen = e.contacts;
+    Entry *a = e.ahead;
+    if (a && !a->retired) {
+      const double ds = t.gap(a->proj.s, e.proj.s), dl = std::fabs(a->proj.lat - e.proj.lat);
+      if (a == b.wasAhead && b.wasAheadDl > 2.3 && dl < 1.5 && ds > 0 && ds < 9 && e.car.speed > a->car.speed + 1) {
+        b.anger += 0.35 * gain;
+        b.grudge = a;
+      }
+      b.wasAhead = a; b.wasAheadDl = dl > 2.3 ? dl : dl < 1.5 ? 0 : b.wasAheadDl;
+    } else b.wasAhead = nullptr;
+    b.anger = std::clamp(b.anger - dtR * (b.mood == 3 ? 0.05 : b.mood == 1 ? 0.004 : 0.018), 0.0, 3.0);
+    const bool was = b.seesRed;
+    b.seesRed = b.anger > 1 || (b.seesRed && b.anger > 0.4);
+    if (b.seesRed != was && e.hasDriver) {
+      // anger costs precision: more mistakes while it lasts
+      const double k = b.seesRed ? 1.7 : 1 / 1.7;
+      e.driver.errScale = (std::isnan(e.driver.errScale) ? 1 : e.driver.errScale) * k;
+    }
+    if (!b.seesRed) b.grudge = nullptr;
+  }
+  // MAD, today or right now: risk is cheap, places are everything
+  const double caution = b.caution * (b.seesRed ? 0.45 : 1), wAtk = b.wAtk * (b.seesRed ? 1.5 : 1), wDef = b.wDef * (b.seesRed ? 1.5 : 1);
 
   // ---- the plan it already has, between thoughts
   const auto give = [&]() {
@@ -320,11 +352,11 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
     for (int q = 0; q < ns; q++) {
       const double end = x - o[q].ds;                     // + : I finish ahead of them
       const double w = b.grudge == seen[q].who ? 2.2 : 1;
-      if (!seen[q].behind && end > L * 0.6) U += BT.passW * b.wAtk * w * (0.6 + 0.8 * e.driver.aggression);
-      if (seen[q].behind && end < -L * 0.3) U -= BT.defW * b.wDef * (0.5 + e.driver.defence);
-      if (seen[q].behind && !noDef) U += std::clamp(end - (-seen[q].ds), -8.0, 8.0) * 0.5 * b.wDef * e.driver.defence;   // even keeping them further back is worth something
+      if (!seen[q].behind && end > L * 0.6) U += BT.passW * wAtk * w * (0.6 + 0.8 * e.driver.aggression);
+      if (seen[q].behind && end < -L * 0.3) U -= BT.defW * wDef * (0.5 + e.driver.defence);
+      if (seen[q].behind && !noDef) U += std::clamp(end - (-seen[q].ds), -8.0, 8.0) * 0.5 * wDef * e.driver.defence;   // even keeping them further back is worth something
     }
-    U -= risk * BT.riskW * b.caution;
+    U -= risk * BT.riskW * caution;
     // changing its mind costs a little: a driver commits
     const bool same = c.plan == b.plan && (c.plan == 0 || std::fabs(c.lat - b.planLat) < 1.2) && (c.late > 0) == (b.planLate > 0);
     if (!same) U -= (b.tier == 2 ? 0.27 : 1.0) * BT.switchC;
@@ -342,8 +374,6 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
                   ahead ? ahead->who->name.c_str() : "-", ahead ? ahead->ds : 0, ahead ? ahead->lat : 0, ahead ? ahead->v : 0, e.car.damage, zone ? 1 : 0);
     }
   }
-  // MAD: whoever hit me last is who this race is about now
-  if (b.mood == 1 && e.hitBy && e.hitBy != &e) b.grudge = e.hitBy;
   return give();
 }
 

@@ -48,6 +48,13 @@ struct Brain {
   double planLat = 0, planAt = -9, planLate = 0, planCap = NaN;
   double pressT = 0;               // how long somebody has been filling the mirrors it looks in
   Entry *grudge = nullptr;         // MAD: who did this to me
+  // TEMPER. Being hit or cut off fills it; time empties it. Past 1 the driver is MAD,
+  // whatever mood it started the day in, and stays mad until it has cooled to 0.4.
+  double anger = 0;
+  bool seesRed = false;
+  int hitsSeen = 0;
+  Entry *wasAhead = nullptr;
+  double wasAheadDl = 9;
   unsigned rng = 1;
   bool sideSeen = true;            // a car alongside, right now: seen or not
   double sideAt = -9;

@@ -330,6 +330,7 @@ int main(int argc, char **argv) {
   for (const Entry *e : race.standings)
     std::printf("%3d %s %10s %5d %4s %5d %5d %5.2f %s  grid %2d  %s\n", e->pos, padEnd(e->name, 14).c_str(), fmt(e->bestLap).c_str(), e->lap,
                 jsNum(e->penalty).c_str(), e->warnings, e->contacts, e->car.damage, e->retired ? " RETIRED" : "", e->gridPos, race.brainTag(*e));
+  for (const Entry *e : race.standings) if (e->brain.anger > 0.05 && e->brain.mood != 1) std::printf("TEMPER %s %.2f%s%s%s\n", e->name.c_str(), e->brain.anger, e->brain.seesRed ? "  SEEING RED" : "", e->brain.grudge ? "  at " : "", e->brain.grudge ? e->brain.grudge->name.c_str() : "");
 
   int fin = 0, moved = 0;
   double best = 1e9;

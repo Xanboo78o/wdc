@@ -294,12 +294,8 @@ void GameHud::draw(Renderer &R, float k, const HudTheme &T, const HudIn &in) {
         rowText(*race, e, i, r.cls, r.gap);
         // GT MODE: the number is your place in YOUR class, on your class's colour
         if (race->multi) { r.klassOn = true; r.klass = hex(gtClass(e.klass).col); r.pos = classPos(*race, e); }
-        // THE NINE (brain.cpp): who this driver is, in the colour of the day they are having
-        if (e.brain.tier > 0) {
-          static const char *TIER[4] = {"", "SMART", "DUMB", "SONNY"};
-          static const char *MOOD[4] = {"#9aa0a6", "#ff4a3d", "#ffd23f", "#4fd8e8"};      // -, mad, happy, zen
-          r.tag = TIER[e.brain.tier]; r.tagC = hex(MOOD[e.brain.mood]);
-        }
+        // (Who is SMART, DUMB or SONNY, and in what mood, is NOT shown — Adam: "dont tell me who is
+        // what mood and smart". You find out by racing them.)
         rows.push_back(r);
       }
     }
