@@ -8,6 +8,7 @@
 // a pure rotation, so the world is not mirrored — which the browser game once
 // was, and it read as "the steering is inverted".
 #pragma once
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -121,6 +122,7 @@ class Renderer {
   Mat4 curVP;
   float curEye[3] = {0, 0, 0};
   Look curLook;
+  float scalePin = 0;           // > 0: draw the scene at this share of the window (--scale) instead of letting the governor choose
   bool post = true;             // false: the plain picture, as it was (SETTINGS - LOOK)
   bool postOk = true;           // false: this GPU could not build the look at all
   bool treeShadows = true;
@@ -195,6 +197,15 @@ class Renderer {
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;
   bool sceneOpen = false;
+  // THE GOVERNOR. The scene is drawn at `scale` of the window and enlarged when
+  // it is developed; the scale follows what the GPU is measured to take, so the
+  // picture is as sharp as this machine can hold at speed, and no sharper.
+  float scale = 1.0f;
+  int sw() const { return std::max(8, (int)(W * scale + 0.5f)); }
+  int sh() const { return std::max(8, (int)(H * scale + 0.5f)); }
+  unsigned gpuQ[2] = {0, 0};
+  int gpuAt = 0, gpuN = 0;
+  double gpuSum = 0, gpuMs = 0;
   void ensurePost();
   void renderShadow(const Look &L, const float eye[3], const float fwd[3], double time);
   bool camReady = false;

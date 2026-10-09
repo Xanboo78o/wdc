@@ -472,7 +472,7 @@ int main(int argc, char **argv) {
   bool autoDrive = false, lineArg = false, windowed = false, hidpi = false, noAudio = false, hidden = false;
   int camArg = -1, ffbArg = -1, winW = 1600, winH = 900, gridArg = 0, lapsArg = 0, startArg = 0;
   long maxFrames = 0;
-  double spool = 0, seedArg = 0;
+  double spool = 0, seedArg = 0, scaleArg = 0;
   for (int i = 1; i < argc; i++) {
     const std::string a = argv[i];
     auto val = [&](const char *flag) -> std::string {
@@ -499,7 +499,8 @@ int main(int argc, char **argv) {
     else if (a == "--shot") shot = val("--shot");
     else if (a == "--screen") screenArg = val("--screen");
     else if (a == "--model") modelArg = val("--model");
-    else if (a == "--look") lookArg = val("--look");           // film (the default) | plain
+    else if (a == "--look") lookArg = val("--look");
+    else if (a == "--scale") scaleArg = std::atof(val("--scale").c_str());   // pin the drawing scale (0.6..1) instead of letting the governor choose           // film (the default) | plain
     else if (a == "--xingus") xingArg = val("--xingus");       // a Xingus STYLE (rally, rallycross, gt3, derby ...) for unattended checks
     else if (a == "--xtrack") xtrackArg = val("--xtrack");     // heiligen | speedway | a circuit; --xheil picks the Heiligen route
     else if (a == "--xheil") xheilArg = val("--xheil");
@@ -790,6 +791,7 @@ int main(int argc, char **argv) {
   };
   auto drawAll = [&](FrameIn &f) {
     R.post = cfg.look != "plain" && R.postOk;
+    R.scalePin = (float)scaleArg;
     R.drawWorld(f);
     drawField();
     R.endScene(f.time);

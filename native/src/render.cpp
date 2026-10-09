@@ -315,8 +315,8 @@ void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); vU = p; gl_
 )";
 // what is brighter than paper white, at a quarter of the size: the source of the bloom
 static const char *BRIGHT_FS = R"(#version 330 core
-in vec2 vU; uniform sampler2D uTex; uniform vec2 uPx; uniform float uExp; out vec4 o;
-vec3 lin(vec2 u){ vec3 c = max(texture(uTex, u).rgb, 0.0); return min(pow(c, vec3(2.2)) * uExp, vec3(12.0)); }
+in vec2 vU; uniform sampler2D uTex; uniform vec2 uPx, uK; uniform float uExp; out vec4 o;
+vec3 lin(vec2 u){ vec3 c = max(texture(uTex, min(u * uK, uK - uPx * 0.5)).rgb, 0.0); return min(pow(c, vec3(2.2)) * uExp, vec3(12.0)); }
 void main(){
   vec3 c = (lin(vU + uPx * vec2(-1, -1)) + lin(vU + uPx * vec2(1, -1)) + lin(vU + uPx * vec2(-1, 1)) + lin(vU + uPx * vec2(1, 1))) * 0.25;
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -333,10 +333,17 @@ void main(){
 }
 )";
 static const char *COMP_FS = R"(#version 330 core
-in vec2 vU; uniform sampler2D uTex, uBloom; uniform float uExp; out vec4 o;
+in vec2 vU; uniform sampler2D uTex, uBloom; uniform float uExp, uSharp; uniform vec2 uK, uPx; out vec4 o;
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 void main(){
-  vec3 c = max(texture(uTex, vU).rgb, 0.0);
+  vec2 u = min(vU * uK, uK - uPx * 0.5);
+  vec3 c = max(texture(uTex, u).rgb, 0.0);
+  if (uSharp > 0.0) {
+    // drawn smaller than the window: give back the edge the enlargement softened
+    vec3 n = texture(uTex, u + vec2(uPx.x, 0.0)).rgb + texture(uTex, u - vec2(uPx.x, 0.0)).rgb
+           + texture(uTex, u + vec2(0.0, uPx.y)).rgb + texture(uTex, u - vec2(0.0, uPx.y)).rgb;
+    c = max(c + (c - n * 0.25) * uSharp, 0.0);
+  }
   c = pow(c, vec3(2.2)) * uExp;                       // display value -> light
   c += texture(uBloom, vU).rgb * 0.20;
   c = aces(c * 1.05);
@@ -1353,7 +1360,7 @@ void Renderer::renderShadow(const Look &L, const float eye[3], const float fwd[3
   glDisable(GL_POLYGON_OFFSET_FILL);
   glUniform1i(uPass, 0);
   glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)was);
-  glViewport(0, 0, W, H);
+  glViewport(0, 0, post ? sw() : W, post ? sh() : H);
 }
 
 // Develop the picture: bloom from what is brighter than white, the film curve
@@ -1367,12 +1374,14 @@ void Renderer::endScene(double time) {
   glActiveTexture(GL_TEXTURE0);
   const int bw = std::max(1, W / 4), bh = std::max(1, H / 4);
   const float EXPOSURE = 1.0f;
+  const float kx = (float)sw() / (float)W, ky = (float)sh() / (float)H;
   glViewport(0, 0, bw, bh);
   glBindFramebuffer(GL_FRAMEBUFFER, bloomFbo[0]);
   glUseProgram(brightProg);
   glBindTexture(GL_TEXTURE_2D, sceneCol);
   glUniform2f(glGetUniformLocation(brightProg, "uPx"), 1.0f / (float)W, 1.0f / (float)H);
   glUniform1f(glGetUniformLocation(brightProg, "uExp"), EXPOSURE);
+  glUniform2f(glGetUniformLocation(brightProg, "uK"), kx, ky);
   glDrawArrays(GL_TRIANGLES, 0, 3);
   glUseProgram(blurProg);
   const GLint uDir = glGetUniformLocation(blurProg, "uDir");
@@ -1388,6 +1397,9 @@ void Renderer::endScene(double time) {
   glUseProgram(compProg);
   glUniform1i(glGetUniformLocation(compProg, "uTex"), 0); glUniform1i(glGetUniformLocation(compProg, "uBloom"), 1);
   glUniform1f(glGetUniformLocation(compProg, "uExp"), EXPOSURE);
+  glUniform2f(glGetUniformLocation(compProg, "uK"), kx, ky);
+  glUniform2f(glGetUniformLocation(compProg, "uPx"), 1.0f / (float)W, 1.0f / (float)H);
+  glUniform1f(glGetUniformLocation(compProg, "uSharp"), scale < 0.999f ? (1.0f - scale) * 1.6f : 0.0f);
   glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, bloomTex[0]);
   glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, sceneCol);
   glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -1400,6 +1412,9 @@ void Renderer::endScene(double time) {
   glBindVertexArray(0);
   glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST);
   glUseProgram(prog);
+  glEndQuery(GL_TIME_ELAPSED);
+  gpuAt ^= 1;
+  if (PROF.on && PROF.frames % 100 == 0) std::fprintf(stderr, "governor: GPU %.1f ms a frame, drawing at %.0f%%\n", gpuMs, scale * 100);
   PROF.mark(6);
 }
 
@@ -1415,7 +1430,23 @@ void Renderer::drawWorld(const FrameIn &f) {
     for (int k = 0; k < 3; k++) { L.sunCol[k] *= 1.50f; L.skyAmb[k] *= 0.95f; L.gndAmb[k] *= 0.92f; }
     glBindFramebuffer(GL_FRAMEBUFFER, sceneFbo);
     sceneOpen = true;
-  }
+    // what the last frames cost the GPU decides how large this one is drawn
+    if (!gpuQ[0]) glGenQueries(2, gpuQ);
+    if (gpuN > 0 || gpuAt > 0) {
+      GLuint64 ns = 0; GLint ok = 0;
+      glGetQueryObjectiv(gpuQ[gpuAt ^ 1], GL_QUERY_RESULT_AVAILABLE, &ok);
+      if (ok) { glGetQueryObjectui64v(gpuQ[gpuAt ^ 1], GL_QUERY_RESULT, &ns); gpuSum += ns / 1e6; gpuN++; }
+    }
+    if (gpuN >= 20) {
+      gpuMs = gpuSum / gpuN; gpuSum = 0; gpuN = 0;
+      if (scalePin > 0) scale = scalePin;
+      else if (gpuMs > 14.5) scale = std::max(0.75f, scale - (gpuMs > 19 ? 0.10f : 0.05f));
+      else if (gpuMs < 10.5) scale = std::min(1.0f, scale + 0.05f);
+    }
+    if (scalePin > 0) scale = scalePin;
+    glBeginQuery(GL_TIME_ELAPSED, gpuQ[gpuAt]);
+    glViewport(0, 0, sw(), sh());
+  } else
   glViewport(0, 0, W, H);
   glClearColor(L.fog[0], L.fog[1], L.fog[2], 1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
