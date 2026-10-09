@@ -1,6 +1,7 @@
 # XBR, native. `make` builds both binaries into native/build/.
 #
 #   xbr-drive   the headless gate (sim core only, links nothing graphical)
+#   xbr-race    a whole race, headless (sim core + race layer, nothing graphical)
 #   xbr         the game (SDL3 + OpenGL)
 #
 # No CMake on purpose: g++, make and SDL3 are all this needs.
@@ -12,16 +13,32 @@ CXXFLAGS ?= -O2 -g -std=c++20 -Wall -Wextra -Wno-unused-parameter
 CXXFLAGS += -ffp-contract=off
 BUILD    := build
 
-SIM  := physics.cpp parts.cpp track.cpp driver.cpp collide.cpp
-GAME := game_main.cpp render.cpp audio.cpp
+SIM  := physics.cpp parts.cpp track.cpp driver.cpp collide.cpp world.cpp
+# the race layer: js/race.js and everything it imports that is pure logic
+SIM  += grid.cpp drivers.cpp pitstop.cpp xingus.cpp safetycar.cpp race.cpp weather.cpp
+GAME := game_main.cpp render.cpp audio.cpp bridge.cpp carmesh.cpp ui.cpp home.cpp
 
 SIM_O  := $(SIM:%.cpp=$(BUILD)/%.o)
 GAME_O := $(GAME:%.cpp=$(BUILD)/%.o)
 
-GAME_CFLAGS := $(shell pkg-config --cflags sdl3 epoxy)
-GAME_LIBS   := $(shell pkg-config --libs sdl3 epoxy) -lm
+GAME_CFLAGS := $(shell pkg-config --cflags sdl3 epoxy freetype2)
+GAME_LIBS   := $(shell pkg-config --libs sdl3 epoxy freetype2) -lm
 
-all: $(BUILD)/xbr-drive $(BUILD)/xbr
+# The photographs the browser game uses (data/tex, CC0 from ambientCG), turned
+# into plain PPMs at build time so the game needs no JPEG decoder of its own.
+TEXN := tarmac grass gravel concrete plaster apron sand
+TEX  := $(foreach t,$(TEXN),$(BUILD)/tex/$(t)-c.ppm $(BUILD)/tex/$(t)-n.ppm)
+
+all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX)
+# the headless tools alone (what native/check.sh needs): `make -C native sim`
+sim: $(BUILD)/xbr-drive $(BUILD)/xbr-race
+
+$(BUILD)/xbr-race: $(SIM_O) $(BUILD)/race_main.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
+
+$(BUILD)/tex/%.ppm: ../data/tex/%.jpg | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $< -resize 1024x1024! -depth 8 $@
 
 $(BUILD)/xbr-drive: $(SIM_O) $(BUILD)/drive_main.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
@@ -38,4 +55,4 @@ $(BUILD):
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean
+.PHONY: all sim clean

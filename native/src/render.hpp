@@ -14,6 +14,7 @@
 #include "json.hpp"
 #include "physics.hpp"
 #include "track.hpp"
+#include "world.hpp"
 
 namespace xbr {
 
@@ -57,36 +58,72 @@ struct GLMesh {
 
 enum Align { LEFT, CENTRE, RIGHT };
 
+// The light and the air: time of day and weather, as the renderer needs them.
+struct Look {
+  float sun[3] = {0.42f, 0.80f, 0.36f};          // toward the sun (GL space; normalised on use)
+  float sunCol[3] = {1.00f, 0.95f, 0.86f};
+  float skyAmb[3] = {0.52f, 0.58f, 0.68f}, gndAmb[3] = {0.34f, 0.33f, 0.30f};
+  float fog[3] = {0.78f, 0.84f, 0.90f}, skyTop[3] = {0.24f, 0.46f, 0.82f};
+  float fogK = 0.00055f;
+  float wet = 0;                                  // 0 dry .. 1 soaked: the road darkens and shines
+  float rain = 0;                                 // 0..1: streaks across the view
+};
+// phase: "dawn" | "day" | "dusk" | "night" (anything else is day); cloud 0 clear .. 1 overcast
+Look makeLook(const std::string &phase, double cloud, double wet, double rain);
+
 struct FrameIn {
   const Car *car = nullptr;
   const Spec *spec = nullptr;
   int camMode = 0;              // 0 onboard, 1 chase, 2 high
   bool showLine = false;
-  double wheelAngle = 0;        // radians the wheels have rolled
+  double wheelAngle = 0;        // metres the wheels have rolled
+  double groundH = 0;           // height of the road under the car
+  double gPitch = 0, gRoll = 0; // the tilt of the ground under its wheels
   double dt = 1.0 / 60;
+  double time = 0;              // seconds, for anything that animates
+  float paint[3] = {-1, 0, 0};  // the player's car; negative = the house red
+  Look look;
 };
 
 class Renderer {
  public:
-  bool init();
+  bool init(const std::string &dataDir, const std::string &texDir);
   void shutdown();
   void resize(int w, int h) { W = w; H = h; }
-  void buildWorld(const Track &track, const Json &surf, const Json &env, const Line &raceLine);
+  void buildWorld(const Track &track, const World &world, const Json &surf, const Json &env, const Line &raceLine);
   void buildCar(const Spec &spec);
   void snapCamera() { camReady = false; }
   void drawWorld(const FrameIn &f);
+  // Another car on the circuit (a rival): same meshes, its own paint. Call
+  // between drawWorld and the HUD.
+  void drawCar(const Car &car, const Spec &S, double groundH, double gPitch, double gRoll, const float paint[3], double rolled,
+               bool helmet = true);
+  void drawRain(const FrameIn &f);
 
   // ---- HUD: pixel coordinates, origin top-left
   void hudBegin();
   void rect(float x, float y, float w, float h, const float rgba[4]);
-  void text(float x, float y, float px, const std::string &s, const float rgba[4], Align al = LEFT);
-  float textWidth(float px, const std::string &s) const;
+  // font: 0 Anton, 1 Rubik, -1 picks by size (big figures in Anton)
+  void text(float x, float y, float px, const std::string &s, const float rgba[4], Align al = LEFT, int font = -1);
+  float textWidth(float px, const std::string &s, int font = -1) const;
   void hudEnd();
+  // ---- the shapes the game's own pages are made of (CSS pixels in, as given)
+  enum { ANTON = 0, RUBIK = 1, MARKER = 2, HUD_I = 3, HUD_B = 4 };
+  void poly(const float *xy, int n, const float rgba[4]);
+  void rrect(float x, float y, float w, float h, float r, const float rgba[4]);
+  void card(float x, float y, float w, float h, float r, float bw, const float fill[4], const float line[4]);
+  void circle(float cx, float cy, float r, const float rgba[4]);
+  void path(const float *xy, int n, float width, const float rgba[4], bool closed);
+  float textPx(float x, float y, float size, const std::string &s, const float rgba[4], Align al = LEFT, int font = 1, float track = 0);
+  float widthPx(float size, const std::string &s, int font = 1, float track = 0) const;
+  void hudRot(float cx, float cy, float deg);       // every shape after this is turned about (cx, cy); 0 turns it off
+  float hudAlpha = 1;                               // multiplies every shape's alpha
 
   // Render into an offscreen target and write a PPM. For checking a build
   // without putting a window on anyone's screen.
   bool beginOffscreen(int w, int h);
   bool writePPM(const std::string &path);
+  unsigned offscreenFbo() const { return fbo; }
 
   int W = 1280, H = 720;
   size_t worldTris = 0;
@@ -94,10 +131,27 @@ class Renderer {
  private:
   unsigned prog = 0, hudProg = 0;
   int uVP = -1, uModel = -1, uEye = -1, uSun = -1, uAlpha = -1, uHudSize = -1;
-  GLMesh ground, corridor, decals, lineMesh, scenery, sky, shadow;
+  int uSunCol = -1, uSkyAmb = -1, uGndAmb = -1, uFog = -1, uSkyTop = -1, uFogK = -1, uWet = -1, uNDent = -1, uDent = -1, uDentN = -1, uPaint = -1;
+  void setDents(const Car *car);
+  GLMesh ground, sea, corridor, decals, lineMesh, scenery, sky, shadow;
   GLMesh carBody, carFrontWing, carRearWing, carHelmet, wheelF, wheelR;
   double wheelR_f = 0.36, wheelR_r = 0.36;
-  unsigned hudVao = 0, hudVbo = 0;
+  bool carCabin = true;
+  float carEye[3] = {0.2f, 0.76f, 0};
+  unsigned hudVao = 0, hudVbo = 0, fontTex = 0;
+  struct Glyph { float x = 0, y = 0, w = 0, h = 0, bx = 0, by = 0, adv = 0; };
+  struct Font { Glyph g[95]; float cap = 50, asc = 50, desc = 14; };
+  Font fonts[5];
+  bool rotOn = false;
+  float rotCx = 0, rotCy = 0, rotC = 1, rotS = 0;
+  void hudVert(float x, float y, float u, float v, const float c[4]);
+  bool loadFonts(const std::string &dataDir);
+  bool loadTextures(const std::string &texDir);
+  unsigned texCol = 0, texNrm = 0;
+  bool hasTex = false;
+  int uHasTex = -1, uOrigin = -1;
+  int fontFor(float px, int font) const;
+  void hudQuad(float x, float y, float w, float h, float u0, float v0, float u1, float v1, const float c[4], float skew = 0);
   std::vector<float> hud;
   unsigned fbo = 0, fboCol = 0, fboDepth = 0;
   bool camReady = false;

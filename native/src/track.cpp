@@ -54,6 +54,58 @@ Track Track::fromJson(const Json &d) {
     t.curv.d[n - 1] = t.curv.d[n - 2];
   }
 
+  // ---- the race layer's share of the file (js/race.js reads these) -------------
+  if (d["road"].isArr() && (int)d["road"].size() == n) {
+    t.road.resize(n);
+    for (int i = 0; i < n; i++) t.road[i] = (unsigned char)d["road"][(size_t)i].n();
+  }
+  for (const auto &f : d["detours"].arr) {
+    Detour k;
+    k.name = f["name"].s(); k.s0 = f["s0"].n(); k.s1 = f["s1"].n(); k.w = f["w"].n(); k.road = (int)f["road"].n();
+    for (const auto &p : f["pts"].arr) k.pts.emplace_back(p[(size_t)0].n(), p[(size_t)1].n());
+    if (k.pts.size() >= 2) t.detours.push_back(k);
+  }
+  // WHICH SIDE THE PIT LANE IS ON — measured, never read from the file: the
+  // median lateral offset over the middle 40% of the lane's length.
+  if (d["pit"].isObj() && t.pitPts.size() >= 2) {
+    Pit &P = t.pit;
+    P.has = true; P.pts = t.pitPts;
+    P.entryS = d["pit"]["entryS"].n(0); P.exitS = d["pit"]["exitS"].n(0);
+    const auto &pp = P.pts;
+    for (size_t i = 1; i < pp.size(); i++) t.pitLen += std::hypot(pp[i].first - pp[i - 1].first, pp[i].second - pp[i - 1].second);
+    const auto nearest = [&](double px, double py) {
+      int b = 0;
+      double bd = std::numeric_limits<double>::infinity();
+      for (int i = 0; i < n; i++) {
+        const double d2 = (t.x[i] - px) * (t.x[i] - px) + (t.y[i] - py) * (t.y[i] - py);
+        if (d2 < bd) { bd = d2; b = i; }
+      }
+      return b;
+    };
+    const auto &mid = pp[pp.size() / 2];
+    const int best = nearest(mid.first, mid.second);
+    const double hm = t.hdg[best];
+    double lat = -std::sin(hm) * (mid.first - t.x[best]) + std::cos(hm) * (mid.second - t.y[best]);
+    {
+      std::vector<double> cum{0};
+      for (size_t i = 1; i < pp.size(); i++) cum.push_back(cum[i - 1] + std::hypot(pp[i].first - pp[i - 1].first, pp[i].second - pp[i - 1].second));
+      std::vector<double> lats;
+      for (double f = 0.30; f <= 0.701; f += 0.05) {
+        const double dd = f * cum.back();
+        size_t k = 1;
+        while (k < pp.size() - 1 && cum[k] < dd) k++;
+        const double u = (dd - cum[k - 1]) / std::max(1e-6, cum[k] - cum[k - 1]);
+        const double px = pp[k - 1].first + (pp[k].first - pp[k - 1].first) * u, py = pp[k - 1].second + (pp[k].second - pp[k - 1].second) * u;
+        const int b = nearest(px, py);
+        lats.push_back(-std::sin(t.hdg[b]) * (px - t.x[b]) + std::cos(t.hdg[b]) * (py - t.y[b]));
+      }
+      std::stable_sort(lats.begin(), lats.end());
+      if (!lats.empty()) lat = lats[lats.size() >> 1];
+    }
+    P.side = sign(lat) != 0 ? sign(lat) : 1;
+    P.offset = lat;
+  }
+
   // BANKING NEEDS A TRANSITION — no more than BANK_RATE degrees per metre.
   bool anyBank = false;
   for (double v : t.bank) if (v != 0) { anyBank = true; break; }

@@ -57,6 +57,13 @@ struct Driver {
   double ceiling = 0, grip = 0;
   double gripOverride = NaN, gripNow = NaN, errScale = NaN;
   std::string lineKind;                   // empty = the tier's own line
+  // How they drive in traffic (js/drivers.js STYLE); random unless the driver
+  // table names this person. Its own stream, so it moves no other draw.
+  struct Style { double launch = 0.27, space = 0, side = 0.5; } style;
+  // set by the race layer / the driver table; NaN = not set
+  double moveGap = NaN, lungeMax = NaN, paceMul = NaN;
+  const struct DriverProfile *profile = nullptr;
+  const struct Team *team = nullptr;
 };
 Driver makeDriver(double seed, const std::string &tierKey = "medium", int nCorners = 24);
 

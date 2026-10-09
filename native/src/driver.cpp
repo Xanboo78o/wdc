@@ -102,6 +102,13 @@ Driver makeDriver(double seed, const std::string &tierKey, int nCorners) {
   d.place = T.place;
   d.tyreCare = 0.3 + d.rng() * 0.7;
   d.nextMistake = 6 + d.rng() * 40;
+  {
+    Mulberry r(seed * 4243 + 71);
+    d.style.launch = 0.2 + r() * 0.8;
+    const double a = r(), b = r();
+    d.style.space = a * b * 0.8;
+    d.style.side = 0.3 + r() * 0.7;
+  }
   return d;
 }
 

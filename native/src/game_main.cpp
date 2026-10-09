@@ -1,19 +1,21 @@
 // xbr — the game, native. SDL3 for the window, the devices and the sound;
 // OpenGL for the picture; the sim core for everything that is true.
 //
-//   xbr [track] [car]            car: f1 | f4 | gt3      (default monza f1)
-//   --auto                       the reference driver takes the wheel (F1 toggles it)
-//   --tier hard|medium|casual|supercasual   who that driver is
-//   --cam 0|1|2                  onboard | chase | high
-//   --line                       show the racing line
-//   --windowed  --size WxH  --hidpi  --no-audio  --data DIR
-//   --shot FILE.ppm [--spool SECONDS]   render one frame offscreen and exit
-//   --frames N [--hidden]        run the real loop for N frames, report, exit.
-//                                --hidden shows no window and plays no sound:
-//                                a smoke test that disturbs nobody.
+// It opens on HOME, as the browser game does (home.html): a live race behind
+// the cards, RACE one press away, SETUP / GARAGE / SETTINGS beside it.
 //
-// This is the hot-lap half of the browser game. The loop below is
-// js/main.js's solo branch, substep for substep.
+//   xbr [track] [car]            go straight to that circuit (car: f1 | f4 | gt3), skipping HOME
+//   --mode race|hotlap  --grid N  --laps N  --start N  --tier T  --seed N
+//   --auto                       the reference driver takes your wheel (F1 toggles it)
+//   --cam 0|1|2|3  --line  --time PHASE  --weather KIND
+//   --windowed  --size WxH  --hidpi  --no-audio  --data DIR
+//   --ffb PERCENT                wheel force for this run, through tools/ffb.py (0 = off, the default)
+//   --shot FILE.ppm [--spool SECONDS] [--screen home|setup|garage|settings|pause|results]
+//   --frames N [--hidden]        run the real loop for N frames, report, exit;
+//                                --hidden shows no window and plays no sound
+//
+// The driving loop is js/main.js's, substep for substep: the solo branch for a
+// hot lap, race.tick for a race.
 #include <SDL3/SDL.h>
 #include <epoxy/gl.h>
 
@@ -23,16 +25,27 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <set>
+#include <ctime>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "audio.hpp"
+#include "bridge.hpp"
 #include "collide.hpp"
 #include "driver.hpp"
+#include "drivers.hpp"
+#include "grid.hpp"
+#include "home.hpp"
 #include "physics.hpp"
+#include "race.hpp"
 #include "render.hpp"
 #include "track.hpp"
+#include "ui.hpp"
+#include "weather.hpp"
+#include "world.hpp"
 
 using namespace xbr;
 
@@ -141,29 +154,38 @@ struct Devices {
 };
 
 // ---------------------------------------------------------------------------
-// a session: one circuit, one car
+// a session: one circuit, one car, and — in a race — everyone else
 // ---------------------------------------------------------------------------
+struct RaceSetup {
+  int grid = 22, laps = 3, slot = 12;
+  std::string tier = "medium", battle, teamKey, field = "f1";
+  bool noDnf = false, standIn = false;
+  double seed = 1;
+};
+
 struct Session {
+  std::string key, cls;
   Track track;
+  std::unique_ptr<World> world;
+  std::unique_ptr<Terrain> terrain;
+  Gnd gnd;
   Spec *spec = nullptr;
   std::unique_ptr<Lines> lines;
-  Car car;
+  Car own;
+  Car *car = &own;                 // your car: `own` in a hot lap, the race's entry in a race
   Driver driver;
   std::unique_ptr<Autopilot> pilot;
   std::unique_ptr<Gearbox> box;
   Hands hands;
+  std::unique_ptr<Race> race;
   int hint = 0;
   double sPrev = 0, lapT = 0, last = 0, best = 0, offT = 0, rolled = 0;
   bool hasLast = false, hasBest = false, invalid = false;
   int lap = 0;
+  double lastHit = 0;              // closing speed of a contact the sound has not played yet
+  double t = 0, passAt = -9;
   Proj proj;
 };
-
-static std::string fmtLap(double s) {
-  char buf[32];
-  std::snprintf(buf, sizeof buf, "%d:%06.3f", (int)std::floor(s / 60), std::fmod(s, 60));
-  return buf;
-}
 
 static void resetCar(Session &S) {
   const Track &track = S.track;
@@ -172,16 +194,33 @@ static void resetCar(Session &S) {
   double px, py, ph;
   int pi;
   track.point(0, line.off[i], px, py, ph, pi);
-  S.car = makeCar(S.spec->key);              // a reset car is a repaired car
-  S.car.x = px; S.car.y = py; S.car.hdg = line.hdg[i];
-  S.car.tyre.Tf = S.car.tyre.Tr = 70;
+  S.own = makeCar(S.spec->key);              // a reset car is a repaired car
+  S.own.x = px; S.own.y = py; S.own.hdg = line.hdg[i];
+  S.own.tyre.Tf = S.own.tyre.Tr = 70;
   S.hands = Hands{};
   S.hint = i; S.sPrev = 0; S.lapT = 0; S.lap = 0; S.invalid = false; S.offT = 0;
-  S.proj = track.project(S.car.x, S.car.y, S.hint);
+  S.proj = track.project(S.own.x, S.own.y, S.hint);
 }
 
-static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, const std::string &key,
-                        const std::string &cls, const std::string &tier) {
+// js/main.js rejoin(): beached, and the race is still going. Back on the line a
+// little way behind where it stopped. It does NOT repair anything.
+static void rejoin(Session &S) {
+  Entry &me = *S.race->me;
+  Car &car = me.car;
+  const double s = me.proj.s - 12;
+  double px, py, ph;
+  int pi;
+  S.track.point(s, S.lines->race.off[S.track.idx(s)], px, py, ph, pi);
+  car.x = px; car.y = py; car.hdg = ph;
+  car.vx = 10; car.vy = 0; car.r = 0;
+  car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0;
+  car.airborne = false; car.onRoof = false;
+  me.stuck = 0;
+}
+
+static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, const std::string &key, const std::string &cls,
+                        const std::string &pilotTier, const RaceSetup *rs) {
+  S.key = key; S.cls = cls;
   try { S.track = Track::load(dataDir, key); }
   catch (const std::exception &e) { std::fprintf(stderr, "xbr: %s\n", e.what()); return false; }
   if (S.track.n < 8) { std::fprintf(stderr, "xbr: %s has no usable centreline\n", key.c_str()); return false; }
@@ -193,14 +232,36 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     if (j.isObj()) registerAero(cls, new AeroMap(AeroMap::fromJson(j)));
     else std::fprintf(stderr, "xbr: no aero map for %s — driving on the constants\n", cls.c_str());
   }
+  S.world = std::make_unique<World>(S.track, Json::loadOpt(dataDir + "/elev/" + key + ".json"));
+  S.terrain = std::make_unique<Terrain>(S.track, S.world.get());
   S.lines = std::make_unique<Lines>(buildLines(S.track, *S.spec));
   S.lines->track = &S.track;
-  S.driver = makeDriver(1, tier, S.track.corners.empty() ? 24 : (int)S.track.corners.size());
-  S.pilot = std::make_unique<Autopilot>(S.track, *S.lines, *S.spec, peakSlip(*S.spec), &S.driver);
   S.box = std::make_unique<Gearbox>(cls);
   S.hasBest = S.hasLast = false;
   resetCar(S);
-  R.buildWorld(S.track, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"),
+  if (rs) {
+    // You take a seat in your team, and its other car is your teammate.
+    setField(cls == "f1" ? rs->field : cls);
+    setPlayerTeam(rs->standIn ? "" : rs->teamKey, rs->grid);
+    RaceOptions o;
+    o.track = &S.track; o.lines = S.lines.get(); o.spec = S.spec;
+    o.slots = gridSlots(S.track, rs->grid);
+    o.laps = rs->laps; o.grid = rs->grid; o.playerGrid = rs->slot; o.tier = rs->tier; o.player = true;
+    o.battle = rs->battle; o.noDnf = rs->noDnf; o.seed = rs->seed; o.standIn = rs->standIn;
+    o.playerTeam = rs->standIn ? nullptr : teamByKey(rs->teamKey);
+    S.race = std::make_unique<Race>(o);
+    World *w = S.world.get();
+    S.race->slopeAt = [w](double s) { return w->gradeAt(s); };
+    if (!S.race->me) { std::fprintf(stderr, "xbr: the race has no car for you\n"); return false; }
+    S.car = &S.race->me->car;
+    S.proj = S.race->me->proj;
+    if (S.race->me->hasDriver) S.pilot = std::make_unique<Autopilot>(S.track, *S.lines, *S.spec, peakSlip(*S.spec), &S.race->me->driver);
+  }
+  if (!S.pilot) {
+    S.driver = makeDriver(1, pilotTier, S.track.corners.empty() ? 24 : (int)S.track.corners.size());
+    S.pilot = std::make_unique<Autopilot>(S.track, *S.lines, *S.spec, peakSlip(*S.spec), &S.driver);
+  }
+  R.buildWorld(S.track, *S.world, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"),
                S.lines->race);
   R.buildCar(*S.spec);
   return true;
@@ -208,9 +269,9 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
 
 struct Toast { std::string msg; double t = 0; };
 
-// One 400 Hz substep. js/main.js, the solo branch.
+// One 400 Hz substep of a HOT LAP. js/main.js, the solo branch.
 static void simStep(Session &S, const HandsIn &in, bool autoDrive, bool drsTap, Toast &toast) {
-  Car &car = S.car;
+  Car &car = S.own;
   const Track &track = S.track;
   const Proj proj = track.project(car.x, car.y, S.hint);
   S.hint = proj.i;
@@ -241,17 +302,17 @@ static void simStep(Session &S, const HandsIn &in, bool autoDrive, bool drsTap, 
   Env env;
   env.surface = surface; env.bank = proj.bank; env.bankDir = sign(proj.curv);
   env.rollMul = dragFor(surface);
-  // NOT PORTED YET: env.slope. The surveyed gradient belongs to the elevation
-  // model, which the native renderer does not draw; the world is flat here.
+  // gravity along the road: the surveyed gradient under the car's own heading
+  env.slope = S.world->gradeAt(proj.s) * std::cos(car.hdg - track.hdg[(size_t)proj.i]);
   step(car, FIXED_DT, env);
 
   const Hit hit = resolveBarrier(car, track, S.hint);
   if (hit.hit && hit.closing > 3.5) {
-    char buf[64];
+    S.lastHit = std::max(S.lastHit, hit.closing);
     if (hit.harm > 0.12) {
-      std::snprintf(buf, sizeof buf, "HEAVY CONTACT - %s", hit.part);
-      for (char *c = buf; *c; c++) *c = (char)std::toupper((unsigned char)*c);
-      toast = {buf, 2.2};
+      std::string p = hit.part;
+      for (char &c : p) c = (char)std::toupper((unsigned char)c);
+      toast = {"HEAVY CONTACT - " + p, 2.2};
     } else toast = {"CONTACT", 1.4};
   }
 
@@ -270,120 +331,84 @@ static void simStep(Session &S, const HandsIn &in, bool autoDrive, bool drsTap, 
   S.rolled = std::fmod(S.rolled + car.vx * FIXED_DT, 1000.0);
 }
 
-// ---------------------------------------------------------------------------
-// HUD. Paper, ink and red.
-// ---------------------------------------------------------------------------
-static const float INK[4] = {0.06f, 0.06f, 0.07f, 0.80f}, PAPER[4] = {0.96f, 0.94f, 0.90f, 1}, DIM[4] = {0.96f, 0.94f, 0.90f, 0.55f};
-static const float RED[4] = {0.88f, 0.14f, 0.16f, 1}, GREEN[4] = {0.22f, 0.80f, 0.38f, 1}, AMBER[4] = {0.96f, 0.70f, 0.12f, 1};
-
-static void drawHud(Renderer &R, const Session &S, const Devices &dev, bool autoDrive, const Toast &toast, bool showFps,
-                    double fps, bool showInput, double helpT, const std::string &tier) {
-  const Car &car = S.car;
-  const float W = (float)R.W, H = (float)R.H;
-  const float u = std::max(1.0f, std::floor(H / 360.0f));       // one HUD pixel
-  R.hudBegin();
-
-  // ---- top left: where you are and how the lap is going
-  R.rect(12 * u, 12 * u, 132 * u, 62 * u, INK);
-  std::string title = S.track.name.empty() ? S.track.key : S.track.name;
-  if (title.size() > 16) title.resize(16);
-  R.text(18 * u, 17 * u, u, title, PAPER);
-  R.text(138 * u, 17 * u, u, S.spec->name, RED, RIGHT);
-  R.text(18 * u, 30 * u, 2 * u, S.lap > 0 ? fmtLap(S.lapT) : "OUT LAP", S.invalid ? RED : PAPER);
-  R.text(18 * u, 50 * u, u, "LAST", DIM);
-  R.text(48 * u, 50 * u, u, S.hasLast ? fmtLap(S.last) : "-:--.---", PAPER);
-  R.text(18 * u, 61 * u, u, "BEST", DIM);
-  R.text(48 * u, 61 * u, u, S.hasBest ? fmtLap(S.best) : "-:--.---", S.hasBest ? GREEN : PAPER);
-  if (S.lap > 0) { char b[16]; std::snprintf(b, sizeof b, "LAP %d", S.lap); R.text(138 * u, 50 * u, u, b, DIM, RIGHT); }
-  if (S.invalid) R.text(138 * u, 61 * u, u, "INVALID", RED, RIGHT);
-
-  // ---- bottom centre: revs, gear, speed
-  const float cx = W / 2, by = H - 16 * u;
-  R.rect(cx - 92 * u, by - 54 * u, 184 * u, 54 * u, INK);
-  const BoxSpec &bx = *S.box->box;
-  const double rev = clampd((S.box->rpm - bx.idle) / (bx.limit - bx.idle), 0, 1);
-  const int SEGS = 20;
-  for (int i = 0; i < SEGS; i++) {
-    const bool on = rev * SEGS > i;
-    const float *c = i >= SEGS - 3 ? RED : i >= SEGS - 7 ? AMBER : GREEN;
-    const float off[4] = {c[0], c[1], c[2], 0.18f};
-    R.rect(cx - 86 * u + i * 8.6f * u, by - 49 * u, 7 * u, 6 * u, on ? c : off);
+// One substep of a RACE. The race decides everything; this hands it your pedals.
+static void raceStep(Session &S, const HandsIn &in, bool bot, bool drsTap, Toast &toast) {
+  Race &race = *S.race;
+  Entry &me = *race.me;
+  Car &car = me.car;
+  PlayerInput pi;
+  if (bot && S.pilot) {
+    // behind HOME a bot sits in your seat, with racecraft: the race hands it a ctx
+    S.pilot->drive(car, me.proj, FIXED_DT, me.hasCtx ? &me.ctx : nullptr);
+    if (race.state == RaceState::Grid) { car.throttle = 0; car.brake = 1; }     // it waits for the lights like everybody else
+    pi.throttle = car.throttle; pi.brake = car.brake; pi.delta = car.delta;
+  } else {
+    S.hands.update(FIXED_DT, in);
+    pi.throttle = S.hands.throttle; pi.brake = S.hands.brake;
+    pi.delta = S.hands.wheel * steerLock(car.speed);
+    pi.wheel = S.hands.wheel;
   }
-  char b[32];
-  std::snprintf(b, sizeof b, "%d", (int)std::round(car.speed * 3.6));
-  R.text(cx + 84 * u, by - 36 * u, 4 * u, b, PAPER, RIGHT);
-  R.text(cx + 84 * u, by - 8 * u, u, "KM/H", DIM, RIGHT);
-  const std::string gear = car.selector < 0 ? "R" : std::to_string(S.box->gear + 1);
-  R.text(cx - 84 * u, by - 36 * u, 4 * u, gear, RED);
-  std::snprintf(b, sizeof b, "%d RPM", (int)(std::round(S.box->rpm / 100) * 100));
-  R.text(cx - 84 * u, by - 8 * u, u, b, DIM);
-  if (S.spec->drs) R.text(cx - 30 * u, by - 30 * u, 2 * u, "DRS", car.drsOpen ? GREEN : DIM, CENTRE);
-  if (car.tcCut < 0.97 && car.throttle > 0.1) R.text(cx - 16 * u, by - 8 * u, u, "TC", AMBER, CENTRE);
-  if (car.absCut < 0.97 && car.brake > 0.1) R.text(cx + 4 * u, by - 8 * u, u, "ABS", AMBER, CENTRE);
-
-  // ---- bottom right: pedals and the wheel
-  const float px = W - 46 * u;
-  R.rect(px - 6 * u, by - 54 * u, 40 * u, 54 * u, INK);
-  const float off[4] = {1, 1, 1, 0.10f};
-  R.rect(px, by - 48 * u, 10 * u, 36 * u, off);
-  R.rect(px + 14 * u, by - 48 * u, 10 * u, 36 * u, off);
-  R.rect(px, by - 12 * u - 36 * u * (float)car.brake, 10 * u, 36 * u * (float)car.brake, RED);
-  R.rect(px + 14 * u, by - 12 * u - 36 * u * (float)car.throttle, 10 * u, 36 * u * (float)car.throttle, GREEN);
-  const float lock = (float)steerLock(car.speed);
-  const float st = lock > 0 ? (float)clampd(car.delta / lock, -1, 1) : 0;
-  R.rect(px - 2 * u, by - 8 * u, 28 * u, 3 * u, off);
-  R.rect(px + 12 * u - st * 13 * u - 1.5f * u, by - 9 * u, 3 * u, 5 * u, PAPER);   // +delta is LEFT
-
-  // ---- damage, when there is any
-  if (car.damage > 0.01) {
-    std::snprintf(b, sizeof b, "DAMAGE %d%%", (int)std::round(car.damage * 100));
-    R.text(W - 14 * u, 17 * u, u, b, car.damage > 0.4 ? RED : AMBER, RIGHT);
-    if (car.hasLost && car.lostFrontWing) R.text(W - 14 * u, 28 * u, u, "FRONT WING GONE", RED, RIGHT);
-    if (car.hasLost && car.lostRearWing) R.text(W - 14 * u, 39 * u, u, "REAR WING GONE", RED, RIGHT);
+  if (S.spec->drs && drsTap) car.drsOpen = !car.drsOpen;
+  race.tick(FIXED_DT, &pi);
+  if (car.brake > 0.05) car.drsOpen = false;
+  if (me.bump.has) {
+    me.bump.has = false;
+    S.lastHit = std::max(S.lastHit, me.bump.closing);
+    if (std::string(me.bump.what) == "car") toast = {me.bump.harm > 1.2 ? "CONTACT - WHEEL TO WHEEL" : "RUBBING", 1.6};
+    else if (me.bump.harm > 0.12) {
+      std::string p = me.bump.part;
+      for (char &c : p) c = (char)std::toupper((unsigned char)c);
+      toast = {"HEAVY CONTACT - " + p, 2.2};
+    } else toast = {"CONTACT", 1.4};
   }
-
-  if (autoDrive) { R.text(cx, 14 * u, u, "REFERENCE DRIVER - " + tier + " - F1 TO TAKE THE WHEEL", AMBER, CENTRE); }
-  if (toast.t > 0) {
-    const float w = R.textWidth(2 * u, toast.msg) + 16 * u;
-    R.rect(cx - w / 2, 34 * u, w, 22 * u, INK);
-    R.text(cx, 38 * u, 2 * u, toast.msg, PAPER, CENTRE);
-  }
-  if (showFps) { std::snprintf(b, sizeof b, "%d FPS", (int)std::round(fps)); R.text(W - 14 * u, H - 84 * u, u, b, DIM, RIGHT); }
-  if (helpT > 0) {
-    R.text(14 * u, H - 34 * u, u, "ARROWS OR WASD DRIVE   SPACE DRS   SHIFT REVERSE   R RESET   C CAMERA   L LINE", DIM);
-    R.text(14 * u, H - 24 * u, u, "N NEXT TRACK   B PREVIOUS   TAB CAR   F1 REFERENCE DRIVER   F FULLSCREEN   F3 INPUT   F4 FPS   ESC QUIT", DIM);
-  }
-  if (showInput) {
-    // Which device, and what it is saying. A dead pedal names itself here.
-    float y = 84 * u;
-    R.rect(12 * u, y - 4 * u, 250 * u, 52 * u, INK);
-    R.text(18 * u, y, u, dev.joy ? "WHEEL: " + dev.name : dev.pad ? "PAD: " + dev.name : "KEYBOARD - NO WHEEL OR PAD FOUND", PAPER);
-    y += 11 * u;
-    if (dev.joy) {
-      std::string ax = "AXES";
-      const int na = std::min(10, SDL_GetNumJoystickAxes(dev.joy));
-      for (int i = 0; i < na; i++) { std::snprintf(b, sizeof b, " %d:%+.2f", i, Devices::axis(dev.joy, i)); ax += b; }
-      R.text(18 * u, y, u, ax, DIM); y += 11 * u;
-      std::string bt = "BUTTONS";
-      const int nb = SDL_GetNumJoystickButtons(dev.joy);
-      for (int i = 0; i < nb; i++) if (SDL_GetJoystickButton(dev.joy, i)) { bt += " " + std::to_string(i); }
-      R.text(18 * u, y, u, bt, DIM); y += 11 * u;
-      std::snprintf(b, sizeof b, "PROFILE STEER %d THR %d BRK %d", dev.prof.steer.ax, dev.prof.throttle.ax, dev.prof.brake.ax);
-      R.text(18 * u, y, u, b, DIM);
-    } else if (!dev.prof.ok) R.text(18 * u, y, u, "DATA/WHEEL.JSON NOT FOUND - A WHEEL CANNOT BE RECOGNISED", AMBER);
-    y += 11 * u;
-  }
-  R.hudEnd();
+  S.proj = me.proj;
+  S.lap = me.lap + 1;
+  S.lapT = race.state == RaceState::Grid ? 0 : std::max(0.0, race.time - me.lapStart);
+  S.hasLast = me.lastLap == me.lastLap; S.last = me.lastLap;
+  S.hasBest = me.bestLap == me.bestLap; S.best = me.bestLap;
+  S.rolled = std::fmod(S.rolled + car.vx * FIXED_DT, 1000.0);
 }
+
+// js/menuui.js resultMood: the results screen has feelings
+static void resultMood(int pos, int n, bool retired, std::string &title, std::string &line) {
+  const int r = std::rand();
+  if (retired) { if (r & 1) { title = "<span>...ow.</span>"; line = "the wall won. the wall always has home advantage."; } else { title = "RACE <span>OVER</span>"; line = "ok. sad for exactly ten seconds. then again."; } }
+  else if (pos == 1) {
+    const char *T[3][2] = {{"P1!!! <span>LET'S GOOO</span>", "you absolute menace. frame this one."}, {"WINNER <span>WINNER</span>", "nobody tell the others how easy that looked."},
+                           {"WE ARE <span>SO BACK</span>", "top step. remember this feeling."}};
+    title = T[r % 3][0]; line = T[r % 3][1];
+  } else if (pos <= 3) { if (r & 1) { title = "PODIUM <span>BABY</span>"; line = "champagne is on you. (it is apple juice.)"; } else { title = "A <span>TROPHY</span>"; line = "small trophy. still a trophy."; } }
+  else if (pos >= n && n > 3) { title = "LAST. <span>BUT FINISHED</span>"; line = "someone has to be. today it was us."; }
+  else if (pos <= (n + 1) / 2) { if (r & 1) { title = "CHEQUERED <span>FLAG</span>"; line = "solid. not boring. SOLID."; } else { title = "POINTS <span>IN THE BAG</span>"; line = "we take those."; } }
+  else { if (r & 1) { title = "WELL. <span>THAT HAPPENED</span>"; line = "we move. we always move."; } else { title = "CHEQUERED <span>FLAG</span>"; line = "the car came home. the pace did not."; } }
+}
+
+// The rim's buttons by NAME (data/wheelbtn.json, measured on Adam's R3), heard
+// through the bridge. Nothing here knows a button index.
+struct RimMap {
+  std::vector<std::pair<std::string, int>> b;
+  void load(const std::string &dataDir) {
+    const Json j = Json::loadOpt(dataDir + "/wheelbtn.json");
+    for (const auto &kv : j["map"].obj)
+      for (const auto &c : kv.second.arr)
+        if (c["b"].isNum()) b.emplace_back(kv.first, (int)c["b"].n());
+  }
+  bool held(const std::set<int> &down, const char *name) const {
+    for (const auto &e : b) if (e.first == name && down.count(e.second)) return true;
+    return false;
+  }
+};
+
+enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A_RESET, A_GO, A_PIT, A_COUNT };
 
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
   std::vector<std::string> pos;
-  std::string dataDir, shot, tier = "hard";
-  bool autoDrive = false, showLine = false, windowed = true, hidpi = false, noAudio = false, hidden = false;
+  std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg;
+  bool autoDrive = false, lineArg = false, windowed = false, hidpi = false, noAudio = false, hidden = false;
+  int camArg = -1, ffbArg = -1, winW = 1600, winH = 900, gridArg = 0, lapsArg = 0, startArg = 0;
   long maxFrames = 0;
-  int cam = 0, winW = 1600, winH = 900;
-  double spool = 0;
+  double spool = 0, seedArg = 0;
   for (int i = 1; i < argc; i++) {
     const std::string a = argv[i];
     auto val = [&](const char *flag) -> std::string {
@@ -391,7 +416,7 @@ int main(int argc, char **argv) {
       return argv[++i];
     };
     if (a == "--auto") autoDrive = true;
-    else if (a == "--line") showLine = true;
+    else if (a == "--line") lineArg = true;
     else if (a == "--windowed") windowed = true;
     else if (a == "--fullscreen") windowed = false;
     else if (a == "--hidpi") hidpi = true;
@@ -399,25 +424,41 @@ int main(int argc, char **argv) {
     else if (a == "--hidden") hidden = true;
     else if (a == "--frames") maxFrames = std::atol(val("--frames").c_str());
     else if (a == "--data") dataDir = val("--data");
-    else if (a == "--tier") tier = val("--tier");
-    else if (a == "--cam") cam = std::atoi(val("--cam").c_str());
+    else if (a == "--tier") tierArg = val("--tier");
+    else if (a == "--mode") modeArg = val("--mode");
+    else if (a == "--grid") gridArg = std::atoi(val("--grid").c_str());
+    else if (a == "--laps") lapsArg = std::atoi(val("--laps").c_str());
+    else if (a == "--start") startArg = std::atoi(val("--start").c_str());
+    else if (a == "--seed") seedArg = std::atof(val("--seed").c_str());
+    else if (a == "--cam") camArg = std::atoi(val("--cam").c_str());
+    else if (a == "--ffb") ffbArg = std::atoi(val("--ffb").c_str());
     else if (a == "--shot") shot = val("--shot");
+    else if (a == "--screen") screenArg = val("--screen");
     else if (a == "--spool") spool = std::atof(val("--spool").c_str());
-    else if (a == "--size") { if (std::sscanf(val("--size").c_str(), "%dx%d", &winW, &winH) != 2) { std::fprintf(stderr, "xbr: --size wants WxH\n"); return 2; } }
+    else if (a == "--time") timeArg = val("--time");
+    else if (a == "--weather") weatherArg = val("--weather");
+    else if (a == "--size") { windowed = true; if (std::sscanf(val("--size").c_str(), "%dx%d", &winW, &winH) != 2) { std::fprintf(stderr, "xbr: --size wants WxH\n"); return 2; } }
     else if (a.rfind("--", 0) == 0) { std::fprintf(stderr, "xbr: unknown flag %s\n", a.c_str()); return 2; }
     else pos.push_back(a);
   }
   if (pos.size() > 2) { std::fprintf(stderr, "xbr: too many arguments (track, car)\n"); return 2; }
-  std::string key = pos.size() > 0 ? pos[0] : "monza", cls = pos.size() > 1 ? pos[1] : "f1";
-  if (!hasCarSpec(cls)) { std::fprintf(stderr, "xbr: no car class '%s' (f1, f4, gt3)\n", cls.c_str()); return 2; }
-  if (cam < 0 || cam > 2) { std::fprintf(stderr, "xbr: --cam is 0, 1 or 2\n"); return 2; }
-  if (std::string(tierFor(tier)->key) != tier) { std::fprintf(stderr, "xbr: no tier '%s'\n", tier.c_str()); return 2; }
+  if (pos.size() > 1 && !hasCarSpec(pos[1])) { std::fprintf(stderr, "xbr: no car class '%s' (f1, f4, gt3)\n", pos[1].c_str()); return 2; }
+  if (camArg > 3) { std::fprintf(stderr, "xbr: --cam is 0 onboard, 1 chase, 2 nose or 3 t-cam\n"); return 2; }
+  if (!tierArg.empty() && std::string(tierFor(tierArg)->key) != tierArg) { std::fprintf(stderr, "xbr: no tier '%s'\n", tierArg.c_str()); return 2; }
+  if (!modeArg.empty() && modeArg != "race" && modeArg != "hotlap") { std::fprintf(stderr, "xbr: --mode is race or hotlap\n"); return 2; }
+  static const std::vector<std::string> TIMES = {"live", "night", "dawn", "sunrise", "morning", "day", "evening", "sunset", "dusk"},
+                                        WEATHERS = {"live", "clear", "cloudy", "overcast", "rain", "storm", "changing"},
+                                        SCREENS = {"home", "setup", "garage", "settings", "pause", "results"};
+  auto oneOf = [](const std::vector<std::string> &v, const std::string &s) { return std::find(v.begin(), v.end(), s) != v.end(); };
+  if (!timeArg.empty() && !oneOf(TIMES, timeArg)) { std::fprintf(stderr, "xbr: no --time '%s'\n", timeArg.c_str()); return 2; }
+  if (!weatherArg.empty() && !oneOf(WEATHERS, weatherArg)) { std::fprintf(stderr, "xbr: no --weather '%s'\n", weatherArg.c_str()); return 2; }
+  if (!screenArg.empty() && !oneOf(SCREENS, screenArg)) { std::fprintf(stderr, "xbr: no --screen '%s'\n", screenArg.c_str()); return 2; }
   const bool shotMode = !shot.empty();
   if (hidden && maxFrames <= 0) { std::fprintf(stderr, "xbr: --hidden needs --frames N, or it would run unseen for ever\n"); return 2; }
+  std::srand((unsigned)std::time(nullptr));
 
-  // The offscreen driver first when all that is wanted is a picture: it never
-  // touches the compositor. A hidden window is the fallback.
   if (shotMode) SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
+  SDL_SetAppMetadata("XBR", "native", "xbr");
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     if (shotMode) { SDL_ResetHint(SDL_HINT_VIDEO_DRIVER); if (!SDL_Init(SDL_INIT_VIDEO)) { std::fprintf(stderr, "xbr: SDL: %s\n", SDL_GetError()); return 1; } }
     else { std::fprintf(stderr, "xbr: SDL: %s\n", SDL_GetError()); return 1; }
@@ -432,28 +473,43 @@ int main(int argc, char **argv) {
     if (dataDir.empty()) { std::fprintf(stderr, "xbr: cannot find the data directory (pass --data DIR)\n"); return 1; }
   }
 
-  // every circuit on disk, for N / B
-  std::vector<std::string> tracks;
-  for (const auto &e : std::filesystem::directory_iterator(dataDir + "/tracks")) {
-    const std::string stem = e.path().stem().string();
-    if (e.path().extension() == ".json" && stem.rfind("fold", 0) != 0 && stem != "test") tracks.push_back(stem);
+  // the menu's record, kept between runs (the browser's `wdc.menu`)
+  std::string savePath;
+  const bool offscreen = shotMode || hidden;
+  if (!offscreen) { char *pref = SDL_GetPrefPath("xanboo78o", "xbr"); if (pref) { savePath = std::string(pref) + "menu.txt"; SDL_free(pref); } }
+  Home home(dataDir, savePath);
+  MenuSave &cfg = home.S;
+  const bool direct = !pos.empty() || maxFrames > 0 || autoDrive || (shotMode && (screenArg.empty() || screenArg == "pause" || screenArg == "results"));
+  if (pos.size() > 0) cfg.track = pos[0];
+  if (pos.size() > 1) cfg.car = pos[1];
+  if (!tierArg.empty()) cfg.tier = tierArg;
+  if (!modeArg.empty()) cfg.mode = modeArg;
+  else if (direct && offscreen) cfg.mode = "hotlap";
+  if (gridArg) cfg.grid = std::max(2, std::min(61, gridArg));
+  if (lapsArg) cfg.laps = std::max(1, std::min(999, lapsArg));
+  if (camArg >= 0) cfg.cam = camArg;
+  if (ffbArg >= 0) cfg.ffb = std::min(100, ffbArg);
+  if (lineArg) cfg.line = true;
+  if (!timeArg.empty()) cfg.time = timeArg;
+  if (!weatherArg.empty()) cfg.weather = weatherArg;
+  if (!std::filesystem::exists(dataDir + "/tracks/" + cfg.track + ".json")) {
+    if (!pos.empty()) { std::fprintf(stderr, "xbr: no circuit '%s' in %s/tracks\n", cfg.track.c_str(), dataDir.c_str()); return 1; }
+    cfg.track = "monza";
   }
-  std::sort(tracks.begin(), tracks.end());
 
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
   SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
   SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-  if (!shotMode && !hidden) { SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1); SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4); }
+  if (!offscreen) { SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1); SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4); }
   SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
-  if (shotMode || hidden) flags |= SDL_WINDOW_HIDDEN;
+  if (offscreen) flags |= SDL_WINDOW_HIDDEN;
   if (hidpi) flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
-  if (!windowed && !shotMode) flags |= SDL_WINDOW_FULLSCREEN;
+  if (!windowed && !offscreen) flags |= SDL_WINDOW_FULLSCREEN;
   SDL_Window *win = SDL_CreateWindow("XBR", winW, winH, flags);
   SDL_GLContext ctx = win ? SDL_GL_CreateContext(win) : nullptr;
-  if (!ctx && !shotMode) {
-    // no multisampling on this driver: ask again without it
+  if (!ctx && !offscreen) {
     if (win) SDL_DestroyWindow(win);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0); SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
     win = SDL_CreateWindow("XBR", winW, winH, flags);
@@ -461,36 +517,201 @@ int main(int argc, char **argv) {
   }
   if (!ctx) { std::fprintf(stderr, "xbr: no OpenGL 3.3 context: %s\n", SDL_GetError()); return 1; }
   SDL_GL_MakeCurrent(win, ctx);
-  if (!shotMode && !hidden) SDL_GL_SetSwapInterval(1);
+  if (!offscreen) SDL_GL_SetSwapInterval(1);
   std::fprintf(stderr, "xbr: %s | %s | video driver %s\n", (const char *)glGetString(GL_RENDERER), (const char *)glGetString(GL_VERSION),
                SDL_GetCurrentVideoDriver());
 
   Renderer R;
-  if (!R.init()) return 1;
-  if (shotMode || hidden) { if (!R.beginOffscreen(winW, winH)) { std::fprintf(stderr, "xbr: offscreen target incomplete\n"); return 1; } }
-  else { int w, h; SDL_GetWindowSizeInPixels(win, &w, &h); R.resize(w, h); glEnable(GL_MULTISAMPLE); }
+  {
+    const char *base = SDL_GetBasePath();
+    if (!R.init(dataDir, std::string(base ? base : "native/build/") + "tex")) return 1;
+  }
+  float K = 1;                     // device pixels per CSS pixel
+  if (offscreen) { if (!R.beginOffscreen(winW, winH)) { std::fprintf(stderr, "xbr: offscreen target incomplete\n"); return 1; } }
+  else { int w, h; SDL_GetWindowSizeInPixels(win, &w, &h); R.resize(w, h); glEnable(GL_MULTISAMPLE); K = std::max(1.0f, SDL_GetWindowPixelDensity(win)); }
 
-  Session S;
-  if (!loadSession(S, R, dataDir, key, cls, tier)) return 1;
-
+  // The session lives on the heap and is never moved: the world, the terrain,
+  // the lines, the race and the driver all hold references into it.
+  std::unique_ptr<Session> SP;
+#define S (*SP)
+  enum Screen { HOME, DRIVE, PAUSE, RESULTS };
+  Screen screen = HOME;
+  GameHud hud;
+  HudTheme theme;
   Toast toast;
+  double clock = 0, acc = 0;
+  int pauseAt = 0;
+  std::string pauseSay, resTitle, resLine;
+  bool bgOn = false;               // the session on screen is HOME's backdrop
+  std::string bgCar;
+  WeatherDirector wd("clear", 1);
+  std::string wdMode;
+
+  auto showLoading = [&](const std::string &text) {
+    glBindFramebuffer(GL_FRAMEBUFFER, offscreen ? R.offscreenFbo() : 0);
+    glViewport(0, 0, R.W, R.H);
+    R.hudBegin();
+    hud.loading(R, K, theme, text);
+    R.hudEnd();
+    if (!offscreen) SDL_GL_SwapWindow(win);
+  };
+  // HOME's backdrop: two cars on one of the small circuits, a bot in your seat
+  auto startBackdrop = [&]() {
+    showLoading("WARMING THE TYRES. AND THE DRIVER.");
+    static const char *SMALL[2] = {"adam1", "monaco"};
+    RaceSetup rs;
+    rs.grid = 2; rs.slot = 2; rs.laps = 30; rs.tier = "supercasual"; rs.battle = "hard"; rs.noDnf = true; rs.standIn = true;
+    rs.seed = 1 + std::rand() % 9973;
+    auto N = std::make_unique<Session>();
+    const std::string bk = SMALL[std::rand() & 1];
+    if (!loadSession(*N, R, dataDir, std::filesystem::exists(dataDir + "/tracks/" + bk + ".json") ? bk : "monza", cfg.car, "hard", &rs)) return false;
+    SP = std::move(N);
+    bgOn = true; bgCar = cfg.car;
+    R.snapCamera(); acc = 0;
+    return true;
+  };
+  auto startSession = [&]() {
+    theme = HudTheme::forTeam(home.teamKey());
+    showLoading(cfg.mode == "race" ? "BUILDING A GRID OF " + std::to_string(cfg.grid) + "..." : "SOLVING THE RACING LINE... (IT IS THE FAST ONE)");
+    RaceSetup rs;
+    rs.grid = cfg.grid; rs.laps = cfg.laps; rs.tier = cfg.tier;
+    rs.slot = std::max(1, std::min(cfg.grid, startArg > 0 ? startArg : home.startSlot(cfg.grid)));
+    rs.battle = cfg.tier == "supercasual" ? cfg.battle : "";
+    rs.noDnf = cfg.noDnf; rs.teamKey = cfg.teams[cfg.car]; rs.field = cfg.field;
+    rs.seed = seedArg > 0 ? seedArg : 1 + std::rand() % 9973;
+    auto N = std::make_unique<Session>();
+    if (!loadSession(*N, R, dataDir, cfg.track, cfg.car, cfg.tier, cfg.mode == "race" ? &rs : nullptr)) return false;
+    SP = std::move(N);
+    bgOn = false;
+    hud.reset();
+    toast = {};
+    R.snapCamera(); acc = 0;
+    screen = DRIVE;
+    return true;
+  };
+  if (direct) { if (!startSession()) return 1; }
+  else if (!startBackdrop()) return 1;
+  if (shotMode && !screenArg.empty() && screenArg != "pause" && screenArg != "results") home.show(screenArg);
+
+  // ---- the light and the air
+  auto phaseNow = [&]() -> std::string {
+    std::string t = cfg.time;
+    if (bgOn) t = "day";
+    if (t == "live") {
+      // where the sun really is, here, now (New Hampshire, where this is driven)
+      const Sun sun = solarPosition((double)std::time(nullptr) * 1000.0, 43.13, -71.46);
+      t = dayPhase(sun.elevation, sun.azimuth).name;
+    }
+    if (t == "sunrise") return "dawn";
+    if (t == "morning" || t == "evening") return "day";
+    if (t == "sunset") return "dusk";
+    return t;
+  };
+  double rainNow = 0;
+  auto lookNow = [&](double dt) {
+    const std::string mode = bgOn ? "clear" : cfg.weather == "live" ? "clear" : cfg.weather;
+    if (mode != wdMode) { wdMode = mode; wd = WeatherDirector(mode, 1 + std::rand() % 997); }
+    const WeatherDirector::Sky sky = wd.step(dt);
+    setWetness(sky.road);
+    rainNow = sky.rain;
+    const std::string ch = wd.takeChange();
+    if (!ch.empty() && screen == DRIVE) { std::string u = ch; for (char &c : u) c = (char)std::toupper((unsigned char)c); toast = {"WEATHER: " + u, 3}; }
+    return makeLook(phaseNow(), sky.cloud, sky.road, sky.rain);
+  };
+  auto paintOf = [&](const std::string &col, float out[3]) { const Rgba c = hex(col.empty() ? "#ffffff" : col); out[0] = c.c[0]; out[1] = c.c[1]; out[2] = c.c[2]; };
+  auto frameOf = [&](double dt) {
+    FrameIn f;
+    f.car = S.car; f.spec = S.spec; f.showLine = cfg.line && !bgOn; f.wheelAngle = S.rolled; f.dt = dt; f.time = clock;
+    f.camMode = bgOn ? 1 : cfg.cam;
+    S.terrain->under(*S.car, S.proj, S.gnd);
+    f.groundH = S.terrain->h(S.proj.s, S.proj.lat); f.gPitch = S.gnd.pitch; f.gRoll = S.gnd.roll;
+    f.look = lookNow(dt);
+    if (S.race) paintOf(S.race->me->col, f.paint);
+    else { const Team *t = teamByKey(home.teamKey()); if (t) paintOf(t->col, f.paint); }
+    return f;
+  };
+  // everyone else on the circuit
+  auto drawField = [&]() {
+    if (!S.race) return;
+    for (Entry &e : S.race->entries) {
+      if (e.isPlayer) continue;
+      float paint[3];
+      paintOf(e.col, paint);
+      Gnd g;
+      S.terrain->under(e.car, e.proj, g);
+      R.drawCar(e.car, *S.spec, S.terrain->h(e.proj.s, e.proj.lat), g.pitch, g.roll, paint, std::fmod(S.race->progress(e), 1000.0));
+    }
+    // the safety car, when it is out: the same body in silver, until its own is drawn
+    const SafetyCar &sc = S.race->rc.sc;
+    if (sc.out) {
+      const float silver[3] = {0.78f, 0.80f, 0.82f};
+      Proj p = S.track.project(sc.car.x, sc.car.y);
+      Gnd g;
+      S.terrain->under(sc.car, p, g);
+      R.drawCar(sc.car, *S.spec, S.terrain->h(p.s, p.lat), g.pitch, g.roll, silver, std::fmod(sc.prog, 1000.0));
+    }
+  };
+  auto hudIn = [&]() {
+    HudIn h;
+    h.car = S.car; h.spec = S.spec; h.box = S.box.get();
+    h.trackName = S.track.name.empty() ? S.key : S.track.name; h.carName = S.spec->full;
+    h.sessionT = S.t; h.lap = S.lap; h.lapT = S.lapT; h.last = S.last; h.best = S.best;
+    h.hasLast = S.hasLast; h.hasBest = S.hasBest; h.invalid = S.invalid;
+    h.usingPad = S.hands.usingPad; h.msg = toast.t > 0 ? toast.msg : "";
+    h.race = S.race.get(); h.clock = clock;
+    h.passFlash = S.race && S.race->time - S.passAt < 2.6;
+    return h;
+  };
+  auto liveOf = [&]() {
+    LiveTower L;
+    if (!bgOn || !S.race || S.race->state == RaceState::Grid) return L;
+    L.up = true; L.track = S.track.name; L.lap = std::min(S.race->laps, S.race->me->lap + 1); L.laps = S.race->laps;
+    for (size_t i = 0; i < S.race->standings.size(); i++) {
+      const Entry &e = *S.race->standings[i];
+      char g[24] = "LEADER";
+      if (i > 0) std::snprintf(g, sizeof g, "+%.1f", (S.race->progress(*S.race->standings[i - 1]) - S.race->progress(e)) / std::max(e.car.speed, 14.0));
+      L.rows.push_back({(int)i + 1, e.col.empty() ? "#ffffff" : e.col, e.name, e.retired ? "DNF" : g, e.isPlayer});
+    }
+    return L;
+  };
+  auto pauseItems = [&]() {
+    static const char *CAMS[4] = {"ONBOARD", "CHASE", "NOSE", "T-CAM"};
+    return std::vector<std::string>{"RESUME", S.race ? "REJOIN" : "RESTART LAP", std::string("CAMERA - ") + CAMS[cfg.cam], "IDEAL LINE",
+                                    "FORCE FEEDBACK - " + std::to_string(cfg.ffb) + "%", "QUIT TO MENU"};
+  };
+  auto drawAll = [&](FrameIn &f) {
+    R.drawWorld(f);
+    drawField();
+    R.hudBegin();
+    R.drawRain(f);
+    if (screen == HOME) home.draw(R, K, clock, liveOf());
+    else if (screen == RESULTS && S.race) hud.results(R, K, theme, *S.race, resTitle, resLine);
+    else {
+      hud.draw(R, K, theme, hudIn());
+      if (screen == PAUSE) hud.pause(R, K, theme, pauseItems(), pauseAt, pauseSay);
+    }
+    R.hudEnd();
+  };
+
   if (shotMode) {
     HandsIn none;
     const long steps = (long)(spool / FIXED_DT);
+    Look tmp = lookNow(0.016);
+    (void)tmp;
     for (long i = 0; i < steps; i++) {
-      simStep(S, none, true, false, toast);
-      if (i % 8 == 0) S.box->update(8 * FIXED_DT, S.car.speed * 3.6, S.car.throttle);
+      if (S.race) raceStep(S, none, true, false, toast); else simStep(S, none, true, false, toast);
+      if (i % 8 == 0) S.box->update(8 * FIXED_DT, S.car->speed * 3.6, S.car->throttle);
     }
-    FrameIn f;
-    f.car = &S.car; f.spec = S.spec; f.camMode = cam; f.showLine = showLine; f.wheelAngle = S.rolled;
+    clock = spool; S.t = spool;
+    if (screenArg == "pause") { screen = PAUSE; pauseSay = "breathe."; }
+    if (screenArg == "results" && S.race) { screen = RESULTS; resultMood(S.race->me->pos, (int)S.race->entries.size(), S.race->me->retired, resTitle, resLine); }
+    FrameIn f = frameOf(1.0 / 60);
     R.snapCamera();
-    R.drawWorld(f);
-    Devices none2;
-    drawHud(R, S, none2, autoDrive, toast, false, 0, false, 0, tier);
+    drawAll(f);
     glFinish();
     const bool ok = R.writePPM(shot);
     std::fprintf(stderr, "xbr: %s %s  (t=%.1fs, %.0f km/h, lap %d)\n", ok ? "wrote" : "FAILED to write", shot.c_str(), spool,
-                 S.car.speed * 3.6, S.lap);
+                 S.car->speed * 3.6, S.lap);
     return ok ? 0 : 1;
   }
 
@@ -498,68 +719,55 @@ int main(int argc, char **argv) {
   dev.prof = loadWheelProfile(dataDir);
   dev.scan();
   if (!dev.name.empty()) std::fprintf(stderr, "xbr: input device: %s (%s)\n", dev.name.c_str(), dev.joy ? "wheel profile" : "gamepad");
+  RimMap rim;
+  rim.load(dataDir);
+  Bridge bridge;
 
   EngineAudio audio;
-  if (!noAudio && !audio.open(cls)) std::fprintf(stderr, "xbr: no audio device (%s) — running silent\n", SDL_GetError());
+  if (!noAudio && !audio.open(S.cls, dataDir)) std::fprintf(stderr, "xbr: no audio device (%s) — running silent\n", SDL_GetError());
 
-  bool running = true, showFps = false, showInput = false, paused = false, fullscreen = !windowed;
+  bool running = true, showFps = false, fullscreen = !windowed && !offscreen;
   long frames = 0;
-  double worstMs = 0;
+  double worstMs = 0, fps = 60;
   const Uint64 t0 = SDL_GetTicksNS();
-  double acc = 0, helpT = 14, fps = 60;
-  Uint64 prev = SDL_GetTicksNS();
+  Uint64 prev = t0;
   bool drsTap = false;
+  bool actPrev[A_COUNT] = {false};
+  double repeatAt[A_COUNT] = {0};
 
-  auto reload = [&](const std::string &k, const std::string &c) {
-    Session N;
-    if (!loadSession(N, R, dataDir, k, c, tier)) {
-      // the world meshes may be half replaced: put the old circuit back
-      R.buildWorld(S.track, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"), S.lines->race);
-      R.buildCar(*S.spec);
-      toast = {"COULD NOT LOAD " + k, 3};
-      return;
-    }
-    S = std::move(N);
-    // the lines hold a pointer to the track they were solved for, and the
-    // session has just moved: rebuild what points into it
-    S.lines->track = &S.track;
-    S.pilot = std::make_unique<Autopilot>(S.track, *S.lines, *S.spec, peakSlip(*S.spec), &S.driver);
-    key = k; cls = c;
-    audio.setClass(cls);
-    toast = {(S.track.name.empty() ? key : S.track.name) + " - " + S.spec->name, 3};
-    acc = 0; prev = SDL_GetTicksNS();
-  };
+  auto toHome = [&]() { bridge.release(); screen = HOME; home.show("home"); if (startBackdrop()) audio.setClass(S.cls); prev = SDL_GetTicksNS(); };
+  auto lightsOut = [&]() { bridge.release(); if (startSession()) { audio.setClass(S.cls); autoDrive = false; } else { home.say("that one would not load."); startBackdrop(); } prev = SDL_GetTicksNS(); };
 
   while (running) {
+    bool act[A_COUNT] = {false};
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
       switch (e.type) {
         case SDL_EVENT_QUIT: running = false; break;
-        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: { if (hidden) break; int w, h; SDL_GetWindowSizeInPixels(win, &w, &h); R.resize(w, h); break; }
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: { if (hidden) break; int w, h; SDL_GetWindowSizeInPixels(win, &w, &h); R.resize(w, h); K = std::max(1.0f, SDL_GetWindowPixelDensity(win)); break; }
+        case SDL_EVENT_WINDOW_FOCUS_LOST: if (screen == DRIVE && !hidden && !autoDrive) { screen = PAUSE; pauseAt = 0; pauseSay = "it will still be here."; bridge.release(); } break;
         case SDL_EVENT_JOYSTICK_ADDED: case SDL_EVENT_JOYSTICK_REMOVED: dev.scan(); break;
         case SDL_EVENT_KEY_DOWN: {
-          if (e.key.repeat) break;
+          if (e.key.repeat && screen == DRIVE) break;
+          const bool menuish = screen != DRIVE;
           switch (e.key.scancode) {
-            case SDL_SCANCODE_ESCAPE: running = false; break;
-            case SDL_SCANCODE_SPACE: drsTap = true; break;
-            case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: S.hands.selector = S.hands.selector < 0 ? 1 : -1; break;
-            case SDL_SCANCODE_R: case SDL_SCANCODE_BACKSPACE: resetCar(S); R.snapCamera(); break;
-            case SDL_SCANCODE_C: cam = (cam + 1) % 3; R.snapCamera(); break;
-            case SDL_SCANCODE_L: showLine = !showLine; break;
-            case SDL_SCANCODE_F: fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen); break;
-            case SDL_SCANCODE_F1: autoDrive = !autoDrive; break;
-            case SDL_SCANCODE_F3: showInput = !showInput; break;
+            case SDL_SCANCODE_ESCAPE: act[screen == DRIVE || screen == PAUSE ? A_PAUSE : A_BACK] = true; break;
+            case SDL_SCANCODE_BACKSPACE: act[menuish ? A_BACK : A_RESET] = true; break;
+            case SDL_SCANCODE_UP: if (menuish) act[A_UP] = true; break;
+            case SDL_SCANCODE_DOWN: if (menuish) act[A_DOWN] = true; break;
+            case SDL_SCANCODE_LEFT: if (menuish) act[A_LEFT] = true; break;
+            case SDL_SCANCODE_RIGHT: if (menuish) act[A_RIGHT] = true; break;
+            case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: act[A_OK] = true; break;
+            case SDL_SCANCODE_SPACE: act[menuish ? A_OK : A_DRS] = true; break;
+            case SDL_SCANCODE_G: if (menuish) act[A_GO] = true; break;
+            case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: if (screen == DRIVE) S.hands.selector = S.hands.selector < 0 ? 1 : -1; break;
+            case SDL_SCANCODE_R: if (!menuish) act[A_RESET] = true; break;
+            case SDL_SCANCODE_C: if (!menuish) act[A_CAM] = true; break;
+            case SDL_SCANCODE_P: if (!menuish) act[A_PIT] = true; break;
+            case SDL_SCANCODE_L: if (!menuish) cfg.line = !cfg.line; break;
+            case SDL_SCANCODE_F: case SDL_SCANCODE_F11: if (e.key.scancode == SDL_SCANCODE_F11 || !menuish) { fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen); } break;
+            case SDL_SCANCODE_F1: if (screen == DRIVE && !S.race) autoDrive = !autoDrive; break;
             case SDL_SCANCODE_F4: showFps = !showFps; break;
-            case SDL_SCANCODE_RETURN: paused = !paused; break;
-            case SDL_SCANCODE_TAB: reload(key, cls == "f1" ? "f4" : cls == "f4" ? "gt3" : "f1"); break;
-            case SDL_SCANCODE_N: case SDL_SCANCODE_B: {
-              if (tracks.empty()) break;
-              auto it = std::find(tracks.begin(), tracks.end(), key);
-              long i = it == tracks.end() ? 0 : it - tracks.begin();
-              i = (i + (e.key.scancode == SDL_SCANCODE_N ? 1 : (long)tracks.size() - 1)) % (long)tracks.size();
-              reload(tracks[(size_t)i], cls);
-              break;
-            }
             default: break;
           }
           break;
@@ -567,75 +775,162 @@ int main(int argc, char **argv) {
         default: break;
       }
     }
-    if (dev.tapped(0)) drsTap = true;
-    if (dev.tapped(1)) { cam = (cam + 1) % 3; R.snapCamera(); }
-    if (dev.tapped(2)) { resetCar(S); R.snapCamera(); }
-    if (dev.tapped(3)) paused = !paused;
-
     const Uint64 now = SDL_GetTicksNS();
     double dt = (now - prev) / 1e9;
     prev = now;
     if (dt > 0) fps += (1.0 / dt - fps) * 0.05;
     dt = std::min(dt, 0.1);
+    clock += dt;
+
+    // pad and rim: held states, turned into presses (a held direction repeats, like a held key)
+    {
+      bool held[A_COUNT] = {false};
+      const std::set<int> &rb = bridge.buttons;
+      held[A_UP] = rim.held(rb, "up"); held[A_DOWN] = rim.held(rb, "down"); held[A_LEFT] = rim.held(rb, "left"); held[A_RIGHT] = rim.held(rb, "right");
+      held[A_OK] = rim.held(rb, "confirm"); held[A_BACK] = rim.held(rb, "back");
+      held[screen == HOME ? A_GO : A_PAUSE] = rim.held(rb, "pause");
+      held[A_CAM] = rim.held(rb, "cam"); held[A_DRS] = rim.held(rb, "drs");
+      if (dev.pad) {
+        auto pb = [&](SDL_GamepadButton b) { return SDL_GetGamepadButton(dev.pad, b); };
+        const double ax = SDL_GetGamepadAxis(dev.pad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0, ay = SDL_GetGamepadAxis(dev.pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0;
+        const bool menuish = screen != DRIVE;
+        held[A_UP] |= pb(SDL_GAMEPAD_BUTTON_DPAD_UP) || (menuish && ay < -0.6); held[A_DOWN] |= pb(SDL_GAMEPAD_BUTTON_DPAD_DOWN) || (menuish && ay > 0.6);
+        held[A_LEFT] |= pb(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || (menuish && ax < -0.6); held[A_RIGHT] |= pb(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || (menuish && ax > 0.6);
+        held[screen == HOME ? A_GO : A_PAUSE] |= pb(SDL_GAMEPAD_BUTTON_START);
+        if (!menuish) { held[A_DRS] |= pb(SDL_GAMEPAD_BUTTON_SOUTH); held[A_RESET] |= pb(SDL_GAMEPAD_BUTTON_BACK); held[A_CAM] |= pb(SDL_GAMEPAD_BUTTON_NORTH); held[A_PIT] |= pb(SDL_GAMEPAD_BUTTON_WEST); }
+        else { held[A_OK] |= pb(SDL_GAMEPAD_BUTTON_SOUTH); held[A_BACK] |= pb(SDL_GAMEPAD_BUTTON_EAST); }
+      }
+      for (int i = 0; i < A_COUNT; i++) {
+        if (held[i] && !actPrev[i]) { act[i] = true; repeatAt[i] = clock + 0.38; }
+        else if (held[i] && i <= A_RIGHT && clock >= repeatAt[i]) { act[i] = true; repeatAt[i] = clock + 0.12; }
+        actPrev[i] = held[i];
+      }
+    }
+
+    // ---- the screens
+    if (screen == HOME) {
+      if (act[A_UP]) home.input(Nav::Up);
+      if (act[A_DOWN]) home.input(Nav::Down);
+      if (act[A_LEFT]) home.input(Nav::Left);
+      if (act[A_RIGHT]) home.input(Nav::Right);
+      if (act[A_OK]) home.input(Nav::Ok);
+      if (act[A_BACK]) home.input(Nav::Back);
+      if (act[A_GO]) home.input(Nav::Go);
+      if (home.wantQuit) running = false;
+      if (home.wantStart) { home.wantStart = false; lightsOut(); }
+      else if (home.dirty) { home.dirty = false; if (bgOn && bgCar != cfg.car) { startBackdrop(); audio.setClass(S.cls); prev = SDL_GetTicksNS(); } }
+    } else if (screen == PAUSE) {
+      const int n = (int)pauseItems().size();
+      if (act[A_UP]) pauseAt = (pauseAt + n - 1) % n;
+      if (act[A_DOWN]) pauseAt = (pauseAt + 1) % n;
+      if (act[A_PAUSE] || act[A_BACK]) screen = DRIVE;
+      if (act[A_OK]) {
+        switch (pauseAt) {
+          case 0: screen = DRIVE; break;
+          case 1: screen = DRIVE; if (S.race) rejoin(S); else resetCar(S); R.snapCamera(); break;
+          case 2: cfg.cam = (cfg.cam + 1) % 4; R.snapCamera(); break;
+          case 3: cfg.line = !cfg.line; break;
+          case 4: { static const int STEPS[] = {0, 20, 35, 50, 65, 80, 100}; int q = 0; for (int i = 0; i < 7; i++) if (STEPS[i] == cfg.ffb) q = i; cfg.ffb = STEPS[(q + 6) % 7]; break; }   // steps DOWN, then back to the top, as the JS does
+          default: toHome(); break;
+        }
+      }
+      prev = SDL_GetTicksNS();
+    } else if (screen == RESULTS) {
+      if (act[A_OK] || act[A_BACK] || act[A_PAUSE]) toHome();
+    } else {
+      if (act[A_PAUSE]) {
+        screen = PAUSE; pauseAt = 0; bridge.release();
+        static const char *CALM[3] = {"breathe.", "shake your hands out.", "it will still be here."}, *HURT[3] = {"we do not talk about that one.", "the car has seen better days.", "...ow."};
+        const Car &c = *S.car;
+        const bool hurt = c.hasCrush && std::max({c.crushFront, c.crushRear, c.crushLeft, c.crushRight}) > 0.3;
+        pauseSay = (hurt ? HURT : CALM)[std::rand() % 3];
+      }
+      if (act[A_CAM]) { cfg.cam = (cfg.cam + 1) % 4; R.snapCamera(); }
+      if (act[A_RESET]) { if (S.race) rejoin(S); else resetCar(S); R.snapCamera(); }
+      if (act[A_DRS]) drsTap = true;
+      if (act[A_PIT] && S.race) { S.race->me->pitRequest = !S.race->me->pitRequest; toast = {S.race->me->pitRequest ? "BOX THIS LAP" : "STAY OUT", 2}; }
+    }
 
     HandsIn in;
-    const bool *ks = SDL_GetKeyboardState(nullptr);
-    in.left = ks[SDL_SCANCODE_LEFT] || ks[SDL_SCANCODE_A];
-    in.right = ks[SDL_SCANCODE_RIGHT] || ks[SDL_SCANCODE_D];
-    in.throttle = ks[SDL_SCANCODE_UP] || ks[SDL_SCANCODE_W];
-    in.brake = ks[SDL_SCANCODE_DOWN] || ks[SDL_SCANCODE_S];
-    dev.read(in);
+    if (screen == DRIVE) {
+      const bool *ks = SDL_GetKeyboardState(nullptr);
+      in.left = ks[SDL_SCANCODE_LEFT] || ks[SDL_SCANCODE_A];
+      in.right = ks[SDL_SCANCODE_RIGHT] || ks[SDL_SCANCODE_D];
+      in.throttle = ks[SDL_SCANCODE_UP] || ks[SDL_SCANCODE_W];
+      in.brake = ks[SDL_SCANCODE_DOWN] || ks[SDL_SCANCODE_S];
+      dev.read(in);
+    }
 
-    if (!paused) {
+    if (screen == HOME || screen == DRIVE || screen == RESULTS) {
+      const bool bot = bgOn || autoDrive || screen == RESULTS;
       acc += dt;
       int steps = 0;
       while (acc >= FIXED_DT && steps < 60) {
-        simStep(S, in, autoDrive, drsTap, toast);
+        if (S.race) raceStep(S, in, bot, drsTap, toast); else simStep(S, in, bot, drsTap, toast);
         drsTap = false;
         acc -= FIXED_DT;
         steps++;
       }
       if (steps == 60) acc = 0;                       // never chase a stall
-      S.box->update(dt, S.car.speed * 3.6, S.car.throttle);
+      S.t += dt;
+      S.box->update(dt, S.car->speed * 3.6, S.car->throttle);
       if (toast.t > 0) toast.t -= dt;
-      if (helpT > 0) helpT -= dt;
+      if (S.race) {
+        // YOUR overtake that stuck: the tower row flashes
+        if (!S.race->cheers.empty()) { S.passAt = S.race->time; S.race->cheers.clear(); }
+        if (S.race->state == RaceState::Over) {
+          if (bgOn) { startBackdrop(); prev = SDL_GetTicksNS(); }      // the backdrop race just runs again
+          else if (screen == DRIVE) { screen = RESULTS; bridge.release(); resultMood(S.race->me->pos, (int)S.race->entries.size(), S.race->me->retired, resTitle, resLine); }
+        }
+      }
     }
     drsTap = false;
-    audio.set(S.box->rpm, S.car.throttle, (paused || hidden) ? 0.0 : 0.42, S.car.speed);
+    {
+      SoundIn si;
+      const Car &c = *S.car;
+      si.rpm = S.box->rpm; si.throttle = c.throttle; si.speed = c.speed;
+      si.slip = c.slipR; si.peak = S.spec->pk; si.surf = c.surface; si.wall = c.wallTouch;
+      si.rain = rainNow;
+      si.dt = dt; si.paused = screen == PAUSE;
+      // behind HOME the race is silent, as it is in the browser (sound=0)
+      si.volume = (hidden || bgOn || screen == RESULTS) ? 0 : cfg.volume / 10.0;
+      audio.update(si);
+      if (S.lastHit > 0) { if (screen == DRIVE) { audio.hit(S.lastHit); bridge.hit(S.lastHit / 14); } S.lastHit = 0; }
+    }
+    // the wheel: only while YOU are driving, and only if you switched it on
+    {
+      const double sf = S.car->surface;
+      const double rough = sf < 0.9 ? 0.45 : sf < 1 ? 0.22 : 0;
+      bridge.update(*S.car, rough, dt, screen == DRIVE && !autoDrive && !bgOn && cfg.ffb > 0, cfg.ffb / 100.0);
+    }
 
-    FrameIn f;
-    f.car = &S.car; f.spec = S.spec; f.camMode = cam; f.showLine = showLine; f.wheelAngle = S.rolled; f.dt = dt;
-    R.drawWorld(f);
-    Toast shown = toast;
-    if (paused) shown = {"PAUSED - ENTER TO GO", 1};
-    drawHud(R, S, dev, autoDrive, shown, showFps, fps, showInput, helpT, tierFor(tier)->name);
+    FrameIn f = frameOf(dt);
+    drawAll(f);
+    if (showFps) {
+      char b[32];
+      std::snprintf(b, sizeof b, "%d FPS", (int)std::round(fps));
+      const float dim[4] = {1, 1, 1, 0.6f};
+      R.hudBegin(); R.textPx((float)R.W - 24 * K, (float)R.H - 24 * K, 11 * K, b, dim, RIGHT, Renderer::HUD_B, 0.1f); R.hudEnd();
+    }
     if (hidden) glFinish(); else SDL_GL_SwapWindow(win);
     frames++;
     if (frames > 5) worstMs = std::max(worstMs, dt * 1000);
     if (maxFrames > 0 && frames >= maxFrames) running = false;
   }
+  bridge.release();
+  if (!savePath.empty()) cfg.save(savePath);
   if (maxFrames > 0) {
     // What the rig contributed: with --hidden there is no vsync, no compositor
     // and no multisampling, so this is the cost of drawing, not a frame rate.
     const double wall = (SDL_GetTicksNS() - t0) / 1e9;
-    std::fprintf(stderr, "xbr: %ld frames in %.2f s = %.2f ms a frame (worst %.1f ms)%s; car at %.0f km/h, %.0f m into the lap, audio %s\n",
+    std::fprintf(stderr, "xbr: %ld frames in %.2f s = %.2f ms a frame (worst %.1f ms)%s; car at %.0f km/h, %.0f m into the lap, audio %s, bridge %s\n",
                  frames, wall, wall / frames * 1000, worstMs, hidden ? " [hidden: no vsync, no MSAA]" : "",
-                 S.car.speed * 3.6, S.proj.s, audio.ok() ? "open" : "off");
-    if (dev.joy) {
-      // the wheel at rest should read 0 / 0 / 0 through the profile; anything
-      // else means SDL numbers this device's axes differently from the file
-      std::string ax;
-      char b[32];
-      for (int i = 0; i < std::min(8, SDL_GetNumJoystickAxes(dev.joy)); i++) { std::snprintf(b, sizeof b, " %d:%+.3f", i, Devices::axis(dev.joy, i)); ax += b; }
-      HandsIn probe;
-      const bool live = dev.read(probe);
-      std::fprintf(stderr, "xbr: wheel axes%s  ->  steer %+.3f throttle %.3f brake %.3f (%s), %d buttons\n", ax.c_str(), probe.aSteer,
-                   probe.aThrottle, probe.aBrake, live ? "live" : "at rest", SDL_GetNumJoystickButtons(dev.joy));
-    }
+                 S.car->speed * 3.6, S.proj.s, audio.ok() ? "open" : "off", bridge.live() ? "connected" : "not connected");
   }
 
   audio.close();
   dev.close();
+  SP.reset();
   R.shutdown();
   SDL_GL_DestroyContext(ctx);
   SDL_DestroyWindow(win);

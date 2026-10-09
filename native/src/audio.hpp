@@ -26,12 +26,29 @@ struct Gearbox {
   void update(double dt, double speedKmh, double throttle);
 };
 
+// Everything the car tells the mix, once a frame (js/audio.js Engine.update).
+struct SoundIn {
+  double rpm = 0, throttle = 0, speed = 0;   // speed in m/s
+  double slip = 0, peak = 0;                 // rear slip angle and the tyre's peak
+  double surf = 1;                           // car.surface: 1 tarmac, 0.93 kerb, 0.58 gravel, 0.42 grass
+  bool wall = false;                         // bodywork along a barrier
+  double rain = 0;                           // 0..1
+  double dt = 1.0 / 60;
+  bool paused = false;
+  double volume = 1;
+};
+
+// The whole mix: the modelled engine, and the recordings the browser game uses
+// (data/audio — tyre squeal, gravel and grass under the wheels, kerb thuds,
+// stones, the scrape along a wall, the crashes), plus wind and rain made from
+// noise. Levels are js/audio.js's FX table.
 class EngineAudio {
  public:
   ~EngineAudio();
-  bool open(const std::string &cls);      // false = no audio device; the game runs silent
+  bool open(const std::string &cls, const std::string &dataDir);   // false = no audio device; the game runs silent
   void setClass(const std::string &cls);
-  void set(double rpm, double throttle, double gain, double speed);
+  void update(const SoundIn &in);
+  void hit(double closing);               // an impact, m/s of closing speed
   void close();
   bool ok() const { return stream != nullptr; }
 
@@ -44,6 +61,14 @@ class EngineAudio {
   std::atomic<int> pendingCls{-1};
   struct Core;
   Core *core = nullptr;
+  struct Mixer;
+  Mixer *mix = nullptr;
+  // main-thread state
+  double t = 0, duck = 1, kerbDist = 1.9, lastStone = 0, lastCrash = -9;
+  bool wasOff = false;
+  unsigned rngS = 12345;
+  double rnd();
+  void once(int sample, double gain, double rate = 1);
 };
 
 }  // namespace xbr

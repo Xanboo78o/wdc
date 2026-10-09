@@ -28,6 +28,22 @@ struct F32 {
 struct Corner { int n = 0; double s0 = 0, s1 = 0, s = 0, R = 0, dir = 0; std::string name; };
 struct DrsZone { double from = 0, to = 0, detect = 0; };
 
+// The pit lane as the track file gives it, with the side MEASURED (js/track.js:
+// the baked `pit.side` is wrong on three circuits out of five).
+struct Pit {
+  bool has = false;
+  std::vector<std::pair<double, double>> pts;
+  double entryS = 0, exitS = 0;      // `?? 0` in js/pitstop.js makeLane
+  double offset = 0, side = 1;       // signed metres left of the centreline; +1 = left of travel
+};
+// A road that forks off the lap and rejoins it (the Heiligen joker).
+struct Detour {
+  std::string name;
+  double s0 = 0, s1 = 0, w = 0;
+  int road = 0;
+  std::vector<std::pair<double, double>> pts;
+};
+
 struct Proj {
   int i = 0;
   double s = 0, lat = 0, w = 0, runL = 0, runR = 0, run = 0, bank = 0, curv = 0, hdg = 0;
@@ -44,6 +60,10 @@ struct Track {
   std::vector<Corner> corners;
   std::vector<DrsZone> drs;
   std::vector<std::pair<double, double>> pitPts;
+  Pit pit;                           // pit.has false = no lane (`track.pit` null)
+  double pitLen = 0;
+  std::vector<unsigned char> road;   // per sample: 0 tarmac, 1 gravel, 2 snow; empty = the file has none
+  std::vector<Detour> detours;
   int sharedWalls = 0;
 
   static Track fromJson(const Json &d);

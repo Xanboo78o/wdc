@@ -57,6 +57,169 @@ static const char *region(double lx, double ly, const Spec &S) {
   return ly > 0 ? "left" : "right";
 }
 
+// ---- CAR TO CAR ---------------------------------------------------------------
+// Separating Axis Theorem on two rectangles: four axes, and the smallest
+// overlap among them is the contact normal (js/collide.js sat / resolveCars).
+namespace {
+struct Obb { double cx, cy, ax[2], ay[2], hx, hy; };
+struct Cnr { double x, y, lx, ly; };
+struct Sat { bool hit = false; double depth = 0, nx = 0, ny = 0; };
+
+Obb obb(const Car &car) {
+  const Spec &S = *car.spec;
+  const double c = std::cos(car.hdg), s = std::sin(car.hdg);
+  return {car.x, car.y, {c, s}, {-s, c}, S.bodyL * 0.5, S.bodyW * 0.5};
+}
+
+Sat sat(const Obb &A, const Obb &B) {
+  const double dx = B.cx - A.cx, dy = B.cy - A.cy;
+  double best = std::numeric_limits<double>::infinity(), nx = 0, ny = 0;
+  const double *axes[4] = {A.ax, A.ay, B.ax, B.ay};
+  for (const double *ax : axes) {
+    const auto reach = [&](const Obb &O) {
+      return std::fabs(O.ax[0] * ax[0] + O.ax[1] * ax[1]) * O.hx + std::fabs(O.ay[0] * ax[0] + O.ay[1] * ax[1]) * O.hy;
+    };
+    const double d = dx * ax[0] + dy * ax[1];
+    const double overlap = reach(A) + reach(B) - std::fabs(d);
+    if (overlap <= 0) return {};
+    if (overlap < best) {
+      const double sgn = d < 0 ? -1 : 1;
+      best = overlap; nx = ax[0] * sgn; ny = ax[1] * sgn;
+    }
+  }
+  return {true, best, nx, ny};
+}
+
+void cornersOf(const Car &car, Cnr out[4]) {
+  const Spec &S = *car.spec;
+  const double hl = S.bodyL * 0.5, hw = S.bodyW * 0.5;
+  const double cs = std::cos(car.hdg), sn = std::sin(car.hdg);
+  const double local[4][2] = {{hl, hw}, {hl, -hw}, {-hl, -hw}, {-hl, hw}};
+  for (int k = 0; k < 4; k++) {
+    const double lx = local[k][0], ly = local[k][1];
+    out[k] = {car.x + lx * cs - ly * sn, car.y + lx * sn + ly * cs, lx, ly};
+  }
+}
+
+// The corner of `car` furthest along (dx, dy): the bit doing the hitting.
+Cnr extremeCorner(const Car &car, double dx, double dy) {
+  Cnr c[4];
+  cornersOf(car, c);
+  int best = 0;
+  double bd = -std::numeric_limits<double>::infinity();
+  for (int k = 0; k < 4; k++) {
+    const double d = (c[k].x - car.x) * dx + (c[k].y - car.y) * dy;
+    if (d > bd) { bd = d; best = k; }
+  }
+  return c[best];
+}
+}  // namespace
+
+CarHit resolveCars(Car &a, Car &b, double restitution) {
+  const Sat hit = sat(obb(a), obb(b));
+  CarHit out;
+  if (!hit.hit) return out;
+  const double nx = hit.nx, ny = hit.ny, depth = hit.depth;
+  const Spec &SA = *a.spec, &SB = *b.spec;
+
+  // 1. Push apart, shared in inverse proportion to mass.
+  const double invA = 1 / SA.m, invB = 1 / SB.m, invSum = invA + invB;
+  a.x -= nx * depth * (invA / invSum); a.y -= ny * depth * (invA / invSum);
+  b.x += nx * depth * (invB / invSum); b.y += ny * depth * (invB / invSum);
+
+  // 2. Contact point: midway between the two corners actually doing the work.
+  const Cnr ca = extremeCorner(a, nx, ny), cb = extremeCorner(b, -nx, -ny);
+  const double px = (ca.x + cb.x) * 0.5, py = (ca.y + cb.y) * 0.5;
+  const double rax = px - a.x, ray = py - a.y;
+  const double rbx = px - b.x, rby = py - b.y;
+
+  double avx, avy, bvx, bvy;
+  {
+    const double cs = std::cos(a.hdg), sn = std::sin(a.hdg);
+    avx = a.vx * cs - a.vy * sn; avy = a.vx * sn + a.vy * cs;
+  }
+  {
+    const double cs = std::cos(b.hdg), sn = std::sin(b.hdg);
+    bvx = b.vx * cs - b.vy * sn; bvy = b.vx * sn + b.vy * cs;
+  }
+  double wa = a.r, wb = b.r;
+
+  const double vax = avx - wa * ray, vay = avy + wa * rax;
+  const double vbx = bvx - wb * rby, vby = bvy + wb * rbx;
+  const double rvn = (vbx - vax) * nx + (vby - vay) * ny;
+
+  out.hit = true; out.depth = depth; out.closing = -rvn; out.nx = nx; out.ny = ny;
+  if (rvn < 0) {
+    const double ran = rax * ny - ray * nx, rbn = rbx * ny - rby * nx;
+    const double inv = invA + invB + (ran * ran) / SA.Izz + (rbn * rbn) / SB.Izz;
+    const double j = -(1 + restitution) * rvn / inv;
+
+    avx -= j * nx * invA; avy -= j * ny * invA;
+    bvx += j * nx * invB; bvy += j * ny * invB;
+    wa -= (rax * (j * ny) - ray * (j * nx)) / SA.Izz;
+    wb += (rbx * (j * ny) - rby * (j * nx)) / SB.Izz;
+
+    // rubbing along each other
+    const double tx = -ny, ty = nx;
+    const double rvt = (bvx - wb * rby - (avx - wa * ray)) * tx + (bvy + wb * rbx - (avy + wa * rax)) * ty;
+    const double rat = rax * ty - ray * tx, rbt = rbx * ty - rby * tx;
+    const double invT = invA + invB + (rat * rat) / SA.Izz + (rbt * rbt) / SB.Izz;
+    double jt = -rvt / invT;
+    const double cap = 0.42 * std::fabs(j);
+    jt = std::max(-cap, std::min(cap, jt));
+    avx -= jt * tx * invA; avy -= jt * ty * invA;
+    bvx += jt * tx * invB; bvy += jt * ty * invB;
+    wa -= (rax * (jt * ty) - ray * (jt * tx)) / SA.Izz;
+    wb += (rbx * (jt * ty) - rby * (jt * tx)) / SB.Izz;
+
+    out.j = j;
+    // Damage on both, from the velocity each one actually lost. Blame is the
+    // race layer's: collide does not know the running order.
+    for (int k = 0; k < 2; k++) {
+      Car &car = k == 0 ? a : b;
+      const double invM = k == 0 ? invA : invB;
+      const Cnr &c2 = k == 0 ? ca : cb;
+      const double dv = std::fabs(j) * invM;
+      if (dv > 2.5) {
+        const double harm = std::min(0.6, std::pow((dv - 2.5) / 22, 1.6));
+        car.damage = std::min(1.0, car.damage + harm);
+        car.hasCrush = true;
+        double *part = car.crushPart(region(c2.lx, c2.ly, *car.spec));
+        *part = std::min(1.0, *part + harm * 1.6);
+        const double sg = k == 0 ? -1 : 1;
+        mark(car, c2.lx, c2.ly, nx * sg, ny * sg, harm);
+      }
+      // Wheel-to-wheel and wing-into-tyre: the tyre nearest the contact.
+      if (dv > 1.2) {
+        const double h = car.hdg;
+        tyreHit(car, c2.lx, c2.ly, -nx * std::sin(h) + ny * std::cos(h), dv);
+      }
+    }
+    out.harm = std::fabs(j) / std::min(SA.m, SB.m);
+
+    // RIDING UP A REAR WHEEL: purely geometric, and only an open wheel is a ramp.
+    const double dx = a.x - b.x, dy = a.y - b.y;
+    const double offset = std::fabs(-dx * std::sin(b.hdg) + dy * std::cos(b.hdg));
+    const bool nose = ca.lx > SA.bodyL * 0.30;
+    const bool onWheel = cb.lx < -SB.bodyL * 0.30 && offset > SB.bodyW * 0.30;
+    const bool closed = SA.gt || SB.gt;
+    if (nose && onWheel && -rvn > 9.0 && !closed) {
+      launch(a, std::fabs(j) * 0.50 * std::min(1.0, (-rvn - 9.0) / 7), SA.a, ca.ly * 0.5);
+      out.launched = true;
+    }
+  }
+
+  {
+    const double cs = std::cos(a.hdg), sn = std::sin(a.hdg);
+    a.vx = avx * cs + avy * sn; a.vy = -avx * sn + avy * cs; a.r = wa;
+  }
+  {
+    const double cs = std::cos(b.hdg), sn = std::sin(b.hdg);
+    b.vx = bvx * cs + bvy * sn; b.vy = -bvx * sn + bvy * cs; b.r = wb;
+  }
+  return out;
+}
+
 Hit resolveBarrier(Car &car, const Track &track, int hint) {
   const Spec &S = *car.spec;
   const double hl = S.bodyL * 0.5, hw = S.bodyW * 0.5;

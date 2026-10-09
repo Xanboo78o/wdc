@@ -101,6 +101,18 @@ struct Parts {
   double cl = 1, bal = 1, cd = 1;
 };
 struct Aids { double tc = 0.60, abs = 0.60, sc = 0.35; };
+// js/xingus.js car.xg — the arcade handling's own state. `on` false = the JS's
+// `car.xg` undefined: the serious game, and nothing reads the rest.
+struct Xg {
+  bool on = false;
+  double dir = 0, flick = 0, calm = 0, lock = 0.25, beta = 0;
+  int state = 0;                           // 0 grip, 1 drift, 2 out
+  double vHold = 0, loose = 0.84;
+  bool stakes = false;
+  double bank = 0;
+  double vPrev = NaN, r = NaN;             // NaN = null
+  double gCap = 0;                         // 0 = not set (an oval's stock rules set it)
+};
 
 struct Env {
   double surface = 1;
@@ -154,6 +166,7 @@ struct Car {
   double sag[4] = {0, 0, 0, 0};
   double cmKD[4] = {1, 1, 1, 1}, cmKB[4] = {1, 1, 1, 1}, cmDrag[4] = {0, 0, 0, 0}, cmOn[4] = {1, 1, 1, 1};
   Parts parts;
+  Xg xg;
 
   double *crushPart(const char *part);
 };
