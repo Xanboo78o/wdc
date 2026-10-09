@@ -36,11 +36,28 @@ static double rpmAt(const BoxSpec &box, double speedKmh, int gear) {
   return std::max(box.idle, std::min(box.limit, r));
 }
 
+bool Gearbox::shift(int dir, double speedKmh) {
+  const int last = (int)box->tops.size() - 1, g = std::max(0, std::min(last, (manual >= 0 ? manual : gear) + dir));
+  if (dir < 0 && box->limit * (speedKmh / box->tops[(size_t)g]) > box->limit * 1.06) return false;
+  if (g != manual) { manual = g; gear = g; shiftT = 0.07; shifted = dir; }
+  return true;
+}
+
 void Gearbox::update(double dt, double speedKmh, double throttle) {
-  shifted = 0;
+  shifted = manual >= 0 && shiftT > 0.06 ? shifted : 0;
+  clockMs += dt * 1000;
   if (shiftT > 0) shiftT = std::max(0.0, shiftT - dt);
   const int last = (int)box->tops.size() - 1;
+  if (manual >= 0) gear = std::max(0, std::min(last, manual));
   const double raw = box->limit * (speedKmh / box->tops[(size_t)gear]);
+  limiter = manual >= 0 && raw >= box->limit * 0.995 && throttle > 0.2;
+  if (manual >= 0) {
+    // on the limiter the needle bounces: the cut is what you hear
+    const double bounce = limiter ? 1 - 0.035 * (0.5 + 0.5 * std::sin(clockMs * 0.075)) : 1;
+    const double want = std::max(box->idle, std::min(box->limit, raw)) * bounce * (shiftT > 0 ? 0.85 : 1);
+    rpm += (want - rpm) * std::min(1.0, dt * 30);
+    return;
+  }
   if (shiftT == 0) {
     if (raw > box->shiftUp && gear < last) {
       gear++; shiftT = 0.05; shifted = 1;

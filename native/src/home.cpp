@@ -2,6 +2,7 @@
 // Sizes are the stylesheet's, in CSS pixels; `k` turns them into the screen's.
 #include "home.hpp"
 
+#include <set>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -28,6 +29,36 @@ static const int N_TRACKS = 13;
 static int trackIdx(const std::string &id) { for (int i = 0; i < N_TRACKS; i++) if (id == TRACKS[i][0]) return i; return 5; }
 static const char *LEAGUE_KEYS[3] = {"f1", "gt3", "f4"}, *LEAGUE_NAMES[3] = {"F1", "GT3", "F4"};
 static const char *leagueName(const std::string &k) { for (int i = 0; i < 3; i++) if (k == LEAGUE_KEYS[i]) return LEAGUE_NAMES[i]; return "F1"; }
+
+// ---- XINGUS (js/home.js) --------------------------------------------------------------
+//   key, label, the line under it, car tune, rivals, derby, stakes, loose
+static const XStyle XSTYLES[] = {
+    {"hotlaps", "HOTLAPS", "ALONE - RALLY CAR", "rally", 0, false, false, false},
+    {"rally", "RALLY", "ALONE - IT COUNTS", "rally", 0, false, true, false},
+    {"rallycross", "RALLYCROSS", "SIX OF YOU - NO LINE, NO RULES", "rally", 5, false, false, true},
+    {"rallygt", "RALLY GT", "GT CARS ON THE STAGES", "gt", 9, false, false, false},
+    {"gt3", "GT3", "FAST SEDAN RACE", "gt", 17, false, false, false},
+    {"gt3lonely", "GT3 LONELY", "ALONE - GT CAR", "gt", 0, false, false, false},
+    {"derby", "DEMO DERBY", "NOBODY IS CAREFUL", "gt", 21, true, false, false},
+};
+const XStyle &xstyle(const std::string &key) { for (const XStyle &x : XSTYLES) if (key == x.key) return x; return XSTYLES[4]; }
+// A Heiligen route key <-> the choice at each junction.
+struct HeilChoice { bool rx; std::string town, mid, end; };
+static const char *HEIL_BASE[6][3] = {{"alt", "pass", "grand"}, {"ring", "pass", "schnee"}, {"alt", "wald", "wald"},
+                                      {"ring", "wald", "forst"}, {"alt", "tal", "stadt"}, {"ring", "tal", "sprint"}};
+static std::string heilKey(const HeilChoice &c) {
+  std::string base = "grand";
+  for (auto &b : HEIL_BASE) if (c.town == b[0] && c.mid == b[1]) base = b[2];
+  return std::string("heil") + (c.rx ? "rx" : base) + (c.end == "joker" ? "j" : "");
+}
+static HeilChoice heilChoice(std::string key) {
+  HeilChoice c{false, "alt", "pass", "wall"};
+  if (key.size() > 4 && key.back() == 'j') { c.end = "joker"; key.pop_back(); }
+  const std::string base = key.size() > 4 ? key.substr(4) : "";
+  if (base == "rx") { c.rx = true; c.town = "ring"; c.mid = "tal"; return c; }
+  for (auto &b : HEIL_BASE) if (base == b[2]) { c.town = b[0]; c.mid = b[1]; }
+  return c;
+}
 
 // ---- the voice (js/menuui.js SAY) ---------------------------------------------------
 static std::string sayFor(const std::string &row, const std::string &v) {
@@ -81,7 +112,10 @@ void MenuSave::load(const std::string &path) {
     else if (k == "ffb") ffbSeen = std::atoi(v.c_str()); else if (k == "ffbv") ffbVer = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
     else if (k == "volume") volume = std::atoi(v.c_str()); else if (k == "line") line = v == "1";
     else if (k == "model") model = v;
+    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
+    else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
+  xStyle = xstyle(xStyle).key; xBots = std::max(0, std::min(60, xBots));
   // a record from before the wheel's force was set up said 0 because nothing else was possible
   if (ffbSeen >= 0 && ffbVer >= 2) ffb = ffbSeen;
   if (!hasCarSpec(car)) car = "f1";
@@ -97,6 +131,8 @@ void MenuSave::save(const std::string &path) const {
     << "\nfield " << field << "\ntheme " << theme << "\nmusic " << music << "\nffbv 2\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
     << "\nline " << (line ? 1 : 0) << "\n";
   if (!model.empty()) f << "model " << model << "\n";
+  f << "xon " << (xOn ? 1 : 0) << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
+  if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
   for (const auto &kv : teams) if (!kv.second.empty()) f << "team." << kv.first << " " << kv.second << "\n";
 }
 
@@ -104,6 +140,7 @@ Home::Home(const std::string &dataDir_, const std::string &savePath_) : dataDir(
   if (!savePath.empty()) S.load(savePath);
   const Json idx = Json::loadOpt(dataDir + "/cars/index.json");
   if (idx.isArr()) for (size_t i = 0; i < idx.size(); i++) packs.push_back({idx[i]["key"].s(""), idx[i]["title"].s(""), idx[i]["klass"].s("gt3")});
+  hmap = Json::loadOpt(dataDir + "/build/heiligen-map.json");
   sayText = greeting();
   build();
 }
@@ -124,17 +161,40 @@ int Home::startSlot(int grid) const {
 // ---- settings rows -------------------------------------------------------------------
 // Downloaded cars are all cars with a roof: they take the GT3 seat and its physics.
 std::string Home::pack() const {
-  if (S.car != "gt3") return "";
+  if (!S.xOn && S.car != "gt3") return "";
   for (const Pack &p : packs) if (p.key == S.model) return p.key;
   return "";
 }
 std::string Home::voice() const {
   const std::string k = pack();
   for (const Pack &p : packs) if (p.key == k) return p.klass;
-  return S.car;
+  return S.xOn ? "gt3" : S.car;
 }
+// The circuit row. Heiligen is Xingus's own: one entry, its route chosen on a map. So is the oval.
+std::vector<Home::Circuit> Home::circuits() const {
+  std::vector<Circuit> L;
+  if (S.xOn) { L.push_back({"heiligen", "Heiligen Auto Circuit", "VALCORSA - 14 ROUTES"}); L.push_back({"speedway", "Xingus Speedway", "OVAL - DRAFT - PIT (P)"}); }
+  for (int i = 0; i < N_TRACKS; i++) L.push_back({TRACKS[i][0], TRACKS[i][1], TRACKS[i][2]});
+  return L;
+}
+std::string Home::circuitId() const {
+  if (!S.xOn) return S.track;
+  if (S.xTrack == "heiligen" || S.xTrack == "speedway") return S.xTrack;
+  for (int i = 0; i < N_TRACKS; i++) if (S.xTrack == TRACKS[i][0]) return S.xTrack;
+  return S.track;
+}
+std::string Home::xTrackKey() const { const std::string id = circuitId(); return id == "heiligen" ? S.xHeil : id; }
 std::string Home::get(const std::string &key) const {
   if (key == "model") return pack();
+  if (key == "modeX") return S.xOn ? "xingus" : S.mode;
+  if (key == "xStyle") return S.xStyle;
+  if (key == "xGears") return S.xGears == "auto" ? "auto" : "manual";
+  if (key == "xBots") return S.xBots > 0 ? std::to_string(S.xBots) : "style";
+  if (key == "xField") return S.xField == "skilled" ? "skilled" : "4fun";
+  if (key == "heil") return S.xHeil;
+  if (key == "hTown") return heilChoice(S.xHeil).town;
+  if (key == "hMid") return heilChoice(S.xHeil).mid;
+  if (key == "hEnd") return heilChoice(S.xHeil).end;
   if (key == "mode") return S.mode;
   if (key == "laps") return std::to_string(S.laps);
   if (key == "grid") return std::to_string(S.grid);
@@ -161,16 +221,51 @@ void Home::set(const std::string &key, const std::string &v) {
   else if (key == "ffb") S.ffb = std::atoi(v.c_str()); else if (key == "cam") S.cam = std::atoi(v.c_str());
   else if (key == "volume") S.volume = std::atoi(v.c_str()); else if (key == "line") S.line = v == "true";
   else if (key == "model") { S.model = v; dirty = true; }
+  else if (key == "modeX") { S.xOn = v == "xingus"; if (!S.xOn) S.mode = v == "race" ? "race" : "hotlap"; dirty = true; }
+  else if (key == "xStyle") S.xStyle = xstyle(v).key; else if (key == "xGears") S.xGears = v;
+  else if (key == "xBots") S.xBots = v == "style" ? 0 : std::atoi(v.c_str()); else if (key == "xField") S.xField = v;
+  else if (key == "heil") S.xHeil = v;
+  else if (key == "hTown" || key == "hMid" || key == "hEnd") {
+    HeilChoice c = heilChoice(S.xHeil);
+    c.rx = key == "hEnd" ? c.rx : false;
+    (key == "hTown" ? c.town : key == "hMid" ? c.mid : c.end) = v;
+    S.xHeil = heilKey(c);
+  }
+}
+// THE HEILIGEN PAGE: a route is a choice at each junction — town or ring road,
+// valley or forest or the pass, the banking or the joker (js/home.js heiligen()).
+std::vector<Home::Opt> Home::heilRows() const {
+  std::vector<Opt> rows;
+  rows.push_back({"PREMADE", "heil", {{"heilgrand", "GRAND 9.0"}, {"heilschnee", "SCHNEE"}, {"heilwald", "WALD"}, {"heilforst", "FORST"}, {"heilstadt", "STADT"},
+                                      {"heilsprint", "SPRINT 4.9"}, {"heilrx", "RALLYCROSS"}, {"heilrxj", "RX - JOKER EVERY LAP"}}});
+  if (!heilChoice(S.xHeil).rx) {
+    rows.push_back({"THE TOWN", "hTown", {{"alt", "ALTSTADT"}, {"ring", "STADTRING"}}});
+    rows.push_back({"THE MOUNTAIN", "hMid", {{"tal", "VALLEY"}, {"wald", "FOREST"}, {"pass", "THE PASS"}}});
+  }
+  rows.push_back({"THE LAST CORNER", "hEnd", {{"wall", "STEILWAND - ONE JOKER LAP OWED"}, {"joker", "JOKER ROAD EVERY LAP"}}});
+  return rows;
 }
 std::vector<Home::Opt> Home::setupRows() const {
   std::vector<Opt> rows;
-  rows.push_back({"MODE", "mode", {{"hotlap", "HOT LAP"}, {"race", "RACE"}}});
-  if (S.car == "gt3" && !packs.empty()) {
+  rows.push_back({"MODE", "modeX", {{"hotlap", "HOT LAP"}, {"race", "RACE"}, {"xingus", "XINGUS"}}});
+  if (S.xOn) {
+    Opt st{"STYLE", "xStyle", {}};
+    for (const XStyle &x : XSTYLES) st.opts.push_back({x.key, x.label});
+    rows.push_back(st);
+    rows.push_back({"GEARS", "xGears", {{"manual", "PADDLES (E / Q)"}, {"auto", "AUTOMATIC"}}});
+    const XStyle &x = xstyle(S.xStyle);
+    if (x.rivals) {
+      rows.push_back({"LAPS", "laps", {{"2", "2"}, {"3", "3"}, {"5", "5"}, {"10", "10"}, {"20", "20"}}});
+      rows.push_back({"BOTS", "xBots", {{"style", std::to_string(x.rivals)}, {"29", "29"}, {"49", "49"}}});
+      if (circuitId() == "speedway") rows.push_back({"FIELD", "xField", {{"skilled", "SKILLED"}, {"4fun", "4FUN"}}});
+    }
+  }
+  if ((S.xOn || S.car == "gt3") && !packs.empty()) {
     Opt m{"MODEL", "model", {{"", "XBR GT3"}}};
     for (const Pack &p : packs) { std::string t = p.title; for (char &c : t) c = (char)std::toupper((unsigned char)c); m.opts.push_back({p.key, t}); }
     rows.push_back(m);
   }
-  if (S.mode == "race") {
+  if (!S.xOn && S.mode == "race") {
     rows.push_back({"LAPS", "laps", {{"2", "2"}, {"3", "3"}, {"5", "5"}, {"10", "10"}, {"20", "20"}}});
     rows.push_back({"GRID", "grid", {{"6", "6"}, {"12", "12"}, {"16", "16"}, {"22", "22"}}});
     Opt riv{"RIVALS", "tier", {}};
@@ -197,7 +292,7 @@ void Home::show(const std::string &name, int keep) {
 }
 
 void Home::lightsOut() {
-  if (S.teams[S.car].empty()) { show("garage"); say("pick a team first. then we race."); return; }
+  if (!S.xOn && S.teams[S.car].empty()) { show("garage"); say("pick a team first. then we race."); return; }
   if (!savePath.empty()) S.save(savePath);
   wantStart = true;
 }
@@ -228,20 +323,32 @@ void Home::build() {
     items.push_back({[this] { show("setup"); }, nullptr, nullptr});                                      // SETUP
     items.push_back({[this] { show("garage"); }, nullptr, nullptr});                                     // GARAGE
     const char *notYet = "that room is not built in the native edition yet.";
-    for (int i = 0; i < 5; i++) items.push_back({[this, notYet] { say(notYet); }, nullptr, nullptr});    // XINGUS SHOWROOM BUILDER JUKEBOX iPAD DASH
+    items.push_back({[this] { S.xOn = true; dirty = true; show("setup"); say("xingus mode. grip, drift, no spins."); }, nullptr, nullptr});   // XINGUS
+    for (int i = 0; i < 4; i++) items.push_back({[this, notYet] { say(notYet); }, nullptr, nullptr});    // SHOWROOM BUILDER JUKEBOX iPAD DASH
     items.push_back({[this] { show("settings"); }, nullptr, nullptr});                                   // SETTINGS
     items.push_back({[this] { show("garage"); }, nullptr, nullptr});                                     // the YOU DRIVE FOR card
   } else if (page == "setup") {
     auto step = [this](int d) {
-      const int i = trackIdx(S.track);
-      S.track = TRACKS[(i + d + N_TRACKS) % N_TRACKS][0];
+      const auto L = circuits();
+      const std::string cur = circuitId();
+      int i = 0;
+      const int n = (int)L.size();
+      for (int q = 0; q < n; q++) if (L[(size_t)q].id == cur) i = q;
+      const std::string id = L[(size_t)((i + d + n) % n)].id;
+      if (S.xOn) S.xTrack = id;
+      if (id != "heiligen" && id != "speedway") S.track = id;
+      if (id == "speedway" && !xstyle(S.xStyle).rivals) S.xStyle = "gt3";      // an oval is a pack: not a style that is alone
       dirty = true;
       show("setup", 0);
-      say(sayFor("CIRCUIT", S.track));
+      say(id == "heiligen" ? "heiligen. fourteen ways round. pick one." : id == "speedway" ? "the oval. turn left. repeat." : sayFor("CIRCUIT", id));
     };
-    items.push_back({[this] { at = 1; }, [step] { step(-1); }, [step] { step(1); }});
+    items.push_back({[this] { if (circuitId() == "heiligen") show("heiligen"); else at = 1; }, [step] { step(-1); }, [step] { step(1); }});
     optItems(setupRows(), "setup");
     items.push_back({[this] { lightsOut(); }, nullptr, nullptr});
+  } else if (page == "heiligen") {
+    back = [this] { show("setup"); };
+    optItems(heilRows(), "heiligen");
+    items.push_back({[this] { show("setup"); }, nullptr, nullptr});
   } else if (page == "garage") {
     auto league = [this](int d) {
       int i = 0;
@@ -582,14 +689,17 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         hot(24, bottom - 180, 250, 180, 1);
         const Rgba fg = on ? PAPER : INK, sm = on ? alpha_(PAPER, 0.75f) : SOFT;
         text(37, y + 12, 10, "NEXT UP", sm, LEFT, RB, 0.16f);
-        drawMap(R, k, 37, y + 29, 224, 96, S.track, true, clock);
-        std::string nm = upper(TRACKS[ti][1]);
+        const std::string nid = S.xOn ? xTrackKey() : S.track;
+        std::string cname = TRACKS[ti][1], ctag = TRACKS[ti][2];
+        for (const Circuit &c : circuits()) if (c.id == circuitId()) { cname = c.name; ctag = c.tag; }
+        drawMap(R, k, 37, y + 29, 224, 96, nid, true, clock);
+        std::string nm = upper(cname);
         while (nm.size() > 4 && width(26, nm, A, 0.02f) > 224) nm.pop_back();
         text(37, y + 131, 26, nm, fg, LEFT, A, 0.02f);
-        const Outline &o = outline(S.track);
+        const Outline &o = outline(nid);
         char km[32];
         std::snprintf(km, sizeof km, " - %.3f KM", o.len / 1000);
-        text(37, y + 160, 10, std::string(TRACKS[ti][2]) + (o.ok ? km : ""), sm, LEFT, RB, 0.16f);
+        text(37, y + 160, 10, ctag + (o.ok ? km : ""), sm, LEFT, RB, 0.16f);
       }
       // RACE
       {
@@ -601,7 +711,8 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         hot(x, bottom - 112, 236, 112, 0);
         text(x + 118, y + 18, 58, "RACE", ONRED, CENTRE, A, 0.04f);
         char sub[96];
-        if (S.mode == "race") std::snprintf(sub, sizeof sub, "%d LAPS - %d CARS - %s", S.laps, S.grid, upper(TRACKS[ti][1]).c_str());
+        if (S.xOn) { std::string cn = TRACKS[ti][1]; for (const Circuit &c : circuits()) if (c.id == circuitId()) cn = c.name; std::snprintf(sub, sizeof sub, "XINGUS - %s - %s", xstyle(S.xStyle).label, upper(cn).c_str()); }
+        else if (S.mode == "race") std::snprintf(sub, sizeof sub, "%d LAPS - %d CARS - %s", S.laps, S.grid, upper(TRACKS[ti][1]).c_str());
         else std::snprintf(sub, sizeof sub, "HOT LAP - %s", upper(TRACKS[ti][1]).c_str());
         std::string sb = sub;
         while (sb.size() > 6 && width(11, sb, RB, 0.14f) > 212) sb.pop_back();
@@ -647,10 +758,14 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   }
 
   if (page == "setup") {
-    const int i = trackIdx(S.track);
+    const auto L = circuits();
+    const int nL = (int)L.size();
+    const std::string cid = circuitId(), mapId = S.xOn ? xTrackKey() : S.track;
+    int i = 0;
+    for (int q = 0; q < nL; q++) if (L[(size_t)q].id == cid) i = q;
     const float tw = title("RACE SETUP");
     {
-      const std::string small = team ? upper(team->name) : "NO TEAM", big = upper(carSpec(S.car).full);
+      const std::string small = S.xOn ? "XINGUS" : team ? upper(team->name) : "NO TEAM", big = S.xOn ? xstyle(S.xStyle).line : upper(carSpec(S.car).full);
       const float x = 24 + tw + (boo ? 64 : 12), w = std::max(width(9, small, RB, 0.16f), width(19, big, A, 0.03f)) + 26;
       R.card(x * k, 28 * k, w * k, 42 * k, 12 * k, 2.5f * k, YELL, INK);
       text(x + 13, 34, 9, small, hex("#5b5540"), LEFT, RB, 0.16f);
@@ -674,19 +789,83 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
       std::snprintf(no, sizeof no, "%02d", i + 1);
       text(102 + 23, y + 46, 20, no, hex("#121212"), CENTRE, A);
       R.hudRot(0, 0, 0);
-      drawMap(R, k, 164, y + 9, 170, 96, S.track, true, clock);
-      const Outline &o = outline(S.track);
+      drawMap(R, k, 164, y + 9, 170, 96, mapId, true, clock);
+      if (cid == "heiligen") hot(164, y + 9, 170, 96, 0, [this] { show("heiligen"); });
+      const Outline &o = outline(mapId);
       char km[32];
       std::snprintf(km, sizeof km, " - %.3f KM", o.len / 1000);
-      text(350, y + 22, 10, std::string(TRACKS[i][2]) + (o.ok ? km : ""), SOFT, LEFT, RB, 0.16f);
-      text(350, y + 38, 44, upper(TRACKS[i][1]), INK, LEFT, A, 0.02f);
-      const float dx = W - 24 - 12 - 50 - 16 - (float)N_TRACKS * 11;
-      for (int q = 0; q < N_TRACKS; q++) R.circle((dx + q * 11 + 3.5f) * k, (y + 57) * k, (q == i ? 5.25f : 3.5f) * k, q == i ? RED : mix(INK, CARD, 0.22f));
+      text(350, y + 22, 10, L[(size_t)i].tag + (o.ok ? km : "") + (cid == "heiligen" ? "  -  ENTER: CHOOSE THE ROUTE" : ""), SOFT, LEFT, RB, 0.16f);
+      text(350, y + 38, 44, upper(L[(size_t)i].name), INK, LEFT, A, 0.02f);
+      const float dx = W - 24 - 12 - 50 - 16 - (float)nL * 11;
+      for (int q = 0; q < nL; q++) R.circle((dx + q * 11 + 3.5f) * k, (y + 57) * k, (q == i ? 5.25f : 3.5f) * k, q == i ? RED : mix(INK, CARD, 0.22f));
       arrow(W - 24 - 12 - 50, ">");
     }
     const auto rows = setupRows();
     optGrid(rows, 92 + 114 + 14, H - 22 - 50 - 14, 1);
-    foot(S.teams[S.car].empty() ? "PICK A TEAM" : "LIGHTS OUT", "UP / DOWN MOVE  -  LEFT / RIGHT CHANGE  -  G = LIGHTS OUT", at == 1 + (int)rows.size());
+    foot(!S.xOn && S.teams[S.car].empty() ? "PICK A TEAM" : "LIGHTS OUT", "UP / DOWN MOVE  -  LEFT / RIGHT CHANGE  -  G = LIGHTS OUT", at == 1 + (int)rows.size());
+    return;
+  }
+
+  if (page == "heiligen") {
+    title("HEILIGEN AUTO CIRCUIT");
+    sayBox(W - 24 - std::min(520.0f, width(17, sayText, MK) + 30), 30);
+    const auto rows = heilRows();
+    const float y0 = 92, yRows = H - 22 - 50 - 14 - 190, mh = yRows - y0 - 10, mw = W - 48 - 300;
+    R.card(24 * k, y0 * k, mw * k, mh * k, 12 * k, 2.5f * k, CARD, INK);
+    const Json &segs = hmap["segs"], &routes = hmap["routes"];
+    const Json *route = nullptr;
+    for (size_t q = 0; q < routes.size(); q++) if (routes[q]["key"].s("") == S.xHeil) route = &routes[q];
+    if (!route && routes.size()) route = &routes[(size_t)0];
+    if (segs.isObj() && route) {
+      std::set<std::string> on;
+      for (size_t q = 0; q < (*route)["segs"].size(); q++) on.insert((*route)["segs"][q].s(""));
+      if (heilChoice(S.xHeil).end == "wall") on.insert("joker");
+      float x0 = 1e30f, y0m = 1e30f, x1 = -1e30f, y1 = -1e30f;
+      for (const auto &kv : segs.obj) for (size_t q = 0; q < kv.second["pts"].size(); q++) {
+        const float x = (float)kv.second["pts"][q][(size_t)0].n(), y = (float)-kv.second["pts"][q][(size_t)1].n();
+        x0 = std::min(x0, x); x1 = std::max(x1, x); y0m = std::min(y0m, y); y1 = std::max(y1, y);
+      }
+      const float pad = 230, vw = x1 - x0 + 2 * pad, vh = y1 - y0m + 2 * pad, sc = std::min((mw - 16) / vw, (mh - 16) / vh);
+      const float ox = 24 + 8 + ((mw - 16) - vw * sc) / 2 - (x0 - pad) * sc, oy = y0 + 8 + ((mh - 16) - vh * sc) / 2 - (y0m - pad) * sc;
+      // black tarmac, brown gravel, blue snow; the chosen route is the thick one
+      for (int pass = 0; pass < 2; pass++) for (const auto &kv : segs.obj) {
+        const bool sel = on.count(kv.first) > 0;
+        if (sel != (pass == 1)) continue;
+        const std::string surf = kv.second["surf"].s("tarmac");
+        Rgba col = surf == "gravel" ? hex("#b0844a") : surf == "snow" ? hex("#6fa8dc") : INK;
+        if (!sel) col = alpha_(col, 0.28f);
+        std::vector<float> p;
+        for (size_t q = 0; q < kv.second["pts"].size(); q++) { p.push_back((ox + (float)kv.second["pts"][q][(size_t)0].n() * sc) * k); p.push_back((oy + (float)-kv.second["pts"][q][(size_t)1].n() * sc) * k); }
+        R.path(p.data(), (int)p.size() / 2, std::max(sel ? 5.0f : 1.5f, (sel ? 34 : 13) * sc) * k, col, false);
+        if (sel && kv.first != "hauptstrasse2" && kv.first != "steilwand1" && kv.first != "talstrasse2" && p.size() >= 4) {
+          const size_t m = (p.size() / 4) * 2;
+          std::string lb = kv.second["label"].s("");
+          for (size_t q = lb.find("\xC3\x9F"); q != std::string::npos; q = lb.find("\xC3\x9F")) lb.replace(q, 2, "ss");
+          text(p[m] / k + 10, p[m + 1] / k - 18, 11, upper(lb), INK, LEFT, A, 0.06f);
+        }
+      }
+      R.circle((ox) * k, (oy) * k, 7 * k, INK); R.circle(ox * k, oy * k, 5 * k, RED);
+      text(ox - 16, oy + 12, 11, "START", RED, LEFT, A, 0.06f);
+      // the route, said beside the map
+      const float cx = 24 + mw + 12, cw2 = W - 24 - cx;
+      R.card(cx * k, y0 * k, cw2 * k, mh * k, 12 * k, 2.5f * k, CARD, INK);
+      text(cx + 14, y0 + 12, 10, "THE ROUTE", SOFT, LEFT, RB, 0.18f);
+      std::string rn = (*route)["name"].s("");
+      if (rn.rfind("Heiligen ", 0) == 0) rn = rn.substr(9);
+      text(cx + 14, y0 + 28, 34, upper(rn), INK, LEFT, A, 0.02f);
+      char ln[96];
+      const int jumps = (int)(*route)["jumps"].n();
+      std::snprintf(ln, sizeof ln, "%.2f KM - %d CORNERS - %d JUMP%s", (*route)["km"].n(), (int)(*route)["corners"].n(), jumps, jumps == 1 ? "" : "S");
+      text(cx + 14, y0 + 72, 11, ln, INK, LEFT, RB, 0.12f);
+      std::string tag;
+      for (unsigned char ch : (*route)["tag"].s("")) tag += ch < 128 ? (char)ch : ch == 0xC2 ? '-' : '\0';
+      tag.erase(std::remove(tag.begin(), tag.end(), '\0'), tag.end());
+      text(cx + 14, y0 + 90, 11, tag, SOFT, LEFT, RB, 0.12f);
+      text(cx + 14, y0 + 116, 10, "BLACK TARMAC - BROWN GRAVEL", SOFT, LEFT, RB, 0.12f);
+      text(cx + 14, y0 + 131, 10, "BLUE SNOW", SOFT, LEFT, RB, 0.12f);
+    } else text(40, y0 + 20, 17, "the map did not load.", INK, LEFT, MK);
+    optGrid(rows, yRows, H - 22 - 50 - 14, 0);
+    foot("DONE", "LEFT / RIGHT IN A BOX  -  ESC BACK", at == (int)rows.size());
     return;
   }
 

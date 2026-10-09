@@ -23,9 +23,17 @@ struct MenuSave {
   int ffb = 50, cam = 0, volume = 8;             // native only. ffb: percent of the bridge's ceiling (Adam: "starts at 50%")
   bool line = false;
   std::string model;                             // native only: a downloaded car (data/cars/<key>) for the GT3 seat, "" = the built-in body
+  // XINGUS (js/home.js `X`, the browser's own record `wdc.xingus`)
+  bool xOn = false;
+  std::string xStyle = "gt3", xGears = "manual", xTrack, xHeil = "heilgrand", xField = "4fun";
+  int xBots = 0;                                 // 0 = the style's own number
   void load(const std::string &path);
   void save(const std::string &path) const;
 };
+
+// A Xingus STYLE is switches the race understands (js/home.js XSTYLES).
+struct XStyle { const char *key, *label, *line, *tune; int rivals; bool derby, stakes, loose; };
+const XStyle &xstyle(const std::string &key);
 
 struct LiveRow { int p; std::string col, name, gap; bool you; };
 struct LiveTower { bool up = false; std::string track; int lap = 0, laps = 0; std::vector<LiveRow> rows; };
@@ -52,6 +60,7 @@ class Home {
   // the downloaded car you chose, if this league has one ("" = the built-in body), and the kind of engine it has
   std::string pack() const;
   std::string voice() const;
+  std::string xTrackKey() const;                  // the circuit a Xingus session loads (a Heiligen route, the oval, or the usual one)
 
  private:
   struct Pack { std::string key, title, klass; };
@@ -73,6 +82,11 @@ class Home {
   void lightsOut();
   struct Opt { std::string label, key; std::vector<std::pair<std::string, std::string>> opts; };
   std::vector<Opt> setupRows() const;
+  std::vector<Opt> heilRows() const;
+  struct Circuit { std::string id, name, tag; };
+  std::vector<Circuit> circuits() const;          // the circuit row: in Xingus, Heiligen and the oval come first
+  std::string circuitId() const;
+  Json hmap;                                      // data/build/heiligen-map.json
   std::string get(const std::string &key) const;
   void set(const std::string &key, const std::string &v);
 };

@@ -16,6 +16,9 @@
 //
 // The driving loop is js/main.js's, substep for substep: the solo branch for a
 // hot lap, race.tick for a race.
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <SDL3/SDL.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -165,6 +168,9 @@ struct RaceSetup {
   std::string tier = "medium", battle, teamKey, field = "f1";
   bool noDnf = false, standIn = false;
   double seed = 1;
+  // XINGUS: which tune, and the style's switches (js/home.js xingusUrl)
+  bool xingus = false, xsolo = false, xderby = false, xstakes = false, xloose = false;
+  std::string xcar = "gt";
 };
 
 struct Session {
@@ -189,6 +195,8 @@ struct Session {
   double lastHit = 0;              // closing speed of a contact the sound has not played yet
   double t = 0, passAt = -9;
   Proj proj;
+  bool xingus = false, xmanual = false;   // Xingus mode; and the paddles ARE the gearbox
+  bool hand = false;                      // handbrake held (X, or the rim's `handbrake`)
 };
 
 static void resetCar(Session &S) {
@@ -253,6 +261,9 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     o.laps = rs->laps; o.grid = rs->grid; o.playerGrid = rs->slot; o.tier = rs->tier; o.player = true;
     o.battle = rs->battle; o.noDnf = rs->noDnf; o.seed = rs->seed; o.standIn = rs->standIn;
     o.playerTeam = rs->standIn ? nullptr : teamByKey(rs->teamKey);
+    o.xingus = rs->xingus; o.xopt.car = rs->xcar; o.xopt.solo = rs->xsolo; o.xopt.derby = rs->xderby;
+    o.xopt.stakes = rs->xstakes; o.xopt.loose = rs->xloose;
+    S.xingus = rs->xingus;
     S.race = std::make_unique<Race>(o);
     World *w = S.world.get();
     S.race->slopeAt = [w](double s) { return w->gradeAt(s); };
@@ -351,6 +362,14 @@ static void raceStep(Session &S, const HandsIn &in, bool bot, bool drsTap, Toast
     pi.throttle = S.hands.throttle; pi.brake = S.hands.brake;
     pi.delta = S.hands.wheel * steerLock(car.speed);
     pi.wheel = S.hands.wheel;
+    car.selector = S.hands.selector;
+    // Xingus reads these; the serious game ignores them. The gear you are in,
+    // as the road speed it runs out of revs at.
+    pi.hand = S.hand;
+    if (S.xmanual && S.box->manual >= 0) {
+      pi.gearTop = S.box->box->tops[(size_t)S.box->manual] / 3.6;
+      pi.gearLow = S.box->manual > 0 ? S.box->box->tops[(size_t)S.box->manual - 1] / 3.6 : 0;
+    }
   }
   if (S.spec->drs && drsTap) car.drsOpen = !car.drsOpen;
   race.tick(FIXED_DT, &pi);
@@ -444,12 +463,12 @@ static pid_t spawnBridge(const std::string &repo) {
   return p;
 }
 
-enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A_RESET, A_GO, A_PIT, A_COUNT };
+enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A_RESET, A_GO, A_PIT, A_SHUP, A_SHDN, A_COUNT };
 
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
   std::vector<std::string> pos;
-  std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg, modelArg;
+  std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg, modelArg, xingArg, xtrackArg, xheilArg;
   bool autoDrive = false, lineArg = false, windowed = false, hidpi = false, noAudio = false, hidden = false;
   int camArg = -1, ffbArg = -1, winW = 1600, winH = 900, gridArg = 0, lapsArg = 0, startArg = 0;
   long maxFrames = 0;
@@ -480,6 +499,9 @@ int main(int argc, char **argv) {
     else if (a == "--shot") shot = val("--shot");
     else if (a == "--screen") screenArg = val("--screen");
     else if (a == "--model") modelArg = val("--model");
+    else if (a == "--xingus") xingArg = val("--xingus");       // a Xingus STYLE (rally, rallycross, gt3, derby ...) for unattended checks
+    else if (a == "--xtrack") xtrackArg = val("--xtrack");     // heiligen | speedway | a circuit; --xheil picks the Heiligen route
+    else if (a == "--xheil") xheilArg = val("--xheil");
     else if (a == "--spool") spool = std::atof(val("--spool").c_str());
     else if (a == "--time") timeArg = val("--time");
     else if (a == "--weather") weatherArg = val("--weather");
@@ -494,7 +516,7 @@ int main(int argc, char **argv) {
   if (!modeArg.empty() && modeArg != "race" && modeArg != "hotlap") { std::fprintf(stderr, "xbr: --mode is race or hotlap\n"); return 2; }
   static const std::vector<std::string> TIMES = {"live", "night", "dawn", "sunrise", "morning", "day", "evening", "sunset", "dusk"},
                                         WEATHERS = {"live", "clear", "cloudy", "overcast", "rain", "storm", "changing"},
-                                        SCREENS = {"home", "setup", "garage", "settings", "pause", "results"};
+                                        SCREENS = {"home", "setup", "garage", "settings", "pause", "results", "heiligen"};
   auto oneOf = [](const std::vector<std::string> &v, const std::string &s) { return std::find(v.begin(), v.end(), s) != v.end(); };
   if (!timeArg.empty() && !oneOf(TIMES, timeArg)) { std::fprintf(stderr, "xbr: no --time '%s'\n", timeArg.c_str()); return 2; }
   if (!weatherArg.empty() && !oneOf(WEATHERS, weatherArg)) { std::fprintf(stderr, "xbr: no --weather '%s'\n", weatherArg.c_str()); return 2; }
@@ -523,10 +545,26 @@ int main(int argc, char **argv) {
   std::string savePath;
   const bool offscreen = shotMode || hidden;
   if (!offscreen) { char *pref = SDL_GetPrefPath("xanboo78o", "xbr"); if (pref) { savePath = std::string(pref) + "menu.txt"; SDL_free(pref); } }
+  // ONE GAME AT A TIME. Two copies both read the one wheel and both command its
+  // one motor, each for a different car: the rim is thrown about (it happened,
+  // 2026-10-08). A second window says so and leaves. Unseen checks are exempt,
+  // and never touch the motor at all.
+  if (!offscreen) {
+    const char *rt = std::getenv("XDG_RUNTIME_DIR");
+    const std::string lk = std::string(rt && *rt ? rt : "/tmp") + "/xbr.lock";
+    const int lfd = open(lk.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    if (lfd >= 0 && flock(lfd, LOCK_EX | LOCK_NB) != 0) {
+      std::fprintf(stderr, "xbr: the game is already running — one at a time (two would fight over the wheel)\n");
+      return 1;
+    }
+  }
   Home home(dataDir, savePath);
   MenuSave &cfg = home.S;
-  const bool direct = !pos.empty() || maxFrames > 0 || autoDrive || (shotMode && (screenArg.empty() || screenArg == "pause" || screenArg == "results"));
+  const bool direct = !pos.empty() || (!xingArg.empty() && screenArg.empty()) || maxFrames > 0 || autoDrive || (shotMode && (screenArg.empty() || screenArg == "pause" || screenArg == "results"));
   if (!modelArg.empty()) { cfg.model = modelArg; cfg.car = "gt3"; }      // a downloaded car takes the GT3 seat
+  if (!xingArg.empty()) { cfg.xOn = true; cfg.xStyle = xstyle(xingArg).key; }
+  if (!xtrackArg.empty()) cfg.xTrack = xtrackArg;
+  if (!xheilArg.empty()) cfg.xHeil = xheilArg;
   if (pos.size() > 0) cfg.track = pos[0];
   if (pos.size() > 1) cfg.car = pos[1];
   if (!tierArg.empty()) cfg.tier = tierArg;
@@ -633,10 +671,24 @@ int main(int argc, char **argv) {
     rs.battle = cfg.tier == "supercasual" ? cfg.battle : "";
     rs.noDnf = cfg.noDnf; rs.teamKey = cfg.teams[cfg.car]; rs.field = cfg.field;
     rs.seed = seedArg > 0 ? seedArg : 1 + std::rand() % 9973;
+    std::string trk = cfg.track, car = cfg.car;
+    bool racing = cfg.mode == "race";
+    if (cfg.xOn) {
+      // XINGUS (js/home.js xingusUrl): always a race, in the GT3 seat, the style's switches on
+      const XStyle &x = xstyle(cfg.xStyle);
+      trk = home.xTrackKey(); car = "gt3"; racing = true;
+      const int rivals = x.rivals && cfg.xBots > 0 ? cfg.xBots : x.rivals;
+      rs.grid = std::max(2, rivals + 1); rs.slot = rivals ? rs.grid : 1;
+      rs.tier = x.derby ? "medium" : trk == "speedway" && cfg.xField == "skilled" ? "hard" : "casual";
+      rs.battle = x.derby ? "hard" : ""; rs.noDnf = !x.stakes; rs.teamKey = ""; rs.standIn = false;
+      rs.xingus = true; rs.xcar = x.tune; rs.xsolo = rivals == 0; rs.xderby = x.derby; rs.xstakes = x.stakes; rs.xloose = x.loose;
+    }
     auto N = std::make_unique<Session>();
-    if (!loadSession(*N, R, dataDir, cfg.track, cfg.car, cfg.tier, cfg.mode == "race" ? &rs : nullptr)) return false;
+    if (!loadSession(*N, R, dataDir, trk, car, rs.tier, racing ? &rs : nullptr)) return false;
     SP = std::move(N);
     usePack();
+    SP->xmanual = cfg.xOn && cfg.xGears != "auto" && !autoDrive;      // a bot at the wheel does not pull paddles
+    if (SP->xmanual) SP->box->manual = 0;
     bgOn = false;
     hud.reset();
     toast = {};
@@ -836,6 +888,8 @@ int main(int argc, char **argv) {
             case SDL_SCANCODE_R: if (!menuish) act[A_RESET] = true; break;
             case SDL_SCANCODE_C: if (!menuish) act[A_CAM] = true; break;
             case SDL_SCANCODE_P: if (!menuish) act[A_PIT] = true; break;
+            case SDL_SCANCODE_E: if (!menuish) act[A_SHUP] = true; break;
+            case SDL_SCANCODE_Q: if (!menuish) act[A_SHDN] = true; break;
             case SDL_SCANCODE_L: if (!menuish) cfg.line = !cfg.line; break;
             case SDL_SCANCODE_F: case SDL_SCANCODE_F11: if (e.key.scancode == SDL_SCANCODE_F11 || !menuish) { fullscreen = !fullscreen; SDL_SetWindowFullscreen(win, fullscreen); } break;
             case SDL_SCANCODE_F1: if (screen == DRIVE && !S.race) autoDrive = !autoDrive; break;
@@ -865,6 +919,8 @@ int main(int argc, char **argv) {
       held[A_CAM] = rim.held(jy, rb, "cam"); held[A_DRS] = rim.held(jy, rb, "drs");
       // on the wheel there is no Enter within reach: in the menus either paddle confirms too
       if (screen != DRIVE) held[A_OK] |= rim.held(jy, rb, "shiftUp");
+      else { held[A_SHUP] = rim.held(jy, rb, "shiftUp"); held[A_SHDN] = rim.held(jy, rb, "shiftDn"); }
+      S.hand = screen == DRIVE && (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_X] || rim.held(jy, rb, "handbrake"));
       if (dev.pad) {
         auto pb = [&](SDL_GamepadButton b) { return SDL_GetGamepadButton(dev.pad, b); };
         const double ax = SDL_GetGamepadAxis(dev.pad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0, ay = SDL_GetGamepadAxis(dev.pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0;
@@ -923,6 +979,26 @@ int main(int argc, char **argv) {
       if (act[A_CAM]) { cfg.cam = (cfg.cam + 1) % 4; R.snapCamera(); }
       if (act[A_RESET]) { if (S.race) rejoin(S); else resetCar(S); R.snapCamera(); }
       if (act[A_DRS]) drsTap = true;
+      // THE PADDLES (js/main.js). In Xingus with manual gears they ARE the
+      // gearbox: a downshift that would bury the needle is refused, down from
+      // first at a standstill is reverse, up out of it is first again.
+      // Otherwise they are the selector: drive and reverse.
+      if (!autoDrive && (act[A_SHUP] || act[A_SHDN])) {
+        Hands &hd = S.hands;
+        const double v = S.car->speed;
+        if (S.xmanual) {
+          Gearbox &b = *S.box;
+          if (b.manual < 0) b.manual = 0;
+          if (act[A_SHUP]) { if (hd.selector < 0) { hd.selector = 1; b.manual = 0; } else b.shift(1, v * 3.6); }
+          if (act[A_SHDN]) {
+            if (b.manual == 0 && v < 3 && hd.selector > 0) { hd.selector = -1; toast = {"REVERSE", 2}; }
+            else if (hd.selector > 0 && !b.shift(-1, v * 3.6)) toast = {"TOO FAST FOR THAT GEAR", 2};
+          }
+        } else {
+          if (act[A_SHUP] && hd.selector < 0) { hd.selector = 1; toast = {"DRIVE", 2}; }
+          if (act[A_SHDN] && hd.selector > 0) { if (v < 5) { hd.selector = -1; toast = {"REVERSE", 2}; } else toast = {"TOO FAST FOR REVERSE", 2}; }
+        }
+      }
       if (act[A_PIT] && S.race) { S.race->me->pitRequest = !S.race->me->pitRequest; toast = {S.race->me->pitRequest ? "BOX THIS LAP" : "STAY OUT", 2}; }
     }
 
@@ -976,7 +1052,9 @@ int main(int argc, char **argv) {
     {
       const double sf = S.car->surface;
       const double rough = sf < 0.9 ? 0.45 : sf < 1 ? 0.22 : 0;
-      bridge.update(*S.car, rough, dt, screen == DRIVE && !autoDrive && !bgOn && cfg.ffb > 0, cfg.ffb / 100.0);
+      // force only from the one game you are looking at: never unseen, never from a window without the keyboard
+      const bool mine = !offscreen && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
+      if (!offscreen) bridge.update(*S.car, rough, dt, mine && screen == DRIVE && !autoDrive && !bgOn && cfg.ffb > 0, cfg.ffb / 100.0);
       // force is wanted and no bridge has answered for a few seconds: start it, once
       if (!hidden && cfg.ffb > 0 && dev.joy && !bridge.live() && !bridgeTried) {
         bridgeWait += dt;

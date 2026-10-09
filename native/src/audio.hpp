@@ -22,6 +22,13 @@ struct Gearbox {
   int gear = 0;
   double rpm = 0, shiftT = 0;
   int shifted = 0;
+  // MANUAL (Xingus; js/gearbox.js): set `manual` to a gear and the box stops
+  // choosing. `limiter` is true on the stop. shift() is the paddle: it refuses
+  // a downshift that would over-rev.
+  int manual = -1;
+  bool limiter = false;
+  double clockMs = 0;
+  bool shift(int dir, double speedKmh);
   explicit Gearbox(const std::string &cls);
   void update(double dt, double speedKmh, double throttle);
 };
