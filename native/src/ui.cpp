@@ -294,6 +294,12 @@ void GameHud::draw(Renderer &R, float k, const HudTheme &T, const HudIn &in) {
         rowText(*race, e, i, r.cls, r.gap);
         // GT MODE: the number is your place in YOUR class, on your class's colour
         if (race->multi) { r.klassOn = true; r.klass = hex(gtClass(e.klass).col); r.pos = classPos(*race, e); }
+        // THE NINE (brain.cpp): who this driver is, in the colour of the day they are having
+        if (e.brain.tier > 0) {
+          static const char *TIER[4] = {"", "SMART", "DUMB", "SONNY"};
+          static const char *MOOD[4] = {"#9aa0a6", "#ff4a3d", "#ffd23f", "#4fd8e8"};      // -, mad, happy, zen
+          r.tag = TIER[e.brain.tier]; r.tagC = hex(MOOD[e.brain.mood]);
+        }
         rows.push_back(r);
       }
     }
@@ -316,7 +322,8 @@ void GameHud::draw(Renderer &R, float k, const HudTheme &T, const HudIn &in) {
       text(x0 + 26, y + 4, 11, std::to_string(r.pos), posC, RIGHT, I9);
       skewBar(R, k, x0 + 33, y + 3, 4, 13, r.chip);
       std::string nm = r.name;
-      while (nm.size() > 3 && width(11, nm, B7, 0.06f) > 122) nm.pop_back();
+      while (nm.size() > 3 && width(11, nm, B7, 0.06f) > (r.tag.empty() ? 122 : 92)) nm.pop_back();
+      if (!r.tag.empty()) text(x0 + w - 52, y + 6, 7.5f, r.tag, r.me ? posC : r.tagC, RIGHT, B7, 0.1f);
       text(x0 + 44, y + 4, 11, nm, nameC, LEFT, B7, 0.06f);
       text(x0 + w - 10, y + 4.5f, 10, r.gap, gapC, RIGHT, B7, 0.06f);
       R.hudAlpha = 1;

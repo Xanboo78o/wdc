@@ -876,14 +876,14 @@ void Race::racecraft(Entry &e) {
   // Car-following: THE CAR AHEAD IN YOUR LANE, not the nearest car ahead (the duel).
   // ...but not off the grid or through the first corners: twenty-two cars on cold tyres in one
   // braking zone is where the old caution earns its keep (eight lap-one shunts in one race without it).
-  const bool close = brainOn && !zip && state == RaceState::Green && time - greenT > 12;
+  const bool close = brainOn && !zip && state == RaceState::Green && time - greenT > brainTune().closeAfter;
   Entry *A = e.ahead;
   if (duel) {
     // REAL: a driver who has pulled out IS out. Its lane is a car and a bit wide, on a straight
     // and under braking alike — or nobody can ever go down the inside (measured: the fastest car
     // on the grid, started last, took five laps to pass three).
     // (and what it imagined tells it when a car that is NOT in its lane yet is about to be: thinkCap, below)
-    Entry *la = laneAhead(e, close ? 2.2 : brakingZone(e.proj.s, 140) ? std::max(4.5, t.w[(size_t)i] * 1.1) : 3.4);
+    Entry *la = laneAhead(e, close ? brainTune().gate : brakingZone(e.proj.s, 140) ? std::max(4.5, t.w[(size_t)i] * 1.1) : 3.4);
     A = la ? la : e.ahead;
   }
   // You, off the road, are not the car to follow.
@@ -912,10 +912,10 @@ void Race::racecraft(Entry &e) {
     // (traced: the fastest car on the grid sat 33 m behind a backmarker, 5 m/s under its own line speed).
     const double zone = close ? 1.0 : braking ? 1.7 : 1.0;
     // ...and the same caution behind: up to a car length more headway.
-    const double headway = close ? 4.0 + v * 0.14 + std::max(0.0, closing) * 1.0 + stSpace * spec->bodyL
+    const double headway = close ? brainTune().hwBase + v * brainTune().hwK + std::max(0.0, closing) * 1.0 + stSpace * spec->bodyL
                                    : (6.5 + v * 0.28 + std::max(0.0, closing) * 1.4) * zone + stSpace * spec->bodyL;
     // Into a braking zone the road narrows onto one line: widen the gate to most of the road.
-    const double latGate = zip ? INF : close ? 2.2 : braking ? std::max(4.5, t.w[(size_t)i] * 1.1) : 3.4;
+    const double latGate = zip ? INF : close ? brainTune().gate : braking ? std::max(4.5, t.w[(size_t)i] * 1.1) : 3.4;
     // You own the road when you have OVERLAP.
     const bool overlap = !zip && ds < spec->bodyL * 1.15 && dl > 1.9;
     // BRAKE FOR THE CAR AHEAD, NOT JUST THE LINE (the duel).

@@ -24,6 +24,26 @@
 
 namespace xbr {
 
+// THE CONSTANTS A THINKING DRIVER IS MADE OF (brain.cpp, race.cpp `close`). The values here
+// are the ones the drivers LEARNED: tools/brainlearn.py races them against themselves, headless,
+// and keeps what overtakes most without wrecking the field. XBR_BT="lane=2.9,riskW=4" overrides.
+struct BrainTune {
+  double lane = 2.7;        // m beside the car ahead: where a pass is driven
+  double passW = 14;        // what finishing ahead of a car that was ahead is worth, in metres of road
+  double defW = 14;         // what being passed costs
+  double riskW = 3.0;       // metres a unit of imagined risk costs
+  double switchC = 1.5;     // metres changing its mind costs
+  double simPen = 0.07;     // imagined: speed lost off the line in a corner
+  double capPen = 0.10;     // real: how much slower an off-line car arrives
+  double hwBase = 4.0, hwK = 0.14;   // following distance, m and s
+  double gate = 2.2;        // m: a car further across than this is not in my lane
+  double closeAfter = 12;   // s after the lights before anybody follows closely
+  double lateK = 1.5;       // how much speed a late brake is imagined to buy
+  double confRisk = 2.0;    // risk of an imagined door-to-door moment
+  double horizonK = 1.0;    // every driver's look-ahead, scaled
+};
+BrainTune &brainTune();
+
 // SUPERCASUAL's three OVERTAKES submodes (js/autopilot.js BATTLE).
 struct Battle { const char *key, *name; double lo, hi, aggression, defence, moveGap, lunge, band, mistakes, consistency; };
 const Battle *battleFor(const std::string &key);     // "easy" | "medium" | "hard"; anything else = null

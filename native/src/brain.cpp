@@ -23,10 +23,38 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 #include "race.hpp"
 
 namespace xbr {
+
+BrainTune &brainTune() {
+  static BrainTune T = [] {
+    BrainTune t;
+    if (const char *e = std::getenv("XBR_BT")) {
+      std::string s = e;
+      size_t at = 0;
+      while (at < s.size()) {
+        const size_t c = s.find(',', at), q = s.find('=', at);
+        const size_t end = c == std::string::npos ? s.size() : c;
+        if (q != std::string::npos && q < end) {
+          const std::string k = s.substr(at, q - at);
+          const double v = std::atof(s.substr(q + 1, end - q - 1).c_str());
+          struct { const char *n; double *p; } F[] = {{"lane", &t.lane}, {"passW", &t.passW}, {"defW", &t.defW}, {"riskW", &t.riskW}, {"switchC", &t.switchC},
+            {"simPen", &t.simPen}, {"capPen", &t.capPen}, {"hwBase", &t.hwBase}, {"hwK", &t.hwK}, {"gate", &t.gate}, {"closeAfter", &t.closeAfter},
+            {"lateK", &t.lateK}, {"confRisk", &t.confRisk}, {"horizonK", &t.horizonK}};
+          bool ok = false;
+          for (auto &f : F) if (k == f.n) { *f.p = v; ok = true; }
+          if (!ok) { std::fprintf(stderr, "XBR_BT: no such constant '%s'\n", k.c_str()); std::exit(2); }
+        }
+        at = end + 1;
+      }
+    }
+    return t;
+  }();
+  return T;
+}
 
 static double rnd(unsigned &s) { s = s * 1664525u + 1013904223u; return (s >> 8) / 16777216.0; }
 static unsigned hashName(const std::string &n, unsigned salt) {
@@ -151,7 +179,7 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
           const int idx = t.idx(e.proj.s + d);
           const double vl = std::max(8.0, (double)line.v[(size_t)idx]);
           const double corner = std::clamp((0.9 - vl / vTop) / 0.25, 0.0, 1.0);
-          const double va = vl * (1 - 0.10 * corner * std::min(1.0, dev / 3.0)) * (1 + b.planLate);
+          const double va = vl * (1 - brainTune().capPen * corner * std::min(1.0, dev / 3.0)) * (1 + b.planLate);
           const double c = std::sqrt(va * va + 2 * 9.0 * d);
           if (corner > 0 && (std::isnan(out.cap) || c < out.cap)) out.cap = c;
         }
@@ -168,6 +196,7 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
   if (time - b.planAt < b.every) return give();
   b.planAt = time;
 
+  const BrainTune &BT = brainTune();
   // ---- WHAT IT CAN SEE
   Other seen[6];
   int ns = 0;
@@ -204,7 +233,7 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
   const bool zone = brakingZone(e.proj.s, 140);
   const double lateBy = (std::isnan(e.driver.lungeMax) ? 0.02 : e.driver.lungeMax) * (0.6 + 0.6 * e.driver.aggression) * b.dive;
   if (ahead && ahead->ds < 70 && !noAtk) {
-    const double l = ahead->lat + 2.7, r = ahead->lat - 2.7;
+    const double l = ahead->lat + BT.lane, r = ahead->lat - BT.lane;
     const bool lOk = l <= lim, rOk = r >= -lim;
     if (b.tier == 2) {
       // DUMB knows one way past: the side with more road
@@ -226,7 +255,7 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
 
   // ---- IMAGINE EACH ONE
   const double DT = 0.25;
-  const int N = (int)std::max(3.0, b.horizon / DT);
+  const int N = (int)std::max(3.0, b.horizon * BT.horizonK / DT);
   const double vTop = std::max(40.0, topSpeed(*e.car.spec));
   const double myPace = std::clamp(e.car.speed / vLineNow, 0.85, 1.05);
   const auto allowed = [&](int idx, double lat, double pace) {
@@ -234,7 +263,7 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
     const double dev = std::fabs(lat - (double)line.off[(size_t)idx]);
     // off the line costs nothing on a straight and up to 7% of the speed in a corner
     const double corner = std::clamp((0.9 - vl / vTop) / 0.25, 0.0, 1.0);
-    return vl * pace * (1 - 0.07 * corner * std::min(1.0, dev / 3.5));
+    return vl * pace * (1 - BT.simPen * corner * std::min(1.0, dev / 3.5));
   };
   double bestU = -1e18, bestCap = NaN;
   int bestK = 0;
@@ -249,7 +278,7 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
       const double tgt = c.plan == 0 ? (double)line.off[(size_t)idx] : std::clamp(c.lat, -lm, lm);
       lat += std::clamp(tgt - lat, -3.5 * DT, 3.5 * DT);
       double va = allowed(idx, lat, std::max(myPace, 0.97));
-      if (c.late > 0) { va *= 1 + c.late * 1.5; if (va < v) risk += 0.5; }     // braking late is a bet, every step it is on
+      if (c.late > 0) { va *= 1 + c.late * BT.lateK; if (va < v) risk += 0.5; }     // braking late is a bet, every step it is on
       bool tow = false;
       for (int q = 0; q < ns; q++) {
         Other &p = o[q];
@@ -262,7 +291,7 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
           if (j < 4) cap = std::isnan(cap) ? p.v : std::min(cap, p.v);
         }
         // door to door, or through them: this future has a crash in it
-        if (std::fabs(gap) < L * 1.05 && dl < b.margin) risk += (b.grudge == p.who ? 0.5 : 2.0);
+        if (std::fabs(gap) < L * 1.05 && dl < b.margin) risk += (b.grudge == p.who ? 0.25 : 1.0) * BT.confRisk;
       }
       if (v < va) v += std::min((std::max(1.0, 9 * (1 - v / vTop)) + (tow ? 0.8 : 0)) * DT, va - v);
       else { const double dv = std::min(13 * DT, v - va); v -= dv; if (v > va * 1.03) risk += (v / va - 1) * 6; }
@@ -291,14 +320,14 @@ Race::Thought Race::think(Entry &e, int i, double lim, double lineOff, bool noAt
     for (int q = 0; q < ns; q++) {
       const double end = x - o[q].ds;                     // + : I finish ahead of them
       const double w = b.grudge == seen[q].who ? 2.2 : 1;
-      if (!seen[q].behind && end > L * 0.6) U += 14 * b.wAtk * w * (0.6 + 0.8 * e.driver.aggression);
-      if (seen[q].behind && end < -L * 0.3) U -= 14 * b.wDef * (0.5 + e.driver.defence);
+      if (!seen[q].behind && end > L * 0.6) U += BT.passW * b.wAtk * w * (0.6 + 0.8 * e.driver.aggression);
+      if (seen[q].behind && end < -L * 0.3) U -= BT.defW * b.wDef * (0.5 + e.driver.defence);
       if (seen[q].behind && !noDef) U += std::clamp(end - (-seen[q].ds), -8.0, 8.0) * 0.5 * b.wDef * e.driver.defence;   // even keeping them further back is worth something
     }
-    U -= risk * 3.0 * b.caution;
+    U -= risk * BT.riskW * b.caution;
     // changing its mind costs a little: a driver commits
     const bool same = c.plan == b.plan && (c.plan == 0 || std::fabs(c.lat - b.planLat) < 1.2) && (c.late > 0) == (b.planLate > 0);
-    if (!same) U -= b.tier == 2 ? 0.4 : 1.5;
+    if (!same) U -= (b.tier == 2 ? 0.27 : 1.0) * BT.switchC;
     if (U > bestU) { bestU = U; bestK = k; bestCap = cap; }
   }
   b.plan = cands[bestK].plan; b.planLat = cands[bestK].lat; b.planLate = cands[bestK].late; b.planCap = bestCap;
