@@ -8,7 +8,7 @@
 # pitstop.js, safetycar.js, drivers.js, grid.js, xingus.js — a change there has
 # to be carried across.
 #
-#   native/check.sh            the usual matrix (about a minute and a half, niced)
+#   native/check.sh            the usual matrix (about three and a half minutes, niced)
 #   native/check.sh --quick    a few cases of each
 #
 # Three instruments, because one of them is weak:
@@ -39,16 +39,31 @@
 #        and to a millimetre for 283 s; a red flag, the pit lane and a standing
 #        restart agree to a micrometre for the 300 s they are judged.
 #        A case that touches before it has been judged for 10 s FAILS as useless.
+# TOUCH  ...so car-to-car contact has an instrument of its own: 2000 pairs of
+#        cars thrown at each other (`--collide`), the same pairs to the last bit
+#        in both builds, one line a pair. At most 1% of the hits may differ —
+#        measured, 2 of 1190 do, and they are the corner tie above.
 #
 # Exit status is the number of FAILs.
 #
 # THIS GATE HAS BEEN WATCHED FAILING: F1 mu 1.91 -> 1.90 in physics.cpp fails
-# every F1 trace; the car-following headway 0.28 -> 0.29 in race.cpp racecraft
-# fails nine RACE cases, and a pit-lane constant fails the ones with a stop.
+# every F1 trace. In the race layer, each broken alone (2026-10-08):
+#   race.cpp      car-following headway 0.28 -> 0.29   every RACE case fails
+#   race.cpp      DRS_GAP 1.0 -> 0.5                   the Kate Mascoi case fails
+#   pitstop.cpp   ENTRY_DECEL 10 -> 11                 the three cases with a pit entry fail
+#   safetycar.hpp SC_F 0.60 -> 0.61                    the two safety-car cases fail
+#   xingus.cpp    TURN_G 4.2 -> 4.3                    the two steered Xingus cases fail
+#   collide.cpp   car-to-car friction 0.42 -> 0.43     TOUCH fails (427 of 1190), and nothing else
+# Three of those PASSED the first time, and that is the lesson: SC_F while no
+# case ran long enough for a queue to form behind the safety car, TURN_G while
+# no scripted input turned the wheel, DRS_GAP while no car was ever within a
+# second of another at a detection line. A case only gates what its cars DO —
+# the trace's last line counts what they did (drs, sideFights, sc, vsc, red).
 # What it CANNOT see: the renderer, the devices, the sound, anything the
-# reference driver never does (reverse, a lost wheel, a puncture), and anything
-# in a race after its cars have touched — which is most of a real race: the
-# closing laps of a safety-car queue, a red flag with a full grid, a restart.
+# reference driver never does (reverse, a lost wheel, a puncture), and in a
+# race anything after its cars have touched — which is most of a real race: a
+# safety-car queue of twenty, a red flag with a full grid, lapped traffic, the
+# cheer for a pass that stuck (no scripted input ever makes one).
 set -u
 cd "$(dirname "$0")/.."
 BIN=native/build
@@ -70,17 +85,22 @@ else
         "suzuka 40 f1 supercasual")
   # `@N`: judged for N s of race time, or to the first touch. What each is for:
   RACE=(
-    "monza f1 3 22 medium --seed 1 @60"                       # a full grid, pits and rules on, nobody touches
+    "monza f1 3 22 medium --seed 1 @100"                      # a full grid, pits and rules on, nobody touches
+    "kate f1 3 8 hard --seed 1 --battle hard @200"            # DRS (nobody at Monza gets within a second on lap two), the band with nobody to band to
     "suzuka f4 5 12 hard --seed 3 @25"                        # they touch at 14.8 s: judged to 14
     "speedway gt3 6 18 medium --seed 2 @60"                   # stock rules: out of the pits in fives, the formation
     "speedway gt3 4 4 hard --seed 4 --rolling 0 @50"          # ...and from the grid: a whole pit stop, a speeding penalty
     "heilrx f4 4 10 medium --seed 5 @100"                     # a joker lap owed, gravel road, banking
+    "heilgrand f1 3 4 hard --seed 5 --player 1 --input floor @150"   # no pit lane: a WHOLE virtual safety car, and the truck
     "monza f1 6 8 medium --seed 1 --player 4 @280"            # YOU, parked on the grid: round you, then four minutes of safety car and its queue
     "monza f1 4 8 medium --seed 1 --player 1 --input floor @300"   # jump start, the wall at turn one, and a WHOLE safety car: truck, in this lap, the restart
     "monaco f1 3 10 medium --seed 2 --player 1 --input floor --aero @90"    # the same at Monaco with the solved aero map, and a rival in the wall under it
     "monza f1 5 4 hard --seed 9 --rainat 20 @300"             # rain: red flag, the pit lane, garages, a standing restart
     "heilgrand gt3 3 8 medium --seed 6 --xingus rally --player 1 --input floor @45"   # Xingus handling, snow, no race control
     "speedway f1 5 6 medium --seed 3 --rolling 0 --player 2 --input floor --xingus gt @45"   # Xingus on the oval: tyre stints, gCap
+    "monza f1 2 1 medium --seed 6 --xingus rally --xsolo --player 1 --input weave @60"   # ...and steered, alone: grip, the drift, the handbrake, a gear
+    "monza gt3 2 1 medium --seed 6 --xingus gt --xsolo --xstakes --player 1 --input weave @60"   # ...with stakes: the damage is real
+    "suzuka f1 3 6 medium --seed 2 --player 1 --input weave --nodnf @25"   # you, all over the road: blue flags, the stewards, NO DNF
     "spa f1 3 20 supercasual --seed 8 --battle hard --player 1 --input floor --nodnf @100"   # the OVERTAKES band and its leash
     "zandvoort f4 3 14 casual --seed 4 --battle medium --player 7 --standin @80"   # a stand-in at your wheel, the duel trim
     "sepang gt3 4 16 medium --seed 11 --aero --wet 0.6 --pits 0 --rules 0 @25"   # the race before race control, in the wet
@@ -135,6 +155,14 @@ for full in "${RACE[@]}"; do
   elif awk -v d="$2" 'BEGIN { exit !(d <= 0.001) }'; then echo "EXACT      race  $c   ($note)"
   else echo "FAIL       race  $c   ($note)"; paste -d'|' "$T/js" "$T/cc" | awk -F'|' '{ split($1, a, " "); split($2, b, " "); if (a[1] ~ /^[0-9.]+$/ && (a[3] != b[3] || a[4] != b[4])) { print $1; print $2; if (++k >= 3) exit } }'; fails=$((fails + 1)); fi
 done
+
+# resolveCars, pair by pair
+if nice node native/check/ref-race.mjs --collide 2000 3 > "$T/js" 2> "$T/jserr" && nice $BIN/xbr-race --collide 2000 3 > "$T/cc" 2> "$T/ccerr"; then
+  r=$(paste "$T/js" "$T/cc" | awk -F'\t' '{ n++; if ($1 ~ / hit /) h++; if ($1 != $2) d++ } END { printf "%d %d %d", n, h, d }')
+  set -- $r
+  if [ "$1" -eq 2000 ] && [ "$2" -gt 500 ] && [ $(( $3 * 100 )) -le "$2" ]; then echo "EXACT      touch 2000 pairs   ($2 hits, $3 differ)"
+  else echo "FAIL       touch 2000 pairs   ($1 lines, $2 hits, $3 differ)"; diff "$T/js" "$T/cc" | head -4 | cut -c1-220; fails=$((fails + 1)); fi
+else echo "FAIL       touch 2000 pairs   (a tool failed: $(head -1 "$T/jserr" "$T/ccerr" 2>/dev/null | head -3 | tr '\n' ' '))"; fails=$((fails + 1)); fi
 
 for c in "${LAPS[@]}"; do
   nice node tools/drive.mjs $c > "$T/js" 2> "$T/jserr" || { echo "FAIL       laps  $c   (node tool failed: $(head -1 "$T/jserr"))"; fails=$((fails + 1)); continue; }

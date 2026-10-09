@@ -10,7 +10,9 @@
 //   --drs 0|1           --battle easy|medium|hard             --nodnf
 //   --player N          you, on grid slot N (nobody at the wheel unless --input)
 //   --standin           a bot's racecraft at your wheel (still your pedals)
-//   --input park|floor  your pedals: none at all, or flat out and dead straight
+//   --input park|floor|weave   your hands and feet: none at all; flat out and dead
+//                       straight; or flat out in a gear good for 60 m/s, weaving
+//                       gently, the handbrake at 9 s and the brakes with lock on at 14
 //   --xingus gt|rally   --xsolo  --xderby  --xloose  --xstakes
 //   --rolling 0|1       --joker 0|1        --aero             --wet W (0..1)
 //   --rainat T          a downpour arrives T s in (wetness -> 1): a red flag, 15 s later
@@ -25,6 +27,13 @@
 //                       each number in its shortest exact form. For bisecting which
 //                       field parts company first when a trace fails.
 //   --data DIR
+//
+//   xbr-race --collide N [seed]
+//
+// Not a race: N pairs of cars thrown at each other (js/collide.js resolveCars),
+// one line a pair with what came out. A race trace cannot judge car-to-car
+// contact — it is where the two builds stop agreeing — so contact is judged
+// here, on inputs that are the same to the last bit.
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -44,9 +53,45 @@ static std::string fmt(double s) {
   return buf;
 }
 // String.padEnd / padStart count UTF-16 units; the names here are ASCII.
+// The same pairs in both builds: every number below comes off one mulberry32
+// stream, drawn in this order.
+static int collide(int n, double seed) {
+  Mulberry rng(seed);
+  const char *cls[3] = {"f1", "f4", "gt3"};
+  const auto u = [&](double lo, double hi) { return lo + (hi - lo) * rng(); };
+  const auto side = [](const Car &c) {
+    double tyres = 0;
+    for (int i = 0; i < 4; i++) tyres += c.tyres[i].dmg;
+    char buf[400];
+    std::snprintf(buf, sizeof buf, "%.9g %.9g %.9g %.9g %.9g dmg %.9g crush %.6g %.6g %.6g %.6g lost %d%d dents %d tyres %.6g z %.6g vz %.6g air %d",
+                  c.x, c.y, c.vx, c.vy, c.r, c.damage, c.crushFront, c.crushRear, c.crushLeft, c.crushRight,
+                  c.hasLost && c.lostFrontWing ? 1 : 0, c.hasLost && c.lostRearWing ? 1 : 0, (int)c.dents.size(), tyres, c.z, c.vz, c.airborne ? 1 : 0);
+    return std::string(buf);
+  };
+  for (int k = 0; k < n; k++) {
+    Car a = makeCar(cls[(int)std::floor(rng() * 3)]), b = makeCar(cls[(int)std::floor(rng() * 3)]);
+    const double ha = u(-PI, PI), d = u(1.2, 5.2), phi = u(-PI, PI);
+    a.x = u(-500, 500); a.y = u(-500, 500); a.hdg = ha;
+    b.x = a.x + d * std::cos(phi); b.y = a.y + d * std::sin(phi);
+    // half of them nearly parallel (a pack), half at any angle (a spin)
+    b.hdg = rng() < 0.5 ? ha + u(-0.25, 0.25) : u(-PI, PI);
+    a.vx = u(5, 85); a.vy = u(-4, 4); a.r = u(-1.2, 1.2);
+    b.vx = u(5, 85); b.vy = u(-4, 4); b.r = u(-1.2, 1.2);
+    const CarHit h = resolveCars(a, b);
+    if (!h.hit) { std::printf("%d miss\n", k); continue; }
+    std::printf("%d hit depth %.9g closing %.9g n %.9g %.9g j %.9g harm %.9g up %d | %s | %s\n", k, h.depth, h.closing, h.nx, h.ny, h.j, h.harm,
+                h.launched ? 1 : 0, side(a).c_str(), side(b).c_str());
+  }
+  return 0;
+}
+
 static std::string padEnd(std::string s, size_t n) { while (s.size() < n) s += ' '; return s; }
 
 int main(int argc, char **argv) {
+  if (argc >= 3 && std::string(argv[1]) == "--collide") {
+    if (argc > 4 || std::atoi(argv[2]) < 1) { std::fprintf(stderr, "xbr-race: --collide N [seed]\n"); return 2; }
+    return collide(std::atoi(argv[2]), argc > 3 ? std::atof(argv[3]) : 1);
+  }
   std::vector<std::string> a;
   std::string dataDir = "data", battle, input = "park", xcar;
   double seed = 7, every = 1, maxTime = -1, wet = 0, rainAt = -1;
@@ -103,7 +148,7 @@ int main(int argc, char **argv) {
   if (!hasCarSpec(cls)) { std::fprintf(stderr, "xbr-race: no car class '%s' (f4, f1, gt3)\n", cls.c_str()); return 2; }
   if (std::string(tierFor(tier)->key) != tier) { std::fprintf(stderr, "xbr-race: no tier '%s'\n", tier.c_str()); return 2; }
   if (!battle.empty() && !battleFor(battle)) { std::fprintf(stderr, "xbr-race: no battle '%s' (easy, medium, hard)\n", battle.c_str()); return 2; }
-  if (input != "park" && input != "floor") { std::fprintf(stderr, "xbr-race: --input is park or floor\n"); return 2; }
+  if (input != "park" && input != "floor" && input != "weave") { std::fprintf(stderr, "xbr-race: --input is park, floor or weave\n"); return 2; }
   if (!xcar.empty() && xcar != "gt" && xcar != "rally") { std::fprintf(stderr, "xbr-race: --xingus is gt or rally\n"); return 2; }
   if (laps < 1 || grid < 1 || every <= 0) { std::fprintf(stderr, "xbr-race: laps, grid and the trace interval must be positive\n"); return 2; }
 
@@ -136,16 +181,31 @@ int main(int argc, char **argv) {
   race.onEvent = [&](const RaceEvent &ev) { all.push_back(ev); };
   PlayerInput floorIt;
   floorIt.throttle = 1; floorIt.brake = 0; floorIt.delta = 0;
-  const PlayerInput *in = input == "floor" ? &floorIt : nullptr;
+  PlayerInput hands = floorIt;
+  const bool weave = input == "weave";
+  const PlayerInput *in = input == "park" ? nullptr : weave ? &hands : &floorIt;
+  // the same hands for the same substep, in both builds
+  const auto weaveAt = [&](long k) {
+    const double ph = k * FIXED_DT;
+    hands.throttle = 1; hands.brake = 0; hands.hand = false;
+    hands.wheel = 0.04 * std::sin(3 * ph);
+    if (ph >= 9 && ph < 9.5) { hands.wheel = 0.3; hands.hand = true; }                             // a tug of the handbrake: a drift
+    if (ph >= 14 && ph < 14.6) { hands.wheel = -0.35; hands.brake = 0.7; hands.throttle = 0; }     // on the brakes with lock on: another
+    hands.delta = 0.25 * hands.wheel;
+    hands.gearTop = 60; hands.gearLow = 20;
+  };
 
   if (trace) {
     const double T = maxTime > 0 ? maxTime : 60;
     const long steps = (long)jsRound(T / FIXED_DT), ev = (long)jsRound(every / FIXED_DT);
     std::printf("%s  %s  %d laps  %d cars  %s  seed %s  race trace\n", track.key.c_str(), cls.c_str(), laps, (int)race.entries.size(), tier.c_str(), jsNum(seed).c_str());
     std::printf("       T CAR              X              Y      M/S LAP POS    DMG FL\n");
+    long drsOpen = 0;                 // car-substeps with the flap open: did this case use DRS at all?
     for (long k = 1; k <= steps; k++) {
       if (rainAt >= 0 && k == (long)jsRound(rainAt / FIXED_DT)) setWetness(1);
+      if (weave) weaveAt(k);
       race.tick(FIXED_DT, in);
+      for (const Entry &e : race.entries) if (e.car.drsOpen && !e.retired) drsOpen++;
       if (probeOn) {
         const double tt = k * FIXED_DT;
         if (tt >= probeFrom && tt <= probeTo) {
@@ -178,9 +238,9 @@ int main(int argc, char **argv) {
     if (std::isnan(race.firstHitAt)) std::printf("CONTACT -\n"); else std::printf("CONTACT %.4f\n", race.firstHitAt);
     const auto &c = race.rc.count;
     const SafetyCar &sc = race.rc.sc;
-    std::printf("END state %s  rc %s %s  sc %d vsc %d red %d restarts %d pens %d  passes %d  sideFights %d  safety car %s s %.6f v %.6f hits %d\n",
+    std::printf("END state %s  rc %s %s  sc %d vsc %d red %d restarts %d pens %d  passes %d  sideFights %d  drs %ld  safety car %s s %.6f v %.6f hits %d\n",
                 raceStateName(race.state), rcModeName(race.rc.mode), race.rc.phase == RcPhase::None ? "-" : rcPhaseName(race.rc.phase),
-                c.sc, c.vsc, c.red, c.restarts, c.pens, race.passes, race.sideFights,
+                c.sc, c.vsc, c.red, c.restarts, c.pens, race.passes, race.sideFights, drsOpen,
                 !sc.out ? "in" : sc.inLane ? "lane" : "out", sc.s, sc.v, race.rc.scHits);
     return 0;
   }
@@ -188,9 +248,11 @@ int main(int argc, char **argv) {
   std::printf("%s — %s — %d cars, %d laps, %s\n\n", track.full.c_str(), spec.full.c_str(), grid, laps, tier.c_str());
   const auto t0 = std::chrono::steady_clock::now();
   double simT = 0;
+  long kk = 0;
   const double maxT = maxTime > 0 ? maxTime : laps * 260 + 90;
   while (race.state != RaceState::Over && simT < maxT) {
     if (rainAt >= 0 && simT < rainAt && simT + FIXED_DT >= rainAt) setWetness(1);
+    if (weave) weaveAt(++kk);
     race.tick(FIXED_DT, in);
     simT += FIXED_DT;
   }

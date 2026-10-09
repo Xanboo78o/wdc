@@ -17,13 +17,66 @@
 import fs from 'fs';
 import { Track } from '../../js/track.js';
 import { buildLines } from '../../js/line.js';
-import { CARS, FIXED_DT, registerAero, setWetness } from '../../js/physics.js';
+import { CARS, FIXED_DT, registerAero, setWetness, makeCar } from '../../js/physics.js';
+import { resolveCars } from '../../js/collide.js';
 import { makeAero } from '../../js/aero.js';
 import { TIERS, BATTLE } from '../../js/autopilot.js';
 import { Race } from '../../js/race.js';
 import { gridSlots } from '../../js/grid.js';
 
 const die = (m, c = 2) => { console.error('ref-race: ' + m); process.exit(c); };
+
+//   node native/check/ref-race.mjs --collide N [seed]
+// Not a race: N pairs of cars thrown at each other, one line a pair. The same
+// pairs as `xbr-race --collide`: every number comes off one mulberry32 stream.
+function mulberry(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+// C's %.Ng
+const g = (v, n) => {
+  if (v === 0) return Object.is(v, -0) ? '-0' : '0';
+  const e = Math.floor(Math.log10(Math.abs(Number(v.toPrecision(n)))));
+  if (e < -4 || e >= n) { const [m, x] = v.toExponential(n - 1).split('e'); return (m.includes('.') ? m.replace(/\.?0+$/, '') : m) + 'e' + (x[0] === '-' ? '-' : '+') + x.slice(1).padStart(2, '0'); }
+  const f = v.toFixed(Math.max(0, n - 1 - e));
+  return f.includes('.') ? f.replace(/\.?0+$/, '') : f;
+};
+function collide(n, seed) {
+  const rng = mulberry(seed), cls = ['f1', 'f4', 'gt3'];
+  const u = (lo, hi) => lo + (hi - lo) * rng();
+  const side = c => {
+    let tyres = 0;
+    for (let i = 0; i < 4; i++) tyres += c.tyres[i].dmg;
+    const k = c.crush || { front: 0, rear: 0, left: 0, right: 0 }, L = c.lost;
+    return `${g(c.x, 9)} ${g(c.y, 9)} ${g(c.vx, 9)} ${g(c.vy, 9)} ${g(c.r, 9)} dmg ${g(c.damage, 9)} crush ${g(k.front, 6)} ${g(k.rear, 6)} ${g(k.left, 6)} ${g(k.right, 6)} lost ${L && L.frontWing ? 1 : 0}${L && L.rearWing ? 1 : 0} dents ${(c.dents || []).length} tyres ${g(tyres, 6)} z ${g(c.z, 6)} vz ${g(c.vz, 6)} air ${c.airborne ? 1 : 0}`;
+  };
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const ca = cls[Math.floor(rng() * 3)], cb = cls[Math.floor(rng() * 3)];
+    const a = makeCar({ cls: ca }), b = makeCar({ cls: cb });
+    const ha = u(-Math.PI, Math.PI), d = u(1.2, 5.2), phi = u(-Math.PI, Math.PI);
+    a.x = u(-500, 500); a.y = u(-500, 500); a.hdg = ha;
+    b.x = a.x + d * Math.cos(phi); b.y = a.y + d * Math.sin(phi);
+    b.hdg = rng() < 0.5 ? ha + u(-0.25, 0.25) : u(-Math.PI, Math.PI);
+    a.vx = u(5, 85); a.vy = u(-4, 4); a.r = u(-1.2, 1.2);
+    b.vx = u(5, 85); b.vy = u(-4, 4); b.r = u(-1.2, 1.2);
+    const h = resolveCars(a, b);
+    if (!h) { out.push(`${k} miss`); continue; }
+    out.push(`${k} hit depth ${g(h.depth, 9)} closing ${g(h.closing, 9)} n ${g(h.nx, 9)} ${g(h.ny, 9)} j ${g(h.j, 9)} harm ${g(h.harm || 0, 9)} up ${h.launched ? 1 : 0} | ${side(a)} | ${side(b)}`);
+  }
+  console.log(out.join('\n'));
+}
+if (process.argv[2] === '--collide') {
+  const n = parseInt(process.argv[3], 10);
+  if (!(n >= 1) || process.argv.length > 5) die('--collide N [seed]');
+  collide(n, process.argv[4] != null ? +process.argv[4] : 1);
+  process.exit(0);
+}
+
 const argv = process.argv.slice(2), a = [];
 let probe = null;
 let rainAt = -1;
@@ -72,7 +125,7 @@ const laps = a[2] != null ? parseInt(a[2], 10) : 3, grid = a[3] != null ? parseI
 if (!CARS[cls]) die(`no car class '${cls}' (f4, f1, gt3)`);
 if (!TIERS[tier]) die(`no tier '${tier}'`);
 if (battle != null && !BATTLE[battle]) die(`no battle '${battle}' (easy, medium, hard)`);
-if (input !== 'park' && input !== 'floor') die('--input is park or floor');
+if (input !== 'park' && input !== 'floor' && input !== 'weave') die('--input is park, floor or weave');
 if (xcar != null && xcar !== 'gt' && xcar !== 'rally') die('--xingus is gt or rally');
 if (!(laps >= 1) || !(grid >= 1) || !(every > 0)) die('laps, grid and the trace interval must be positive');
 
@@ -104,7 +157,18 @@ race.carContact = () => {
   contact0();
   if (cars.some((c, i) => c.x !== was[i][0] || c.y !== was[i][1])) firstHitAt = race.time;
 };
-const inp = input === 'floor' ? { throttle: 1, brake: 0, delta: 0 } : null;
+const weave = input === 'weave';
+const inp = input === 'park' ? null : { throttle: 1, brake: 0, delta: 0 };
+// the same hands for the same substep, in both builds
+const weaveAt = k => {
+  const ph = k * FIXED_DT;
+  inp.throttle = 1; inp.brake = 0; inp.hand = false;
+  inp.wheel = 0.04 * Math.sin(3 * ph);
+  if (ph >= 9 && ph < 9.5) { inp.wheel = 0.3; inp.hand = true; }                         // a tug of the handbrake: a drift
+  if (ph >= 14 && ph < 14.6) { inp.wheel = -0.35; inp.brake = 0.7; inp.throttle = 0; }   // on the brakes with lock on: another
+  inp.delta = 0.25 * inp.wheel;
+  inp.gearTop = 60; inp.gearLow = 20;
+};
 const fmt = s => s == null ? '--.---' : `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
 
 function runTrace() {
@@ -113,9 +177,12 @@ function runTrace() {
   console.log(`${track.key}  ${cls}  ${laps} laps  ${race.entries.length} cars  ${tier}  seed ${seed}  race trace`);
   console.log('       T CAR              X              Y      M/S LAP POS    DMG FL');
   const out = [];
+  let drsOpen = 0;                    // car-substeps with the flap open: did this case use DRS at all?
   for (let k = 1; k <= steps; k++) {
     if (rainAt >= 0 && k === Math.round(rainAt / FIXED_DT)) setWetness(1);
+    if (weave) weaveAt(k);
     race.tick(FIXED_DT, inp);
+    for (const e of race.entries) if (e.car.drsOpen && !e.retired) drsOpen++;
     if (probe) {
       const tt = k * FIXED_DT;
       if (tt >= probe[1] && tt <= probe[2]) {
@@ -142,17 +209,18 @@ function runTrace() {
   console.log(firstHitAt == null ? 'CONTACT -' : `CONTACT ${firstHitAt.toFixed(4)}`);
   const c = race.rc.count;
   const sc = race.rc.sc;
-  console.log(`END state ${race.state}  rc ${race.rc.mode} ${race.rc.phase || '-'}  sc ${c.sc} vsc ${c.vsc} red ${c.red} restarts ${c.restarts} pens ${c.pens}  passes ${race.passes || 0}  sideFights ${race.sideFights || 0}  safety car ${!sc.out ? 'in' : sc.inLane ? 'lane' : 'out'} s ${sc.s.toFixed(6)} v ${sc.v.toFixed(6)} hits ${race.rc.scHits || 0}`);
+  console.log(`END state ${race.state}  rc ${race.rc.mode} ${race.rc.phase || '-'}  sc ${c.sc} vsc ${c.vsc} red ${c.red} restarts ${c.restarts} pens ${c.pens}  passes ${race.passes || 0}  sideFights ${race.sideFights || 0}  drs ${drsOpen}  safety car ${!sc.out ? 'in' : sc.inLane ? 'lane' : 'out'} s ${sc.s.toFixed(6)} v ${sc.v.toFixed(6)} hits ${race.rc.scHits || 0}`);
 }
 
 
 function runTable() {
 console.log(`${track.full} — ${spec.full} — ${grid} cars, ${laps} laps, ${tier}\n`);
 const t0 = Date.now();
-let simT = 0;
+let simT = 0, kk = 0;
 const maxT = maxTime > 0 ? maxTime : laps * 260 + 90;
 while (race.state !== 'over' && simT < maxT) {
   if (rainAt >= 0 && simT < rainAt && simT + FIXED_DT >= rainAt) setWetness(1);
+  if (weave) weaveAt(++kk);
   race.tick(FIXED_DT, inp); simT += FIXED_DT;
 }
 const wall = (Date.now() - t0) / 1000;

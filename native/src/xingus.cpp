@@ -12,7 +12,7 @@ static const double DRIFT_MIN = 14 * D2R, DRIFT_MAX = 40 * D2R;
 static const double T_GRIP = 0.05;
 static const double RATE_IN = 75 * D2R, RATE_OUT = 55 * D2R;
 static const double HOLD_ON = 1.6, HOLD_OFF = 7;
-static const double TURN_G = 4.3, TURN_G_FAST = 3.6;
+static const double TURN_G = 4.2, TURN_G_FAST = 3.6;
 static const double BANK_G = 1.6, BANK_MAX = 5;
 static const double STEER_AT[6] = {0, 0.85, 0.62, 0.45, 0.33, 0.24};
 static int steerLevel = 3;
