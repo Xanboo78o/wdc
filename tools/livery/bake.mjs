@@ -25,6 +25,7 @@
 import fs from 'fs';
 import { SPONSORS } from './sponsors.mjs';
 import { rasters, MW, MH } from './carmask.mjs';
+import { NAMES, TAILS, KEEP, PRIDE } from './teams.mjs';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 const atlas = JSON.parse(fs.readFileSync(ROOT + 'data/livery/atlas.json', 'utf8'));
@@ -69,7 +70,7 @@ const WAYS = [
 
 // ---- the designs ---------------------------------------------------------------------------
 const STRIPE = 1, SKIRT = 2, CUT = 3, SWEEP = 4, SLASH = 5, CAP = 6, ROOF = 7, HOOP = 8, FADE = 9, ARROW = 10, DOTS = 11, CAMO = 12, ROUNDEL = 13, CHECK = 14,
-  ZEBRA = 15, TEETH = 16, WAVE = 17, BURST = 18, PIXEL = 19, DRIP = 20;
+  ZEBRA = 15, TEETH = 16, WAVE = 17, BURST = 18, PIXEL = 19, DRIP = 20, BAND = 21;
 const L = (t, c, q0 = 0, q1 = 0, q2 = 0, q3 = 0, s = 0) => ({ t, c, q: [q0, q1, q2, q3], s });
 const ALL = c => L(CAP, c, -9, 1);                    // the whole car (used with a side: one flank only)
 const DESIGNS = {
@@ -142,6 +143,7 @@ function paintAt(liv, p) {
       case 18: m = step(fract(Math.atan2(p[1] - q[1], (p[0] - q[0]) * 1.8) * q[2] / 6.28318), q[3]) * step(0.45, az); break;
       case 19: m = step(hash(Math.floor(p[0] * q[0] * 2.2), Math.floor((p[1] + az * 0.6) * q[0])), clamp((q[2] - p[0] * q[3]) * 0.9, 0, 1)); break;
       case 20: { const k = 0.5 + 0.5 * Math.sin(p[0] * q[2] + 1.7 * Math.sin(p[0] * q[2] * 0.37)); m = step(q[0] - q[1] * k * k * k, p[1]); break; }
+      case 21: m = step(q[0], p[2]) * step(p[2], q[1]); break;
     }
     if (m) c = l.c;
   }
@@ -170,6 +172,35 @@ const PADDOCK = {
   a480: { klass: 'HYPER', pre: ['Aurore', 'Mistral', 'Tramontane', 'Kumo', 'Hayate', 'Raijin', 'Solstice', 'Borealis', 'Vostok', 'Titan', 'Helios', 'Écurie Lumière', 'Scuderia Volpe', 'Équipe Vingt-Quatre', 'Sirocco', 'Polaris', 'Meteor', 'Corona', 'Tsunami', 'Ventoux', 'Zephyr', 'Arcadia', 'Bifrost', 'Calypso', 'Daedalus', 'Elysium', 'Fenrir', 'Galatea', 'Horizon', 'Ionosphere', 'Juno', 'Krakatoa', 'Leviathan', 'Midnight Sun', 'Nebula', 'Orion'],
           suf: ['Hypercar', 'Endurance', 'Works', 'Factory', 'Prototype', 'Racing', 'Le Mans', 'Sport'] },
 };
+
+// ---- a pride flag, as paint -----------------------------------------------------------------
+// Four ways to fly one, so ten pride cars in a paddock are not ten of the same car:
+//   0 nose to tail   1 on the slant   2 flown along the flanks   3 a ribbon on a dark car, and laid across the top
+function prideLivery(flag, variant) {
+  const cs = flag.cols, n = cs.length, w = flag.w || cs.map(() => 1), tot = w.reduce((a, b) => a + b, 0);
+  const F = [0]; for (const x of w) F.push(F[F.length - 1] + x / tot);             // where each stripe ends, 0..1
+  if (flag.ring) {
+    // one colour and a ring: on each door, and hoops in the ring's colour fore and aft
+    return { base: cs[0], layers: [L(ROUNDEL, flag.ring, -0.02, 0.46, 0.25, 1.8), L(ROUNDEL, cs[0], -0.02, 0.46, 0.16, 1.8), L(HOOP, flag.ring, 0.5, 0.80 + variant * 0.03, 0.035), L(STRIPE, flag.ring, 0.02, 0.0), L(SKIRT, '0e0f12', 0.13, 0)] };
+  }
+  if (flag.chevron) {
+    // the six stripes along the flanks, and the five chevrons driving in from the nose over the top
+    const layers = [];
+    for (let k = 1; k < n; k++) layers.push(L(SKIRT, cs[k], 0.92 - 0.80 * F[k], 0));
+    flag.chevron.forEach((c, k) => layers.push(L(ARROW, c, 1.02 - k * 0.13, 0.75, 0.40)));
+    return { base: cs[0], layers };
+  }
+  const layers = [];
+  if (variant === 0) { for (let k = n - 2; k >= 0; k--) layers.push(L(CAP, cs[k], 1 - 2 * F[k + 1], 1)); return { base: cs[n - 1], layers }; }
+  if (variant === 1) { for (let k = n - 2; k >= 0; k--) layers.push(L(CUT, cs[k], 1.0 - 2.9 * F[k + 1], -0.9, 1, 0)); return { base: cs[n - 1], layers }; }
+  if (variant === 2) { for (let k = 1; k < n; k++) layers.push(L(SKIRT, cs[k], 0.92 - 0.80 * F[k], 0)); return { base: cs[0], layers }; }
+  const m = Math.min(n, 6);
+  for (let k = 0; k < m; k++) layers.push(L(SWEEP, cs[k], 0.60 - 0.34 * (F[k] + F[k + 1]) / 2 * (n / m), -0.10, 0.17 * (F[k + 1] - F[k]) * (n / m) + 0.002, 0.5));
+  if (n <= 6) for (let k = 0; k < n; k++) layers.push(L(BAND, cs[k], -0.34 + 0.68 * F[k], -0.34 + 0.68 * F[k + 1]));
+  return { base: '15161a', layers };
+}
+const prideCount = {}, sponsorTeams = new Set(['DONUT DISTRICT', 'MAISON VERO']), everyName = new Set();
+let tailIx = 0;
 
 function rngOf(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
@@ -223,6 +254,7 @@ function build(key, carIx) {
   const Z = ZONES[key], P = PADDOCK[key];
   if (!Z || !P) throw new Error(`bake: no zones or paddock for ${key} — add them at the top of tools/livery/bake.mjs`);
   const out = [], names = new Set(), numbers = new Set(), pairs = new Set();
+  let written = 0;
   for (let i = 0; i < 80; i++) {
     const r = rngOf(carIx * 7919 + i * 104729 + 17);
     const pick = a => a[Math.floor(r() * a.length)];
@@ -232,15 +264,33 @@ function build(key, carIx) {
     while ((contrast(C[WAYS[w][1]], C[WAYS[w][2]]) < 1.7 || pairs.has(design + w)) && guard++ < WAYS.length) w = (w + 1) % WAYS.length;
     pairs.add(design + w);
     const [way, a, b, c, d, fin = 0] = WAYS[w];
-    const liv = { base: C[a], layers: DESIGNS[design](C[a], C[b], C[c], C[d]) };
-    const finish = design === 'CAMO' ? 1 : fin;
+    // every eighth car flies a pride flag
+    const flag = i % 8 === 3 ? PRIDE[((i - 3) / 8 + carIx * 3) % PRIDE.length] : null;
+    const liv = flag ? prideLivery(flag, ((i - 3) / 8 + carIx) % 4) : { base: C[a], layers: DESIGNS[design](C[a], C[b], C[c], C[d]) };
+    const finish = flag ? 0 : design === 'CAMO' ? 1 : fin;
+    const tints = flag ? [] : [C[c], C[b], C[a]];
     // ---- the team
     const title = pick(SPONSORS);
     let name;
+    // (the two-hats draw is still made, and thrown away: it keeps every later
+    // draw — the number, the sponsors, where the stickers went — as it was, so
+    // a car he has already seen keeps its number and its look under its new name)
+    let bySponsor = false;
     do {
-      name = r() < 0.3 ? `${title.n.replace(/\b(\w)(\w*)/g, (m, x, y) => x + y.toLowerCase())} ${pick(P.suf)}` : `${pick(P.pre)} ${pick(P.suf)}`;
+      bySponsor = r() < 0.3;
+      name = bySponsor ? `${title.n} ${pick(P.suf)}` : `${pick(P.pre)} ${pick(P.suf)}`;
     } while (names.has(name));
     names.add(name);
+    const cased = title.n.replace(/\b([A-Z])([A-Z']*)/g, (m, x, y) => x + y.toLowerCase());
+    if (flag) { const k = prideCount[flag.key] = (prideCount[flag.key] || 0) + 1; name = flag.teams[(k - 1) % flag.teams.length]; }
+    else if (KEEP[`${key}:${i}`]) name = KEEP[`${key}:${i}`];
+    else if (bySponsor && !sponsorTeams.has(title.n)) { sponsorTeams.add(title.n); name = `${cased} ${TAILS[tailIx++ % TAILS.length]}`; }
+    else {
+      do { name = NAMES[key][written++]; } while (name && Object.values(KEEP).includes(name));
+      if (!name) throw new Error(`bake: ${key} has run out of written names — add some to tools/livery/teams.mjs`);
+    }
+    if (everyName.has(name)) throw new Error(`bake: two teams are called ${name}`);
+    everyName.add(name);
     let num;
     do { num = 1 + Math.floor(r() * (key === 'a480' ? 99 : 199)); } while (numbers.has(num));
     numbers.add(num);
@@ -255,7 +305,7 @@ function build(key, carIx) {
     const PL = placer(key), S = [];
     const vinyl = (view, rect) => {
       const under = paintAt(liv, PL.under(view, rect));
-      const cands = ['f4f3ee', '0e0f12', C[c], C[b], C[a]];
+      const cands = ['f4f3ee', '0e0f12', ...tints];
       let best = cands[0];
       for (const k of cands) if (contrast(k, under) > contrast(best, under) * (k === cands[0] || k === cands[1] ? 1 : 1.25)) best = k;
       return best;
@@ -317,8 +367,8 @@ function build(key, carIx) {
     // the wheels: as they came, or in black, white, gold, bronze or one of the team's own colours
     const rim = r() < 0.3 ? null : pick(['15161a', '15161a', 'f4f3ee', 'c9a13b', '8a5a2b', C[c], C[b], C[c]]);
     out.push({
-      name, num, design, way, style, rim, title: title.n, sponsors: others.slice(0, n2).map(s => s.n), finish,
-      base: C[a], chips: [C[a], C[b], C[c]], layers: liv.layers.slice(0, 8),
+      name, num, design: flag ? 'PRIDE' : design, way: flag ? flag.label : way, style, rim: flag ? pick([null, 'f4f3ee', '15161a']) : rim, title: title.n, sponsors: others.slice(0, n2).map(s => s.n), finish,
+      base: liv.base, chips: flag ? [flag.cols[0], flag.cols[Math.floor(flag.cols.length / 2)] || flag.ring, flag.cols[flag.cols.length - 1] === flag.cols[0] ? (flag.ring || flag.cols[1]) : flag.cols[flag.cols.length - 1]] : [C[a], C[b], C[c]], layers: liv.layers.slice(0, 12),
       stickers: S.slice(0, 24).map(s => ({ uv: uv(s.cell).map(v => +v.toFixed(5)), plane: s.plane, rect: s.rect, tint: s.tint })),
     });
   }

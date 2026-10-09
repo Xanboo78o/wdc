@@ -2,7 +2,7 @@
 //
 // One source for both games: garage.html splices it into three's paint shader,
 // native/src/dress.cpp into its own. A livery (data/livery/<car>.json, written
-// by tools/livery/bake.mjs) is a base colour, up to eight LAYERS of shape laid
+// by tools/livery/bake.mjs) is a base colour, up to twelve LAYERS of shape laid
 // one over the last, and up to twenty-four STICKERS off the sheet
 // data/livery/atlas.png.
 //
@@ -33,11 +33,12 @@
 //   18 BURST    rays from a point on the flank (q.x, q.y): q.z rays, duty q.w
 //   19 PIXEL    squares dissolving along the car: q.x squares, gone by x = q.z, direction q.w (1 thins toward the nose)
 //   20 DRIP     paint running down from the roof line q.x, tongues q.y long, q.z of them
+//   21 BAND     a stripe along the car between z = q.x and z = q.y — LEFT to RIGHT, not mirrored: a flag laid over the car
 uniform int uLivN;
-uniform int uLivType[8];
-uniform vec3 uLivCol[8];
-uniform vec4 uLivP[8];
-uniform float uLivSide[8];          // 0 both sides, 1 the right only, -1 the left only
+uniform int uLivType[12];
+uniform vec3 uLivCol[12];
+uniform vec4 uLivP[12];
+uniform float uLivSide[12];          // 0 both sides, 1 the right only, -1 the left only
 uniform int uStkN;
 uniform vec4 uStkRect[24];          // centre (along, up), half-width, half-height — in p's units
 uniform vec4 uStkUv[24];            // where on the sheet: u0, v0, du, dv
@@ -49,7 +50,7 @@ float livNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 
 vec3 livery(vec3 p, vec3 base) {
   vec3 c = base;
   float az = abs(p.z);
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < 12; i++) {
     if (i >= uLivN) break;
     int t = uLivType[i]; vec4 q = uLivP[i]; float m = 0.0;
     if (uLivSide[i] * p.z < -0.0001) continue;
@@ -73,6 +74,7 @@ vec3 livery(vec3 p, vec3 base) {
     else if (t == 18) m = step(fract(atan(p.y - q.y, (p.x - q.x) * 1.8) * q.z / 6.28318), q.w) * step(0.45, az);
     else if (t == 19) { vec2 g = floor(vec2(p.x * q.x * 2.2, (p.y + az * 0.6) * q.x)); m = step(livHash(g), clamp((q.z - p.x * q.w) * 0.9, 0.0, 1.0)); }
     else if (t == 20) { float k = 0.5 + 0.5 * sin(p.x * q.z + 1.7 * sin(p.x * q.z * 0.37)); m = step(q.x - q.y * k * k * k, p.y); }
+    else if (t == 21) m = step(q.x, p.z) * step(p.z, q.y);
     c = mix(c, uLivCol[i], m);
   }
   return c;

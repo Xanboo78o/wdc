@@ -23,7 +23,7 @@ using namespace xbr;
 int main(int argc, char **argv) {
   if (argc < 3) { std::fprintf(stderr, "xbr-livery <car> <out.ppm> [--from N] [--count N] [--view front|rear|side|top] [--cols N] [--tile WxH]\n"); return 2; }
   const std::string key = argv[1], out = argv[2];
-  int from = 0, count = 20, cols = 5, tw = 384, th = 216;
+  int from = 0, count = 20, cols = 5, tw = 384, th = 216, stride = 1;
   std::string view = "front";
   for (int i = 3; i < argc; i++) {
     const std::string a = argv[i];
@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
     if (a == "--from") from = std::atoi(val().c_str());
     else if (a == "--count") count = std::atoi(val().c_str());
     else if (a == "--cols") cols = std::atoi(val().c_str());
+    else if (a == "--step") stride = std::max(1, std::atoi(val().c_str()));      // every Nth livery (--from 3 --step 8: the pride cars)
     else if (a == "--view") view = val();
     else if (a == "--tile") { if (std::sscanf(val().c_str(), "%dx%d", &tw, &th) != 2) { std::fprintf(stderr, "xbr-livery: --tile WxH\n"); return 2; } }
     else { std::fprintf(stderr, "xbr-livery: unknown option %s\n", a.c_str()); return 2; }
@@ -53,7 +54,7 @@ int main(int argc, char **argv) {
   if (!pc) return 1;
   const int total = (int)dress.liveryCount(*pc);
   if (!total) { std::fprintf(stderr, "xbr-livery: %s has no liveries (node tools/livery/bake.mjs %s)\n", key.c_str(), key.c_str()); return 1; }
-  count = std::max(1, std::min(count, total - from));
+  count = std::max(1, std::min(count, (total - from + stride - 1) / stride));
   const int rows = (count + cols - 1) / cols, W = cols * tw, H = rows * th, SS = 2;      // drawn at twice the size and averaged down
   GLuint fbo, col, dep;
   glGenFramebuffers(1, &fbo); glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -84,7 +85,7 @@ int main(int argc, char **argv) {
     glClearColor(0.50f, 0.52f, 0.56f, 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     dress.frame(VP, eye, look, 0);
-    dress.setLivery(from + k);
+    dress.setLivery(from + k * stride);
     dress.drawPack(*pc, Mat4::identity(), 0.22, 0, nullptr, none, nullptr, false);
     dress.drawPack(*pc, Mat4::identity(), 0.22, 0, nullptr, none, nullptr, true);
   }

@@ -114,7 +114,7 @@ struct PackCar {
   // the eighty teams this car can race as (data/livery/<key>.json), and the frame they are painted in
   struct Livery {
     float base[3]; float rim[4] = {0, 0, 0, 0}; int finish = 0, nLayers = 0, nStk = 0;
-    int type[8]; float col[8][3], q[8][4], side[8];
+    int type[12]; float col[12][3], q[12][4], side[12];
     float rect[24][4], uv[24][4], tint[24][4], plane[24];
   };
   std::vector<Livery> liveries;
@@ -248,7 +248,7 @@ const PackCar *Dress::pack(const std::string &key) {
       L.finish = (int)l["finish"].n();
       if (l["rim"].type == Json::Str) { hex(l["rim"].s(), L.rim); L.rim[3] = 1; }
       for (const Json &y : l["layers"].arr) {
-        if (L.nLayers >= 8) break;
+        if (L.nLayers >= 12) break;
         const int k = L.nLayers++;
         L.type[k] = (int)y["t"].n(); hex(y["c"].s(), L.col[k]); L.side[k] = (float)y["s"].n();
         for (int q = 0; q < 4; q++) L.q[k][q] = (float)y["q"][(size_t)q].n();
@@ -343,10 +343,10 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
     glUniform4fv(U("uLivFrame"), 1, pc.frame);
     glUniform1i(U("uLivFinish"), L->finish);
     glUniform1i(U("uLivN"), L->nLayers);
-    glUniform1iv(U("uLivType"), 8, L->type);
-    glUniform3fv(U("uLivCol"), 8, &L->col[0][0]);
-    glUniform4fv(U("uLivP"), 8, &L->q[0][0]);
-    glUniform1fv(U("uLivSide"), 8, L->side);
+    glUniform1iv(U("uLivType"), 12, L->type);
+    glUniform3fv(U("uLivCol"), 12, &L->col[0][0]);
+    glUniform4fv(U("uLivP"), 12, &L->q[0][0]);
+    glUniform1fv(U("uLivSide"), 12, L->side);
     glUniform1i(U("uStkN"), sheet ? L->nStk : 0);
     glUniform4fv(U("uStkRect"), 24, &L->rect[0][0]);
     glUniform4fv(U("uStkUv"), 24, &L->uv[0][0]);
