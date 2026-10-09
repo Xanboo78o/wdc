@@ -42,7 +42,7 @@ inline V3 norm(V3 a) { const double l = len(a); return l > 1e-12 ? a * (1 / l) :
 // polygons afterwards (1 = team paint, takes the livery; 2 = a GT wheel arch).
 struct Mat { float r, g, b, kind; int tag; };
 
-const float K_MATT = 0, K_GLOSS = 6, K_GLOW = 8, K_PAINT = 12;
+const float K_MATT = 0, K_GLOSS = 6, K_GLOW = 8, K_PAINT = 12, K_MIRGLASS = 13;
 // car.js's `carbon` is clearcoated (roughness 0.32, clearcoat 0.9): it takes
 // the specular kind. Its `carbonMatt` (the suspension) does not. Set this to
 // K_MATT for a car with no shine on its carbon at all.
@@ -60,7 +60,7 @@ const Mat CARBONM = {0.055f, 0.055f, 0.065f, K_MATT, 0};
 const Mat BLACK   = {0.020f, 0.024f, 0.027f, K_MATT, 0};      // 0x050607
 const Mat FABRIC  = {0.078f, 0.082f, 0.094f, K_MATT, 0};      // 0x141518
 const Mat VISOR   = {0.07f, 0.09f, 0.12f, K_GLOSS, 0};
-const Mat MIRROR  = {0.72f, 0.77f, 0.82f, K_GLOSS, 0};        // 0xb8c4d0
+const Mat MIRROR  = {0.72f, 0.77f, 0.82f, K_MIRGLASS, 0};     // 0xb8c4d0; the glass shows what is behind (render.cpp kind 13)
 const Mat RAIN    = {0.90f, 0.05f, 0.05f, K_GLOW, 0};
 const Mat LAMP    = {0.87f, 0.91f, 0.95f, K_GLOW, 0};         // 0xdfe8f2, emissive
 const Mat RUBBER  = {0.045f, 0.045f, 0.05f, K_MATT, 0};
@@ -433,8 +433,29 @@ void measure(const Soup &s, Ext &e) {
 
 // three.js (x, y up, z right) -> sim (x, y left, z up), as flat triangles.
 void emit(MeshB &m, const Soup &s) {
+  // how big each mirror's glass is, across the car (z) and up (y): [0] left, [1] right
+  double glassLo[2][2] = {{1e9, 1e9}, {1e9, 1e9}}, glassHi[2][2] = {{-1e9, -1e9}, {-1e9, -1e9}};
+  for (const Poly &q : s) if (q.m.kind == K_MIRGLASS) for (const V3 &v : q.p) {
+    const int sd = q.p[0].z > 0 ? 1 : 0;
+    glassLo[sd][0] = std::min(glassLo[sd][0], v.z); glassHi[sd][0] = std::max(glassHi[sd][0], v.z);
+    glassLo[sd][1] = std::min(glassLo[sd][1], v.y); glassHi[sd][1] = std::max(glassHi[sd][1], v.y);
+  }
   for (const Poly &q : s) {
     const float col[3] = {q.m.r, q.m.g, q.m.b};
+    if (q.m.kind == K_MIRGLASS) {
+      // A MIRROR'S GLASS: its colour channels carry where each point is on the
+      // glass (r across, g up) and which side of the car it is on (b: 1 right, 0 left),
+      // so the shader can lay the view behind across it.
+      const int sd = q.p[0].z > 0 ? 1 : 0;
+      const V3 nn = cross(q.p[1] - q.p[0], q.p[2] - q.p[0]);
+      const double nl = std::max(1e-12, len(nn));
+      for (size_t i = 1; i + 1 < q.p.size(); i++) for (const V3 *v : {&q.p[0], &q.p[i], &q.p[i + 1]}) {
+        const float c2[3] = {(float)((v->z - glassLo[sd][0]) / std::max(1e-6, glassHi[sd][0] - glassLo[sd][0])),
+                             (float)((v->y - glassLo[sd][1]) / std::max(1e-6, glassHi[sd][1] - glassLo[sd][1])), (float)sd};
+        m.vert(v->x, -v->z, v->y, nn.x / nl, -nn.z / nl, nn.y / nl, c2, K_MIRGLASS);
+      }
+      continue;
+    }
     for (size_t i = 1; i + 1 < q.p.size(); i++) {
       const V3 &A = q.p[0], &B = q.p[i], &C = q.p[i + 1];
       if (len(cross(B - A, C - A)) < 1e-10) continue;

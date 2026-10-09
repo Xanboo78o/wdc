@@ -200,6 +200,7 @@ uniform sampler2DArray uCol, uNrm; uniform int uHasTex;
 uniform vec3 uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop, uPaint; uniform float uFogK, uWet;
 uniform sampler2DShadow uShadow; uniform mat4 uShVP; uniform float uShOn, uHdr; uniform int uPass;
 uniform vec3 uLampPos, uLampDir; uniform float uLampOn, uTime, uCloud, uNight, uGhost;
+uniform sampler2D uMirror; uniform float uMirOn;
 out vec4 o;
 // how much of the sun reaches this point: four soft looks at the shadow map
 float sunVis(vec3 p, vec3 n){
@@ -252,6 +253,15 @@ void main(){
   vec3 V = uEye - vW; float dist = length(V); V /= dist;
   vec3 n = normalize(vN); if (dot(n, V) < 0.0) n = -n;
   vec3 c = vC;
+  if (k == 13) {
+    // A MIRROR ON THE CAR: the picture taken looking back (Renderer::mirrorBegin),
+    // the left third of it in the left glass and the right third in the right.
+    if (uMirOn > 0.5) {
+      vec2 mu = vec2(mix(0.03, 0.57, vC.b) + vC.r * 0.40, 0.15 + vC.g * 0.70);
+      o = vec4(texture(uMirror, vec2(1.0 - mu.x, mu.y)).rgb * 0.92 + 0.015, uAlpha); return;
+    }
+    c = vec3(0.72, 0.77, 0.82); k = 6;          // no picture (the chase view, the mirror's own pass): plain glass
+  }
   if (k == 12) c = uPaint * (vC.r / 0.78);      // the car's paint: whichever team's
   // Grain you can see moving is most of what makes 210 km/h feel like 210.
   // The fine layer fades with distance, or it turns to shimmer.
@@ -1804,6 +1814,94 @@ void Renderer::endScene(double time) {
   PROF.mark(6);
 }
 
+// ---- THE SHAKE (js/speedfx.js SpeedShake, and js/render.js's rule for when it runs).
+// Adam, 2026-10-03, on the rig: "random shake when im on the track ... unplayable",
+// "only shake on grass and crash". So the camera moves ONLY on grass or in a
+// crash. Everywhere else every shake, buzz, dive and bob is zero.
+// XBR_SHAKE=0 off, 2 double.
+void Renderer::shakeCamera(const FrameIn &f, float eye[3], float at[3], float up[3]) {
+  static const float K = std::getenv("XBR_SHAKE") ? (float)std::atof(std::getenv("XBR_SHAKE")) : 1.0f;
+  const Car &car = *f.car;
+  Shake &q = shake;
+  const float dt = (float)std::min(0.1, std::max(0.0, f.dt));
+  auto rnd = []() { return (float)std::rand() / (float)RAND_MAX * 2 - 1; };
+  const float v = (float)std::fabs(car.speed);
+  // grass: the only surface that shakes
+  const float grass = (car.surface < 0.5 && !car.airborne) ? 0.45f * std::min(1.0f, v / 12.0f) : 0.0f;
+  // a crash: speed lost far faster than any brake can (over 12 g), from real speed, over a real frame
+  const float dvG = dt >= 0.008f && q.spdWas > 8 ? std::max(0.0f, q.spdWas - v) / dt / 9.81f : 0.0f;
+  q.spdWas = v;
+  const float crash = dvG > 12 ? std::min(0.06f, 0.015f + (dvG - 12) * 0.0015f) : 0.0f;
+  q.level = std::max(q.level * (1 - dt * 6), grass * 0.05f + crash);
+  const float ja = std::min(1.0f, dt * 18);
+  for (float &j : q.jit) j += (rnd() * 0.5f - j) * ja;
+  // acceleration, from the speed alone, over a 0.1 s window, and none below 11 km/h
+  q.accT += dt;
+  if (q.accT >= 0.1f) { q.accHeld = (v - q.lastSpd) / q.accT; q.lastSpd = v; q.accT = 0; }
+  if (v < 3) q.accHeld = 0;
+  q.acc += (std::max(-60.0f, std::min(60.0f, q.accHeld)) - q.acc) * std::min(1.0f, dt * 4);
+  const bool on = K > 0 && (grass > 0 || q.level > 0.003f);
+  if (!on) return;
+  // per mount, degrees at 350 km/h (speedfx.js MOUNTS): onboard, chase, nose, t-cam
+  struct Mount { float buzzP, buzzY, buzzR, roadP, roadR, heave, kerb, dive, squat, sink, latM, latR; };
+  static const Mount M4[4] = {
+    {0.075f, 0.035f, 0.03f, 0.16f, 0.10f, 0.004f, 0.9f, 0.18f, 0.08f, 0.02f, 0.010f, 0.30f},
+    {0.025f, 0.015f, 0.0f, 0.06f, 0.03f, 0.012f, 0.35f, 0, 0, 0.03f, 0, 0},
+    {0.12f, 0.05f, 0.04f, 0.20f, 0.08f, 0.006f, 1.2f, 0, 0, 0.006f, 0, 0},
+    {0.16f, 0.045f, 0.05f, 0.14f, 0.12f, 0.005f, 1.1f, 0.12f, 0.05f, 0.015f, 0, 0}};
+  const Mount &M = M4[std::max(0, std::min(3, f.camMode))];
+  const float rough = grass * 0.12f, gLong = q.acc / 9.81f;
+  const float gLat = (float)std::max(-5.0, std::min(5.0, car.vx * car.r / 9.81));
+  const float gVert = std::fabs(gLat) * std::sin(std::fabs((float)f.gRoll));
+  const float k = v / 97.2f;                                    // 1.0 at 350 km/h
+  q.dist += v * dt;
+  q.kick = std::max(q.kick, std::min(1.0f, rough * 1.6f));
+  q.kick *= std::exp(-dt * 7);
+  const float b = std::pow(k, 1.6f) * K;
+  const float a = std::min(1.0f, dt * 55);
+  for (float &h : q.hf) h += (rnd() - h) * a;
+  const float d = q.dist;
+  const float w1 = std::sin(d / 9.1f * 6.283f), w2 = std::sin(d / 3.7f * 6.283f + 1.3f), w3 = std::sin(d / 14.3f * 6.283f + 2.1f);
+  const float road = (0.5f * w2 + 0.3f * w1 + 0.2f * w3) * std::min(1.0f, k) * K;
+  const float roll = (0.6f * std::sin(d / 5.3f * 6.283f + 0.4f) + 0.4f * w3) * std::min(1.0f, k) * K;
+  const float kk = q.kick * M.kerb * K;
+  q.kn += (rnd() - q.kn) * std::min(1.0f, dt * 18);
+  // the dive: a spring chasing the longitudinal g, so the release overshoots a touch
+  const float tgt = std::max(-6.5f, std::min(2.5f, gLong));
+  q.dv += (13 * 13 * (tgt - q.dx) - 2 * 0.45f * 13 * q.dv) * dt; q.dx += q.dv * dt;
+  const float dive = (q.dx < 0 ? q.dx * M.dive : q.dx * M.squat) * K;
+  q.gv += (std::max(0.0f, std::min(3.0f, gVert)) - q.gv) * std::min(1.0f, dt * 5);
+  // the head in a corner
+  q.lv += (81 * (gLat - q.lx) - 2 * 0.6f * 9 * q.lv) * dt; q.lx += q.lv * dt;
+  const float D2R = (float)PI / 180;
+  const float sx = M.latM * q.lx * K, headRoll = -M.latR * q.lx;
+  const float sp = (M.buzzP * b * q.hf[0] + M.roadP * road + kk * q.kn * 0.9f + dive - 0.25f * q.gv) * D2R;
+  const float sy = (M.buzzY * b * q.hf[1] + kk * q.kn * 0.25f) * D2R;
+  const float sr = (M.buzzR * b * q.hf[2] + M.roadR * roll + kk * q.kn * 0.5f + headRoll * K) * D2R;
+  const float sh2 = M.heave * (road + 0.5f * b * q.hf[0]) + 0.01f * kk * q.kn - M.sink * (q.gv + std::max(0.0f, -q.dx) * 0.25f);
+
+  // ---- onto the camera: the hit as a small shove, then the angles about its own axes
+  auto norm = [](float *p) { const float l = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) + 1e-9f; p[0] /= l; p[1] /= l; p[2] /= l; };
+  auto crossf = [](const float *x, const float *y, float *o) { o[0] = x[1] * y[2] - x[2] * y[1]; o[1] = x[2] * y[0] - x[0] * y[2]; o[2] = x[0] * y[1] - x[1] * y[0]; };
+  auto turn = [&](float *p, const float *ax, float ang) {       // Rodrigues, ax a unit vector
+    const float c = std::cos(ang), s = std::sin(ang), dt2 = ax[0] * p[0] + ax[1] * p[1] + ax[2] * p[2];
+    float cr[3]; crossf(ax, p, cr);
+    for (int i = 0; i < 3; i++) p[i] = p[i] * c + cr[i] * s + ax[i] * dt2 * (1 - c);
+  };
+  float fw[3] = {at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]};
+  const float reach = std::sqrt(fw[0] * fw[0] + fw[1] * fw[1] + fw[2] * fw[2]);
+  norm(fw);
+  float right[3], u2[3];
+  crossf(fw, up, right); norm(right);
+  crossf(right, fw, u2); norm(u2);
+  const float amp = q.level * 0.35f * K;
+  for (int i = 0; i < 3; i++) eye[i] += q.jit[i] * amp + u2[i] * sh2 + right[i] * sx;
+  turn(fw, right, sp); turn(u2, right, sp);                      // pitch
+  turn(fw, u2, sy);                                              // yaw
+  turn(u2, fw, sr);                                              // roll
+  for (int i = 0; i < 3; i++) { at[i] = eye[i] + fw[i] * reach; up[i] = u2[i]; }
+}
+
 // ---- THE MIRROR (js/render.js _mirror): one wide glass at the top of the screen, in every
 // view you drive from. The world is drawn a second time, small, looking back; game_main
 // calls mirrorBegin, drawWorld, its rivals, mirrorEnd — on alternate frames, as ACC's does —
@@ -1933,6 +2031,7 @@ void Renderer::drawWorld(const FrameIn &f) {
     eye[0] = (float)(car.x - cx * 4.9); eye[1] = carY + 1.28f; eye[2] = (float)-(car.y - cy * 4.9);
     at[0] = (float)(car.x + cx * 15); at[1] = carY + 0.62f; at[2] = (float)-(car.y + cy * 15);
   }
+  if (!mirrorPass) shakeCamera(f, eye, at, up);
   if (mirrorPass) {
     // from just above your head, straight back down the road: one wide glass
     // (Adam: "also add mirrors" — a race you cannot see behind is a race against ghosts)
@@ -1978,6 +2077,13 @@ void Renderer::drawWorld(const FrameIn &f) {
     glUniform1f(uLampOn, on);
     glUniform1f(uTime, (float)std::fmod(f.time, 10000.0));
     glUniform1f(uCloud, L.cloud); glUniform1f(uNight, L.night);
+  }
+  // the mirrors on the car itself show the same picture as the glass at the top of the screen
+  {
+    const bool on = !mirrorPass && mirHas && mirrorOn;
+    glUniform1f(glGetUniformLocation(prog, "uMirOn"), on ? 1.0f : 0.0f);
+    glUniform1i(glGetUniformLocation(prog, "uMirror"), 5);
+    if (on) { glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_2D, mirTex); glActiveTexture(GL_TEXTURE0); }
   }
   curVP = VP; curLook = L;
   for (int k = 0; k < 3; k++) curEye[k] = eye[k];

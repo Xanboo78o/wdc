@@ -217,6 +217,9 @@ class Renderer {
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;
   static constexpr int MIR_W = 840, MIR_H = 200;
+  // the camera's shake (render.cpp shakeCamera): only ever on grass or in a crash
+  struct Shake { float level = 0, spdWas = 0, jit[3] = {0, 0, 0}, accT = 0, accHeld = 0, lastSpd = 0, acc = 0, dist = 0, kick = 0, hf[3] = {0, 0, 0}, kn = 0, dv = 0, dx = 0, gv = 0, lv = 0, lx = 0; } shake;
+  void shakeCamera(const FrameIn &f, float eye[3], float at[3], float up[3]);
   unsigned mirFbo = 0, mirTex = 0, mirDepth = 0;
   bool mirrorPass = false, mirHas = false;
   // motion blur (render.cpp COMP_FS): the camera's travel in view space, the view itself, and the cars to leave sharp
