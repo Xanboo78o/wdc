@@ -197,6 +197,7 @@ uniform vec3 uEye, uSun; uniform float uAlpha;
 uniform sampler2DArray uCol, uNrm; uniform int uHasTex;
 uniform vec3 uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop, uPaint; uniform float uFogK, uWet;
 uniform sampler2DShadow uShadow; uniform mat4 uShVP; uniform float uShOn, uHdr; uniform int uPass;
+uniform vec3 uLampPos, uLampDir; uniform float uLampOn, uTime, uCloud, uNight;
 out vec4 o;
 // how much of the sun reaches this point: four soft looks at the shadow map
 float sunVis(vec3 p, vec3 n){
@@ -220,13 +221,32 @@ void main(){
   if (k == 9) {
     vec3 sky = mix(uFog, uSkyTop, vC.r);
     if (uHdr > 0.5) {
-      // the sun itself, and the glare round it: brighter than white, so the film blooms
-      float sd = max(dot(normalize(vW - uEye), uSun), 0.0);
-      sky += uSunCol * (pow(sd, 2200.0) * 14.0 + pow(sd, 90.0) * 0.55 + pow(sd, 9.0) * 0.16);
+      vec3 d = normalize(vW - uEye);
+      // stars, where the sky is dark enough to have them
+      if (uNight > 0.5 && d.y > 0.02) {
+        vec2 sp = d.xz / (d.y + 0.35) * 190.0;
+        float st = hash(floor(sp));
+        float tw = 0.75 + 0.25 * sin(uTime * 2.0 + st * 80.0);
+        sky += vec3(0.85, 0.9, 1.0) * step(0.9925, st) * smoothstep(0.75, 0.2, length(fract(sp) - 0.5) * 2.0) * tw * 1.6 * (1.0 - uCloud);
+      }
+      // the sun itself (at night, the moon), and the glare round it: brighter than white, so the film blooms
+      float sd = max(dot(d, uSun), 0.0);
+      sky += uSunCol * (pow(sd, 2200.0) * 14.0 + pow(sd, 90.0) * 0.55 + pow(sd, 9.0) * 0.16) * (1.0 - 0.8 * uCloud);
+      // CLOUDS: a layer overhead, drifting, lit from the sun's side and grey underneath
+      if (d.y > 0.0) {
+        vec2 uv = d.xz / (d.y + 0.12) * 1.15 + vec2(uTime * 0.006, uTime * 0.0025);
+        float f = vnoise(uv) * 0.5 + vnoise(uv * 2.03 + 7.1) * 0.25 + vnoise(uv * 4.01 + 3.7) * 0.125 + vnoise(uv * 8.1) * 0.0625;
+        float cov = mix(0.56, 0.16, uCloud);
+        float a = smoothstep(cov, cov + 0.26, f) * smoothstep(0.0, 0.16, d.y);
+        float thick = smoothstep(cov + 0.10, cov + 0.55, f);
+        vec3 lit = uSunCol * (0.42 + 0.30 * pow(sd, 4.0)) + uSkyAmb * 0.95;
+        vec3 shade = uSkyAmb * 0.70 + uFog * 0.18;
+        sky = mix(sky, mix(lit, shade, thick * (0.55 + 0.4 * uCloud)), a * 0.94);
+      }
     }
     o = vec4(sky, 1.0); return;
   }
-  if (k == 8) { o = vec4(vC, uAlpha); return; }
+  if (k == 8) { o = vec4(vC * (uHdr > 0.5 ? 1.0 + (0.35 + 1.5 * uNight) * max(max(vC.r, vC.g), vC.b) : 1.0), uAlpha); return; }      // a lamp: bright enough to bloom
   vec3 V = uEye - vW; float dist = length(V); V /= dist;
   vec3 n = normalize(vN); if (dot(n, V) < 0.0) n = -n;
   vec3 c = vC;
@@ -279,6 +299,14 @@ void main(){
   float vis = sunVis(vW, normalize(vN) * (dot(normalize(vN), uSun) < 0.0 ? -1.0 : 1.0));
   vec3 lit = c * (amb + uSunCol * ndl * 0.78 * vis);
   if (uHdr > 1.5) { o = vec4(vec3(vis * 0.5), 1.0); return; }
+  // YOUR HEADLIGHTS: a cone from the nose, falling off with distance
+  if (uLampOn > 0.0) {
+    vec3 ld = vW - uLampPos; float d2 = dot(ld, ld); vec3 ln = ld * inversesqrt(max(d2, 1e-4));
+    float ca = dot(ln, uLampDir);
+    // a bright core down the road, and a wide soft pool that reaches the verges
+    float cone = smoothstep(0.86, 0.985, ca) + 0.38 * smoothstep(0.35, 0.92, ca);
+    if (cone > 0.0) lit += c * vec3(1.0, 0.95, 0.84) * cone * (0.34 + 0.66 * max(dot(n, -ln), 0.0)) * 4.6 / (1.0 + d2 * 0.0026) * uLampOn;
+  }
   lit = mix(lit, uFog * 1.05, shine * 0.75);
   if (uWet > 0.0 && shine > 0.0) { vec3 hw = normalize(uSun + V); lit += uSunCol * pow(max(dot(n, hw), 0.0), 90.0) * uWet * 0.9 * vis; }
   if (k == 6 || k == 12) {
@@ -443,6 +471,8 @@ bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
   uOrigin = glGetUniformLocation(prog, "uOrigin");
   uShVP = glGetUniformLocation(prog, "uShVP"); uShOn = glGetUniformLocation(prog, "uShOn");
   uPass = glGetUniformLocation(prog, "uPass"); uHdr = glGetUniformLocation(prog, "uHdr");
+  uLampPos = glGetUniformLocation(prog, "uLampPos"); uLampDir = glGetUniformLocation(prog, "uLampDir"); uLampOn = glGetUniformLocation(prog, "uLampOn");
+  uTime = glGetUniformLocation(prog, "uTime"); uCloud = glGetUniformLocation(prog, "uCloud"); uNight = glGetUniformLocation(prog, "uNight");
   brightProg = link(PVS, BRIGHT_FS); blurProg = link(PVS, BLUR_FS); compProg = link(PVS, COMP_FS); fxaaProg = link(PVS, FXAA_FS);
   if (!brightProg || !blurProg || !compProg || !fxaaProg) { std::fprintf(stderr, "xbr: the look's shaders did not build - plain picture\n"); post = postOk = false; }
   // the shadow map exists always: the sampler must have something to look at
@@ -1064,7 +1094,7 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
           for (int q = 0; q < 3; q++) { a2[q] = a[q]; b2[q] = b[q]; }
           a2[2] += 0.75; b2[2] += 0.75;
           sc.quad(a, b, c, d, STEEL, 0);
-          sc.quad(d, c, b2, a2, crowd, 8);
+          sc.quad(d, c, b2, a2, crowd, 0);          // lit like anything else: unlit, a crowd glowed in the dark
         }
         if (k % 6 == 0) {
           double p0[3], p1[3];
@@ -1102,7 +1132,8 @@ void Renderer::buildCar(const Spec &S) {
   // are, and the faces here are two-sided, so the view was the inside of a box.
   // Find the top of the bodywork under each mount and sit 9 cm above it.
   {
-    const float sh = (float)(S.a - S.L / 2), mx[3] = {-0.34f + sh, 1.62f + sh, -0.62f + sh};
+    onboardX = S.key == "gt3" ? 0.62f : -0.34f;        // a car with a roof: the camera goes to the foot of the windscreen
+    const float sh = (float)(S.a - S.L / 2), mx[3] = {onboardX + sh, 1.62f + sh, -0.62f + sh};
     for (int c = 0; c < 3; c++) {
       float top = 0;
       for (size_t i = 0; i + 9 < cm.body.v.size(); i += 10) {
@@ -1266,6 +1297,8 @@ Look makeLook(const std::string &phase, double cloud, double wet, double rain) {
   L.fogK = 0.00055f + 0.0012f * (float)clampd(rain, 0, 1) + 0.0003f * c;
   L.wet = (float)clampd(wet, 0, 1);
   L.rain = (float)clampd(rain, 0, 1);
+  L.cloud = c;
+  L.night = phase == "night" ? 1.0f : phase == "dusk" || phase == "dawn" ? 0.35f : 0.0f;
   return L;
 }
 
@@ -1480,7 +1513,7 @@ void Renderer::drawWorld(const FrameIn &f) {
     if (f.camMode == 0) {
       if (packCar) { const PackInfo pi = packInfo(*packCar); e[0] = pi.eye[0] + shift; e[1] = pi.eye[1]; e[2] = pi.eye[2]; drop = 1.1f; }
       else if (carCabin) { e[0] = carEye[0]; e[1] = carEye[1]; e[2] = carEye[2]; drop = 1.1f; }
-      else { e[0] = -0.34f + shift; e[1] = std::max(1.19f, camFloor[0]); e[2] = 0; }        // no cabin to sit in: above the airbox, as the JS does
+      else { e[0] = onboardX + shift; e[1] = onboardX > 0 ? camFloor[0] + 0.06f : std::max(1.19f, camFloor[0]); e[2] = 0; }        // no cabin to sit in: above the airbox, as the JS does
     } else if (f.camMode == 2) { e[0] = 1.62f + shift; e[1] = packCar ? 0.46f : std::max(0.46f, camFloor[1]); e[2] = 0; aim = 26; }
     else { e[0] = -0.62f + shift; e[1] = packCar ? 0.93f : std::max(0.93f, camFloor[2]); e[2] = 0; drop = 1.0f; fov = 50; }
     const float t[3] = {e[0] + aim, e[1] - drop, 0};
@@ -1512,6 +1545,17 @@ void Renderer::drawWorld(const FrameIn &f) {
   PROF.mark(0);
   glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, shTex); glActiveTexture(GL_TEXTURE0);
   if (dress) dress->frame(VP, eye, L, f.time);
+  // lamps on when it is dark, or raining hard enough that you would
+  {
+    const float on = std::max(L.night, L.rain > 0.3f ? 0.6f : 0.0f);
+    const float hx = (float)std::cos(car.hdg), hz = (float)-std::sin(car.hdg);
+    glUniform3f(uLampPos, (float)car.x + hx * 1.4f, carY + 0.55f, (float)-car.y + hz * 1.4f);
+    const float dl = std::sqrt(1.0f + 0.045f * 0.045f);
+    glUniform3f(uLampDir, hx / dl, -0.045f / dl, hz / dl);
+    glUniform1f(uLampOn, on);
+    glUniform1f(uTime, (float)std::fmod(f.time, 10000.0));
+    glUniform1f(uCloud, L.cloud); glUniform1f(uNight, L.night);
+  }
   curVP = VP; curLook = L;
   for (int k = 0; k < 3; k++) curEye[k] = eye[k];
   glUniformMatrix4fv(uVP, 1, GL_FALSE, VP.m);

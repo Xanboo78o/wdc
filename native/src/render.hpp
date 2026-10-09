@@ -72,6 +72,8 @@ struct Look {
   float fogK = 0.00055f;
   float wet = 0;                                  // 0 dry .. 1 soaked: the road darkens and shines
   float rain = 0;                                 // 0..1: streaks across the view
+  float cloud = 0;                                // 0 fair-weather .. 1 overcast: what the sky is covered with
+  float night = 0;                                // 0 day .. 1 night: lamps on, stars out
 };
 // phase: "dawn" | "day" | "dusk" | "night" (anything else is day); cloud 0 clear .. 1 overcast
 Look makeLook(const std::string &phase, double cloud, double wet, double rain);
@@ -172,6 +174,7 @@ class Renderer {
   float carEye[3] = {0.2f, 0.76f, 0};
   // the least height the three bolted cameras (roof, nose, T-bar) may sit at and still be OUTSIDE this body
   float camFloor[3] = {0, 0, 0};
+  float onboardX = -0.34f;
   unsigned hudVao = 0, hudVbo = 0, fontTex = 0;
   struct Glyph { float x = 0, y = 0, w = 0, h = 0, bx = 0, by = 0, adv = 0; };
   struct Font { Glyph g[95]; float cap = 50, asc = 50, desc = 14; };
@@ -194,6 +197,7 @@ class Renderer {
   unsigned sceneFbo = 0, sceneCol = 0, sceneDepth = 0, bloomFbo[2] = {0, 0}, bloomTex[2] = {0, 0}, ldrFbo = 0, ldrTex = 0;
   unsigned shFbo = 0, shTex = 0, fsVao = 0, brightProg = 0, blurProg = 0, compProg = 0, fxaaProg = 0;
   int postW = 0, postH = 0, uShVP = -1, uShOn = -1, uPass = -1, uHdr = -1;
+  int uLampPos = -1, uLampDir = -1, uLampOn = -1, uTime = -1, uCloud = -1, uNight = -1;
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;
   bool sceneOpen = false;
