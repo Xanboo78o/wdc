@@ -1,0 +1,13 @@
+{
+ "note": "Foam blocks, hand-placed. Each group is anchored at `s` metres round the lap; a row stands `ahead` metres straight on along the road's heading there, with one block at each `across` (metres to the LEFT of that line; a block is 1.9 m wide). Check with: node tools/barriercheck.mjs monza --at 640 --span 200 --png out.png",
+ "foam": [
+  {
+   "name": "Variante del Rettifilo: straight on",
+   "s": 590,
+   "rows": [
+    { "ahead": 36, "across": [-2, 0, 2, 4, 6] },
+    { "ahead": 50, "across": [6, 8, 10, 12, 14] }
+   ]
+  }
+ ]
+}

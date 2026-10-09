@@ -42,6 +42,7 @@
 #include "audio.hpp"
 #include "bridge.hpp"
 #include "collide.hpp"
+#include "knock.hpp"
 #include "driver.hpp"
 #include "drivers.hpp"
 #include "multiclass.hpp"
@@ -292,6 +293,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     S.driver = makeDriver(1, pilotTier, S.track.corners.empty() ? 24 : (int)S.track.corners.size());
     S.pilot = std::make_unique<Autopilot>(S.track, *S.lines, *S.spec, peakSlip(*S.spec), &S.driver);
   }
+  { World *wk = S.world.get(); knock().ground = [wk](double x, double y) { return wk->heightAt(x, y); }; }
   barrierWear().reset(S.track);      // new session, straight barriers (collide.hpp: the game's walls give)
   R.buildWorld(S.track, *S.world, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"),
                S.lines->race);
@@ -814,6 +816,13 @@ int main(int argc, char **argv) {
     }
   };
   // the crash effects watch every car, once a frame (fx.hpp): they read, and never write
+  // the foam blocks and braking boards (knock.hpp): every car on the circuit can send one flying
+  auto knockTick = [&](double dt) {
+    std::vector<Car *> cars;
+    if (S.race) for (Entry &e : S.race->entries) { if (!e.inPit) cars.push_back(&e.car); }
+    else if (S.car) cars.push_back(S.car);
+    knock().step(dt, cars);
+  };
   auto fxTick = [&](double dt) {
     fx.begin(SP.get(), S.track, S.world.get(), S.terrain.get(), *S.spec);
     float pc[3] = {-1, 0, 0};
@@ -909,6 +918,7 @@ int main(int argc, char **argv) {
       double a2 = 0;
       for (int k = 0; k < (int)(ft * 60); k++) {
         for (a2 += 1.0 / 60; a2 >= FIXED_DT && !hold; a2 -= FIXED_DT) { if (S.race) raceStep(S, none, !crash, false, toast); else simStep(S, none, !crash, false, toast); }
+        knockTick(1.0 / 60);
         fxTick(1.0 / 60);
       }
       clock += ft; S.t += ft;
@@ -1133,6 +1143,7 @@ int main(int argc, char **argv) {
       }
       if (steps == 60) acc = 0;                       // never chase a stall
       S.t += dt;
+      knockTick(dt);
       fxTick(dt);
       eventTick();
       S.box->update(dt, S.car->speed * 3.6, S.car->throttle);

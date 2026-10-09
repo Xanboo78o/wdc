@@ -119,6 +119,19 @@ if (png) {
     if (len > 400 || b.gap) continue;
     for (let q = 0; q <= len / (m * 0.5); q++) { const f = q / Math.max(1, len / (m * 0.5)); for (const [ox, oy] of [[0, 0], [m, 0], [0, m]]) put(a.x + (b.x - a.x) * f + ox, a.y + (b.y - a.y) * f + oy, [220, 30, 30]); }
   }
+  // the foam blocks of data/knock/<key>.json, in green: are they where you meant, and on open ground?
+  let kd = null;
+  try { kd = JSON.parse(fs.readFileSync(`${ROOT}data/knock/${key}.json`, 'utf8')); } catch { /* none */ }
+  for (const grp of kd?.foam || []) {
+    const i = t.idx(grp.s), h = t.hdg[i];
+    for (const row of grp.rows) for (const ac of row.across) {
+      const bx = t.x[i] + Math.cos(h) * row.ahead - Math.sin(h) * ac, by = t.y[i] + Math.sin(h) * row.ahead + Math.cos(h) * ac;
+      const pj = t.project(bx, by), on = Math.abs(pj.lat) < pj.w + 1.2, wall = gameDepth(bx, by) > 0;
+      if (on || wall) console.log(`  FOAM at s=${grp.s} ahead ${row.ahead} across ${ac}: ${on ? 'ON THE ROAD' : 'IN THE WALL'}`);
+      for (let q = -0.95; q <= 0.95; q += m * 0.5) for (let r = -0.25; r <= 0.25; r += m * 0.5)
+        put(bx - Math.sin(h) * q + Math.cos(h) * r, by + Math.cos(h) * q + Math.sin(h) * r, wall || on ? [255, 0, 255] : [0, 150, 40]);
+    }
+  }
   const ppm = png.replace(/\.png$/, '.ppm');
   fs.writeFileSync(ppm, Buffer.concat([Buffer.from(`P6\n${PX} ${PX}\n255\n`), img]));
   execFileSync('magick', [ppm, png]); fs.rmSync(ppm);

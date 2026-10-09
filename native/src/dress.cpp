@@ -1,5 +1,6 @@
 // dress.cpp — see dress.hpp.
 #include "dress.hpp"
+#include "knock.hpp"
 
 #include <epoxy/gl.h>
 
@@ -907,6 +908,12 @@ struct Woods {
   std::vector<CellMesh *> order;                    // the big cells, sorted near to far each frame
   bool ok = false;
   size_t trees = 0, papers = 0;
+  // THE MOVABLES (knock.hpp): braking boards and foam blocks. Each keeps its
+  // own vertices about its foot; every frame they are put where the car left them.
+  struct Mov { int obj = -1; float lift = 0; std::vector<float> v; };
+  std::vector<Mov> movs;
+  GLuint mvao = 0, mvbo = 0;
+  std::vector<float> mbuf;
 
   static void sv(std::vector<float> &v, const double p[3], double nx, double ny, double nz, double u, double vv, double layer, const float col[3], double mode, int fade, double rnd) {
     const float f[16] = {(float)p[0], (float)p[1], (float)p[2], (float)nx, (float)ny, (float)nz, (float)u, (float)vv, (float)layer, col[0], col[1], col[2], (float)mode, (float)fade, (float)rnd, 0};
@@ -1030,6 +1037,7 @@ static void instVao(GLuint &vao, GLuint kitVbo, GLuint instVbo) {
 }
 
 void Dress::buildWorld(const Track &t, const World &world, const Json &env, const Line &line) {
+  knock().clear();                     // the last circuit's boards and blocks
   woods = std::make_unique<Woods>();
   Woods &W = *woods;
   worldTris = 0;
@@ -1409,18 +1417,80 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
         const double fx = -std::cos(h), fz = std::sin(h);
         const double p[4][3] = {{px + ux * half, gy + y0, pz + uz * half}, {px - ux * half, gy + y0, pz - uz * half}, {px - ux * half, gy + y1, pz - uz * half}, {px + ux * half, gy + y1, pz + uz * half}};
         const double uu[4] = {u0, u1, u1, u0}, vv[4] = {v1, v1, v0, v0};
-        CellMesh &cm = W.cell(px, pz);
-        for (int q : {0, 1, 2, 0, 2, 3}) Woods::sv(cm.deco, p[q], fx * 0.6, 0.8, fz * 0.6, uu[q], vv[q], L_BOARD, WHITE, 0, F_NEVER, 0);
+        // a board can be hit (knock.hpp): it is a movable, drawn about its own foot
+        W.movs.emplace_back();
+        Woods::Mov &mv = W.movs.back();
+        mv.obj = knock().add(KnockObj::BOARD, sx, sy, gy);
+        mv.lift = 0.03f;
+        auto rel = [&](const double *q, double out[3]) { out[0] = q[0] - px; out[1] = q[1] - gy; out[2] = q[2] - pz; };
+        double r3[3];
+        for (int q : {0, 1, 2, 0, 2, 3}) { rel(p[q], r3); Woods::sv(mv.v, r3, fx * 0.6, 0.8, fz * 0.6, uu[q], vv[q], L_BOARD, WHITE, 0, F_NEVER, 0); }
         // a plain back, a hand's breadth behind, so the number is not read backwards from the far side
-        for (int q : {0, 1, 2, 0, 2, 3}) { const double b[3] = {p[q][0] - fx * 0.03, p[q][1], p[q][2] - fz * 0.03}; Woods::sv(cm.deco, b, -fx * 0.6, 0.8, -fz * 0.6, 0, 0, -1, DARK, 0, F_NEVER, 0); }
+        for (int q : {0, 1, 2, 0, 2, 3}) { const double b[3] = {p[q][0] - fx * 0.03, p[q][1], p[q][2] - fz * 0.03}; rel(b, r3); Woods::sv(mv.v, r3, -fx * 0.6, 0.8, -fz * 0.6, 0, 0, -1, DARK, 0, F_NEVER, 0); }
         for (double e : {0.5, -0.5}) {
           const double bx = px + ux * e, bz = pz + uz * e;
           const double l[4][3] = {{bx - ux * 0.045, gy, bz - uz * 0.045}, {bx + ux * 0.045, gy, bz + uz * 0.045}, {bx + ux * 0.045, gy + y0, bz + uz * 0.045}, {bx - ux * 0.045, gy + y0, bz - uz * 0.045}};
-          for (int q : {0, 1, 2, 0, 2, 3}) Woods::sv(cm.deco, l[q], fx * 0.6, 0.8, fz * 0.6, 0, 0, -1, DARK, 0, F_NEVER, 0);
+          for (int q : {0, 1, 2, 0, 2, 3}) { rel(l[q], r3); Woods::sv(mv.v, r3, fx * 0.6, 0.8, fz * 0.6, 0, 0, -1, DARK, 0, F_NEVER, 0); }
         }
         boards++;
       }
     }
+  }
+
+  // ---- foam blocks (data/knock/<track>.json): the polystyrene you thread through on an escape road.
+  // HAND-PLACED, each row given from an anchor on the lap: `s` metres round, then
+  // `ahead` metres straight on along the road's heading THERE, and `across` metres to the left.
+  size_t foam = 0;
+  {
+    const Json kd = Json::loadOpt(dataDir + "/knock/" + t.key + ".json");
+    for (const Json &grp : kd["foam"].arr) {
+      const int i = t.idx(grp["s"].n());
+      const double h = t.hdg[(size_t)i], ch = std::cos(h), sh = std::sin(h);
+      for (const Json &row : grp["rows"].arr) for (const Json &ac : row["across"].arr) {
+        const double ahead = row["ahead"].n(), across = ac.n();
+        const double sx = t.x[(size_t)i] + ch * ahead - sh * across, sy = t.y[(size_t)i] + sh * ahead + ch * across;
+        const double gy = world.heightAt(sx, sy);
+        W.movs.emplace_back();
+        Woods::Mov &mv = W.movs.back();
+        mv.obj = knock().add(KnockObj::FOAM, sx, sy, gy);
+        mv.lift = 0.25f;
+        // a block 1.9 m across the escape road, 0.5 m thick, 1.0 m high; white, with a band of colour
+        const double ax = -sh, az = -ch;              // GL: across (to the left)
+        const double fx2 = ch, fz2 = -sh;             // GL: along the heading
+        const float WHITE2[3] = {0.93f, 0.93f, 0.91f};
+        const float BAND[2][3] = {{0.80f, 0.10f, 0.10f}, {0.10f, 0.25f, 0.70f}};
+        const float *band = BAND[foam & 1];
+        auto face = [&](const double a[3], const double b[3], const double c[3], const double d[3], double nx, double ny, double nz, const float *col) {
+          const double *q[6] = {a, b, c, a, c, d};
+          for (const double *v : q) Woods::sv(mv.v, v, nx, ny, nz, 0, 0, -1, col, 0, F_NEVER, 0);
+        };
+        auto pt = [&](double acr, double alo, double y, double out[3]) { out[0] = ax * acr + fx2 * alo; out[1] = y; out[2] = az * acr + fz2 * alo; };
+        const double HW = 0.95, HT = 0.25;
+        for (int part = 0; part < 2; part++) {
+          const double ya = part == 0 ? 0.0 : 0.62, yb = part == 0 ? 0.62 : 1.0;
+          const float *col = part == 0 ? WHITE2 : band;
+          double c8[8][3];
+          int k = 0;
+          for (double y : {ya, yb}) for (double alo : {-HT, HT}) for (double acr : {-HW, HW}) pt(acr, alo, y, c8[k++]);
+          // c8: y a/b, alo -/+, acr -/+  ->  index = yi*4 + ai*2 + ci
+          face(c8[0], c8[1], c8[5], c8[4], -fx2 * 0.7, 0.7, -fz2 * 0.7, col);     // the face you drive at
+          face(c8[3], c8[2], c8[6], c8[7], fx2 * 0.7, 0.7, fz2 * 0.7, col);       // the far face
+          face(c8[2], c8[0], c8[4], c8[6], -ax * 0.7, 0.7, -az * 0.7, col);       // one end
+          face(c8[1], c8[3], c8[7], c8[5], ax * 0.7, 0.7, az * 0.7, col);         // the other
+          if (part == 1) face(c8[4], c8[5], c8[7], c8[6], 0, 1, 0, col);          // the top
+        }
+        foam++;
+      }
+    }
+    if (foam) std::fprintf(stderr, "woods: %s — %zu foam blocks on the escape road\n", t.key.c_str(), foam);
+  }
+  if (!W.movs.empty()) {
+    glGenVertexArrays(1, &W.mvao); glGenBuffers(1, &W.mvbo);
+    glBindVertexArray(W.mvao); glBindBuffer(GL_ARRAY_BUFFER, W.mvbo);
+    const GLsizei st = 16 * sizeof(float);
+    const int size[5] = {3, 3, 3, 3, 4}, off[5] = {0, 3, 6, 9, 12};
+    for (int q = 0; q < 5; q++) { glEnableVertexAttribArray((GLuint)q); glVertexAttribPointer((GLuint)q, size[q], GL_FLOAT, GL_FALSE, st, (void *)(off[q] * sizeof(float))); }
+    glBindVertexArray(0);
   }
 
   // ---- to the card -------------------------------------------------------------------------------
@@ -1493,6 +1563,47 @@ void Dress::drawWoods(bool shadow) {
     if (!shadow && unseen(c, R)) continue;
     if (!shadow && c.n[0]) { glBindVertexArray(c.vao[0]); glDrawArrays(GL_TRIANGLES, 0, c.n[0]); }
     if (c.n[1]) { glBindVertexArray(c.vao[1]); glDrawArrays(GL_TRIANGLES, 0, c.n[1]); }
+  }
+  // ---- the movables, where the cars have left them (knock.hpp)
+  if (!shadow && !W.movs.empty()) {
+    W.mbuf.clear();
+    const Knock &K = knock();
+    for (const Woods::Mov &mv : W.movs) {
+      if (mv.obj < 0 || (size_t)mv.obj >= K.objs.size()) continue;
+      const KnockObj &o = K.objs[(size_t)mv.obj];
+      const float cy = std::cos((float)o.yaw), sy = std::sin((float)o.yaw), ct = std::cos((float)o.tip), stn = std::sin((float)o.tip);
+      // tips about the level axis that takes "up" to the way it fell (GL: x, up, -y)
+      const float fxg = (float)o.fallX, fzg = (float)-o.fallY, axx = fzg, axz = -fxg;
+      const float bx = (float)o.x, by = (float)o.z + std::fabs(stn) * mv.lift, bz = (float)-o.y;
+      auto turn = [&](const float *in, float *out) {
+        // about the vertical first
+        const float x = in[0] * cy + in[2] * sy, y = in[1], z = -in[0] * sy + in[2] * cy;
+        // then over: v cos + (a x v) sin + a (a.v)(1 - cos), a = (axx, 0, axz)
+        const float dot = axx * x + axz * z;
+        const float cxv = -axz * y, cyv = axz * x - axx * z, czv = axx * y;
+        out[0] = x * ct + cxv * stn + axx * dot * (1 - ct);
+        out[1] = y * ct + cyv * stn;
+        out[2] = z * ct + czv * stn + axz * dot * (1 - ct);
+      };
+      for (size_t i = 0; i + 16 <= mv.v.size(); i += 16) {
+        float f[16];
+        std::memcpy(f, &mv.v[i], sizeof f);
+        float p[3], nn[3];
+        turn(&mv.v[i], p); turn(&mv.v[i + 3], nn);
+        f[0] = p[0] + bx; f[1] = p[1] + by; f[2] = p[2] + bz;
+        f[3] = nn[0]; f[4] = o.state == KnockObj::STANDING ? nn[1] : std::max(0.35f, std::fabs(nn[1])); f[5] = nn[2];
+        W.mbuf.insert(W.mbuf.end(), f, f + 16);
+      }
+    }
+    if (!W.mbuf.empty()) {
+      const GLboolean cull = glIsEnabled(GL_CULL_FACE);
+      glDisable(GL_CULL_FACE);                       // a tumbling board shows both its sides
+      glBindVertexArray(W.mvao);
+      glBindBuffer(GL_ARRAY_BUFFER, W.mvbo);
+      glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(W.mbuf.size() * 4), W.mbuf.data(), GL_STREAM_DRAW);
+      glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(W.mbuf.size() / 16));
+      if (cull) glEnable(GL_CULL_FACE);
+    }
   }
   glBindVertexArray(0);
   glUseProgram((GLuint)was);
