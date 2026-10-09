@@ -1,6 +1,7 @@
 // home.cpp — home.html + js/home.js + the voice in js/menuui.js. See home.hpp.
 // Sizes are the stylesheet's, in CSS pixels; `k` turns them into the screen's.
 #include "home.hpp"
+#include "multiclass.hpp"
 
 #include <set>
 #include <algorithm>
@@ -83,7 +84,9 @@ static std::string sayFor(const std::string &row, const std::string &v) {
     {"CIRCUIT", "brandshatch", "paddock hill bend drops away under you. the rest is in the woods."},
     {"CIRCUIT", "nordschleife", "twenty kilometres. nobody has finished counting the corners."}, {"CIRCUIT", "spa", "seven kilometres of forest and one hill everybody talks about."},
     {"CAR", "f4", "small car. big dreams."}, {"CAR", "gt3", "the one with a roof."}, {"CAR", "f1", "the big one. hands at ten and two."},
-    {"MODE", "hotlap", "just you and the clock. the clock is mean."}, {"MODE", "race", "wheel to wheel. elbows out."},
+    {"MODE", "hotlap", "just you and the clock. the clock is mean."}, {"MODE", "race", "wheel to wheel. elbows out."}, {"MODE", "gt", "three classes, one road. mind your mirrors."},
+    {"YOUR CLASS", "hyper", "the fast one. everybody else is traffic."}, {"YOUR CLASS", "gt3", "the crowd. hunted from behind, hunting ahead."},
+    {"YOUR CLASS", "gt4", "the slow one. you will be lapped. politely."},
     {"LAPS", "2", "a sprint. blink and it is over."}, {"LAPS", "10", "ten laps. hydrate."},
     {"GRID", "6", "six cars. cosy."}, {"GRID", "22", "twenty-one other people's problems."},
     {"RIVALS", "supercasual", "vibes only."}, {"RIVALS", "hard", "ok tough guy."}, {"RIVALS", "*", "they have been practising. have you?"},
@@ -124,6 +127,7 @@ void MenuSave::load(const std::string &path) {
     else if (k == "ffb") ffbSeen = std::atoi(v.c_str()); else if (k == "ffbv") ffbVer = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
     else if (k == "volume") volume = std::atoi(v.c_str()); else if (k == "line") line = v == "1";
     else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
+    else if (k == "gton") gtOn = v == "1"; else if (k == "gtclass") gtClass = gtClassOf(v) >= 0 ? v : "gt3";
     else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
     else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
@@ -145,6 +149,7 @@ void MenuSave::save(const std::string &path) const {
   if (modelSeen || !model.empty()) f << "model " << (model.empty() ? "-" : model) << "\n";
   f << "look " << look << "\n";
   f << "xon " << (xOn ? 1 : 0) << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
+  f << "gton " << (gtOn ? 1 : 0) << "\ngtclass " << gtClass << "\n";
   if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
   for (const auto &kv : teams) if (!kv.second.empty()) f << "team." << kv.first << " " << kv.second << "\n";
 }
@@ -186,11 +191,17 @@ int Home::startSlot(int grid) const {
 // ---- settings rows -------------------------------------------------------------------
 // Downloaded cars are all cars with a roof: they take the GT3 seat and its physics.
 std::string Home::pack() const {
+  if (gt()) {                                    // GT MODE: each class wears its own car, where this machine has it
+    const std::string want = xbr::gtClass(gtClassOf(S.gtClass)).pack;
+    for (const Pack &p : packs) if (p.key == want) return want;
+    return "";
+  }
   if (!S.xOn && S.car != "gt3") return "";
   for (const Pack &p : packs) if (p.key == S.model) return p.key;
   return "";
 }
 std::string Home::voice() const {
+  if (gt()) return S.gtClass;
   const std::string k = pack();
   for (const Pack &p : packs) if (p.key == k) return p.klass;
   return S.xOn ? "gt3" : S.car;
@@ -219,7 +230,8 @@ std::string Home::xTrackKey() const { const std::string id = circuitId(); return
 std::string Home::get(const std::string &key) const {
   if (key == "model") return pack();
   if (key == "look") return S.look;
-  if (key == "modeX") return S.xOn ? "xingus" : S.mode;
+  if (key == "modeX") return S.xOn ? "xingus" : S.gtOn ? "gt" : S.mode;
+  if (key == "gtClass") return S.gtClass;
   if (key == "xStyle") return S.xStyle;
   if (key == "xGears") return S.xGears == "auto" ? "auto" : "manual";
   if (key == "xBots") return S.xBots > 0 ? std::to_string(S.xBots) : "style";
@@ -255,7 +267,8 @@ void Home::set(const std::string &key, const std::string &v) {
   else if (key == "volume") S.volume = std::atoi(v.c_str()); else if (key == "line") S.line = v == "true";
   else if (key == "model") { S.model = v; S.modelSeen = true; dirty = true; }
   else if (key == "look") S.look = v;
-  else if (key == "modeX") { S.xOn = v == "xingus"; if (!S.xOn) S.mode = v == "race" ? "race" : "hotlap"; dirty = true; }
+  else if (key == "modeX") { S.xOn = v == "xingus"; S.gtOn = v == "gt"; if (!S.xOn) S.mode = v == "race" || v == "gt" ? "race" : "hotlap"; dirty = true; }
+  else if (key == "gtClass") { S.gtClass = gtClassOf(v) >= 0 ? v : "gt3"; dirty = true; }
   else if (key == "xStyle") S.xStyle = xstyle(v).key; else if (key == "xGears") S.xGears = v;
   else if (key == "xBots") S.xBots = v == "style" ? 0 : std::atoi(v.c_str()); else if (key == "xField") S.xField = v;
   else if (key == "heil") S.xHeil = v;
@@ -281,7 +294,8 @@ std::vector<Home::Opt> Home::heilRows() const {
 }
 std::vector<Home::Opt> Home::setupRows() const {
   std::vector<Opt> rows;
-  rows.push_back({"MODE", "modeX", {{"hotlap", "HOT LAP"}, {"race", "RACE"}, {"xingus", "XINGUS"}}});
+  rows.push_back({"MODE", "modeX", {{"hotlap", "HOT LAP"}, {"race", "RACE"}, {"gt", "GT MULTICLASS"}, {"xingus", "XINGUS"}}});
+  if (gt()) rows.push_back({"YOUR CLASS", "gtClass", {{"hyper", "HYPERCAR"}, {"gt3", "GT3"}, {"gt4", "GT4"}}});
   if (S.xOn) {
     Opt st{"STYLE", "xStyle", {}};
     for (const XStyle &x : XSTYLES) st.opts.push_back({x.key, x.label});
@@ -294,7 +308,7 @@ std::vector<Home::Opt> Home::setupRows() const {
       if (circuitId() == "speedway") rows.push_back({"FIELD", "xField", {{"skilled", "SKILLED"}, {"4fun", "4FUN"}}});
     }
   }
-  if ((S.xOn || S.car == "gt3") && !packs.empty()) {
+  if ((S.xOn || S.car == "gt3") && !gt() && !packs.empty()) {
     Opt m{"MODEL", "model", {{"", "XBR GT3"}}};
     for (const Pack &p : packs) { std::string t = p.title; for (char &c : t) c = (char)std::toupper((unsigned char)c); m.opts.push_back({p.key, t}); }
     rows.push_back(m);
@@ -308,7 +322,7 @@ std::vector<Home::Opt> Home::setupRows() const {
     if (S.tier == "supercasual") rows.push_back({"OVERTAKES", "battle", {{"easy", "EASY"}, {"medium", "MEDIUM"}, {"hard", "HARD"}}});
     rows.push_back({"YOU START", "start", {{"pole", "POLE"}, {"front", "FRONT ROW"}, {"mid", "MIDFIELD"}, {"back", "LAST"}}});
     rows.push_back({"RETIREMENT", "noDnf", {{"false", "NORMAL"}, {"true", "NO DNF"}}});
-    if (S.car == "f1") rows.push_back({"FIELD", "field", {{"f1", "2026 GRID"}, {"classic", "CLASSIC"}, {"fantasy", "FANTASY"}, {"all", "ALL ERAS"}}});
+    if (S.car == "f1" && !gt()) rows.push_back({"FIELD", "field", {{"f1", "2026 GRID"}, {"classic", "CLASSIC"}, {"fantasy", "FANTASY"}, {"all", "ALL ERAS"}}});
   }
   rows.push_back({"TIME", "time", {{"live", "LIVE"}, {"night", "NIGHT"}, {"dawn", "DAWN"}, {"sunrise", "SUNRISE"}, {"morning", "MORNING"},
                                     {"day", "DAY"}, {"evening", "EVENING"}, {"sunset", "SUNSET"}, {"dusk", "DUSK"}}});
@@ -328,7 +342,7 @@ void Home::show(const std::string &name, int keep) {
 }
 
 void Home::lightsOut() {
-  if (!S.xOn && S.teams[S.car].empty()) { show("garage"); say("pick a team first. then we race."); return; }
+  if (!S.xOn && !gt() && S.teams[S.car].empty()) { show("garage"); say("pick a team first. then we race."); return; }
   if (!savePath.empty() && !eventOn) S.save(savePath);
   wantStart = true;
 }
@@ -686,7 +700,8 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     for (int q = 0; q < nL; q++) if (L[(size_t)q].id == cid) i = q;
     const float tw = title("RACE SETUP");
     {
-      const std::string small = S.xOn ? "XINGUS" : team ? upper(team->name) : "NO TEAM", big = S.xOn ? xstyle(S.xStyle).line : upper(carSpec(S.car).full);
+      const std::string small = S.xOn ? "XINGUS" : gt() ? "THREE CLASSES - ONE ROAD" : team ? upper(team->name) : "NO TEAM",
+                        big = S.xOn ? xstyle(S.xStyle).line : upper(carSpec(gt() ? S.gtClass : S.car).full);
       const float x = 24 + tw + (boo ? 64 : 12), w = std::max(width(9, small, RB, 0.16f), width(19, big, A, 0.03f)) + 26;
       R.card(x * k, 28 * k, w * k, 42 * k, 12 * k, 2.5f * k, YELL, INK);
       text(x + 13, 34, 9, small, hex("#5b5540"), LEFT, RB, 0.16f);
@@ -723,7 +738,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     }
     const auto rows = setupRows();
     optGrid(rows, 92 + 114 + 14, H - 22 - 50 - 14, 1);
-    foot(!S.xOn && S.teams[S.car].empty() ? "PICK A TEAM" : "LIGHTS OUT", "UP / DOWN MOVE  -  LEFT / RIGHT CHANGE  -  G = LIGHTS OUT", at == 1 + (int)rows.size());
+    foot(!S.xOn && !gt() && S.teams[S.car].empty() ? "PICK A TEAM" : "LIGHTS OUT", "UP / DOWN MOVE  -  LEFT / RIGHT CHANGE  -  G = LIGHTS OUT", at == 1 + (int)rows.size());
     return;
   }
 

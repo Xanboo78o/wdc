@@ -41,6 +41,10 @@ struct Entry {
   bool isPlayer = false;
   bool ghost = false;                // drawing only: this car is drawn as a ghost (THE 78). The race never reads it.
   int idx = 0, box = 0, garage = -1;
+  // MULTICLASS (not in the JS): which class this car races in, and the racing
+  // line solved for ITS car. `lines` is the race's own when there is one class.
+  int klass = 0;
+  Lines *lines = nullptr;
   std::string name, col;
   int num = 0;
   const Team *team = nullptr;

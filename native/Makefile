@@ -15,7 +15,7 @@ BUILD    := build
 
 SIM  := physics.cpp parts.cpp track.cpp driver.cpp collide.cpp world.cpp
 # the race layer: js/race.js and everything it imports that is pure logic
-SIM  += grid.cpp drivers.cpp pitstop.cpp xingus.cpp safetycar.cpp race.cpp weather.cpp
+SIM  += grid.cpp drivers.cpp pitstop.cpp xingus.cpp safetycar.cpp race.cpp weather.cpp multiclass.cpp
 GAME := game_main.cpp render.cpp audio.cpp bridge.cpp carmesh.cpp ui.cpp home.cpp dress.cpp fx.cpp career.cpp home_career.cpp
 
 SIM_O  := $(SIM:%.cpp=$(BUILD)/%.o)

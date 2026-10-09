@@ -78,6 +78,34 @@ static std::map<std::string, Spec> &specs() {
     gt.loadSens = 0.20;
     gt.drs = false;
     m["gt3"] = gt;
+
+    // MULTICLASS (not in the JS): the two classes that share a road with the GT3.
+    // Each is the GT3 with the handful of numbers that make its class what it is.
+    // GT4: a road car with a cage. Heavier, a third less power, a wing for show.
+    Spec g4 = gt;
+    g4.key = "gt4"; g4.name = "GT4"; g4.full = "GT4";
+    g4.m = 1420; g4.Izz = 2080; g4.Iyy = 2080; g4.Ixx = 600;
+    g4.h = 0.48;
+    g4.ClA = 1.25; g4.CdA = 1.22; g4.ClFloor = 0.9;
+    g4.Pmax = 330e3; g4.Fdrive = 9500;
+    g4.Fbrake = 23500;
+    g4.mu = 1.76;
+    g4.aeroBal = 0.34; g4.brakeBal = 0.65;      // what little wing it has is at the back: measured, it stops the slow drivers spinning
+    m["gt4"] = g4;
+    // HYPERCAR: a prototype. A quarter-tonne lighter, more power, and a floor
+    // that does the work — it is in another race, on the same road.
+    Spec hy = gt;
+    hy.key = "hyper"; hy.name = "HYPER"; hy.full = "HYPERCAR";
+    hy.m = 1060; hy.Izz = 1560; hy.Iyy = 1560; hy.Ixx = 430;
+    hy.L = 3.00; hy.a = 1.62; hy.b = 1.38;
+    hy.bodyL = 4.75; hy.bodyW = 2.00;
+    hy.h = 0.36;
+    hy.ClA = 4.30; hy.CdA = 1.14; hy.ClFloor = 3.4;
+    hy.aeroBal = 0.44;
+    hy.Pmax = 500e3; hy.Fdrive = 13000;
+    hy.Fbrake = 30000; hy.brakeBal = 0.60;
+    hy.mu = 1.88;
+    m["hyper"] = hy;
     return m;
   }();
   return M;

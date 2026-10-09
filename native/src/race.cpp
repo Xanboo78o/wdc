@@ -178,6 +178,7 @@ Race::Race(const RaceOptions &o)
     while (k + 1 < c.size() && k < 3 && c[k + 1].s0 - c[k].s1 < 250) k++;
     openEnd = !c.empty() ? c[k].s1 + OPEN_AFTER : 600;
   }
+  multi = !o.seats.empty();
   duel = o.duel;
   drsRule = o.drs && o.duel && spec->drs;
   peak = peakSlip(*spec);
@@ -207,7 +208,12 @@ Race::Race(const RaceOptions &o)
     const int who = o.hasOrder ? std::max(0, o.order[(size_t)k]) : (pIdx >= 0 && k > pIdx ? k - 1 : k);
     entries.emplace_back();
     Entry &e = entries.back();
-    e.car = makeCar(spec->key);
+    // MULTICLASS: this slot's own car and the line solved for it
+    const bool seated = (size_t)k < o.seats.size() && o.seats[(size_t)k].spec && o.seats[(size_t)k].lines;
+    Spec *es = seated ? o.seats[(size_t)k].spec : spec;
+    e.lines = seated ? o.seats[(size_t)k].lines : lines;
+    e.klass = seated ? o.seats[(size_t)k].klass : 0;
+    e.car = makeCar(es->key);
     Car &car = e.car;
     double px, py, ph;
     int pi;
@@ -231,7 +237,7 @@ Race::Race(const RaceOptions &o)
     e.team = isPlayer ? o.playerTeam : &team;
     // Your teammate: the other car of the team you drive for.
     e.mate = !isPlayer && o.playerTeam && &team == o.playerTeam;
-    if (!isPlayer) e.drive = std::make_unique<Autopilot>(t, *lines, *spec, peak, &e.driver);
+    if (!isPlayer) e.drive = std::make_unique<Autopilot>(t, *e.lines, *es, seated ? peakSlip(*es) : peak, &e.driver);
     // Where this car sits relative to the racing line on the grid: the lateral
     // target STARTS at the grid box and drifts to the line after the lights.
     e.biasS = slot.lat - lines->race.off[(size_t)t.idx(slot.s)]; e.merge = true;
@@ -587,8 +593,8 @@ SideFight *Race::sideBySide(Entry &e, bool blocked) {
     SideFight &S = e.side;
     Entry *p = S.o;
     // A fight is at racing speed or it is not a fight.
-    const double vl0 = lines->race.v[(size_t)e.proj.i];
-    const bool slow = e.car.speed < vl0 * 0.7 || p->car.speed < lines->race.v[(size_t)p->proj.i] * 0.7;
+    const double vl0 = e.lines->race.v[(size_t)e.proj.i];
+    const bool slow = e.car.speed < vl0 * 0.7 || p->car.speed < p->lines->race.v[(size_t)p->proj.i] * 0.7;
     const bool gone = !p || p->retired || p->inPit || p->finished || e.inPit || rc.neutral() || slow
       || std::fabs(t.gap(p->proj.s, e.proj.s)) > L * 2.5
       // A real excursion, not a wheel on the kerb.
@@ -605,7 +611,7 @@ SideFight *Race::sideBySide(Entry &e, bool blocked) {
       // Keep level: the one edging ahead eases off until they are door to door.
       if (rel > 1.2) S.cap = std::max(p->car.speed - 6, p->car.speed - (rel - 1.2) * 1.2);
       // Neither car is on the racing line, so neither can carry its speed.
-      const double vl = lines->race.v[(size_t)e.proj.i] * 0.93;
+      const double vl = e.lines->race.v[(size_t)e.proj.i] * 0.93;
       S.cap = std::min(orInf(S.cap), vl);
     }
     return &S;
@@ -613,7 +619,7 @@ SideFight *Race::sideBySide(Entry &e, bool blocked) {
   if (blocked || !sideLock || !duel || state != RaceState::Green || time - greenT < 25) return nullptr;   // not in the lap-one scramble
   // YOU, alongside a bot from behind: the bot you have drawn level with starts the fight.
   const double Lm = spec->bodyL;
-  const auto pace = [&](const Entry &x) { return x.car.speed >= lines->race.v[(size_t)x.proj.i] * 0.8; };
+  const auto pace = [&](const Entry &x) { return x.car.speed >= x.lines->race.v[(size_t)x.proj.i] * 0.8; };
   if (!pace(e)) return nullptr;
   if (me && me != &e && !me->side.on && !me->retired && !me->inPit && e.behind == me && pace(*me)) {
     const double dsm = t.gap(e.proj.s, me->proj.s), dlm = me->proj.lat - e.proj.lat;
@@ -761,7 +767,9 @@ void Race::racecraft(Entry &e) {
   // ---- defence: into a braking zone, cover the inside; on a straight, go with the car that pulls out.
   const double defendT = battle ? 1.0 : 0.75;
   // YOUR TEAMMATE does not defend against you.
-  if (!pitting && !noDef && e.behind && e.behindGapT < defendT && !e.inPit && !(e.mate && e.behind == me)) {
+  // MULTICLASS: nobody defends against another class. It is not their race.
+  const bool otherClass = multi && e.behind && e.behind->klass != e.klass;
+  if (!pitting && !noDef && !otherClass && e.behind && e.behindGapT < defendT && !e.inPit && !(e.mate && e.behind == me)) {
     Entry *o = e.behind;
     const double ds = t.gap(e.proj.s, o->proj.s);          // + : they are behind me
     const double dl = o->proj.lat - e.proj.lat;
@@ -945,7 +953,7 @@ void Race::racecraft(Entry &e) {
   e.biasS = bias - pitBias;
   if (sb && !std::isnan(sb->cap)) speedCap = capMin(speedCap, sb->cap);
   // The cool-down lap is driven at two thirds of racing speed.
-  if (e.finished) speedCap = capMin(speedCap, lines->race.v[(size_t)i] * 0.66);
+  if (e.finished) speedCap = capMin(speedCap, e.lines->race.v[(size_t)i] * 0.66);
   // THE FORMATION: TWO WIDE AND TIGHT. The first car out sets the pace; every
   // rival has a PLACE behind it and drives to that place.
   if (state == RaceState::Formation) {

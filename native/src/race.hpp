@@ -67,6 +67,10 @@ struct RaceOptions {
   bool duel = true, drs = true, rules = true, standIn = false, sideLock = true, styles = true;
   const Team *playerTeam = nullptr;
   bool opening = true;
+  // MULTICLASS (not in the JS): one seat per grid slot, front to back. Empty =
+  // one class, everybody in `spec` on `lines`, exactly as the JS runs it.
+  struct Seat { Spec *spec = nullptr; Lines *lines = nullptr; int klass = 0; };
+  std::vector<Seat> seats;
   // XINGUS. The JS reads these off the page's address when it has one; Node has
   // none, and these are the values Node gets.
   bool xingus = false;
@@ -97,6 +101,7 @@ class Race {
   std::vector<Fork> detours;
   bool jokerRule = false;
   bool stock = false;
+  bool multi = false;                  // MULTICLASS: the grid was handed seats (RaceOptions.seats)
   int stockStint = 0;                  // laps a set of tyres is good for (this.stock.stint)
   double openEnd = 600;
   bool duel, drsRule;

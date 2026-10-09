@@ -119,6 +119,8 @@ struct PackCar {
   };
   std::vector<Livery> liveries;
   float frame[4] = {0, 2.3f, 1.2f, 1.0f};
+  // where the light comes out: found on the bodywork itself when the car is loaded ([0] left, [1] right)
+  float lampP[2][3] = {}, tailP[2][3] = {};
 };
 size_t Dress::liveryCount(const PackCar &pc) const { return pc.liveries.size(); }
 PackInfo packInfo(const PackCar &pc) {
@@ -141,7 +143,7 @@ void main(){ vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = mat3(uModel) * 
 static const char *LIV_STUB = "vec3 livery(vec3 p, vec3 b){ return b; }\nvec3 stickers(vec3 c, vec3 p, vec3 n, sampler2D s){ return c; }\n";
 static const char *CAR_FS_A = R"(#version 330 core
 in vec3 vW, vN, vP, vNo; in vec2 vU;
-uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish;
+uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish; uniform float uBrake;
 uniform vec3 uLivBase; uniform vec4 uLivFrame, uRim;
 )";
 static const char *CAR_FS_B = R"(
@@ -187,8 +189,8 @@ void main(){
   vec3 h = normalize(uSun + V);
   lit = mix(lit, skyAt(reflect(-V, n)), clamp(mirror + fres * (mirror > 0.0 ? 0.5 : 0.0), 0.0, 0.9));
   lit += uSunCol * pow(max(dot(n, h), 0.0), shine) * gloss;
-  if (uRole == 6) lit += (uHasMap == 1 ? t.rgb : vec3(0.75, 0.05, 0.04)) * 0.55;
-  if (uRole == 5) lit += vec3(0.80, 0.86, 0.92) * 0.55;
+  if (uRole == 6) lit += (uHasMap == 1 ? t.rgb : vec3(0.75, 0.05, 0.04)) * (0.40 + 2.4 * uBrake);
+  if (uRole == 5) lit += vec3(0.80, 0.86, 0.92) * 1.3;
   if (uRole == 2) a = clamp(a + fres * 0.35, 0.0, 1.0);
   float f = 1.0 - exp(-dist * uFogK);
   o = vec4(mix(lit, uFog, f), a);
@@ -293,8 +295,136 @@ const PackCar *Dress::pack(const std::string &key) {
   }
   glBindVertexArray(0);
   std::fprintf(stderr, "dress: car pack %s — %zu triangles, %zu groups, %zu materials, %zu liveries\n", key.c_str(), pc->tris, pc->groups.size(), pc->mats.size(), pc->liveries.size());
+  // WHERE THE LAMPS ARE. Nobody labelled them, so ask the bodywork: the furthest
+  // forward point at headlamp height out towards each corner, and the furthest
+  // back at tail-lamp height. (A wheel's vertices are about its hub: too low to be picked.)
+  {
+    const float w = pc->frame[3];
+    for (int s = 0; s < 2; s++) {
+      float bf = -1e9f, br = 1e9f;
+      pc->lampP[s][0] = pc->frame[0] + pc->frame[1] - 0.3f; pc->lampP[s][1] = 0.62f; pc->lampP[s][2] = (s ? 1 : -1) * w * 0.36f;
+      pc->tailP[s][0] = pc->frame[0] - pc->frame[1] + 0.1f; pc->tailP[s][1] = 0.78f; pc->tailP[s][2] = (s ? 1 : -1) * w * 0.36f;
+      for (size_t v = 0; v < nv; v++) {
+        const float x = verts[v * 8], y = verts[v * 8 + 1], z = verts[v * 8 + 2] * (s ? 1 : -1);
+        if (z < w * 0.60f || z > w * 0.84f) continue;
+        if (y > 0.50f && y < 0.78f && x > bf) { bf = x; pc->lampP[s][0] = x; pc->lampP[s][1] = y; pc->lampP[s][2] = verts[v * 8 + 2]; }
+        if (y > 0.58f && y < 0.92f && x < br) { br = x; pc->tailP[s][0] = x; pc->tailP[s][1] = y; pc->tailP[s][2] = verts[v * 8 + 2]; }
+      }
+    }
+  }
   slot = std::move(pc);
   return slot.get();
+}
+
+// ---- lights ------------------------------------------------------------------------------
+static const char *GLOW_VS = R"(#version 330 core
+layout(location=0) in vec2 aQ;
+uniform mat4 uVP; uniform vec3 uC, uU, uV;
+out vec2 vQ;
+void main(){ vQ = aQ; gl_Position = uVP * vec4(uC + uU * aQ.x + uV * aQ.y, 1.0); }
+)";
+// 0 a lamp: a hard core in a soft halo   1 a brake disc: a ring   2 light lying on the road
+static const char *GLOW_FS = R"(#version 330 core
+in vec2 vQ; uniform vec4 uCol; uniform int uShape; out vec4 o;
+void main(){
+  float r = length(vQ), a;
+  if (uShape == 1) a = smoothstep(0.36, 0.52, r) * (1.0 - smoothstep(0.84, 1.0, r));
+  else if (uShape == 2) a = exp(-r * r * 3.2) * (1.0 - smoothstep(0.8, 1.0, r));
+  else a = (exp(-r * r * 6.0) * 0.30 + exp(-r * r * 60.0)) * (1.0 - smoothstep(0.8, 1.0, r));
+  o = vec4(uCol.rgb * uCol.a * a, 1.0);
+}
+)";
+
+void Dress::drawLights(const PackCar &pc, const Mat4 &carM, const void *who, double brake, double speed, double steer, const bool *lost,
+                       const double *sag) {
+  if (!glowProg) {
+    glowProg = linkD(GLOW_VS, GLOW_FS);
+    if (!glowProg) return;
+    const float q[8] = {-1, -1, 1, -1, -1, 1, 1, 1};
+    glGenVertexArrays(1, &glowVao); glGenBuffers(1, &glowVbo);
+    glBindVertexArray(glowVao); glBindBuffer(GL_ARRAY_BUFFER, glowVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof q, q, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+  }
+  // THE DISCS' HEAT. Braking from speed pours it in, the air takes it away: a
+  // stop from two hundred lights them, and they fade down the next straight.
+  Heat &H = heat[who];
+  const double dt = H.t < 0 ? 0 : std::clamp(time - H.t, 0.0, 0.1);
+  H.t = time;
+  const double v = std::fabs(speed);
+  H.h = (float)std::clamp(H.h + (std::clamp(brake, 0.0, 1.0) * std::min(1.0, v / 55.0) * 1.5 - H.h * (0.16 + v * 0.004)) * dt, 0.0, 1.4);
+  const float hot = std::clamp((H.h - 0.30f) / 0.6f, 0.0f, 1.0f);
+
+  GLint was = 0;
+  glGetIntegerv(GL_CURRENT_PROGRAM, &was);
+  const GLboolean cull = glIsEnabled(GL_CULL_FACE);
+  glUseProgram(glowProg);
+  glUniformMatrix4fv(glGetUniformLocation(glowProg, "uVP"), 1, GL_FALSE, VP.m);
+  const GLint uC = glGetUniformLocation(glowProg, "uC"), uU = glGetUniformLocation(glowProg, "uU"), uV = glGetUniformLocation(glowProg, "uV"),
+              uCol = glGetUniformLocation(glowProg, "uCol"), uShape = glGetUniformLocation(glowProg, "uShape");
+  glEnable(GL_BLEND); glBlendFunc(GL_ONE, GL_ONE);
+  glDepthMask(GL_FALSE); glDisable(GL_CULL_FACE);
+  glBindVertexArray(glowVao);
+  const float *m = carM.m;
+  const auto at = [&](float x, float y, float z, float *o) { for (int k = 0; k < 3; k++) o[k] = m[k] * x + m[4 + k] * y + m[8 + k] * z + m[12 + k]; };
+  const float night = look.night;
+  // a lamp faces the eye, and is only seen from the end of the car it is on
+  const auto lamp = [&](const float *p, float out, float size, const float col[3], float power) {
+    float c[3];
+    at(p[0] + out * 0.05f, p[1], p[2], c);
+    float e[3] = {eye[0] - c[0], eye[1] - c[1], eye[2] - c[2]};
+    const float d = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+    if (d < 0.3f || d > 900) return;
+    for (float &q : e) q /= d;
+    const float facing = (e[0] * m[0] + e[1] * m[1] + e[2] * m[2]) * out;
+    if (facing < 0.04f) return;
+    float r[3] = {e[2], 0, -e[0]};
+    const float rl = std::max(1e-4f, std::sqrt(r[0] * r[0] + r[2] * r[2]));
+    r[0] /= rl; r[2] /= rl;
+    const float u[3] = {e[1] * r[2] - e[2] * r[1], e[2] * r[0] - e[0] * r[2], e[0] * r[1] - e[1] * r[0]};
+    // far away a lamp is a point that must not vanish between pixels
+    const float s = std::max(size, d * 0.004f);
+    glUniform3fv(uC, 1, c);
+    glUniform3f(uU, r[0] * s, r[1] * s, r[2] * s); glUniform3f(uV, u[0] * s, u[1] * s, u[2] * s);
+    glUniform4f(uCol, col[0], col[1], col[2], power * std::min(1.0f, facing * 3.5f) * std::exp(-d * look.fogK));
+    glUniform1i(uShape, 0);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  };
+  const float white[3] = {1.0f, 0.95f, 0.84f}, red[3] = {1.0f, 0.07f, 0.04f};
+  const float b = (float)std::clamp(brake, 0.0, 1.0);
+  for (int s = 0; s < 2; s++) {
+    lamp(pc.lampP[s], 1, 0.24f + 0.30f * night, white, 1.2f + 1.6f * night);
+    lamp(pc.tailP[s], -1, 0.15f + 0.09f * b + 0.08f * night, red, 0.40f + 0.25f * night + 1.5f * b);
+  }
+  // the light the headlamps throw: a long pool on the road ahead, at night
+  if (night > 0.25f) {
+    float c[3];
+    at(pc.frame[0] + pc.frame[1] + 8.5f, 0.05f, 0, c);
+    glUniform3fv(uC, 1, c);
+    glUniform3f(uU, m[0] * 9.5f, m[1] * 9.5f, m[2] * 9.5f); glUniform3f(uV, m[8] * 3.4f, m[9] * 3.4f, m[10] * 3.4f);
+    glUniform4f(uCol, white[0], white[1], white[2], 0.42f * night);
+    glUniform1i(uShape, 2);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  }
+  // the discs: a ring in the plane of each wheel, seen through the spokes
+  if (hot > 0.02f) {
+    glUniform1i(uShape, 1);
+    for (int w = 0; w < 4; w++) {
+      if (lost && lost[w]) continue;
+      Mat4 hub = carM * Mat4::translate((float)pc.wc[w][0], (float)(pc.wc[w][1] + (sag ? sag[w] : 0)), (float)pc.wc[w][2]);
+      if (w < 2) hub = hub * Mat4::rotY((float)steer);
+      const float rr = (float)pc.wr[w] * 0.62f, k = hot * (w < 2 ? 1.0f : 0.6f);     // the fronts do most of the stopping
+      glUniform3f(uC, hub.m[12], hub.m[13], hub.m[14]);
+      glUniform3f(uU, hub.m[0] * rr, hub.m[1] * rr, hub.m[2] * rr); glUniform3f(uV, hub.m[4] * rr, hub.m[5] * rr, hub.m[6] * rr);
+      // dull red first, orange when it is really hot
+      glUniform4f(uCol, 1.0f, 0.16f + 0.34f * k, 0.03f + 0.10f * k * k, 0.5f + 2.6f * k);
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+  }
+  glBindVertexArray(0);
+  glDepthMask(GL_TRUE); glDisable(GL_BLEND);
+  if (cull) glEnable(GL_CULL_FACE);
+  glUseProgram((GLuint)was);
 }
 
 void Dress::lights(unsigned prog) {
@@ -322,6 +452,7 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
               uColor = glGetUniformLocation(carProg, "uColor"), uPaint = glGetUniformLocation(carProg, "uPaint"),
               uOpacity = glGetUniformLocation(carProg, "uOpacity");
   glUniform1i(glGetUniformLocation(carProg, "uTex"), 0);
+  glUniform1f(glGetUniformLocation(carProg, "uBrake"), brakeNow);
   if (paint) glUniform3f(uPaint, paint[0], paint[1], paint[2]); else glUniform3f(uPaint, -1, 0, 0);
   // WHICH TEAM. The one asked for (setLivery), else one chosen by the paint
   // colour the game hands every car — so a rival keeps its livery all race and

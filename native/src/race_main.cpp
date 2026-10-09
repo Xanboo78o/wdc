@@ -42,6 +42,7 @@
 #include <string>
 #include <vector>
 
+#include "multiclass.hpp"
 #include "race.hpp"
 
 using namespace xbr;
@@ -100,6 +101,7 @@ int main(int argc, char **argv) {
   bool probeOn = false;
   bool pits = true, rules = true, duel = true, drs = true, noDnf = false, standIn = false, trace = false, aero = false;
   bool xsolo = false, xderby = false, xloose = false, xstakes = false, rolling = true, joker = true;
+  bool multi = false;
   const auto isNum = [](const char *s) { char *e; std::strtod(s, &e); return e != s && *e == 0; };
   for (int i = 1; i < argc; i++) {
     const std::string s = argv[i];
@@ -127,6 +129,7 @@ int main(int argc, char **argv) {
     else if (s == "--xloose") xloose = true;
     else if (s == "--xstakes") xstakes = true;
     else if (s == "--aero") aero = true;
+    else if (s == "--multi") multi = true;                       // GT MODE: hyper + gt3 + gt4 on one grid (the class argument = yours)
     else if (s == "--wet") wet = std::atof(val());
     else if (s == "--rainat") rainAt = std::atof(val());
     else if (s == "--time") maxTime = std::atof(val());
@@ -145,7 +148,8 @@ int main(int argc, char **argv) {
   const std::string key = a.size() > 0 ? a[0] : "monza", cls = a.size() > 1 ? a[1] : "f1";
   const int laps = a.size() > 2 ? std::atoi(a[2].c_str()) : 3, grid = a.size() > 3 ? std::atoi(a[3].c_str()) : 22;
   const std::string tier = a.size() > 4 ? a[4] : "medium";
-  if (!hasCarSpec(cls)) { std::fprintf(stderr, "xbr-race: no car class '%s' (f4, f1, gt3)\n", cls.c_str()); return 2; }
+  if (!hasCarSpec(cls)) { std::fprintf(stderr, "xbr-race: no car class '%s' (f4, f1, gt3, gt4, hyper)\n", cls.c_str()); return 2; }
+  if (multi && gtClassOf(cls) < 0) { std::fprintf(stderr, "xbr-race: --multi wants hyper, gt3 or gt4 as the class\n"); return 2; }
   if (std::string(tierFor(tier)->key) != tier) { std::fprintf(stderr, "xbr-race: no tier '%s'\n", tier.c_str()); return 2; }
   if (!battle.empty() && !battleFor(battle)) { std::fprintf(stderr, "xbr-race: no battle '%s' (easy, medium, hard)\n", battle.c_str()); return 2; }
   if (input != "park" && input != "floor" && input != "weave") { std::fprintf(stderr, "xbr-race: --input is park, floor or weave\n"); return 2; }
@@ -175,6 +179,12 @@ int main(int argc, char **argv) {
   o.xingus = !xcar.empty(); if (!xcar.empty()) o.xopt.car = xcar;
   o.xopt.solo = xsolo; o.xopt.derby = xderby; o.xopt.loose = xloose; o.xopt.stakes = xstakes;
   o.xopt.rolling = rolling; o.xopt.joker = joker;
+  GtField gf;
+  if (multi) {
+    gf = gtField(track, grid, gtClassOf(cls), 0.5);
+    o.seats = gf.seats;
+    if (playerSlot > 0) o.playerGrid = gf.playerGrid;
+  }
   Race race(o);
 
   std::vector<RaceEvent> all;
@@ -281,6 +291,22 @@ int main(int argc, char **argv) {
   std::printf("finished %d/%d   retired %d\n", fin, n, n - fin);
   // The metric that tells a clean RACE apart from a clean procession.
   std::printf("passes: %d   cars finishing off their grid slot: %d/%d\n", race.passes, moved, n);
+  if (multi) {
+    // Is it three races on one road? Each class: its best lap, who it lost, and
+    // how many cars of a SLOWER class finished ahead of its last runner.
+    for (int k = 0; k < GT_CLASSES; k++) {
+      double bl = 1e9; int cnt = 0, out = 0, lapsMax = 0, hits = 0;
+      for (const Entry &e : race.entries) if (e.klass == k) {
+        cnt++; if (e.retired) out++; hits += e.contacts; lapsMax = std::max(lapsMax, e.lap);
+        if (!std::isnan(e.bestLap) && e.bestLap > 0) bl = std::min(bl, e.bestLap);
+      }
+      std::printf("CLASS %-5s  cars %2d  retired %2d  best %s  laps %d  contacts %d\n", gtClass(k).label, cnt, out, fmt(bl < 1e9 ? bl : NaN).c_str(), lapsMax, hits);
+    }
+    int upset = 0;
+    for (const Entry &a : race.entries) for (const Entry &b : race.entries)
+      if (!a.retired && !b.retired && a.klass < b.klass && a.pos > b.pos) upset++;
+    std::printf("pairs where a slower class finished ahead of a faster one: %d\n", upset);
+  }
 
   std::vector<std::pair<std::string, int>> kinds;
   for (const RaceEvent &ev : race.events) {

@@ -63,7 +63,7 @@ class GameHud {
   RaceEvent lastEv;
   // the tower is rebuilt eight times a second, not sixty
   double towerAcc = 9, towerT = 0;
-  struct Row { int pos; Rgba chip; std::string name, gap, cls; bool me, out; };
+  struct Row { int pos; Rgba chip; std::string name, gap, cls; bool me, out; bool klassOn = false; Rgba klass{}; };
   std::vector<Row> rows;
 };
 

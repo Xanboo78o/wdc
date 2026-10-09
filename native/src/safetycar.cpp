@@ -804,7 +804,11 @@ void Director::blueTick() {
     e.blue = nullptr;
     if (!(neutral() || e.retired || e.inPit || e.finished || r.state != RaceState::Green)) {
       Entry *o = e.behind;
-      if (o && !o->inPit && !o->retired && e.behindGapT <= 1.0 && r.progress(*o) - r.progress(e) > L * 0.5) {
+      // MULTICLASS: a faster CLASS coming through is not a blue flag. The slower car
+      // holds its line and the faster one finds the way round — moving a GT4 off the
+      // line mid-corner for a prototype put it in the wall (measured, Zandvoort).
+      const bool otherClass = r.multi && o && o->klass != e.klass;
+      if (o && !otherClass && !o->inPit && !o->retired && e.behindGapT <= 1.0 && r.progress(*o) - r.progress(e) > L * 0.5) {
         e.blue = o; e.blueGap = -r.track->gap(o->proj.s, e.proj.s);
         if (e.blueSide == 0) e.blueSide = sgn1(e.proj.lat - o->proj.lat);
         e.blueAt = r.time;

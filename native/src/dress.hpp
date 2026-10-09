@@ -50,6 +50,15 @@ class Dress {
   size_t liveryCount(const PackCar &pc) const;
   // How far the wheels turn while the shutter is open, radians (0 = sharp): the next drawPack smears them by it.
   void setWheelSweep(float radians) { wheelSweep = radians; }
+  // LIGHTS (Adam: "make their headlights and brake lights work and brakes glow").
+  // How hard this car is on the brakes, 0..1: the next drawPack lights its tail lamps by it.
+  void setBrake(float b) { brakeNow = b; }
+  // After both drawPack passes: the lamps themselves as light — two white at the
+  // nose, two red at the tail that flare under braking, a pool of light on the
+  // road at night, and four discs that glow once they are hot. `who` is any
+  // pointer that stays with this car: the discs' heat is remembered by it.
+  void drawLights(const PackCar &pc, const Mat4 &carM, const void *who, double brake, double speed, double steer, const bool *lost,
+                  const double *sag);
 
   // ---- the woods and the boards ------------------------------------------------
   void buildWorld(const Track &track, const World &world, const Json &env, const Line &raceLine);
@@ -63,7 +72,10 @@ class Dress {
   unsigned carProg = 0, floraProg = 0, sheet = 0;
   bool sheetTried = false, liveryOn = true;
   int liveryIx = -1;
-  float wheelSweep = 0;
+  float wheelSweep = 0, brakeNow = 0;
+  unsigned glowProg = 0, glowVao = 0, glowVbo = 0;
+  struct Heat { float h = 0; double t = -1; };
+  std::map<const void *, Heat> heat;
   Mat4 VP;
   float eye[3] = {0, 0, 0};
   Look look;

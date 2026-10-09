@@ -1364,8 +1364,10 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     for (int i = 0; i < 4; i++) { lost[i] = car.wheelLost[i]; sag[i] = (car.hasSag ? car.sag[i] : 0) - sp.s + hang; }
     // the blur of its turning wheels (dress.cpp): the angle a 1/75 s shutter sees
     dress->setWheelSweep((float)std::min(2.3, std::fabs(car.vx) / std::max(0.2, (double)packInfo(*packCar).wheelR) / 75));
+    dress->setBrake((float)car.brake);
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, false);
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, true);
+    dress->drawLights(*packCar, M, &car, car.brake, car.speed, car.steerEff, lost, sag);      // lamps, brake lights, hot discs (dress.hpp)
     return;
   }
   glUniform3f(uPaint, paint[0], paint[1], paint[2]);

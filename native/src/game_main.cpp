@@ -44,6 +44,7 @@
 #include "collide.hpp"
 #include "driver.hpp"
 #include "drivers.hpp"
+#include "multiclass.hpp"
 #include "fx.hpp"
 #include "grid.hpp"
 #include "home.hpp"
@@ -173,6 +174,7 @@ struct RaceSetup {
   bool xingus = false, xsolo = false, xderby = false, xstakes = false, xloose = false;
   std::string xcar = "gt";
   std::function<void()> customField;   // a career event hands the grid its own field (career.hpp); empty = the usual one
+  bool multi = false;                  // GT MODE: hypercars, GT3 and GT4 on one grid (multiclass.hpp); the session's class is yours
   bool freePace = false;               // THE 78: nobody is held near you (RaceOptions.duel off); the other car drives its own race
 };
 
@@ -184,6 +186,8 @@ struct Session {
   Gnd gnd;
   Spec *spec = nullptr;
   std::unique_ptr<Lines> lines;
+  GtField gt;                      // GT MODE: every class's spec and line (empty otherwise)
+  bool multi = false;
   Car own;
   Car *car = &own;                 // your car: `own` in a hot lap, the race's entry in a race
   Driver driver;
@@ -256,7 +260,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
   resetCar(S);
   if (rs) {
     // You take a seat in your team, and its other car is your teammate.
-    setField(cls == "f1" ? rs->field : cls);
+    setField(cls == "f1" ? rs->field : rs->multi ? "gt3" : cls);
     if (rs->customField) rs->customField(); else setPlayerTeam(rs->standIn ? "" : rs->teamKey, rs->grid);
     RaceOptions o;
     o.track = &S.track; o.lines = S.lines.get(); o.spec = S.spec;
@@ -267,6 +271,11 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     if (rs->freePace) o.duel = false;
     o.xingus = rs->xingus; o.xopt.car = rs->xcar; o.xopt.solo = rs->xsolo; o.xopt.derby = rs->xderby;
     o.xopt.stakes = rs->xstakes; o.xopt.loose = rs->xloose;
+    if (rs->multi && gtClassOf(cls) >= 0) {
+      S.gt = gtField(S.track, rs->grid, gtClassOf(cls), rs->grid > 1 ? (rs->slot - 1.0) / (rs->grid - 1.0) : 0);
+      o.seats = S.gt.seats; o.playerGrid = S.gt.playerGrid;
+      S.multi = true;
+    }
     S.xingus = rs->xingus;
     S.race = std::make_unique<Race>(o);
     World *w = S.world.get();
@@ -472,6 +481,7 @@ enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
   std::vector<std::string> pos;
+  bool multiArg = false;
   std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg, modelArg, lookArg, xingArg, xtrackArg, xheilArg;
   std::string eventArg, careerArg;     // --event KEY starts a career event or an EVENTS mode unattended; --career-state FILE shows a prepared career (never saved)
   int cardArg = -1;                    // --card N: the story card `--screen story` shows
@@ -496,6 +506,7 @@ int main(int argc, char **argv) {
     else if (a == "--data") dataDir = val("--data");
     else if (a == "--tier") tierArg = val("--tier");
     else if (a == "--mode") modeArg = val("--mode");
+    else if (a == "--multi") multiArg = true;                    // GT MODE from the command line: xbr spa gt4 --multi
     else if (a == "--grid") gridArg = std::atoi(val("--grid").c_str());
     else if (a == "--laps") lapsArg = std::atoi(val("--laps").c_str());
     else if (a == "--start") startArg = std::atoi(val("--start").c_str());
@@ -581,6 +592,7 @@ int main(int argc, char **argv) {
   if (!xheilArg.empty()) cfg.xHeil = xheilArg;
   if (pos.size() > 0) cfg.track = pos[0];
   if (pos.size() > 1) cfg.car = pos[1];
+  if (multiArg) { cfg.gtOn = true; cfg.xOn = false; if (gtClassOf(cfg.car) >= 0) cfg.gtClass = cfg.car; }
   if (!tierArg.empty()) cfg.tier = tierArg;
   if (!lookArg.empty()) cfg.look = lookArg == "plain" ? "plain" : "film";
   if (!modeArg.empty()) cfg.mode = modeArg;
@@ -673,21 +685,22 @@ int main(int argc, char **argv) {
     rs.seed = 1 + std::rand() % 9973;
     auto N = std::make_unique<Session>();
     const std::string bk = SMALL[std::rand() & 1];
-    if (!loadSession(*N, R, dataDir, std::filesystem::exists(dataDir + "/tracks/" + bk + ".json") ? bk : "monza", cfg.car, "hard", &rs)) return false;
+    if (!loadSession(*N, R, dataDir, std::filesystem::exists(dataDir + "/tracks/" + bk + ".json") ? bk : "monza", home.gt() ? cfg.gtClass : cfg.car, "hard", &rs)) return false;
     SP = std::move(N);
     usePack();
-    bgOn = true; bgCar = cfg.car + "/" + home.pack();
+    bgOn = true; bgCar = (home.gt() ? cfg.gtClass : cfg.car) + "/" + home.pack();
     R.snapCamera(); acc = 0;
     return true;
   };
   auto startSession = [&]() {
     theme = HudTheme::forTeam(home.teamKey());
-    showLoading(cfg.mode == "race" ? "BUILDING A GRID OF " + std::to_string(cfg.grid) + "..." : "SOLVING THE RACING LINE... (IT IS THE FAST ONE)");
+    showLoading(home.gt() ? "THREE CLASSES. ONE ROAD. SOLVING A LINE FOR EACH..." : cfg.mode == "race" ? "BUILDING A GRID OF " + std::to_string(cfg.grid) + "..." : "SOLVING THE RACING LINE... (IT IS THE FAST ONE)");
     RaceSetup rs;
     rs.grid = cfg.grid; rs.laps = cfg.laps; rs.tier = cfg.tier;
     rs.slot = std::max(1, std::min(cfg.grid, startArg > 0 ? startArg : home.startSlot(cfg.grid)));
     rs.battle = cfg.tier == "supercasual" ? cfg.battle : "";
     rs.noDnf = cfg.noDnf; rs.teamKey = cfg.teams[cfg.car]; rs.field = cfg.field;
+    const bool gtMode = home.gt();
     rs.seed = seedArg > 0 ? seedArg : 1 + std::rand() % 9973;
     // A CAREER EVENT (career.hpp): the menu's record already says most of it; this is the rest
     const Launch *ev = home.event();
@@ -695,6 +708,11 @@ int main(int argc, char **argv) {
     if (ev && ev->custom) { rs.slot = startArg > 0 ? rs.slot : ev->slot; rs.teamKey = "cx-you"; rs.customField = [&home] { home.career.fieldUp(); }; rs.freePace = ev->freePace; }
     std::string trk = cfg.track, car = cfg.car;
     bool racing = cfg.mode == "race";
+    if (gtMode && !cfg.xOn) {
+      // GT MODE: always a race, in the class you chose, with the other two around you
+      car = cfg.gtClass; racing = true;
+      rs.multi = true; rs.teamKey = cfg.teams["gt3"]; rs.standIn = false;
+    }
     if (cfg.xOn) {
       // XINGUS (js/home.js xingusUrl): always a race, in the GT3 seat, the style's switches on
       const XStyle &x = xstyle(cfg.xStyle);
@@ -773,8 +791,10 @@ int main(int argc, char **argv) {
       Gnd g;
       S.terrain->under(e.car, e.proj, g);
       if (e.ghost || (hauntArg && S.race->entries.size() == 2)) R.ghost = 0.9f;      // THE 78: see render.hpp `ghost`
-      R.drawCar(e.car, *S.spec, S.terrain->h(e.proj.s, e.proj.lat), g.pitch, g.roll, paint, std::fmod(S.race->progress(e), 1000.0));
+      if (S.multi && !R.setCarPack(gtClass(e.klass).pack)) R.setCarPack("");      // GT MODE: each class in its own car
+      R.drawCar(e.car, *e.car.spec, S.terrain->h(e.proj.s, e.proj.lat), g.pitch, g.roll, paint, std::fmod(S.race->progress(e), 1000.0));
     }
+    if (S.multi && !R.setCarPack(home.pack())) R.setCarPack("");                  // and yours back in yours
     // the safety car, when it is out: the same body in silver, until its own is drawn
     const SafetyCar &sc = S.race->rc.sc;
     if (sc.out) {
@@ -1026,7 +1046,7 @@ int main(int argc, char **argv) {
       if (act[A_GO]) home.input(Nav::Go);
       if (home.wantQuit) running = false;
       if (home.wantStart) { home.wantStart = false; lightsOut(); }
-      else if (home.dirty) { home.dirty = false; if (bgOn && bgCar != cfg.car + "/" + home.pack()) { startBackdrop(); audio.setClass(home.voice()); prev = SDL_GetTicksNS(); } }
+      else if (home.dirty) { home.dirty = false; if (bgOn && bgCar != (home.gt() ? cfg.gtClass : cfg.car) + "/" + home.pack()) { startBackdrop(); audio.setClass(home.voice()); prev = SDL_GetTicksNS(); } }
     } else if (screen == PAUSE) {
       const int n = (int)pauseItems().size();
       if (act[A_UP]) pauseAt = (pauseAt + n - 1) % n;

@@ -31,6 +31,9 @@ struct MenuSave {
   std::string model;                             // native only: a downloaded car (data/cars/<key>) for the GT3 seat, "" = the built-in body
   // XINGUS (js/home.js `X`, the browser's own record `wdc.xingus`)
   bool xOn = false;
+  // GT MODE (native only): hypercars, GT3 and GT4 on one grid; which of them you drive
+  bool gtOn = false;
+  std::string gtClass = "gt3";
   std::string xStyle = "gt3", xGears = "manual", xTrack, xHeil = "heilgrand", xField = "4fun";
   int xBots = 0;                                 // 0 = the style's own number
   void load(const std::string &path);
@@ -65,6 +68,7 @@ class Home {
   std::string dataDir;
   // the downloaded car you chose, if this league has one ("" = the built-in body), and the kind of engine it has
   std::string pack() const;
+  bool gt() const { return S.gtOn && !S.xOn && !eventOn; }   // GT MODE is what LIGHTS OUT will start
   std::string voice() const;
   std::string xTrackKey() const;                  // the circuit a Xingus session loads (a Heiligen route, the oval, or the usual one)
 

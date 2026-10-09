@@ -1,4 +1,5 @@
 // ui.cpp — the race screen, as index.html + style.css draw it. See ui.hpp.
+#include "multiclass.hpp"
 #include "ui.hpp"
 
 #include <algorithm>
@@ -291,6 +292,8 @@ void GameHud::draw(Renderer &R, float k, const HudTheme &T, const HudIn &in) {
         Row r;
         r.pos = (int)i + 1; r.chip = hex(e.col); r.name = e.name; r.me = e.isPlayer; r.out = e.retired;
         rowText(*race, e, i, r.cls, r.gap);
+        // GT MODE: the number is your place in YOUR class, on your class's colour
+        if (race->multi) { r.klassOn = true; r.klass = hex(gtClass(e.klass).col); r.pos = classPos(*race, e); }
         rows.push_back(r);
       }
     }
@@ -309,6 +312,7 @@ void GameHud::draw(Renderer &R, float k, const HudTheme &T, const HudIn &in) {
       } else if (r.cls == "pit") gapC = WARN;
       else if (r.cls == "dnf") gapC = BAD;
       R.hudAlpha = r.out ? 0.5f : 1;
+      if (r.klassOn) { R.rect((x0 + 9) * k, (y + 2.5f) * k, 20 * k, 14 * k, r.klass); posC = hex("#111111"); }
       text(x0 + 26, y + 4, 11, std::to_string(r.pos), posC, RIGHT, I9);
       skewBar(R, k, x0 + 33, y + 3, 4, 13, r.chip);
       std::string nm = r.name;
