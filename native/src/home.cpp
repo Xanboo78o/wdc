@@ -450,8 +450,14 @@ const Home::Outline &Home::outline(const std::string &id) {
 }
 
 static Rgba alpha_(const Rgba &a, float t) { Rgba r = a; r.c[3] *= t; return r; }
-static const Rgba PAPER = hex("#f3f0e8"), CARD = hex("#ffffff"), INK = hex("#121212"), SOFT = hex("#6d6a63"), RED = hex("#ff2d46"),
-                  ONRED = hex("#ffffff"), YELL = hex("#ffe14d");
+// THE NIGHT PADDOCK (Adam, 2026-10-08: "ui reskin as in new look and style not
+// this setup no more, and halloweeny a lil bit"). The page is the dark; the
+// race behind it shows through. Cards are aubergine, the ink is bone, the one
+// loud colour is pumpkin and the second is slime. The names are the old ones
+// (PAPER the page, CARD a panel, INK the line and the lettering, RED the loud
+// one, YELL the chip) so every page follows at once.
+static const Rgba PAPER = hex("#0f0b16"), CARD = hex("#1c1527"), INK = hex("#f2e9d8"), SOFT = hex("#a99dbb"), RED = hex("#ff7a18"),
+                  ONRED = hex("#170b02"), YELL = hex("#b6ff3c"), PLUM = hex("#7b3cff");
 
 void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, const std::string &id, bool car, double clock) {
   // .frame: 7% ink on the card, the outline inside 8 px of padding, north up
@@ -598,7 +604,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     }
   };
 
-  if (page != "home") R.rect(0, 0, (float)R.W, (float)R.H, PAPER);       // #wash: only HOME has the race behind it
+  if (page != "home") R.rect(0, 0, (float)R.W, (float)R.H, alpha_(PAPER, 0.88f));       // the wash: the race is still there, in the dark
 
   if (page == "home") {
     const int ti = trackIdx(S.track);
