@@ -77,6 +77,9 @@ struct Look {
 };
 // phase: "dawn" | "day" | "dusk" | "night" (anything else is day); cloud 0 clear .. 1 overcast
 Look makeLook(const std::string &phase, double cloud, double wet, double rain);
+// A HAUNTED NIGHT, laid over any look (amount 0..1): fog you can see forty metres
+// into, the colour of pond water; a hard pale moon; almost no light of its own.
+void haunt(Look &L, float amount = 1);
 
 struct FrameIn {
   const Car *car = nullptr;
@@ -124,6 +127,9 @@ class Renderer {
   Mat4 curVP;
   float curEye[3] = {0, 0, 0};
   Look curLook;
+  // > 0: the NEXT drawCar is a ghost of this strength (0..1) — the built-in body,
+  // see-through, lit from inside, brightest at its edges. Read and cleared by drawCar.
+  float ghost = 0;
   float scalePin = 0;           // > 0: draw the scene at this share of the window (--scale) instead of letting the governor choose
   bool post = true;             // false: the plain picture, as it was (SETTINGS - LOOK)
   bool postOk = true;           // false: this GPU could not build the look at all
@@ -197,6 +203,7 @@ class Renderer {
   unsigned sceneFbo = 0, sceneCol = 0, sceneDepth = 0, bloomFbo[2] = {0, 0}, bloomTex[2] = {0, 0}, ldrFbo = 0, ldrTex = 0;
   unsigned shFbo = 0, shTex = 0, fsVao = 0, brightProg = 0, blurProg = 0, compProg = 0, fxaaProg = 0;
   int postW = 0, postH = 0, uShVP = -1, uShOn = -1, uPass = -1, uHdr = -1;
+  int uGhost = -1;
   int uLampPos = -1, uLampDir = -1, uLampOn = -1, uTime = -1, uCloud = -1, uNight = -1;
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;

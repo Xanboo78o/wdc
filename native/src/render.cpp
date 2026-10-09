@@ -197,7 +197,7 @@ uniform vec3 uEye, uSun; uniform float uAlpha;
 uniform sampler2DArray uCol, uNrm; uniform int uHasTex;
 uniform vec3 uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop, uPaint; uniform float uFogK, uWet;
 uniform sampler2DShadow uShadow; uniform mat4 uShVP; uniform float uShOn, uHdr; uniform int uPass;
-uniform vec3 uLampPos, uLampDir; uniform float uLampOn, uTime, uCloud, uNight;
+uniform vec3 uLampPos, uLampDir; uniform float uLampOn, uTime, uCloud, uNight, uGhost;
 out vec4 o;
 // how much of the sun reaches this point: four soft looks at the shadow map
 float sunVis(vec3 p, vec3 n){
@@ -330,6 +330,14 @@ void main(){
     lit += uSunCol * pow(max(dot(n, h), 0.0), 55.0) * pow(1.0 - max(dot(n, V), 0.0), 3.0) * 1.6 * vis;
   }
   float f = 1.0 - exp(-dist * uFogK);
+  if (uGhost > 0.0) {
+    // A GHOST: nothing of it is lit by the world. It is its own light, thin where
+    // you look through it and bright where you look along it; the fog takes it late.
+    float fr = pow(1.0 - max(dot(n, V), 0.0), 1.6);
+    float fl = 0.85 + 0.15 * sin(uTime * 9.0 + vW.y * 7.0);
+    o = vec4(vec3(0.42, 1.0, 0.86) * (0.35 + 2.6 * fr) * fl, uGhost * (0.16 + 0.84 * fr) * (1.0 - 0.6 * f));
+    return;
+  }
   o = vec4(mix(lit, FOG, f), uAlpha);
 }
 )";
@@ -471,6 +479,7 @@ bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
   uOrigin = glGetUniformLocation(prog, "uOrigin");
   uShVP = glGetUniformLocation(prog, "uShVP"); uShOn = glGetUniformLocation(prog, "uShOn");
   uPass = glGetUniformLocation(prog, "uPass"); uHdr = glGetUniformLocation(prog, "uHdr");
+  uGhost = glGetUniformLocation(prog, "uGhost");
   uLampPos = glGetUniformLocation(prog, "uLampPos"); uLampDir = glGetUniformLocation(prog, "uLampDir"); uLampOn = glGetUniformLocation(prog, "uLampOn");
   uTime = glGetUniformLocation(prog, "uTime"); uCloud = glGetUniformLocation(prog, "uCloud"); uNight = glGetUniformLocation(prog, "uNight");
   brightProg = link(PVS, BRIGHT_FS); blurProg = link(PVS, BLUR_FS); compProg = link(PVS, COMP_FS); fxaaProg = link(PVS, FXAA_FS);
@@ -1216,7 +1225,14 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
   const Susp &sp = suspOf(car, S);
   const float hang = -sp.droop * sp.travel * 0.9f;
   const Mat4 carM = wheelsM * Mat4::translate(0, sp.s, 0);
-  if (packCar) {
+  const float gh = ghost;
+  ghost = 0;
+  if (gh > 0) {
+    glUniform1f(uGhost, gh);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);                 // light added to the night, never taken from it
+  }
+  if (packCar && gh <= 0) {
     // The model stands on the road at mid-wheelbase; the sim's origin is the CG.
     const Mat4 M = carM * Mat4::translate((float)(S.a - S.L / 2), 0, 0);
     bool lost[4]; double sag[4];
@@ -1251,6 +1267,7 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     wm = wm * Mat4::rotZ((float)(-rolled / r));
     drawMesh(i < 2 ? wheelF : wheelR, wm);
   }
+  if (gh > 0) { glUniform1f(uGhost, 0.0f); glDisable(GL_BLEND); }
 }
 
 // Rain you drive through: streaks across the view, more and faster with speed.
@@ -1300,6 +1317,18 @@ Look makeLook(const std::string &phase, double cloud, double wet, double rain) {
   L.cloud = c;
   L.night = phase == "night" ? 1.0f : phase == "dusk" || phase == "dawn" ? 0.35f : 0.0f;
   return L;
+}
+
+void haunt(Look &L, float a) {
+  a = std::max(0.0f, std::min(1.0f, a));
+  auto to = [&](float *d, float r, float g, float b) { d[0] += (r - d[0]) * a; d[1] += (g - d[1]) * a; d[2] += (b - d[2]) * a; };
+  to(L.sun, -0.35f, 0.62f, 0.55f);
+  to(L.sunCol, 0.40f, 0.50f, 0.54f);
+  to(L.skyAmb, 0.10f, 0.14f, 0.15f); to(L.gndAmb, 0.05f, 0.07f, 0.07f);
+  to(L.fog, 0.085f, 0.125f, 0.115f); to(L.skyTop, 0.012f, 0.03f, 0.04f);
+  L.fogK += (0.016f - L.fogK) * a;
+  L.night = std::max(L.night, a);
+  L.cloud = std::max(L.cloud, 0.45f * a);
 }
 
 void Renderer::drawMesh(const GLMesh &m, const Mat4 &model, float alpha) {

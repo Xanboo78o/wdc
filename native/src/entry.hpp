@@ -39,6 +39,7 @@ struct Entry {
   Driver driver;
   std::unique_ptr<Autopilot> drive;  // null for YOUR car, stand-in or not
   bool isPlayer = false;
+  bool ghost = false;                // drawing only: this car is drawn as a ghost (THE 78). The race never reads it.
   int idx = 0, box = 0, garage = -1;
   std::string name, col;
   int num = 0;
