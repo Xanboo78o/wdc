@@ -1356,7 +1356,7 @@ void Renderer::renderShadow(const Look &L, const float eye[3], const float fwd[3
   drawMesh(corridor, Mat4::identity());
   drawMesh(scenery, Mat4::identity());
   // the woods cast too: the same draw, seen from the sun
-  if (dress && treeShadows) { dress->frame(shVP, C, L, time); dress->drawWorld(); glUseProgram(prog); }
+  if (dress && treeShadows) { dress->frame(shVP, eye, L, time); dress->drawShadow(); glUseProgram(prog); }
   glDisable(GL_POLYGON_OFFSET_FILL);
   glUniform1i(uPass, 0);
   glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)was);
