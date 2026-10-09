@@ -33,6 +33,13 @@ TEX  := $(foreach t,$(TEXN),$(BUILD)/tex/$(t)-c.ppm $(BUILD)/tex/$(t)-n.ppm)
 # laid out of them (tools/bakestrips.mjs), as plain PAMs with their cut-out in
 # the alpha: dress.cpp's woods.
 FLORA := $(foreach t,leaf needle short tall bark,$(BUILD)/tex/flora-$(t).pam)
+# (a rule above `all` would become the default goal — it did, once, and nothing else was rebuilt)
+.DEFAULT_GOAL := all
+# and the sticker sheet the liveries are cut from (tools/livery/bakeatlas.mjs)
+FLORA += $(BUILD)/tex/livery-atlas.pam
+$(BUILD)/tex/livery-atlas.pam: ../data/livery/atlas.png | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $< -depth 8 pam:$@
 
 all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA)
 

@@ -49,6 +49,8 @@ const RECIPES = {
     eye: [-0.02, 0.80, -0.26],
     // He drives with a real wheel in his hands: the model's own must not sit in front of it.
     skip: /Interior-SteeringWheel/,
+    // The maker's name across the windscreen and the tyre maker's on the sidewalls are real marks: painted out.
+    plain: /Glass-Black_|Tire-/,
     wheels: { by: 'node', fl: /(Wheel|Tire)-LF_/, fr: /Wheel-Front_|Tire-RF_/, rl: /(Wheel|Tire)-LR_/, rr: /Wheel-Rear_|Tire-RR_/,
               hub: { fl: /Wheel-LF_.*(Caliper|BrakePad|BrakeSteel)/, fr: /Wheel-Front_.*(Caliper|BrakePad|BrakeSteel)/, rl: /Wheel-LR_.*(Caliper|BrakePad|BrakeSteel)/, rr: /Wheel-Rear_.*(Caliper|BrakePad|BrakeSteel)/ },
               tyreMat: 'TIRE' },
@@ -59,6 +61,8 @@ const RECIPES = {
   g55: {
     title: 'Ginetta G55', klass: 'gt4', length: null,           // already in metres
     skip: /RIM_BLUR/,
+    plain: /ext_windows_banner/,
+    skipMat: ['ext_stickers', 'stickers_g55'],     // a real tyre maker's windscreen banner, a flag and a number: the team's own stickers go on instead
     wheels: { by: 'node', fl: /WHEEL_LF/, fr: /WHEEL_RF/, rl: /WHEEL_LR/, rr: /WHEEL_RR/, tyre: /TYRE_/ },
     role: { car_paint_g55: 'paint', glass: 'glass', g55_tyre: 'tyre', rimm: 'rim', rear_lights_glass: 'tail', brake_light1: 'tail', ext_metals: 'chrome', aluminium_ext: 'chrome' },
   },
@@ -117,6 +121,7 @@ function walk(i, M, p) {
       const U = pr.attributes.TEXCOORD_0 !== undefined ? accessor(pr.attributes.TEXCOORD_0) : null;
       const idx = pr.indices !== undefined ? accessor(pr.indices).data : Float64Array.from({ length: P.count }, (_, k) => k);
       const mat = pr.material !== undefined ? g.materials[pr.material].name || ('mat' + pr.material) : 'none';
+      if (R.skipMat && R.skipMat.includes(mat)) { skipped++; continue; }
       // a mirrored node turns its triangles inside out; put them back
       const det = W[0] * (W[5] * W[10] - W[6] * W[9]) - W[4] * (W[1] * W[10] - W[2] * W[9]) + W[8] * (W[1] * W[6] - W[2] * W[5]);
       for (let t = 0; t + 2 < idx.length; t += 3) {
@@ -227,14 +232,16 @@ const roleOf = t => {
 };
 const mats = [], matIx = new Map();
 function material(t) {
-  const role = roleOf(t), id = t.mat + '|' + role;
+  const plain = !!(R.plain && R.plain.test(t.path));
+  const role = roleOf(t), id = t.mat + '|' + role + (plain ? '|plain' : '');
   if (matIx.has(id)) return matIx.get(id);
   const m = (g.materials || []).find(x => (x.name || '') === t.mat) || {}, pbr = m.pbrMetallicRoughness || {};
   const out = { name: t.mat, role, color: (pbr.baseColorFactor || [1, 1, 1, 1]).slice(0, 3).map(v => +v.toFixed(4)),
     metal: pbr.metallicFactor ?? 1, rough: +(pbr.roughnessFactor ?? 1).toFixed(3) };
   const a = (pbr.baseColorFactor || [1, 1, 1, 1])[3];
   if (m.alphaMode === 'BLEND' && a > 0.02 && a < 0.98) out.alpha = +a.toFixed(3);
-  if (pbr.baseColorTexture) {
+  if (plain) out.color = [0.004, 0.004, 0.005];
+  if (pbr.baseColorTexture && !plain) {
     const uri = decodeURIComponent(g.images[g.textures[pbr.baseColorTexture.index].source].uri);
     const from = path.join(src, uri);
     const info = execFileSync('magick', ['identify', '-format', '%w %h %[channels]', from]).toString().split(' ');

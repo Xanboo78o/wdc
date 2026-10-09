@@ -111,7 +111,16 @@ struct PackCar {
   double wheelbase = 2.6;
   float eye[3] = {-0.1f, 1.0f, -0.36f};
   size_t tris = 0;
+  // the eighty teams this car can race as (data/livery/<key>.json), and the frame they are painted in
+  struct Livery {
+    float base[3]; int finish = 0, nLayers = 0, nStk = 0;
+    int type[8]; float col[8][3], q[8][4], side[8];
+    float rect[24][4], uv[24][4], tint[24][4], plane[24];
+  };
+  std::vector<Livery> liveries;
+  float frame[4] = {0, 2.3f, 1.2f, 1.0f};
 };
+size_t Dress::liveryCount(const PackCar &pc) const { return pc.liveries.size(); }
 PackInfo packInfo(const PackCar &pc) {
   PackInfo I;
   for (int k = 0; k < 3; k++) I.eye[k] = pc.eye[k];
@@ -124,12 +133,18 @@ PackInfo packInfo(const PackCar &pc) {
 static const char *CAR_VS = R"(#version 330 core
 layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNrm; layout(location=2) in vec2 aUv;
 uniform mat4 uVP, uModel;
-out vec3 vW, vN; out vec2 vU;
-void main(){ vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = mat3(uModel) * aNrm; vU = aUv; gl_Position = uVP * w; }
+out vec3 vW, vN, vP, vNo; out vec2 vU;
+void main(){ vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = mat3(uModel) * aNrm; vU = aUv; vP = aPos; vNo = aNrm; gl_Position = uVP * w; }
 )";
-static const char *CAR_FS = R"(#version 330 core
-in vec3 vW, vN; in vec2 vU;
-uniform sampler2D uTex; uniform int uHasMap, uRole, uCutout;
+// The livery (data/livery/livery.glsl, one source for this game and the browser's
+// garage) is spliced in where the marker is; LIV_STUB stands in if the file is gone.
+static const char *LIV_STUB = "vec3 livery(vec3 p, vec3 b){ return b; }\nvec3 stickers(vec3 c, vec3 p, vec3 n, sampler2D s){ return c; }\n";
+static const char *CAR_FS_A = R"(#version 330 core
+in vec3 vW, vN, vP, vNo; in vec2 vU;
+uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish;
+uniform vec3 uLivBase; uniform vec4 uLivFrame;
+)";
+static const char *CAR_FS_B = R"(
 uniform vec3 uColor, uPaint; uniform float uOpacity;
 uniform vec3 uEye, uSun, uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop; uniform float uFogK;
 out vec4 o;
@@ -143,7 +158,19 @@ void main(){
   float a = uOpacity;
   float gloss = 0.0, shine = 24.0, mirror = 0.0;
   // 0 trim  1 paint  2 glass  3 tyre  4 rim  5 lamp  6 tail  7 chrome
-  if (uRole == 1) { if (uPaint.x >= 0.0) c = uPaint; gloss = 0.55; shine = 64.0; mirror = 0.10; }
+  if (uRole == 1) {
+    gloss = 0.55; shine = 64.0; mirror = 0.10;
+    if (uLivOn == 1) {
+      // a team's livery: paint by where the bodywork is, then its stickers
+      vec3 p = vec3((vP.x - uLivFrame.x) / uLivFrame.y, vP.y / uLivFrame.z, vP.z / uLivFrame.w);
+      c = livery(p, uLivBase);
+      c = stickers(c, p, normalize(vNo), uSheet);
+      if (uLivFinish == 1) { gloss = 0.07; shine = 10.0; mirror = 0.0; }
+      else if (uLivFinish == 2) { gloss = 0.75; shine = 90.0; mirror = 0.16; c *= 0.955 + 0.09 * livHash(floor(vP.xz * 700.0) + floor(vP.y * 700.0)); }
+      else if (uLivFinish == 3) { gloss = 0.95; shine = 140.0; mirror = 0.58; c = mix(c, vec3(0.82), 0.22); }
+      else if (uLivFinish == 4) { float fr = pow(1.0 - max(dot(n, V), 0.0), 2.0); c = mix(c, c.gbr * 1.1 + 0.06, fr * 0.55); gloss = 0.7; shine = 80.0; mirror = 0.14; }
+    } else if (uPaint.x >= 0.0) c = uPaint;
+  }
   else if (uRole == 2) { c = vec3(0.03, 0.04, 0.05); gloss = 0.9; shine = 120.0; mirror = 0.35; a = 0.62; }
   else if (uRole == 3) { if (uHasMap == 0) c = vec3(0.045); gloss = 0.04; shine = 8.0; }
   else if (uRole == 4) { if (uHasMap == 0 && dot(c, vec3(0.333)) < 0.03) c = vec3(0.17, 0.17, 0.19); gloss = 0.45; shine = 40.0; mirror = 0.22; }
@@ -205,6 +232,32 @@ const PackCar *Dress::pack(const std::string &key) {
     }
     pc->mats.push_back(pm);
   }
+  {
+    const double lox = j["lo"][(size_t)0].n(), hix = j["hi"][(size_t)0].n(), hiy = j["hi"][(size_t)1].n(), loz = j["lo"][(size_t)2].n(), hiz = j["hi"][(size_t)2].n();
+    pc->frame[0] = (float)((lox + hix) / 2); pc->frame[1] = (float)std::max(0.5, (hix - lox) / 2);
+    pc->frame[2] = (float)std::max(0.5, hiy); pc->frame[3] = (float)std::max(0.4, std::max(hiz, -loz));
+    auto hex = [](const std::string &h, float *o) { const unsigned long v = std::strtoul(h.c_str(), nullptr, 16); o[0] = ((v >> 16) & 255) / 255.0f; o[1] = ((v >> 8) & 255) / 255.0f; o[2] = (v & 255) / 255.0f; };
+    const Json lj = Json::loadOpt(dataDir + "/livery/" + key + ".json");
+    for (const Json &l : lj.arr) {
+      PackCar::Livery L{};
+      hex(l["base"].s("d6001c"), L.base);
+      L.finish = (int)l["finish"].n();
+      for (const Json &y : l["layers"].arr) {
+        if (L.nLayers >= 8) break;
+        const int k = L.nLayers++;
+        L.type[k] = (int)y["t"].n(); hex(y["c"].s(), L.col[k]); L.side[k] = (float)y["s"].n();
+        for (int q = 0; q < 4; q++) L.q[k][q] = (float)y["q"][(size_t)q].n();
+      }
+      for (const Json &y : l["stickers"].arr) {
+        if (L.nStk >= 24) break;
+        const int k = L.nStk++;
+        for (int q = 0; q < 4; q++) { L.rect[k][q] = (float)y["rect"][(size_t)q].n(); L.uv[k][q] = (float)y["uv"][(size_t)q].n(); }
+        L.plane[k] = (float)y["plane"].n();
+        if (y["tint"].type == Json::Str) { hex(y["tint"].s(), L.tint[k]); L.tint[k][3] = 1; } else L.tint[k][3] = 0;
+      }
+      pc->liveries.push_back(L);
+    }
+  }
   glGenBuffers(1, &pc->vbo);
   glBindBuffer(GL_ARRAY_BUFFER, pc->vbo);
   glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(verts.size() * 4), verts.data(), GL_STATIC_DRAW);
@@ -234,7 +287,7 @@ const PackCar *Dress::pack(const std::string &key) {
     pc->groups.push_back(G);
   }
   glBindVertexArray(0);
-  std::fprintf(stderr, "dress: car pack %s — %zu triangles, %zu groups, %zu materials\n", key.c_str(), pc->tris, pc->groups.size(), pc->mats.size());
+  std::fprintf(stderr, "dress: car pack %s — %zu triangles, %zu groups, %zu materials, %zu liveries\n", key.c_str(), pc->tris, pc->groups.size(), pc->mats.size(), pc->liveries.size());
   slot = std::move(pc);
   return slot.get();
 }
@@ -265,6 +318,39 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
               uOpacity = glGetUniformLocation(carProg, "uOpacity");
   glUniform1i(glGetUniformLocation(carProg, "uTex"), 0);
   if (paint) glUniform3f(uPaint, paint[0], paint[1], paint[2]); else glUniform3f(uPaint, -1, 0, 0);
+  // WHICH TEAM. The one asked for (setLivery), else one chosen by the paint
+  // colour the game hands every car — so a rival keeps its livery all race and
+  // two cars of one team match, with nothing for the game to remember.
+  const PackCar::Livery *L = nullptr;
+  if (!pc.liveries.empty() && liveryOn) {
+    size_t ix;
+    if (liveryIx >= 0) ix = (size_t)liveryIx % pc.liveries.size();
+    else {
+      unsigned h = 2166136261u;
+      const float *pp = paint ? paint : pc.liveries[0].base;
+      for (int k = 0; k < 3; k++) { h ^= (unsigned)std::lround(pp[k] * 255) + 0x9e3779b9u; h *= 16777619u; }
+      ix = (h >> 8) % pc.liveries.size();
+    }
+    L = &pc.liveries[ix];
+    if (!sheet && !sheetTried) { sheet = texture(texDir + "/livery-atlas.pam", false); if (!sheet) { std::fprintf(stderr, "dress: no %s/livery-atlas.pam (run make) — liveries without stickers\n", texDir.c_str()); sheetTried = true; } }
+    auto U = [&](const char *n) { return glGetUniformLocation(carProg, n); };
+    glUniform3fv(U("uLivBase"), 1, L->base);
+    glUniform4fv(U("uLivFrame"), 1, pc.frame);
+    glUniform1i(U("uLivFinish"), L->finish);
+    glUniform1i(U("uLivN"), L->nLayers);
+    glUniform1iv(U("uLivType"), 8, L->type);
+    glUniform3fv(U("uLivCol"), 8, &L->col[0][0]);
+    glUniform4fv(U("uLivP"), 8, &L->q[0][0]);
+    glUniform1fv(U("uLivSide"), 8, L->side);
+    glUniform1i(U("uStkN"), sheet ? L->nStk : 0);
+    glUniform4fv(U("uStkRect"), 24, &L->rect[0][0]);
+    glUniform4fv(U("uStkUv"), 24, &L->uv[0][0]);
+    glUniform4fv(U("uStkTint"), 24, &L->tint[0][0]);
+    glUniform1fv(U("uStkPlane"), 24, L->plane);
+    glUniform1i(U("uSheet"), 4);
+    glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_2D, sheet);
+  }
+  const GLint uLivOn = glGetUniformLocation(carProg, "uLivOn");
   Mat4 hub[4], spin[4];
   for (int w = 0; w < 4; w++) {
     hub[w] = carM * Mat4::translate((float)pc.wc[w][0], (float)(pc.wc[w][1] + (sag ? sag[w] : 0)), (float)pc.wc[w][2]);
@@ -281,7 +367,8 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
     glUniformMatrix4fv(uModel, 1, GL_FALSE, (G.part == 0 ? carM : G.part <= 4 ? spin[w] : hub[w]).m);
     glUniform1i(uHasMap, M.map ? 1 : 0);
     glUniform1i(uRole, M.role);
-    glUniform1i(uCutout, M.cutout ? 1 : 0);
+    glUniform1i(uLivOn, L && G.part == 0 && M.role == R_PAINT ? 1 : 0);      // paintwork on the body; a wheel's vertices are about its hub
+    glUniform1i(uCutout, M.cutout && !(L && G.part == 0 && M.role == R_PAINT) ? 1 : 0);
     glUniform3fv(uColor, 1, M.col);
     glUniform1f(uOpacity, M.alpha);
     if (M.map) glBindTexture(GL_TEXTURE_2D, M.map);
@@ -671,7 +758,14 @@ Dress::~Dress() = default;
 
 bool Dress::init(const std::string &data, const std::string &tex) {
   dataDir = data; texDir = tex;
-  carProg = linkD(CAR_VS, CAR_FS);
+  {
+    std::ifstream lf(dataDir + "/livery/livery.glsl");
+    std::string glsl((std::istreambuf_iterator<char>(lf)), std::istreambuf_iterator<char>());
+    if (glsl.find("vec3 stickers(") == std::string::npos) { std::fprintf(stderr, "dress: no %s/livery/livery.glsl — cars keep the paint they came with\n", dataDir.c_str()); glsl = LIV_STUB; liveryOn = false; }
+    const std::string fs = std::string(CAR_FS_A) + glsl + CAR_FS_B;
+    carProg = linkD(CAR_VS, fs.c_str());
+  }
+  if (const char *e = std::getenv("XBR_LIVERY")) { if (std::string(e) == "off") liveryOn = false; else liveryIx = std::atoi(e); }
   floraProg = linkD(FLORA_VS, FLORA_FS);
   return carProg != 0 && floraProg != 0;
 }

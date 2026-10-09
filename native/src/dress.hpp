@@ -44,6 +44,11 @@ class Dress {
   void drawPack(const PackCar &pc, const Mat4 &carM, double steer, double rolled, const float *paint, const bool *lost,
                 const double *sag, bool glassPass);
 
+  // Which of a car's eighty teams to paint: an index, or -1 to let the paint
+  // colour passed to drawPack choose (the default). XBR_LIVERY=N or =off overrides.
+  void setLivery(int index) { liveryIx = index; }
+  size_t liveryCount(const PackCar &pc) const;
+
   // ---- the woods and the boards ------------------------------------------------
   void buildWorld(const Track &track, const World &world, const Json &env, const Line &raceLine);
   bool hasWoods() const;     // false: the photographs are missing, draw the old trees and boards
@@ -52,7 +57,9 @@ class Dress {
 
  private:
   std::string dataDir, texDir;
-  unsigned carProg = 0, floraProg = 0;
+  unsigned carProg = 0, floraProg = 0, sheet = 0;
+  bool sheetTried = false, liveryOn = true;
+  int liveryIx = -1;
   Mat4 VP;
   float eye[3] = {0, 0, 0};
   Look look;

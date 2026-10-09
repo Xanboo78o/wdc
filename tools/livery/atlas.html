@@ -1,0 +1,134 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>sticker atlas</title>
+<!-- Draws every sticker a livery can carry into one 4096x2048 sheet. Run through
+     tools/livery/bakeatlas.mjs, which reads window.__atlas back out of a headless browser.
+     Open it yourself (localhost:3000/tools/livery/atlas.html) to look at the sheet. -->
+<style>
+  @font-face{font-family:"Rubik";src:url("../../data/fonts/rubik.woff2") format("woff2");font-weight:300 900}
+  @font-face{font-family:"Anton";src:url("../../data/fonts/anton.woff2") format("woff2")}
+  @font-face{font-family:"Knewave";src:url("../../data/fonts/knewave.woff2") format("woff2")}
+  @font-face{font-family:"Handlee";src:url("../../data/fonts/handlee.woff2") format("woff2")}
+  body{margin:0;background:#556}canvas{width:100%;image-rendering:auto}
+</style>
+<canvas id="c" width="4096" height="2048"></canvas>
+<script type="module">
+import { SPONSORS, CLASS_BADGES } from './sponsors.mjs';
+const FAM = { S: 'Rubik, sans-serif', A: 'Anton, Impact, sans-serif', K: 'Knewave, cursive', H: 'Handlee, cursive', E: 'Georgia, "C059", serif', M: '"JetBrainsMono Nerd Font", "Adwaita Mono", monospace' };
+await Promise.all(['300 20px Rubik', '900 20px Rubik', 'italic 900 20px Rubik', '20px Anton', '20px Knewave', '20px Handlee'].map(f => document.fonts.load(f)));
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const CW = 256, CH = 128, PAD = 6;
+const cells = {};
+
+// ---- marks: each draws inside a box of side s centred on (x, y) -------------------------
+const M = {
+  chevron(x, y, s) { g.lineWidth = s * 0.17; g.lineCap = 'butt'; for (let i = 0; i < 2; i++) { const o = -s * 0.18 + i * s * 0.34; g.beginPath(); g.moveTo(x - s * 0.32, y + o + s * 0.16); g.lineTo(x, y + o - s * 0.16); g.lineTo(x + s * 0.32, y + o + s * 0.16); g.stroke(); } },
+  tri(x, y, s) { g.beginPath(); g.moveTo(x, y - s * 0.44); g.lineTo(x + s * 0.42, y + s * 0.32); g.lineTo(x - s * 0.42, y + s * 0.32); g.closePath(); g.lineWidth = s * 0.14; g.lineJoin = 'miter'; g.stroke(); },
+  disc(x, y, s) { g.beginPath(); g.arc(x, y, s * 0.4, 0, 7); g.fill(); },
+  ring(x, y, s) { g.lineWidth = s * 0.14; g.beginPath(); g.arc(x, y, s * 0.34, 0, 7); g.stroke(); },
+  arc(x, y, s) { g.lineWidth = s * 0.12; g.lineCap = 'round'; for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(x - s * 0.3, y + s * 0.3, s * (0.2 + i * 0.22), -Math.PI / 2, 0); g.stroke(); } },
+  bolt(x, y, s) { g.beginPath(); g.moveTo(x + s * 0.12, y - s * 0.46); g.lineTo(x - s * 0.3, y + s * 0.06); g.lineTo(x - s * 0.02, y + s * 0.06); g.lineTo(x - s * 0.14, y + s * 0.46); g.lineTo(x + s * 0.3, y - s * 0.1); g.lineTo(x + s * 0.02, y - s * 0.1); g.closePath(); g.fill(); },
+  hex(x, y, s) { g.beginPath(); for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; g[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * s * 0.4, y + Math.sin(a) * s * 0.4); } g.closePath(); g.lineWidth = s * 0.13; g.stroke(); },
+  bars(x, y, s) { for (let i = 0; i < 3; i++) g.fillRect(x - s * 0.38 + i * s * 0.1, y - s * 0.34 + i * s * 0.26, s * 0.66 - i * s * 0.1, s * 0.15); },
+  wing(x, y, s) { g.beginPath(); g.moveTo(x - s * 0.44, y + s * 0.2); g.quadraticCurveTo(x - s * 0.05, y - s * 0.5, x + s * 0.46, y - s * 0.3); g.quadraticCurveTo(x + s * 0.02, y - s * 0.1, x - s * 0.1, y + s * 0.3); g.closePath(); g.fill(); },
+  gear(x, y, s) { g.beginPath(); for (let i = 0; i < 16; i++) { const a = i * Math.PI / 8, r = s * (i % 2 ? 0.44 : 0.33); g[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill(); g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(x, y, s * 0.13, 0, 7); g.fill(); g.globalCompositeOperation = 'source-over'; },
+  drop(x, y, s) { g.beginPath(); g.moveTo(x, y - s * 0.46); g.bezierCurveTo(x + s * 0.5, y + s * 0.1, x + s * 0.3, y + s * 0.46, x, y + s * 0.46); g.bezierCurveTo(x - s * 0.3, y + s * 0.46, x - s * 0.5, y + s * 0.1, x, y - s * 0.46); g.fill(); },
+  sun(x, y, s) { g.beginPath(); g.arc(x, y, s * 0.22, 0, 7); g.fill(); g.lineWidth = s * 0.08; g.lineCap = 'round'; for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; g.beginPath(); g.moveTo(x + Math.cos(a) * s * 0.32, y + Math.sin(a) * s * 0.32); g.lineTo(x + Math.cos(a) * s * 0.46, y + Math.sin(a) * s * 0.46); g.stroke(); } },
+  star(x, y, s) { g.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = s * (i % 2 ? 0.2 : 0.46); g[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * r, y + Math.sin(a) * r); } g.closePath(); g.fill(); },
+  claw(x, y, s) { g.lineWidth = s * 0.13; g.lineCap = 'round'; for (let i = -1; i <= 1; i++) { g.beginPath(); g.moveTo(x + i * s * 0.26 + s * 0.12, y - s * 0.4); g.quadraticCurveTo(x + i * s * 0.26 - s * 0.14, y, x + i * s * 0.26 + s * 0.02, y + s * 0.4); g.stroke(); } },
+  peak(x, y, s) { g.beginPath(); g.moveTo(x - s * 0.46, y + s * 0.34); g.lineTo(x - s * 0.12, y - s * 0.34); g.lineTo(x + s * 0.06, y); g.lineTo(x + s * 0.2, y - s * 0.2); g.lineTo(x + s * 0.46, y + s * 0.34); g.closePath(); g.fill(); },
+  horn(x, y, s) { g.lineWidth = s * 0.15; g.lineCap = 'round'; for (const k of [-1, 1]) { g.beginPath(); g.moveTo(x + k * s * 0.08, y + s * 0.3); g.quadraticCurveTo(x + k * s * 0.5, y + s * 0.1, x + k * s * 0.3, y - s * 0.4); g.stroke(); } },
+  tower(x, y, s) { g.fillRect(x - s * 0.3, y - s * 0.12, s * 0.6, s * 0.52); for (let i = 0; i < 3; i++) g.fillRect(x - s * 0.36 + i * s * 0.27, y - s * 0.42, s * 0.18, s * 0.3); },
+  leaf(x, y, s) { g.beginPath(); g.moveTo(x - s * 0.36, y + s * 0.4); g.quadraticCurveTo(x - s * 0.46, y - s * 0.4, x + s * 0.4, y - s * 0.42); g.quadraticCurveTo(x + s * 0.4, y + s * 0.42, x - s * 0.36, y + s * 0.4); g.fill(); },
+  crown(x, y, s) { g.beginPath(); g.moveTo(x - s * 0.44, y + s * 0.32); g.lineTo(x - s * 0.44, y - s * 0.26); g.lineTo(x - s * 0.2, y); g.lineTo(x, y - s * 0.4); g.lineTo(x + s * 0.2, y); g.lineTo(x + s * 0.44, y - s * 0.26); g.lineTo(x + s * 0.44, y + s * 0.32); g.closePath(); g.fill(); },
+  pixel(x, y, s) { const u = s * 0.2, P = [[0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [3, 2], [3, 3], [1, 3]]; for (const [i, j] of P) g.fillRect(x - s * 0.4 + i * u, y - s * 0.4 + j * u, u * 0.92, u * 0.92); },
+  cloud(x, y, s) { g.beginPath(); g.arc(x - s * 0.2, y + s * 0.08, s * 0.2, 0, 7); g.arc(x + s * 0.02, y - s * 0.1, s * 0.26, 0, 7); g.arc(x + s * 0.26, y + s * 0.08, s * 0.18, 0, 7); g.fill(); g.fillRect(x - s * 0.2, y + s * 0.08, s * 0.46, s * 0.2); },
+};
+const mark = (name, x, y, s, col) => { g.save(); g.fillStyle = g.strokeStyle = col; (M[name] || M.disc)(x, y, s); g.restore(); };
+function fit(txt, b, maxW, maxH, start) {
+  let size = start;
+  const font = s => `${b.it ? 'italic ' : ''}${b.w} ${s}px ${FAM[b.f]}`;
+  g.letterSpacing = '0px';
+  for (; size > 8; size -= 1) { g.font = font(size); g.letterSpacing = `${(b.sp * size).toFixed(1)}px`; if (g.measureText(txt).width <= maxW && size <= maxH) break; }
+  return size;
+}
+// the brand's logo in the box (x, y, w, h), in colour fg (and bg where a layout needs its second colour)
+function logo(b, x, y, w, h, fg, bg) {
+  g.save();
+  // cut vinyl has no second colour: where a layout would use it, it cuts a hole instead
+  const cut = bg === null, inner = () => { if (cut) { g.globalCompositeOperation = 'destination-out'; g.fillStyle = g.strokeStyle = '#000'; } else g.fillStyle = g.strokeStyle = bg; };
+  g.fillStyle = fg; g.strokeStyle = fg; g.textBaseline = 'middle'; g.textAlign = 'center';
+  const words = b.n.split(' '), two = words.length > 1;
+  const top = two ? words.slice(0, Math.ceil(words.length / 2)).join(' ') : b.n, bot = two ? words.slice(Math.ceil(words.length / 2)).join(' ') : '';
+  const cx = x + w / 2, cy = y + h / 2;
+  switch (b.lay) {
+    case 'word': { fit(b.n, b, w * 0.94, h * 0.74, h * 0.74); g.fillText(b.n, cx, cy + h * 0.03); break; }
+    case 'under': { const s = fit(b.n, b, w * 0.92, h * 0.6, h * 0.6); g.fillText(b.n, cx, cy - h * 0.08); g.lineWidth = Math.max(3, s * 0.1); g.lineCap = 'round'; g.beginPath(); g.moveTo(x + w * 0.08, cy + h * 0.32); g.quadraticCurveTo(cx, cy + h * 0.16, x + w * 0.94, cy + h * 0.2); g.stroke(); break; }
+    case 'stack': { if (!two) { mark(b.mark, cx, y + h * 0.3, h * 0.44, fg); fit(b.n, b, w * 0.92, h * 0.4, h * 0.4); g.fillText(b.n, cx, y + h * 0.75); break; }
+      fit(top, b, w * 0.92, h * 0.46, h * 0.46); g.fillText(top, cx, y + h * 0.29); fit(bot, b, w * 0.92, h * 0.46, h * 0.46); g.fillText(bot, cx, y + h * 0.74); break; }
+    case 'pill': { g.beginPath(); g.roundRect(x + w * 0.03, y + h * 0.16, w * 0.94, h * 0.68, h * 0.34); g.fill(); inner(); fit(b.n, b, w * 0.76, h * 0.46, h * 0.46); g.fillText(b.n, cx, cy + h * 0.02); break; }
+    case 'slant': { g.translate(cx, cy); g.transform(1, 0, -0.22, 1, 0, 0); g.translate(-cx, -cy); g.fillRect(x + w * 0.09, y + h * 0.14, w * 0.82, h * 0.72); inner(); fit(b.n, b, w * 0.70, h * 0.5, h * 0.5); g.fillText(b.n, cx, cy + h * 0.02); break; }
+    case 'box': { g.lineWidth = Math.max(4, h * 0.07); g.strokeRect(x + w * 0.05, y + h * 0.16, w * 0.9, h * 0.68); fit(b.n, b, w * 0.78, h * 0.44, h * 0.44); g.fillText(b.n, cx, cy + h * 0.02); break; }
+    case 'badge': { const r = Math.min(w, h) * 0.47; g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill(); inner(); g.lineWidth = r * 0.07; g.beginPath(); g.arc(cx, cy, r * 0.86, 0, 7); g.stroke();
+      if (two) { fit(top, b, r * 1.36, r * 0.5, r * 0.5); g.fillText(top, cx, cy - r * 0.26); fit(bot, b, r * 1.36, r * 0.5, r * 0.5); g.fillText(bot, cx, cy + r * 0.3); } else { if (cut) M[b.mark] && M[b.mark](cx, cy - r * 0.3, r * 0.62); else mark(b.mark, cx, cy - r * 0.3, r * 0.62, bg); fit(b.n, b, r * 1.5, r * 0.44, r * 0.44); g.fillText(b.n, cx, cy + r * 0.38); } break; }
+    default: { const ms = h * 0.7; mark(b.mark, x + ms * 0.56, cy, ms, fg); g.textAlign = 'left'; fit(b.n, b, w - ms * 1.22, h * 0.6, h * 0.6); g.fillText(b.n, x + ms * 1.12, cy + h * 0.02); }
+  }
+  g.restore();
+}
+let slot = 0;
+const cell = (name, draw, half = false) => {
+  // `half`: a square thing, half a cell wide; two share a cell
+  const col = half ? (slot % 32) : (slot % 16), row = Math.floor(slot / (half ? 32 : 16));
+  const w = half ? CW / 2 : CW, x = col * w, y = row * CH;
+  g.save(); g.beginPath(); g.rect(x, y, w, CH); g.clip();
+  draw(x + PAD, y + PAD, w - 2 * PAD, CH - 2 * PAD);
+  g.restore();
+  cells[name] = { x: x + PAD - 1, y: y + PAD - 1, w: w - 2 * PAD + 2, h: CH - 2 * PAD + 2 };
+  slot++;
+};
+const rowBreak = half => { const per = half ? 32 : 16; slot = Math.ceil(slot / per) * per; };
+// ---- the stickers: a die-cut plate in the brand's own colours ------------------------------
+for (const b of SPONSORS) cell('plate:' + b.n, (x, y, w, h) => {
+  const badge = b.lay === 'badge';
+  g.fillStyle = '#f7f7f4'; g.beginPath();
+  if (badge) g.arc(x + w / 2, y + h / 2, h / 2, 0, 7); else g.roundRect(x, y, w, h, 16);
+  g.fill();
+  g.fillStyle = b.bg; g.beginPath();
+  if (badge) g.arc(x + w / 2, y + h / 2, h / 2 - 5, 0, 7); else g.roundRect(x + 5, y + 5, w - 10, h - 10, 12);
+  g.fill();
+  if (badge) logo({ ...b, lay: 'badge' }, x + 8, y + 8, w - 16, h - 16, b.fg, b.bg);
+  else logo(b, x + 14, y + 10, w - 28, h - 20, b.fg, b.bg);
+});
+rowBreak(false);
+// ---- the same logos cut out of vinyl: white, to be laid on in any colour --------------------
+for (const b of SPONSORS) cell('bare:' + b.n, (x, y, w, h) => logo(b, x + 2, y + 2, w - 4, h - 4, '#ffffff', null));
+// a layout that knocks its second colour out of the first must really cut a hole
+rowBreak(false);
+slot *= 2;
+// ---- race numbers, two hands, and the panels they sit on --------------------------------------
+for (const [style, font] of [['A', '110px Anton'], ['B', 'italic 900 104px Rubik']]) for (let d = 0; d < 10; d++) cell(`digit${style}:${d}`, (x, y, w, h) => {
+  g.fillStyle = '#fff'; g.font = font; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.letterSpacing = '0px';
+  const m = g.measureText(String(d)), sc = Math.min(1, (w * 0.98) / m.width);
+  g.save(); g.translate(x + w / 2, y + h / 2 + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2 * Math.min(1, (h * 0.98) / (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent)));
+  const k = Math.min(sc, (h * 0.98) / (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent)); g.scale(k, k); g.fillText(String(d), 0, 0); g.restore();
+}, true);
+cell('panel:round', (x, y, w, h) => { g.fillStyle = '#fff'; g.beginPath(); g.arc(x + w / 2, y + h / 2, h / 2, 0, 7); g.fill(); }, true);
+cell('panel:square', (x, y, w, h) => { g.fillStyle = '#fff'; g.beginPath(); g.roundRect(x, y, w, h, 14); g.fill(); }, true);
+cell('panel:slant', (x, y, w, h) => { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(x + w * 0.16, y); g.lineTo(x + w, y); g.lineTo(x + w * 0.84, y + h); g.lineTo(x, y + h); g.closePath(); g.fill(); }, true);
+cell('panel:hex', (x, y, w, h) => { g.fillStyle = '#fff'; g.beginPath(); for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; g[i ? 'lineTo' : 'moveTo'](x + w / 2 + Math.cos(a) * w / 2, y + h / 2 + Math.sin(a) * h / 2); } g.closePath(); g.fill(); }, true);
+cell('panel:ring', (x, y, w, h) => { g.strokeStyle = '#fff'; g.lineWidth = 9; g.beginPath(); g.arc(x + w / 2, y + h / 2, h / 2 - 5, 0, 7); g.stroke(); }, true);
+// the small ones every scrutineer insists on
+cell('safety:tow', (x, y, w, h) => { g.fillStyle = '#fff'; g.beginPath(); g.roundRect(x, y, w, h, 10); g.fill(); g.fillStyle = '#d6001c'; g.beginPath(); g.moveTo(x + w * 0.5, y + h * 0.9); g.lineTo(x + w * 0.14, y + h * 0.42); g.lineTo(x + w * 0.36, y + h * 0.42); g.lineTo(x + w * 0.36, y + h * 0.1); g.lineTo(x + w * 0.64, y + h * 0.1); g.lineTo(x + w * 0.64, y + h * 0.42); g.lineTo(x + w * 0.86, y + h * 0.42); g.closePath(); g.fill(); }, true);
+cell('safety:cut', (x, y, w, h) => { g.fillStyle = '#1a55d8'; g.beginPath(); g.moveTo(x + w / 2, y + 2); g.lineTo(x + w - 2, y + h - 4); g.lineTo(x + 2, y + h - 4); g.closePath(); g.fill(); mark('bolt', x + w / 2, y + h * 0.62, h * 0.5, '#fff'); }, true);
+cell('safety:ext', (x, y, w, h) => { g.fillStyle = '#d6001c'; g.beginPath(); g.arc(x + w / 2, y + h / 2, h / 2, 0, 7); g.fill(); g.fillStyle = '#fff'; g.font = '900 78px Rubik'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('E', x + w / 2, y + h / 2 + 4); }, true);
+rowBreak(true);
+slot /= 2;
+for (const c of CLASS_BADGES) cell('class:' + c, (x, y, w, h) => {
+  g.fillStyle = '#101014'; g.beginPath(); g.roundRect(x, y + h * 0.1, w, h * 0.8, 12); g.fill();
+  g.fillStyle = { GT3: '#d6001c', GT4: '#1a55d8', CUP: '#ffb000', HYPER: '#d6001c', PRO: '#f4f3ee', 'PRO-AM': '#bfc3c8', AM: '#c9a13b', ROOKIE: '#7ed321' }[c];
+  g.fillRect(x + 8, y + h * 0.1 + 8, 16, h * 0.8 - 16);
+  g.fillStyle = '#fff'; g.font = 'italic 900 62px Rubik'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.letterSpacing = '2px';
+  const m = g.measureText(c).width; g.save(); g.translate(x + w / 2 + 12, y + h / 2 + 3); const k = Math.min(1, (w - 60) / m); g.scale(k, 1); g.fillText(c, 0, 0); g.restore();
+});
+window.__atlas = { size: [cv.width, cv.height], cells, n: Object.keys(cells).length, png: cv.toDataURL('image/png') };
+</script>
