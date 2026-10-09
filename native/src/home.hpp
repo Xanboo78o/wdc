@@ -27,6 +27,7 @@ struct MenuSave {
   int ffb = 50, cam = 0, volume = 8;             // native only. ffb: percent of the bridge's ceiling (Adam: "starts at 50%")
   bool line = false;
   std::string look = "film";                     // native only: "film" = shadows, bloom, the film curve; "plain" = the picture as it was
+  bool modelSeen = false;                        // false: no choice has ever been saved, so the best car on this machine is offered
   std::string model;                             // native only: a downloaded car (data/cars/<key>) for the GT3 seat, "" = the built-in body
   // XINGUS (js/home.js `X`, the browser's own record `wdc.xingus`)
   bool xOn = false;

@@ -123,7 +123,7 @@ void MenuSave::load(const std::string &path) {
     else if (k == "team.f1") teams["f1"] = v; else if (k == "team.gt3") teams["gt3"] = v; else if (k == "team.f4") teams["f4"] = v;
     else if (k == "ffb") ffbSeen = std::atoi(v.c_str()); else if (k == "ffbv") ffbVer = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
     else if (k == "volume") volume = std::atoi(v.c_str()); else if (k == "line") line = v == "1";
-    else if (k == "model") model = v; else if (k == "look") look = v == "plain" ? "plain" : "film";
+    else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
     else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
@@ -142,7 +142,7 @@ void MenuSave::save(const std::string &path) const {
     << "\nlaps " << laps << "\nnoDnf " << (noDnf ? 1 : 0) << "\ntime " << time << "\nweather " << weather << "\nbattle " << battle
     << "\nfield " << field << "\ntheme " << theme << "\nmusic " << music << "\nffbv 2\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
     << "\nline " << (line ? 1 : 0) << "\n";
-  if (!model.empty()) f << "model " << model << "\n";
+  if (modelSeen || !model.empty()) f << "model " << (model.empty() ? "-" : model) << "\n";
   f << "look " << look << "\n";
   f << "xon " << (xOn ? 1 : 0) << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
   if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
@@ -153,6 +153,8 @@ Home::Home(const std::string &dataDir_, const std::string &savePath_) : dataDir(
   if (!savePath.empty()) S.load(savePath);
   const Json idx = Json::loadOpt(dataDir + "/cars/index.json");
   if (idx.isArr()) for (size_t i = 0; i < idx.size(); i++) packs.push_back({idx[i]["key"].s(""), idx[i]["title"].s(""), idx[i]["klass"].s("gt3")});
+  // nobody has chosen yet: the GT3 seat gets the real GT3 car if this machine has one, not the stand-in body
+  if (!S.modelSeen) for (const Pack &p : packs) if (p.klass == "gt3") { S.model = p.key; break; }
   hmap = Json::loadOpt(dataDir + "/build/heiligen-map.json");
   career.load(dataDir);
   for (auto &o : OPTIONAL) {
@@ -251,7 +253,7 @@ void Home::set(const std::string &key, const std::string &v) {
   else if (key == "weather") S.weather = v; else if (key == "theme") S.theme = v; else if (key == "music") S.music = v;
   else if (key == "ffb") S.ffb = std::atoi(v.c_str()); else if (key == "cam") S.cam = std::atoi(v.c_str());
   else if (key == "volume") S.volume = std::atoi(v.c_str()); else if (key == "line") S.line = v == "true";
-  else if (key == "model") { S.model = v; dirty = true; }
+  else if (key == "model") { S.model = v; S.modelSeen = true; dirty = true; }
   else if (key == "look") S.look = v;
   else if (key == "modeX") { S.xOn = v == "xingus"; if (!S.xOn) S.mode = v == "race" ? "race" : "hotlap"; dirty = true; }
   else if (key == "xStyle") S.xStyle = xstyle(v).key; else if (key == "xGears") S.xGears = v;
