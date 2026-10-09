@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="icon-192.png">
+<title>XBR — An Introduction</title>
+<!--
+  ad-deadpan.html — the other advert: the same game explained calmly by
+  someone who has not looked at the screen. A self-playing three.js film cut
+  to its own synthesised score (js/ads/score-deadpan.js — the trailer's motif,
+  on a marimba, in 7/8).
+
+    ?t=20        start at 20 s          ?mute=1     picture only
+    ?frame=20    draw second 20 exactly, no audio, set window.__adReady (screenshots)
+    ?lo=1        no woods or town (fast)  ?scale=0.6  fixed render scale
+
+  Serve the repo (python3 -m http.server) and open this page. Works offline.
+-->
+<style>
+@font-face{font-family:"Anton";src:url("data/fonts/anton.woff2") format("woff2");font-display:block}
+@font-face{font-family:"Rubik";src:url("data/fonts/rubik.woff2") format("woff2");font-weight:300 900;font-display:block}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#fff;-webkit-font-smoothing:antialiased}
+#stage{position:absolute;overflow:hidden;background:#000;font-size:9px}
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block}
+#caps{position:absolute;inset:0;pointer-events:none}
+.cap{position:absolute;left:0;right:0;text-align:center;visibility:hidden;font-family:"Rubik",system-ui,"Segoe UI",Helvetica,Arial,sans-serif}
+/* the narrator: plain, white, lower third */
+.sub{bottom:9.5%;font-weight:500;font-size:4.4em;line-height:1.2;letter-spacing:.005em;
+  text-shadow:0 .06em .22em rgba(0,0,0,.85),0 0 .9em rgba(0,0,0,.55)}
+.sub.two{bottom:4.6%;font-size:2.6em;font-weight:400;color:rgba(255,255,255,.88)}
+.sub.mid{bottom:auto;top:44%}
+.tag{top:6.5%;left:4.5%;right:auto;text-align:left;font-weight:500;font-size:2em;letter-spacing:.22em;text-transform:uppercase;
+  padding:.5em .9em .45em;background:rgba(0,0,0,.55);border-left:.28em solid #fff}
+.fig{top:6.5%;right:4.5%;left:auto;text-align:right;font-weight:400;font-size:1.5em;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,.8);
+  text-shadow:0 0 .6em rgba(0,0,0,.8)}
+.legal{top:9%;left:7%;right:7%;font-weight:500;font-size:2.75em;line-height:1.42;text-align:justify;color:#fff;
+  text-shadow:0 0 .5em rgba(0,0,0,.9),0 .08em .2em rgba(0,0,0,.9)}
+.review{top:13%;font-size:1em}
+.review .stars{font-size:14em;line-height:1;letter-spacing:.08em;color:#ffd23f;text-shadow:0 0 .12em #000,0 .05em .35em rgba(0,0,0,.85)}
+.review .stars span{display:inline-block;opacity:0;transform:scale(.4)}
+.review .stars span.on{opacity:1;transform:scale(1)}
+.quote{top:auto;bottom:15%;font-weight:500;font-style:italic;font-size:4.6em;line-height:1.2;text-shadow:0 .06em .22em rgba(0,0,0,.85),0 0 .9em rgba(0,0,0,.55)}
+.who{top:auto;bottom:8.5%;font-weight:400;font-size:2.5em;letter-spacing:.08em;color:rgba(255,255,255,.85);text-shadow:0 0 .6em rgba(0,0,0,.9)}
+.end1{top:23%;font:400 30em/1 "Anton","Arial Narrow",Impact,sans-serif;letter-spacing:.02em;color:#121212}
+.end1 i{font-style:normal;color:#ff2d46}
+.end2{top:61%;font-weight:500;font-size:3.2em;letter-spacing:.7em;text-indent:.7em;color:#121212}
+.end3{top:46%;font-weight:400;font-size:3.6em;color:rgba(255,255,255,.9)}
+.paper{inset:0;background:#f3f0e8}
+.panel{top:15%;right:4.5%;left:auto;text-align:left;font-size:2.15em;background:rgba(10,12,16,.74);padding:.9em 1.2em .8em;border-top:.28em solid #fff}
+.panel table{border-collapse:collapse}
+.panel th{letter-spacing:.2em;font-weight:600;text-align:left;padding-bottom:.55em}
+.panel td{padding:.2em 0}
+.panel td+td{text-align:right;padding-left:2.4em;font-variant-numeric:tabular-nums}
+.panel tr.ok td{padding-top:.6em;font-weight:700;color:#6fe08a}
+#card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f3f0e8;color:#121212;cursor:default;transition:opacity .35s}
+#card.ready{cursor:pointer}
+#card.gone{opacity:0;pointer-events:none}
+#card .logo{font:400 16em/1 "Anton","Arial Narrow",Impact,sans-serif}
+#card .logo i{font-style:normal;color:#ff2d46}
+#card .what{margin-top:.6em;font:500 2.2em/1 "Rubik",system-ui,sans-serif;letter-spacing:.06em}
+#cardmsg{margin-top:2.4em;font:700 1.9em/1 "Rubik",system-ui,sans-serif;letter-spacing:.3em;text-indent:.3em;padding:.9em 1.6em .8em;border:.16em solid #121212;border-radius:3em}
+#card.ready #cardmsg{background:#121212;color:#f3f0e8}
+#card .hint{margin-top:1.4em;font:400 1.3em/1 "Rubik",system-ui,sans-serif;opacity:.55}
+#again{position:absolute;left:50%;top:80%;transform:translateX(-50%);padding:.9em 1.8em .8em;border:.14em solid rgba(255,255,255,.7);border-radius:3em;
+  background:transparent;color:#fff;font:600 1.6em/1 "Rubik",system-ui,sans-serif;letter-spacing:.25em;text-indent:.25em;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .5s}
+#again.show{opacity:.85;pointer-events:auto}
+#again:hover{opacity:1}
+body.playing{cursor:none}
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="caps"></div>
+  <button id="again">WATCH IT AGAIN</button>
+  <div id="card"><div class="logo">XB<i>R</i></div><div class="what">An introduction.</div><div id="cardmsg">LOADING</div><div class="hint">(there is sound)</div></div>
+</div>
+<script type="module" src="./js/ads/deadpan.js"></script>
+</body>
+</html>

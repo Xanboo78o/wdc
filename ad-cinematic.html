@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="icon-192.png">
+<title>XBR — Racing for all</title>
+<!--
+  ad-cinematic.html — the trailer. A self-playing three.js film cut to its own
+  synthesised score. Everything on screen is the game's own data and builders
+  (js/ads/stage.js says how); everything you hear is js/ads/score-cinematic.js.
+
+    ?t=20        start at 20 s          ?mute=1     picture only
+    ?frame=20    draw second 20 exactly, no audio, set window.__adReady (screenshots)
+    ?lo=1        no woods or town (fast)  ?scale=0.6  fixed render scale
+
+  Serve the repo (python3 -m http.server) and open this page. Works offline.
+-->
+<style>
+@font-face{font-family:"Anton";src:url("data/fonts/anton.woff2") format("woff2");font-display:block}
+@font-face{font-family:"Rubik";src:url("data/fonts/rubik.woff2") format("woff2");font-weight:300 900;font-display:block}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#fff;-webkit-font-smoothing:antialiased}
+#stage{position:absolute;overflow:hidden;background:#000;font-size:9px}
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block}
+#caps{position:absolute;inset:0;pointer-events:none}
+.cap{position:absolute;left:0;right:0;text-align:center;visibility:hidden;will-change:opacity}
+/* the picture inside the bars runs from 12.8em to 87.2em */
+.big{top:41%;font:400 12.5em/1 "Anton","Arial Narrow",Impact,sans-serif;letter-spacing:.045em;text-transform:uppercase;
+  text-shadow:0 0 1.2em rgba(0,0,0,.45)}
+.big.low{top:69%;font-size:6.6em;letter-spacing:.09em}
+.big.left{text-align:left;left:6%}
+.big.right{text-align:right;right:6%}
+.slug{top:79%;left:5%;text-align:left;font:500 1.9em/1 "Rubik",system-ui,sans-serif;letter-spacing:.42em;text-transform:uppercase;opacity:.9}
+.slug b{font-weight:800;color:#ff2d46}
+.title{top:26%;font:400 34em/1 "Anton","Arial Narrow",Impact,sans-serif;letter-spacing:.02em}
+.title i{font-style:normal;color:#ff2d46}
+.motto{top:66%;font:500 3.1em/1 "Rubik",system-ui,sans-serif;letter-spacing:.9em;text-indent:.9em;text-transform:uppercase}
+.rule{top:63.2%;left:36%;right:36%;height:.22em;background:#ff2d46}
+.fine{top:80.5%;font:400 1.5em/1 "Rubik",system-ui,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:rgba(255,255,255,.55)}
+#card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at 50% 45%,rgba(18,18,22,.55),rgba(0,0,0,.92));cursor:default;transition:opacity .5s}
+#card.ready{cursor:pointer}
+#card.gone{opacity:0;pointer-events:none}
+#card .logo{font:400 20em/1 "Anton","Arial Narrow",Impact,sans-serif;letter-spacing:.02em}
+#card .logo i{font-style:normal;color:#ff2d46}
+#cardmsg{margin-top:2.2em;font:500 2em/1 "Rubik",system-ui,sans-serif;letter-spacing:.7em;text-indent:.7em;opacity:.8}
+#card.ready #cardmsg{animation:pulse 1.6s ease-in-out infinite}
+#card .hint{margin-top:1.6em;font:400 1.3em/1 "Rubik",system-ui,sans-serif;letter-spacing:.3em;opacity:.4}
+@keyframes pulse{50%{opacity:.35}}
+#again{position:absolute;left:50%;top:89%;transform:translateX(-50%);padding:.9em 2.2em .8em;border:.12em solid rgba(255,255,255,.55);
+  background:transparent;color:#fff;font:500 1.6em/1 "Rubik",system-ui,sans-serif;letter-spacing:.5em;text-indent:.5em;cursor:pointer;
+  opacity:0;pointer-events:none;transition:opacity .6s}
+#again.show{opacity:.8;pointer-events:auto}
+#again:hover{opacity:1;border-color:#ff2d46}
+body.playing{cursor:none}
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="caps"></div>
+  <button id="again">PLAY AGAIN</button>
+  <div id="card"><div class="logo">XB<i>R</i></div><div id="cardmsg">LOADING</div><div class="hint">SOUND ON</div></div>
+</div>
+<script type="module" src="./js/ads/cinematic.js"></script>
+</body>
+</html>
