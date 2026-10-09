@@ -222,6 +222,51 @@ CarHit resolveCars(Car &a, Car &b, double restitution) {
 
 BarrierWear &barrierWear() { static BarrierWear w; return w; }
 
+std::vector<char> wallFeet(const Track &t, int side) {
+  const int n = t.n;
+  std::vector<char> real((size_t)n, 0), deep((size_t)n, 0);
+  // is the ground `behind` metres past sample i's edge wall? far: or does it belong to a different part of the lap altogether?
+  auto probe = [&](int i, double behind, bool wide, bool &foreign) {
+    const double lat = side * (t.w[(size_t)i] + std::max(0.05, side > 0 ? t.runL[(size_t)i] : t.runR[(size_t)i]) + behind);
+    const double h = t.hdg[(size_t)i], x = t.x[(size_t)i] - std::sin(h) * lat, y = t.y[(size_t)i] + std::cos(h) * lat;
+    const Proj p = wide ? t.project(x, y) : t.project(x, y, i, 110);
+    int d = std::abs(p.i - i); d = std::min(d, n - d);
+    foreign = d > 80;
+    return std::fabs(p.lat) - (p.w + p.run) > 0;
+  };
+  bool f = false;
+  for (int i = 0; i < n; i++) {
+    real[(size_t)i] = probe(i, 0.6, false, f);
+    // a tongue: wall less than two metres thick with this bend's own open ground behind it.
+    // A car corner is through that between two steps of the sim; it is not a wall, it is a trap.
+    if (real[(size_t)i]) { const bool w2 = probe(i, 2.0, true, f); real[(size_t)i] = w2 || f; }
+    // deep: wall four metres back as well — or the ground there is another stretch of
+    // road entirely (two legs sharing a thin wall), which is a wall worth having
+    if (real[(size_t)i]) { const bool w4 = probe(i, 4.0, true, f); deep[(size_t)i] = w4 || f; }
+  }
+  // an island: a run of wall with this same bend's open ground a few metres behind all of it
+  for (int i = 0; i < n;) {
+    if (!real[(size_t)i]) { i++; continue; }
+    int j = i; bool anyDeep = false;
+    while (j < n && real[(size_t)j]) { anyDeep = anyDeep || deep[(size_t)j]; j++; }
+    const bool wraps = !t.open && (i == 0 || j == n) && real[0] && real[(size_t)n - 1];
+    // (and a scrap under 24 m long with open ground at both its ends holds nothing in: gone too)
+    if ((j - i < 12 || (j - i < 60 && !anyDeep)) && !wraps) for (int k = i; k < j; k++) real[(size_t)k] = 0;
+    i = j;
+  }
+  return real;
+}
+void BarrierWear::reset(const Track &track) {
+  on = true;
+  for (int k = 0; k < 2; k++) {
+    bend[k].assign((size_t)track.n, 0.0f); broke[k].assign((size_t)track.n, 0);
+    const std::vector<char> real = wallFeet(track, k == 0 ? 1 : -1);
+    open[k].assign((size_t)track.n, 0);
+    for (int i = 0; i < track.n; i++) open[k][(size_t)i] = !real[(size_t)i];
+  }
+  version++;
+}
+
 Hit resolveBarrier(Car &car, const Track &track, int hint) {
   BarrierWear &wear = barrierWear();
   const bool gives = wear.on && (int)wear.bend[0].size() == track.n;
@@ -237,7 +282,11 @@ Hit resolveBarrier(Car &car, const Track &track, int hint) {
     const double cx = car.x + c[0] * cs0 - c[1] * sn0, cy = car.y + c[0] * sn0 + c[1] * cs0;
     const Proj p = hint < 0 ? track.project(cx, cy) : track.project(cx, cy, hint, 8);
     double depth = std::fabs(p.lat) - (p.w + p.run);
-    if (gives) depth -= wear.bend[p.lat > 0 ? 0 : 1][(size_t)p.i];        // the wall is where the rail has been pushed to
+    if (gives) {
+      const int sd = p.lat > 0 ? 0 : 1;
+      if (wear.open[sd][(size_t)p.i]) continue;                           // no wall here at all (wallFeet)
+      depth -= wear.bend[sd][(size_t)p.i];                                // the wall is where the rail has been pushed to
+    }
     if (depth > 0 && (!any || depth > wDepth)) {
       any = true; wI = p.i;
       wDepth = depth; wSgn = sign(p.lat) != 0 ? sign(p.lat) : 1; wHdg = p.hdg; wLx = c[0]; wLy = c[1];

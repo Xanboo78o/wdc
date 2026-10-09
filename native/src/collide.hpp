@@ -25,9 +25,22 @@ struct BarrierWear {
   bool on = false;
   std::vector<float> bend[2];        // [0] left of the road, [1] right
   std::vector<char> broke[2];
+  // NO WALL HERE: this sample's run-off edge is not a wall at all (wallFeet below).
+  // The rail is not drawn there and, in the game, nothing is hit there.
+  std::vector<char> open[2];
   unsigned version = 0;              // goes up every time anything above changes
-  void reset(int samples) { on = true; for (int k = 0; k < 2; k++) { bend[k].assign((size_t)samples, 0.0f); broke[k].assign((size_t)samples, 0); } version++; }
+  void reset(const Track &track);
 };
+// WHERE THE WALL REALLY IS. The rule (resolveBarrier) calls a point wall when
+// it is further from the nearest centreline sample than that sample's width
+// plus run-off. Inside a corner tighter than its own run-off that rule leaves
+// almost nothing: every point is nearer some other part of the road, except a
+// sliver a metre or two across at the centre of the bend — an island of
+// invisible wall in the middle of open ground, with the sample-by-sample edge
+// running out to it as a spike (Monza's Rettifilo had both). So, per sample of
+// one side (side +1 left, -1 right): 1 where the edge is a real wall — the
+// ground behind it is wall too, and it is part of a run of wall, not an island.
+std::vector<char> wallFeet(const Track &track, int side);
 BarrierWear &barrierWear();
 
 // Call every substep, AFTER the physics step. `hint` is the car's own sample.

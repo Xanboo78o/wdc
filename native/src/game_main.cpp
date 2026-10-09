@@ -292,7 +292,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     S.driver = makeDriver(1, pilotTier, S.track.corners.empty() ? 24 : (int)S.track.corners.size());
     S.pilot = std::make_unique<Autopilot>(S.track, *S.lines, *S.spec, peakSlip(*S.spec), &S.driver);
   }
-  barrierWear().reset(S.track.n);      // new session, straight barriers (collide.hpp: the game's walls give)
+  barrierWear().reset(S.track);      // new session, straight barriers (collide.hpp: the game's walls give)
   R.buildWorld(S.track, *S.world, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"),
                S.lines->race);
   R.buildCar(*S.spec);

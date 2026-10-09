@@ -951,29 +951,58 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
     if (modelWall) for (int side : {1, -1}) {
       Props::Edge e;
       e.rightSide = side < 0; e.closed = !track.open;
-      for (int i = 0; i < n; i++) {
-        const double lat = side * (track.w[i] + std::max(0.05, side > 0 ? track.runL[i] : track.runR[i]));
+      // Only where the run-off's edge is a real wall (collide.hpp wallFeet): not
+      // inside a corner tighter than its own run-off, where the edge drawn sample
+      // by sample folds back through itself and runs out into open ground. That
+      // was the tangle, and the rail you could drive through, at Monza's Rettifilo.
+      const std::vector<char> real = wallFeet(track, side);
+      auto foot = [&](int i, double lat, int sample) {
         double q[3];
         P(i, lat, 0, q);
-        // THE FOLD. On the inside of a corner tighter than its own run-off, the
-        // edge drawn sample by sample doubles back through itself: a loop of
-        // rail standing on ground the physics calls open (collide.cpp's wall is
-        // "further from the road than its run-off", which has no loops). So a
-        // foot that is NEARER some other part of the road than its own run-off
-        // is not on the wall at all and is left out; the rail joins the points
-        // either side of it. That was the tangle at Monza's Rettifilo.
-        const Proj pj = track.project(q[0], q[1], i, 110);
-        if (std::fabs(pj.lat) < std::fabs(lat) - 0.35) { folded++; continue; }
+        return std::array<float, 3>{(float)q[0], (float)q[2], (float)-q[1]};
+      };
+      auto latOf = [&](int i) { return side * (track.w[i] + std::max(0.05, side > 0 ? track.runL[i] : track.runR[i])); };
+      auto push = [&](const std::array<float, 3> &p, int i) {
         e.sample.push_back(i);
-        e.p.push_back((float)q[0]); e.p.push_back((float)q[2]); e.p.push_back((float)-q[1]);
+        e.p.push_back(p[0]); e.p.push_back(p[1]); e.p.push_back(p[2]);
         // a catch fence: all the way round a street circuit, and along the start straight of any other
         const double s = i * track.ds, fromLine = std::min(s, track.length - s);
         e.fenced.push_back(track.wall == "wall" || fromLine < 320 ? 1 : 0);
+      };
+      // Start just after a stretch with no wall, if there is one, so that a run
+      // of rail which crosses the start line is laid as one run.
+      int i0 = 0;
+      for (int i = 0; i < n; i++) if (!real[(size_t)i]) { i0 = i; break; }
+      const bool whole = real[(size_t)i0] != 0;            // wall all the way round: one closed loop
+      e.closed = whole && !track.open;
+      int last = -2;
+      for (int k = 0; k < n; k++) {
+        const int i = (i0 + k) % n;
+        if (!real[(size_t)i] || (track.open && i == 0 && k > 0)) {
+          folded += !real[(size_t)i];
+          // the wall stops here: so does this run of rail. The next starts where the wall does.
+          if (e.sample.size() >= 2) { edges.push_back(e); }
+          e.p.clear(); e.sample.clear(); e.fenced.clear();
+          last = -2;
+          if (!real[(size_t)i]) continue;
+        }
+        const double lat = latOf(i);
+        // Where the run-off steps (28 m to 10 m between two samples) the rule's
+        // wall turns square across the road half way between them: so does the rail.
+        if (last == i - 1 && std::fabs(lat - latOf(last)) > 1.5) {
+          const double lp = latOf(last);
+          const auto a0 = foot(last, lp, last), a1 = foot(i, lp, i), b0 = foot(last, lat, last), b1 = foot(i, lat, i);
+          push({(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2, (a0[2] + a1[2]) / 2}, last);
+          push({(b0[0] + b1[0]) / 2, (b0[1] + b1[1]) / 2, (b0[2] + b1[2]) / 2}, i);
+        }
+        push(foot(i, lat, i), i);
+        last = i;
       }
+      if (e.sample.size() < 2) continue;
       edges.push_back(std::move(e));
     }
     props->buildWorld(track.wall, edges);
-    if (folded) std::fprintf(stderr, "props: %s — %d m of barrier line folded over itself on the inside of tight corners, left out\n", track.key.c_str(), folded * 2);
+    if (folded) std::fprintf(stderr, "props: %s — %d m of run-off edge is not a wall (inside corners tighter than their run-off): no rail there\n", track.key.c_str(), folded * 2);
   }
   // the gantry over the line
   {
@@ -1435,8 +1464,10 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     // the blur of its turning wheels (dress.cpp): the angle a 1/75 s shutter sees
     dress->setWheelSweep((float)std::min(2.3, std::fabs(car.vx) / std::max(0.2, (double)packInfo(*packCar).wheelR) / 75));
     dress->setBrake((float)car.brake);
+    dress->setDents(&car, S.a - S.L / 2);
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, false);
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, true);
+    dress->setDents(nullptr, 0);
     dress->drawLights(*packCar, M, &car, car.brake, car.speed, car.steerEff, lost, sag);      // lamps, brake lights, hot discs (dress.hpp)
     return;
   }
