@@ -80,6 +80,7 @@ void MenuSave::load(const std::string &path) {
     else if (k == "team.f1") teams["f1"] = v; else if (k == "team.gt3") teams["gt3"] = v; else if (k == "team.f4") teams["f4"] = v;
     else if (k == "ffb") ffbSeen = std::atoi(v.c_str()); else if (k == "ffbv") ffbVer = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
     else if (k == "volume") volume = std::atoi(v.c_str()); else if (k == "line") line = v == "1";
+    else if (k == "model") model = v;
   }
   // a record from before the wheel's force was set up said 0 because nothing else was possible
   if (ffbSeen >= 0 && ffbVer >= 2) ffb = ffbSeen;
@@ -95,11 +96,14 @@ void MenuSave::save(const std::string &path) const {
     << "\nlaps " << laps << "\nnoDnf " << (noDnf ? 1 : 0) << "\ntime " << time << "\nweather " << weather << "\nbattle " << battle
     << "\nfield " << field << "\ntheme " << theme << "\nmusic " << music << "\nffbv 2\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
     << "\nline " << (line ? 1 : 0) << "\n";
+  if (!model.empty()) f << "model " << model << "\n";
   for (const auto &kv : teams) if (!kv.second.empty()) f << "team." << kv.first << " " << kv.second << "\n";
 }
 
 Home::Home(const std::string &dataDir_, const std::string &savePath_) : dataDir(dataDir_), savePath(savePath_) {
   if (!savePath.empty()) S.load(savePath);
+  const Json idx = Json::loadOpt(dataDir + "/cars/index.json");
+  if (idx.isArr()) for (size_t i = 0; i < idx.size(); i++) packs.push_back({idx[i]["key"].s(""), idx[i]["title"].s(""), idx[i]["klass"].s("gt3")});
   sayText = greeting();
   build();
 }
@@ -118,7 +122,19 @@ int Home::startSlot(int grid) const {
 }
 
 // ---- settings rows -------------------------------------------------------------------
+// Downloaded cars are all cars with a roof: they take the GT3 seat and its physics.
+std::string Home::pack() const {
+  if (S.car != "gt3") return "";
+  for (const Pack &p : packs) if (p.key == S.model) return p.key;
+  return "";
+}
+std::string Home::voice() const {
+  const std::string k = pack();
+  for (const Pack &p : packs) if (p.key == k) return p.klass;
+  return S.car;
+}
 std::string Home::get(const std::string &key) const {
+  if (key == "model") return pack();
   if (key == "mode") return S.mode;
   if (key == "laps") return std::to_string(S.laps);
   if (key == "grid") return std::to_string(S.grid);
@@ -144,10 +160,16 @@ void Home::set(const std::string &key, const std::string &v) {
   else if (key == "weather") S.weather = v; else if (key == "theme") S.theme = v; else if (key == "music") S.music = v;
   else if (key == "ffb") S.ffb = std::atoi(v.c_str()); else if (key == "cam") S.cam = std::atoi(v.c_str());
   else if (key == "volume") S.volume = std::atoi(v.c_str()); else if (key == "line") S.line = v == "true";
+  else if (key == "model") { S.model = v; dirty = true; }
 }
 std::vector<Home::Opt> Home::setupRows() const {
   std::vector<Opt> rows;
   rows.push_back({"MODE", "mode", {{"hotlap", "HOT LAP"}, {"race", "RACE"}}});
+  if (S.car == "gt3" && !packs.empty()) {
+    Opt m{"MODEL", "model", {{"", "XBR GT3"}}};
+    for (const Pack &p : packs) { std::string t = p.title; for (char &c : t) c = (char)std::toupper((unsigned char)c); m.opts.push_back({p.key, t}); }
+    rows.push_back(m);
+  }
   if (S.mode == "race") {
     rows.push_back({"LAPS", "laps", {{"2", "2"}, {"3", "3"}, {"5", "5"}, {"10", "10"}, {"20", "20"}}});
     rows.push_back({"GRID", "grid", {{"6", "6"}, {"12", "12"}, {"16", "16"}, {"22", "22"}}});

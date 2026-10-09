@@ -449,7 +449,7 @@ enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
   std::vector<std::string> pos;
-  std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg;
+  std::string dataDir, shot, tierArg, screenArg, timeArg, weatherArg, modeArg, modelArg;
   bool autoDrive = false, lineArg = false, windowed = false, hidpi = false, noAudio = false, hidden = false;
   int camArg = -1, ffbArg = -1, winW = 1600, winH = 900, gridArg = 0, lapsArg = 0, startArg = 0;
   long maxFrames = 0;
@@ -479,6 +479,7 @@ int main(int argc, char **argv) {
     else if (a == "--ffb") ffbArg = std::atoi(val("--ffb").c_str());
     else if (a == "--shot") shot = val("--shot");
     else if (a == "--screen") screenArg = val("--screen");
+    else if (a == "--model") modelArg = val("--model");
     else if (a == "--spool") spool = std::atof(val("--spool").c_str());
     else if (a == "--time") timeArg = val("--time");
     else if (a == "--weather") weatherArg = val("--weather");
@@ -525,6 +526,7 @@ int main(int argc, char **argv) {
   Home home(dataDir, savePath);
   MenuSave &cfg = home.S;
   const bool direct = !pos.empty() || maxFrames > 0 || autoDrive || (shotMode && (screenArg.empty() || screenArg == "pause" || screenArg == "results"));
+  if (!modelArg.empty()) { cfg.model = modelArg; cfg.car = "gt3"; }      // a downloaded car takes the GT3 seat
   if (pos.size() > 0) cfg.track = pos[0];
   if (pos.size() > 1) cfg.car = pos[1];
   if (!tierArg.empty()) cfg.tier = tierArg;
@@ -600,6 +602,12 @@ int main(int argc, char **argv) {
     R.hudEnd();
     if (!offscreen) SDL_GL_SwapWindow(win);
   };
+  // The downloaded car, if one is chosen for this seat: its body on every car of
+  // the field, and its own kind of engine — the revs and the voice — in yours.
+  auto usePack = [&]() {
+    if (!R.setCarPack(home.pack())) R.setCarPack("");
+    SP->box = std::make_unique<Gearbox>(home.voice());
+  };
   // HOME's backdrop: two cars on one of the small circuits, a bot in your seat
   auto startBackdrop = [&]() {
     showLoading("WARMING THE TYRES. AND THE DRIVER.");
@@ -611,7 +619,8 @@ int main(int argc, char **argv) {
     const std::string bk = SMALL[std::rand() & 1];
     if (!loadSession(*N, R, dataDir, std::filesystem::exists(dataDir + "/tracks/" + bk + ".json") ? bk : "monza", cfg.car, "hard", &rs)) return false;
     SP = std::move(N);
-    bgOn = true; bgCar = cfg.car;
+    usePack();
+    bgOn = true; bgCar = cfg.car + "/" + home.pack();
     R.snapCamera(); acc = 0;
     return true;
   };
@@ -627,6 +636,7 @@ int main(int argc, char **argv) {
     auto N = std::make_unique<Session>();
     if (!loadSession(*N, R, dataDir, cfg.track, cfg.car, cfg.tier, cfg.mode == "race" ? &rs : nullptr)) return false;
     SP = std::move(N);
+    usePack();
     bgOn = false;
     hud.reset();
     toast = {};
@@ -772,7 +782,7 @@ int main(int argc, char **argv) {
   bool bridgeTried = false;
 
   EngineAudio audio;
-  if (!noAudio && !audio.open(S.cls, dataDir)) std::fprintf(stderr, "xbr: no audio device (%s) — running silent\n", SDL_GetError());
+  if (!noAudio && !audio.open(home.voice(), dataDir)) std::fprintf(stderr, "xbr: no audio device (%s) — running silent\n", SDL_GetError());
 
   bool running = true, showFps = false, fullscreen = !windowed && !offscreen;
   long frames = 0;
@@ -783,8 +793,8 @@ int main(int argc, char **argv) {
   bool actPrev[A_COUNT] = {false};
   double repeatAt[A_COUNT] = {0};
 
-  auto toHome = [&]() { bridge.release(); screen = HOME; home.show("home"); if (startBackdrop()) audio.setClass(S.cls); prev = SDL_GetTicksNS(); };
-  auto lightsOut = [&]() { bridge.release(); if (startSession()) { audio.setClass(S.cls); autoDrive = false; } else { home.say("that one would not load."); startBackdrop(); } prev = SDL_GetTicksNS(); };
+  auto toHome = [&]() { bridge.release(); screen = HOME; home.show("home"); if (startBackdrop()) audio.setClass(home.voice()); prev = SDL_GetTicksNS(); };
+  auto lightsOut = [&]() { bridge.release(); if (startSession()) { audio.setClass(home.voice()); autoDrive = false; } else { home.say("that one would not load."); startBackdrop(); } prev = SDL_GetTicksNS(); };
 
   while (running) {
     bool act[A_COUNT] = {false};
@@ -883,7 +893,7 @@ int main(int argc, char **argv) {
       if (act[A_GO]) home.input(Nav::Go);
       if (home.wantQuit) running = false;
       if (home.wantStart) { home.wantStart = false; lightsOut(); }
-      else if (home.dirty) { home.dirty = false; if (bgOn && bgCar != cfg.car) { startBackdrop(); audio.setClass(S.cls); prev = SDL_GetTicksNS(); } }
+      else if (home.dirty) { home.dirty = false; if (bgOn && bgCar != cfg.car + "/" + home.pack()) { startBackdrop(); audio.setClass(home.voice()); prev = SDL_GetTicksNS(); } }
     } else if (screen == PAUSE) {
       const int n = (int)pauseItems().size();
       if (act[A_UP]) pauseAt = (pauseAt + n - 1) % n;

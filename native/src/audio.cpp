@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <vector>
 
 namespace xbr {
 
@@ -19,8 +20,11 @@ const BoxSpec &boxFor(const std::string &cls) {
   static const BoxSpec f1{4500, 19000, 18600, 0.74, {85, 115, 146, 176, 208, 240, 280, 321}};
   static const BoxSpec f4{1800, 6500, 6300, 0.72, {55, 80, 108, 138, 175, 215}};
   static const BoxSpec gt3{1250, 7800, 7500, 0.70, {95, 130, 168, 205, 240, 273}};
+  // a hypercar is geared like the GT car it is driven as, and revs like the V12 it sounds like
+  static const BoxSpec hyper{1500, 9200, 8900, 0.70, {95, 130, 168, 205, 240, 273}};
   if (cls == "f4") return f4;
-  if (cls == "gt3") return gt3;
+  if (cls == "hyper") return hyper;
+  if (cls == "gt3" || cls == "gt4" || cls == "gt" || cls == "911") return gt3;
   return f1;
 }
 
@@ -76,22 +80,39 @@ struct EngineP {
   double idle, limit;
   double pipes[4][3];
   double noise, jitterA, jitterT, cylSpread, drive, whineTeeth;
+  double whine = 0.035, body = 0.9;      // gear/turbo whine level, and how much of the low pressure pulse comes through
 };
 // The V10 is the one Adam chose and the one that was measured (js/enginecore.js).
 const EngineP V10{10, 4500, 19000,
                   {{1100, 2.2, 1.0}, {2600, 2.6, 1.1}, {4800, 2.8, 0.75}, {7600, 3.0, 0.3}},
                   0.55, 0.34, 0.012, 0.24, 2.4, 29};
-// The browser game plays the V10 core for every class. These two are the same
-// model with the cylinder count and rev range of the car, and pipes moved down
-// to match: a first pass, NOT measured against recordings the way the V10 was.
+// EVERY KIND OF CAR HAS ITS OWN VOICE (Adam, 2026-10-08: "unique engine sounds
+// per car type, like a deeper roar for gt, a higher whine for hypercars, and the
+// same intensity as f1 even though theyre not goin as fast"). Same firing model,
+// different engine: cylinders, rev range, where the exhaust rings, how much
+// body and how much whine. NOT measured against recordings the way the V10 was.
+//   F4   a small four: buzzy, mid-pitched
+//   GT   a big cross-plane V8: the pipes sit low, the body is turned up, the
+//        firings are uneven — a roar you feel
+//   HYPER a high-revving V12 with a turbo and straight-cut gears on top: the
+//        pipes sit high and the whine is three times anybody else's
 const EngineP I4{4, 1800, 6500,
                  {{420, 2.0, 1.0}, {1100, 2.4, 1.0}, {2400, 2.6, 0.6}, {4200, 3.0, 0.25}},
-                 0.50, 0.30, 0.014, 0.22, 2.2, 23};
+                 0.50, 0.30, 0.014, 0.22, 2.2, 23, 0.035, 0.9};
 const EngineP V8{8, 1250, 7800,
-                 {{300, 1.8, 1.1}, {850, 2.2, 1.0}, {2100, 2.6, 0.6}, {4000, 3.0, 0.25}},
-                 0.52, 0.34, 0.014, 0.26, 2.6, 21};
-const EngineP &paramsFor(int cls) { return cls == 0 ? I4 : cls == 2 ? V8 : V10; }
-int clsIndex(const std::string &c) { return c == "f4" ? 0 : c == "gt3" ? 2 : 1; }
+                 {{170, 1.6, 1.5}, {420, 2.0, 1.25}, {1150, 2.4, 0.7}, {2600, 2.8, 0.3}},
+                 0.58, 0.42, 0.020, 0.34, 3.2, 21, 0.020, 1.6};
+const EngineP V12{12, 1500, 9200,
+                  {{1500, 2.4, 0.9}, {3300, 2.8, 1.1}, {6000, 3.0, 0.9}, {9000, 3.2, 0.45}},
+                  0.48, 0.24, 0.008, 0.14, 2.2, 37, 0.110, 0.6};
+const EngineP &paramsFor(int cls) { return cls == 0 ? I4 : cls == 2 ? V8 : cls == 3 ? V12 : V10; }
+// f4 | f1 | gt (gt3, gt4, 911 and the like) | hyper
+int clsIndex(const std::string &c) {
+  if (c == "f4") return 0;
+  if (c == "hyper") return 3;
+  if (c == "gt3" || c == "gt4" || c == "gt" || c == "911") return 2;
+  return 1;
+}
 }  // namespace
 
 struct EngineAudio::Core {
@@ -105,6 +126,7 @@ struct EngineAudio::Core {
   double phase = 0, nextAt = 0, pulse = 0, burst = 0, crackle = 0, whineP = 0;
   int next = 0;
   bool cut = false;
+  double makeup = 1;           // level trim so every class is as loud as the F1 car at the same revs and load
 
   double rand() { s = s * 1664525u + 1013904223u; return s / 4294967296.0; }
 
@@ -112,7 +134,7 @@ struct EngineAudio::Core {
     for (int i = 0; i < P.cyl; i++) cylA[i] = 1 + (rand() * 2 - 1) * P.cylSpread;
     for (int i = 0; i < P.cyl; i++) cylT[i] = (rand() * 2 - 1) * P.cylSpread * 0.08;
     for (int i = 0; i < 4; i++) pipes[i].set('b', P.pipes[i][0], P.pipes[i][1], sr);
-    body.set('l', 2400, 0.7, sr);
+    body.set('l', P.cyl == 8 ? 900 : 2400, 0.7, sr);
     hiss.set('h', 3000, 0.7, sr);
     road.set('l', 400, 0.6, sr);
     rpm = P.idle;
@@ -156,16 +178,16 @@ struct EngineAudio::Core {
       double pp = 0;
       const double ex = pressure * 0.8 + rasp + pop;
       for (int p = 0; p < 4; p++) pp += pipes[p].run(ex) * P.pipes[p][2];
-      double x = body.run(pressure) * 0.9 + pp * 1.6;
+      double x = body.run(pressure) * P.body + pp * 1.6;
       dc += (x - dc) * 0.002; x -= dc;
       x += hiss.run(white) * 0.03 * revs * (0.4 + 0.6 * thr);
       x = std::tanh(P.drive * x) / std::tanh(P.drive);
       whineP += r / 60 * P.whineTeeth / 4 / sr;
       if (whineP > 1) whineP -= 1;
       const double moving = std::min(1.0, speed / 8);
-      x += std::sin(2 * PI_ * whineP) * 0.035 * moving * revs * (1 - 0.6 * thr);
+      x += std::sin(2 * PI_ * whineP) * P.whine * moving * revs * (1 - 0.6 * thr) * makeup;
       x += road.run(white) * 0.25 * std::pow(std::min(1.0, speed / 85), 1.3);
-      out[i] = (float)(x * gain * (0.55 + 0.45 * revs));
+      out[i] = (float)(x * gain * (0.55 + 0.45 * revs) * makeup);
     }
   }
 };
@@ -256,6 +278,28 @@ void EngineAudio::once(int sample, double gain, double rate) {
   SDL_UnlockAudioStream(stream);
 }
 
+// THE SAME INTENSITY, WHATEVER THE CAR. Each class is played silently for a
+// moment at 85% of its own rev range on full throttle, and trimmed to the level
+// the F1 engine makes there. Done once; it is a few milliseconds of arithmetic.
+static double classMakeup(int cls) {
+  static double table[4] = {0, 0, 0, 0};
+  if (table[cls] > 0) return table[cls];
+  auto rms = [](int c) {
+    EngineAudio::Core *k = EngineAudio::newCore(c);
+    std::vector<float> buf(24000);
+    const double rpm = EngineAudio::limitOf(c) * 0.85;
+    EngineAudio::renderCore(k, buf.data(), 12000, rpm, 1, 1, 60);      // settle
+    EngineAudio::renderCore(k, buf.data(), 24000, rpm, 1, 1, 60);
+    double sum = 0;
+    for (float v : buf) sum += (double)v * v;
+    EngineAudio::freeCore(k);
+    return std::sqrt(sum / 24000.0);
+  };
+  const double ref = rms(1);
+  for (int c = 0; c < 4; c++) { const double r = rms(c); table[c] = r > 1e-6 ? std::min(4.0, std::max(0.25, ref / r)) : 1; }
+  return table[cls];
+}
+
 static void SDLCALL audioCb(void *ud, SDL_AudioStream *stream, int additional, int) {
   auto *self = (EngineAudio *)ud;
   float buf[1024];
@@ -270,7 +314,7 @@ static void SDLCALL audioCb(void *ud, SDL_AudioStream *stream, int additional, i
 
 void EngineAudio::render(float *out, int n) {
   const int pc = pendingCls.exchange(-1);
-  if (pc >= 0 || !core) { delete core; core = new Core(48000, paramsFor(pc >= 0 ? pc : 1)); }
+  if (pc >= 0 || !core) { delete core; core = new Core(48000, paramsFor(pc >= 0 ? pc : 1)); core->makeup = makeupNext; }
   core->render(out, n, tRpm.load(), tThr.load(), tGain.load(), tSpeed.load());
   if (mix) {
     mix->render(out, n);
@@ -282,6 +326,7 @@ void EngineAudio::render(float *out, int n) {
 
 bool EngineAudio::open(const std::string &cls, const std::string &dataDir) {
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return false;
+  makeupNext = classMakeup(clsIndex(cls));
   pendingCls = clsIndex(cls);
   mix = new Mixer();
   static const char *FILES[S_CRASH1] = {"tyre_squeal", "surf_gravel", "surf_grass", "scrape", "dirt_1", "dirt_2", "dirt_3", "dirt_4",
@@ -295,7 +340,15 @@ bool EngineAudio::open(const std::string &cls, const std::string &dataDir) {
   return true;
 }
 
-void EngineAudio::setClass(const std::string &cls) { pendingCls = clsIndex(cls); }
+void EngineAudio::setClass(const std::string &cls) { makeupNext = classMakeup(clsIndex(cls)); pendingCls = clsIndex(cls); }
+EngineAudio::Core *EngineAudio::newCore(int cls) { return new Core(48000, paramsFor(cls)); }
+void EngineAudio::freeCore(Core *c) { delete c; }
+double EngineAudio::limitOf(int cls) { return paramsFor(cls).limit; }
+void EngineAudio::renderCore(Core *c, float *out, int n, double rpm, double thr, double gain, double speed) {
+  // the controls are smoothed per sample: start them where they are going
+  c->rpm = rpm; c->thr = thr; c->gain = gain; c->speed = speed;
+  c->render(out, n, rpm, thr, gain, speed);
+}
 
 // js/audio.js Engine.update, for the emulated engine and the recorded ground.
 void EngineAudio::update(const SoundIn &in) {

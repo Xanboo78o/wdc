@@ -22,6 +22,7 @@ struct MenuSave {
   std::map<std::string, std::string> teams;      // league -> team key ("" = none yet)
   int ffb = 50, cam = 0, volume = 8;             // native only. ffb: percent of the bridge's ceiling (Adam: "starts at 50%")
   bool line = false;
+  std::string model;                             // native only: a downloaded car (data/cars/<key>) for the GT3 seat, "" = the built-in body
   void load(const std::string &path);
   void save(const std::string &path) const;
 };
@@ -48,8 +49,13 @@ class Home {
   std::string teamKey() const;                    // the team of the league you are driving, or any you have
   int startSlot(int grid) const;
   std::string dataDir;
+  // the downloaded car you chose, if this league has one ("" = the built-in body), and the kind of engine it has
+  std::string pack() const;
+  std::string voice() const;
 
  private:
+  struct Pack { std::string key, title, klass; };
+  std::vector<Pack> packs;      // data/cars/index.json: what tools/bakecar.mjs has baked on this machine
   struct Item { std::function<void()> ok, left, right; };
   struct Hot { float x, y, w, h; int item; std::function<void()> fn; };
   std::vector<Hot> hots;        // rebuilt by every draw

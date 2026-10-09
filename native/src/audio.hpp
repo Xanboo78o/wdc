@@ -55,12 +55,19 @@ class EngineAudio {
   // called on the audio thread
   void render(float *out, int n);
 
+  // one engine, off the device: for trimming every class to the same level
+  struct Core;
+  static Core *newCore(int cls);
+  static void freeCore(Core *c);
+  static double limitOf(int cls);
+  static void renderCore(Core *c, float *out, int n, double rpm, double thr, double gain, double speed);
+
  private:
   SDL_AudioStream *stream = nullptr;
   std::atomic<float> tRpm{4500}, tThr{0}, tGain{0}, tSpeed{0};
   std::atomic<int> pendingCls{-1};
-  struct Core;
   Core *core = nullptr;
+  std::atomic<double> makeupNext{1};
   struct Mixer;
   Mixer *mix = nullptr;
   // main-thread state
