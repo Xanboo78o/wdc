@@ -238,6 +238,10 @@ function material(t) {
     const name = path.basename(uri).replace(/_baseColor/, '').replace(/\.[^.]+$/, '') + (keepAlpha ? '.png' : '.jpg');
     execFileSync('magick', [from, '-resize', '2048x2048>', ...(keepAlpha ? [] : ['-background', 'black', '-alpha', 'remove', '-quality', '90']), path.join(outDir, name)]);
     out.map = name;
+    // the native game has no picture decoder: the same picture again as a plain PAM (RGBA, 8 bit)
+    const pam = name.replace(/\.[^.]+$/, '') + '.pam';
+    execFileSync('magick', [from, '-resize', role === 'paint' ? '2048x2048>' : '1024x1024>', '-depth', '8', '-alpha', keepAlpha ? 'on' : 'off', '-define', 'pam:tupletype=RGB_ALPHA', ...(keepAlpha ? [] : ['-alpha', 'opaque']), 'pam:' + path.join(outDir, pam)]);
+    out.pam = pam;
     if (keepAlpha && m.alphaMode === 'MASK') out.cutout = true;
   }
   matIx.set(id, mats.length);
@@ -283,6 +287,7 @@ const car = {
   credit: { author: pick(/\* author:\s*(.+)/), source: pick(/\* source:\s*(.+)/), licence: pick(/\* license type:\s*(.+)/) },
   size: r3([all.size[0], all.size[1] + all.lo[1], all.size[2]]),
   lo: r3(all.lo), hi: r3(all.hi),
+  eye: R.eye || [+(-0.02 * all.size[0]).toFixed(3), +(0.80 * (all.size[1] + all.lo[1])).toFixed(3), +(-0.19 * all.size[2]).toFixed(3)],
   wheelbase: +(((wheels.fl.c[0] + wheels.fr.c[0]) - (wheels.rl.c[0] + wheels.rr.c[0])) / 2).toFixed(4),
   trackF: +(wheels.fr.c[2] - wheels.fl.c[2]).toFixed(4), trackR: +(wheels.rr.c[2] - wheels.rl.c[2]).toFixed(4),
   wheels: Object.fromEntries(WHEELS.map(w => [w, { c: r3(wheels[w].c), r: +wheels[w].r.toFixed(4), w: +wheels[w].w.toFixed(4) }])),

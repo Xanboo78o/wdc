@@ -8,6 +8,7 @@
 // js/render.js and friends and have not been ported.
 #include "render.hpp"
 #include "carmesh.hpp"
+#include "dress.hpp"
 
 #include <epoxy/gl.h>
 #include <ft2build.h>
@@ -358,6 +359,18 @@ bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
       for (int i : order) b.vert(p[i][0], p[i][1], p[i][2], 0, 0, 1, c[i], 9);
     }
   sky.upload(b);
+  dress = new Dress();
+  if (!dress->init(dataDir, texDir)) std::fprintf(stderr, "xbr: the photograph shaders did not build — no downloaded cars, no woods\n");
+  // XBR_PACK=p911 native/play ...  puts a downloaded car on the grid before there is a menu row for it
+  if (const char *pk = std::getenv("XBR_PACK")) if (*pk) setCarPack(pk);
+  return true;
+}
+
+bool Renderer::setCarPack(const std::string &key) {
+  if (key.empty()) { packCar = nullptr; packKey.clear(); return true; }
+  const PackCar *pc = dress ? dress->pack(key) : nullptr;
+  if (!pc) return false;
+  packCar = pc; packKey = key;
   return true;
 }
 
@@ -975,6 +988,15 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
   const float gp = car.airborne ? 0.0f : (float)gPitch, gr = car.airborne ? 0.0f : (float)gRoll;
   const Mat4 carM = Mat4::translate((float)car.x, (float)(groundH + std::max(0.0, car.z)), (float)-car.y)
                   * Mat4::rotY((float)car.hdg) * Mat4::rotZ(gp + (float)car.pitch * gain) * Mat4::rotX(gr + (float)car.roll * gain);
+  if (packCar) {
+    // The model stands on the road at mid-wheelbase; the sim's origin is the CG.
+    const Mat4 M = carM * Mat4::translate((float)(S.a - S.L / 2), 0, 0);
+    bool lost[4]; double sag[4];
+    for (int i = 0; i < 4; i++) { lost[i] = car.wheelLost[i]; sag[i] = car.hasSag ? car.sag[i] : 0; }
+    dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, false);
+    dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, true);
+    return;
+  }
   glUniform3f(uPaint, paint[0], paint[1], paint[2]);
   setDents(&car);
   drawMesh(carBody, carM);
@@ -1079,7 +1101,8 @@ void Renderer::drawWorld(const FrameIn &f) {
   if (f.camMode != 1) {
     float e[3], aim = 24, drop = 0.22f;
     if (f.camMode == 0) {
-      if (carCabin) { e[0] = carEye[0]; e[1] = carEye[1]; e[2] = carEye[2]; drop = 1.1f; }
+      if (packCar) { const PackInfo pi = packInfo(*packCar); e[0] = pi.eye[0] + shift; e[1] = pi.eye[1]; e[2] = pi.eye[2]; drop = 1.1f; }
+      else if (carCabin) { e[0] = carEye[0]; e[1] = carEye[1]; e[2] = carEye[2]; drop = 1.1f; }
       else { e[0] = -0.34f + shift; e[1] = 1.19f; e[2] = 0; }        // no cabin to sit in: above the airbox, as the JS does
     } else if (f.camMode == 2) { e[0] = 1.62f + shift; e[1] = 0.46f; e[2] = 0; aim = 26; }
     else { e[0] = -0.62f + shift; e[1] = 0.93f; e[2] = 0; drop = 1.0f; fov = 50; }
@@ -1100,6 +1123,7 @@ void Renderer::drawWorld(const FrameIn &f) {
   const Mat4 proj = Mat4::perspective(fov * (float)PI / 180, (float)W / (float)std::max(1, H), 0.12f, 12000.0f);
   const Mat4 view = Mat4::lookAt(eye, at, up);
   const Mat4 VP = proj * view;
+  if (dress) dress->frame(VP, eye, L, f.time);
   glUniformMatrix4fv(uVP, 1, GL_FALSE, VP.m);
   glUniform3f(uEye, eye[0], eye[1], eye[2]);
   glUniform1i(uHasTex, hasTex ? 1 : 0);

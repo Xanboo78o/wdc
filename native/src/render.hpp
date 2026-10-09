@@ -18,6 +18,9 @@
 
 namespace xbr {
 
+class Dress;
+struct PackCar;
+
 struct Mat4 {
   float m[16];
   static Mat4 identity();
@@ -92,6 +95,11 @@ class Renderer {
   void resize(int w, int h) { W = w; H = h; }
   void buildWorld(const Track &track, const World &world, const Json &surf, const Json &env, const Line &raceLine);
   void buildCar(const Spec &spec);
+  // A downloaded car model (data/cars/<key>, tools/bakecar.mjs) in place of the
+  // built-in body for every car drawn after this; "" goes back to the built-in.
+  // Returns false, and changes nothing, if there is no such pack.
+  bool setCarPack(const std::string &key);
+  const std::string &carPack() const { return packKey; }
   void snapCamera() { camReady = false; }
   void drawWorld(const FrameIn &f);
   // Another car on the circuit (a rival): same meshes, its own paint. Call
@@ -157,6 +165,10 @@ class Renderer {
   bool camReady = false;
   double camYaw = 0;
   void drawMesh(const GLMesh &m, const Mat4 &model, float alpha = 1);
+  // photographs with their own UVs: downloaded cars, the woods, the boards (dress.cpp)
+  Dress *dress = nullptr;
+  const PackCar *packCar = nullptr;
+  std::string packKey;
 };
 
 }  // namespace xbr
