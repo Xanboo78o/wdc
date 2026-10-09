@@ -146,6 +146,8 @@ class Renderer {
   double wheelR_f = 0.36, wheelR_r = 0.36;
   bool carCabin = true;
   float carEye[3] = {0.2f, 0.76f, 0};
+  // the least height the three bolted cameras (roof, nose, T-bar) may sit at and still be OUTSIDE this body
+  float camFloor[3] = {0, 0, 0};
   unsigned hudVao = 0, hudVbo = 0, fontTex = 0;
   struct Glyph { float x = 0, y = 0, w = 0, h = 0, bx = 0, by = 0, adv = 0; };
   struct Font { Glyph g[95]; float cap = 50, asc = 50, desc = 14; };

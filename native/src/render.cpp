@@ -961,6 +961,21 @@ void Renderer::buildCar(const Spec &S) {
   wheelR_f = cm.wheelRadF; wheelR_r = cm.wheelRadR;
   carCabin = cm.cabin;
   for (int k = 0; k < 3; k++) carEye[k] = cm.eye[k];
+  // A BOLTED CAMERA MUST BE OUTSIDE THE CAR. The mounts are the single-seater's
+  // (js/render.js); on the coupe the roof and the bonnet are higher than they
+  // are, and the faces here are two-sided, so the view was the inside of a box.
+  // Find the top of the bodywork under each mount and sit 9 cm above it.
+  {
+    const float sh = (float)(S.a - S.L / 2), mx[3] = {-0.34f + sh, 1.62f + sh, -0.62f + sh};
+    for (int c = 0; c < 3; c++) {
+      float top = 0;
+      for (size_t i = 0; i + 9 < cm.body.v.size(); i += 10) {
+        const float x = cm.body.v[i], y = cm.body.v[i + 1], z = cm.body.v[i + 2];
+        if (x > mx[c] - 0.45f && x < mx[c] + 0.75f && std::fabs(z) < 0.45f) top = std::max(top, y);
+      }
+      camFloor[c] = top + 0.09f;
+    }
+  }
   const double hw = S.bodyW / 2;
 
   MeshB sh;
@@ -1107,9 +1122,9 @@ void Renderer::drawWorld(const FrameIn &f) {
     if (f.camMode == 0) {
       if (packCar) { const PackInfo pi = packInfo(*packCar); e[0] = pi.eye[0] + shift; e[1] = pi.eye[1]; e[2] = pi.eye[2]; drop = 1.1f; }
       else if (carCabin) { e[0] = carEye[0]; e[1] = carEye[1]; e[2] = carEye[2]; drop = 1.1f; }
-      else { e[0] = -0.34f + shift; e[1] = 1.19f; e[2] = 0; }        // no cabin to sit in: above the airbox, as the JS does
-    } else if (f.camMode == 2) { e[0] = 1.62f + shift; e[1] = 0.46f; e[2] = 0; aim = 26; }
-    else { e[0] = -0.62f + shift; e[1] = 0.93f; e[2] = 0; drop = 1.0f; fov = 50; }
+      else { e[0] = -0.34f + shift; e[1] = std::max(1.19f, camFloor[0]); e[2] = 0; }        // no cabin to sit in: above the airbox, as the JS does
+    } else if (f.camMode == 2) { e[0] = 1.62f + shift; e[1] = packCar ? 0.46f : std::max(0.46f, camFloor[1]); e[2] = 0; aim = 26; }
+    else { e[0] = -0.62f + shift; e[1] = packCar ? 0.93f : std::max(0.93f, camFloor[2]); e[2] = 0; drop = 1.0f; fov = 50; }
     const float t[3] = {e[0] + aim, e[1] - drop, 0};
     const float u[3] = {0, 1, 0};
     xform(carM, e, 1, eye); xform(carM, t, 1, at); xform(carM, u, 0, up);
