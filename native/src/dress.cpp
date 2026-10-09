@@ -135,14 +135,34 @@ PackInfo packInfo(const PackCar &pc) {
 static const char *CAR_VS = R"(#version 330 core
 layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNrm; layout(location=2) in vec2 aUv;
 uniform mat4 uVP, uModel;
-out vec3 vW, vN, vP, vNo; out vec2 vU;
-void main(){ vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = mat3(uModel) * aNrm; vU = aUv; vP = aPos; vNo = aNrm; gl_Position = uVP * w; }
+// DAMAGE, as render.cpp's own cars take it: each dent is where the car was hit
+// (x forward, y left, in the pack's frame), how deep, how wide and which way the
+// blow went. The bodywork is pushed in THERE. vP stays the undamaged position,
+// so a livery is crumpled with the panel it is painted on instead of sliding over it.
+uniform int uNDent; uniform vec4 uDent[8]; uniform vec2 uDentN[8];
+out vec3 vW, vN, vP, vNo; out vec2 vU; out float vHurt;
+void main(){
+  vec3 p = aPos; float hurt = 0.0;
+  for (int i = 0; i < uNDent; i++) {
+    float t = distance(vec2(p.x, -p.z), uDent[i].xy) / uDent[i].w;
+    if (t < 1.0) {
+      float f = (1.0 - t * t); f *= f;
+      float d = uDent[i].z * f;
+      // pushed the way the blow went, and folded: a panel does not move in as one sheet
+      float fold = 0.72 + 0.28 * sin(aPos.x * 23.0 + aPos.y * 31.0) * sin(aPos.z * 27.0 - aPos.y * 19.0);
+      p.x += uDentN[i].x * d * 0.52 * fold; p.z -= uDentN[i].y * d * 0.52 * fold;
+      p.y -= d * 0.12 * clamp(p.y * 2.0, 0.0, 1.0);
+      hurt += d;
+    }
+  }
+  vHurt = clamp(hurt * 1.6, 0.0, 1.0);
+  vec4 w = uModel * vec4(p, 1.0); vW = w.xyz; vN = mat3(uModel) * aNrm; vU = aUv; vP = aPos; vNo = aNrm; gl_Position = uVP * w; }
 )";
 // The livery (data/livery/livery.glsl, one source for this game and the browser's
 // garage) is spliced in where the marker is; LIV_STUB stands in if the file is gone.
 static const char *LIV_STUB = "vec3 livery(vec3 p, vec3 b){ return b; }\nvec3 stickers(vec3 c, vec3 p, vec3 n, sampler2D s){ return c; }\n";
 static const char *CAR_FS_A = R"(#version 330 core
-in vec3 vW, vN, vP, vNo; in vec2 vU;
+in vec3 vW, vN, vP, vNo; in vec2 vU; in float vHurt;
 uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish; uniform float uBrake;
 uniform vec3 uLivBase; uniform vec4 uLivFrame, uRim;
 )";
@@ -153,7 +173,14 @@ out vec4 o;
 vec3 skyAt(vec3 d){ return mix(uFog, uSkyTop, pow(clamp(d.y, 0.0, 1.0), 0.55)) * (d.y < 0.0 ? 0.45 : 1.0); }
 void main(){
   vec3 V = uEye - vW; float dist = length(V); V /= dist;
-  vec3 n = normalize(vN); if (dot(n, V) < 0.0) n = -n;
+  vec3 n = normalize(vN);
+  // crumpled metal catches the light every which way
+  if (vHurt > 0.02) {
+    vec3 q = floor(vP * 26.0);
+    vec3 j = fract(sin(vec3(dot(q, vec3(12.9898, 78.233, 37.719)), dot(q, vec3(39.346, 11.135, 83.155)), dot(q, vec3(73.156, 52.235, 9.151)))) * 43758.5453) - 0.5;
+    n = normalize(n + j * 1.3 * vHurt);
+  }
+  if (dot(n, V) < 0.0) n = -n;
   vec4 t = uHasMap == 1 ? texture(uTex, vU) : vec4(1.0);
   if (uCutout == 1 && t.a < 0.5) discard;
   vec3 c = uHasMap == 1 ? t.rgb : uColor;
@@ -182,6 +209,8 @@ void main(){
     gloss = 0.45; shine = 40.0; mirror = uRim.a > 0.5 ? 0.12 : 0.22; }
   else if (uRole == 7) { c = vec3(0.62, 0.63, 0.66); gloss = 0.8; shine = 90.0; mirror = 0.6; }
   else { gloss = 0.10; shine = 18.0; }
+  // where it was hit the paint is scuffed to the primer and the shine is gone
+  if (uRole != 2) { c = mix(c, vec3(dot(c, vec3(0.333)) * 0.45 + 0.03), vHurt * 0.55); gloss *= 1.0 - 0.8 * vHurt; mirror *= 1.0 - 0.9 * vHurt; }
   float ndl = max(dot(n, uSun), 0.0);
   vec3 amb = mix(uGndAmb, uSkyAmb, n.y * 0.5 + 0.5);
   vec3 lit = c * (amb + uSunCol * ndl * 0.78);
@@ -427,6 +456,17 @@ void Dress::drawLights(const PackCar &pc, const Mat4 &carM, const void *who, dou
   glUseProgram((GLuint)was);
 }
 
+void Dress::setDents(const Car *car, double shift) {
+  nDent = 0;
+  if (!car) return;
+  nDent = (int)std::min<size_t>(8, car->dents.size());
+  for (int i = 0; i < nDent; i++) {
+    const Dent &D = car->dents[(size_t)i];
+    dentV[i * 4] = (float)(D.lx - shift); dentV[i * 4 + 1] = (float)D.ly; dentV[i * 4 + 2] = (float)D.depth; dentV[i * 4 + 3] = (float)std::max(0.2, D.r);
+    dentN[i * 2] = (float)D.nx; dentN[i * 2 + 1] = (float)D.ny;
+  }
+}
+
 void Dress::lights(unsigned prog) {
   const Look &L = look;
   const float sl = std::sqrt(L.sun[0] * L.sun[0] + L.sun[1] * L.sun[1] + L.sun[2] * L.sun[2]);
@@ -497,12 +537,15 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
   }
   if (glassPass) { glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glDepthMask(GL_FALSE); }
   glActiveTexture(GL_TEXTURE0);
+  const GLint uNDentL = glGetUniformLocation(carProg, "uNDent");
+  if (nDent) { glUniform4fv(glGetUniformLocation(carProg, "uDent"), nDent, dentV); glUniform2fv(glGetUniformLocation(carProg, "uDentN"), nDent, dentN); }
   for (const PackGroup &G : pc.groups) {
     const PackMat &M = pc.mats[(size_t)G.mat];
     if (M.see != glassPass) continue;
     const int w = G.part == 0 ? -1 : (G.part - 1) % 4;
     if (w >= 0 && lost && lost[w]) continue;
     glUniformMatrix4fv(uModel, 1, GL_FALSE, (G.part == 0 ? carM : G.part <= 4 ? spin[w] : hub[w]).m);
+    glUniform1i(uNDentL, G.part == 0 ? nDent : 0);                          // the body dents; a wheel's vertices are about its hub
     glUniform1i(uHasMap, M.map ? 1 : 0);
     glUniform1i(uRole, M.role);
     glUniform1i(uLivOn, L && G.part == 0 && M.role == R_PAINT ? 1 : 0);      // paintwork on the body; a wheel's vertices are about its hub

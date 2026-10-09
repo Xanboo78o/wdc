@@ -53,6 +53,9 @@ class Dress {
   // LIGHTS (Adam: "make their headlights and brake lights work and brakes glow").
   // How hard this car is on the brakes, 0..1: the next drawPack lights its tail lamps by it.
   void setBrake(float b) { brakeNow = b; }
+  // DAMAGE: the car's dents (physics Car::dents) for the next drawPack; null = none.
+  // shift: how far ahead of the sim's origin (the CG) the pack's own origin (mid-wheelbase) is.
+  void setDents(const Car *car, double shift);
   // After both drawPack passes: the lamps themselves as light — two white at the
   // nose, two red at the tail that flare under braking, a pool of light on the
   // road at night, and four discs that glow once they are hot. `who` is any
@@ -73,6 +76,8 @@ class Dress {
   bool sheetTried = false, liveryOn = true;
   int liveryIx = -1;
   float wheelSweep = 0, brakeNow = 0;
+  int nDent = 0;
+  float dentV[32] = {}, dentN[16] = {};
   unsigned glowProg = 0, glowVao = 0, glowVbo = 0;
   struct Heat { float h = 0; double t = -1; };
   std::map<const void *, Heat> heat;

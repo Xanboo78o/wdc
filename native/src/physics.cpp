@@ -493,7 +493,7 @@ void launch(Car &car, double jz, double lx, double ly) {
   if (car.z < 0.001) car.z = 0.001;
 }
 
-static const double REV_MAX = 7, REV_FORCE = 0.18;
+static const double REV_MAX = 15, REV_FORCE = 0.50;
 
 // ---------------------------------------------------------------------------
 // FOUR TYRES

@@ -565,7 +565,7 @@ export function launch(car, jz, lx = 0, ly = 0) {
 }
 
 // Reverse: 7 m/s is 25 km/h, and 18% of drive force gets you there slowly.
-const REV_MAX = 7, REV_FORCE = 0.18;
+const REV_MAX = 15, REV_FORCE = 0.50;
 
 export function makeCar(opts = {}) {
   const spec = CARS[opts.cls || 'f4'];
