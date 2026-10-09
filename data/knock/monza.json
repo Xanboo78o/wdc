@@ -1,12 +1,58 @@
 {
- "note": "Foam blocks, hand-placed. Each group is anchored at `s` metres round the lap; a row stands `ahead` metres straight on along the road's heading there, with one block at each `across` (metres to the LEFT of that line; a block is 1.9 m wide). Check with: node tools/barriercheck.mjs monza --at 640 --span 200 --png out.png",
+ "note": "Foam and hay blocks, hand-placed. Each group is anchored at `s` metres round the lap; a row stands `ahead` metres on from there along `hdg` (degrees; left out = the road's own heading at s), with one block at each `across` (metres to the LEFT of that line; a block is 1.9 m wide). `hay`: straw bales instead of foam. Check with: node tools/barriercheck.mjs monza --at 700 --span 300 --png out.png",
  "foam": [
   {
-   "name": "Variante del Rettifilo: straight on",
+   "name": "Variante del Rettifilo: straight on past the chicane, along the old road into the Curva Grande. Three rows across the apron (foam, hay, foam), each with one gap at alternate ends, so that it always costs more than the chicane.",
    "s": 590,
+   "hdg": 85.06,
    "rows": [
-    { "ahead": 36, "across": [-2, 0, 2, 4, 6] },
-    { "ahead": 50, "across": [6, 8, 10, 12, 14] }
+    {
+     "ahead": 62,
+     "across": [
+      -10,
+      -12,
+      -14,
+      -16,
+      -18,
+      -20,
+      -22,
+      -24,
+      -26,
+      -28
+     ]
+    },
+    {
+     "ahead": 82,
+     "across": [
+      4,
+      2,
+      0,
+      -2,
+      -4,
+      -6,
+      -8,
+      -10,
+      -12,
+      -14,
+      -16
+     ],
+     "hay": true
+    },
+    {
+     "ahead": 102,
+     "across": [
+      2,
+      0,
+      -2,
+      -4,
+      -6,
+      -8,
+      -10,
+      -12,
+      -14,
+      -16
+     ]
+    }
    ]
   }
  ]

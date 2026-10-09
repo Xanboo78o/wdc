@@ -987,9 +987,10 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
           if (!real[(size_t)i]) continue;
         }
         const double lat = latOf(i);
-        // Where the run-off steps (28 m to 10 m between two samples) the rule's
+        // Where the run-off steps by a lot (28 m to 10 m between two samples) the rule's
         // wall turns square across the road half way between them: so does the rail.
-        if (last == i - 1 && std::fabs(lat - latOf(last)) > 1.5) {
+        // A small step is a taper, and the rail simply runs across it.
+        if (last == i - 1 && std::fabs(lat - latOf(last)) > 6) {
           const double lp = latOf(last);
           const auto a0 = foot(last, lp, last), a1 = foot(i, lp, i), b0 = foot(last, lat, last), b1 = foot(i, lat, i);
           push({(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2, (a0[2] + a1[2]) / 2}, last);

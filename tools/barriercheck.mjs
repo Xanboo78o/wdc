@@ -69,7 +69,7 @@ for (const side of [1, -1]) {
   for (let i = 0; i < n; i++) {
     if (!real[i]) continue;
     const lat = latOf(i);
-    if (last === i - 1 && Math.abs(lat - latOf(last)) > 1.5) {
+    if (last === i - 1 && Math.abs(lat - latOf(last)) > 6) {
       const lp = latOf(last), a0 = at2(last, lp), a1 = at2(i, lp), b0 = at2(last, lat), b1 = at2(i, lat);
       pts.push({ i: last, x: (a0.x + a1.x) / 2, y: (a0.y + a1.y) / 2 });
       pts.push({ i, x: (b0.x + b1.x) / 2, y: (b0.y + b1.y) / 2 });
@@ -123,7 +123,7 @@ if (png) {
   let kd = null;
   try { kd = JSON.parse(fs.readFileSync(`${ROOT}data/knock/${key}.json`, 'utf8')); } catch { /* none */ }
   for (const grp of kd?.foam || []) {
-    const i = t.idx(grp.s), h = t.hdg[i];
+    const i = t.idx(grp.s), h = grp.hdg != null ? grp.hdg * Math.PI / 180 : t.hdg[i];
     for (const row of grp.rows) for (const ac of row.across) {
       const bx = t.x[i] + Math.cos(h) * row.ahead - Math.sin(h) * ac, by = t.y[i] + Math.sin(h) * row.ahead + Math.cos(h) * ac;
       const pj = t.project(bx, by), on = Math.abs(pj.lat) < pj.w + 1.2, wall = gameDepth(bx, by) > 0;

@@ -1445,7 +1445,7 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
     const Json kd = Json::loadOpt(dataDir + "/knock/" + t.key + ".json");
     for (const Json &grp : kd["foam"].arr) {
       const int i = t.idx(grp["s"].n());
-      const double h = t.hdg[(size_t)i], ch = std::cos(h), sh = std::sin(h);
+      const double h = grp.has("hdg") ? grp["hdg"].n() * PI / 180 : t.hdg[(size_t)i], ch = std::cos(h), sh = std::sin(h);
       for (const Json &row : grp["rows"].arr) for (const Json &ac : row["across"].arr) {
         const double ahead = row["ahead"].n(), across = ac.n();
         const double sx = t.x[(size_t)i] + ch * ahead - sh * across, sy = t.y[(size_t)i] + sh * ahead + ch * across;
@@ -1454,12 +1454,15 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
         Woods::Mov &mv = W.movs.back();
         mv.obj = knock().add(KnockObj::FOAM, sx, sy, gy);
         mv.lift = 0.25f;
+        const bool hay = row["hay"].truthy();
+        if (hay) knock().objs[(size_t)mv.obj].mass = 20;       // a straw bale is the heavier thing to hit
         // a block 1.9 m across the escape road, 0.5 m thick, 1.0 m high; white, with a band of colour
         const double ax = -sh, az = -ch;              // GL: across (to the left)
         const double fx2 = ch, fz2 = -sh;             // GL: along the heading
         const float WHITE2[3] = {0.93f, 0.93f, 0.91f};
         const float BAND[2][3] = {{0.80f, 0.10f, 0.10f}, {0.10f, 0.25f, 0.70f}};
-        const float *band = BAND[foam & 1];
+        const float STRAW[3] = {0.78f, 0.66f, 0.34f}, STRAW2[3] = {0.66f, 0.54f, 0.26f};
+        const float *band = hay ? STRAW2 : BAND[foam & 1];
         auto face = [&](const double a[3], const double b[3], const double c[3], const double d[3], double nx, double ny, double nz, const float *col) {
           const double *q[6] = {a, b, c, a, c, d};
           for (const double *v : q) Woods::sv(mv.v, v, nx, ny, nz, 0, 0, -1, col, 0, F_NEVER, 0);
@@ -1468,7 +1471,7 @@ void Dress::buildWorld(const Track &t, const World &world, const Json &env, cons
         const double HW = 0.95, HT = 0.25;
         for (int part = 0; part < 2; part++) {
           const double ya = part == 0 ? 0.0 : 0.62, yb = part == 0 ? 0.62 : 1.0;
-          const float *col = part == 0 ? WHITE2 : band;
+          const float *col = part == 0 ? (hay ? STRAW : WHITE2) : band;
           double c8[8][3];
           int k = 0;
           for (double y : {ya, yb}) for (double alo : {-HT, HT}) for (double acr : {-HW, HW}) pt(acr, alo, y, c8[k++]);
