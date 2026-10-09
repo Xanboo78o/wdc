@@ -56,6 +56,9 @@ class EngineAudio {
   void setClass(const std::string &cls);
   void update(const SoundIn &in);
   void hit(double closing);               // an impact, m/s of closing speed
+  // THE PASS-BY (Adam: "the vwooosh ... when a car passes u at a standstill"): the air a car
+  // pushes aside, heard as it goes by. strength 0..1 (how close, how fast), seconds = how long it is abeam.
+  void whoosh(double strength, double seconds);
   void close();
   bool ok() const { return stream != nullptr; }
 

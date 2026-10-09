@@ -224,6 +224,8 @@ struct EngineAudio::Mixer {
   struct Shot { int s = -1; double pos = 0, gain = 0, rate = 1; } shot[N_SHOTS];
   std::atomic<float> wind{0}, rain{0}, volume{1};
   double windLP = 0, windLP2 = 0, rainHP = 0, windG = 0, rainG = 0;
+  // the pass-by: noise through a band that falls as the car goes away, on a swell, with the thump of its bow wave
+  struct Whoosh { double t = -1, dur = 0.5, g = 0, lo = 0, bp = 0, ph = 0; } who[4];
   uint32_t ns = 99;
   double noise() { ns = ns * 1664525u + 1013904223u; return ns / 2147483648.0 - 1.0; }
 
@@ -268,6 +270,27 @@ struct EngineAudio::Mixer {
         const double fr = S.pos - (double)i0;
         out[i] += (float)((b[i0] + (b[i0 + 1] - b[i0]) * fr) * S.gain);
         S.pos += S.rate;
+      }
+    }
+    for (Whoosh &W : who) {
+      if (W.t < 0) continue;
+      for (int i = 0; i < n; i++) {
+        const double u = W.t / W.dur;
+        if (u >= 1) { W.t = -1; break; }
+        // up fast, away slowly: the car arrives quicker than it leaves
+        const double env = u < 0.32 ? std::pow(u / 0.32, 1.6) : std::pow(1 - (u - 0.32) / 0.68, 2.2);
+        // the band it hisses in drops as it passes (the Doppler of a noise is its colour)
+        const double fc = 1500 - 1050 * std::min(1.0, u * 1.25);
+        const double f = 2 * std::sin(PI_ * fc / 48000.0), q = 0.85;
+        const double x = noise();
+        W.lo += f * W.bp;
+        const double hi = x - W.lo - q * W.bp;
+        W.bp += f * hi;
+        // the bow wave: one slow push of pressure as it comes level
+        W.ph += 2 * PI_ * (62 - 22 * u) / 48000.0;
+        const double thump = std::sin(W.ph) * std::exp(-std::pow((u - 0.30) / 0.16, 2));
+        out[i] += (float)((W.bp * 0.95 + W.lo * 0.35 + thump * 0.55) * env * W.g);
+        W.t += 1.0 / 48000.0;
       }
     }
     // wind and rain: noise, shaped. The wind is a low roar that rises with
@@ -428,6 +451,16 @@ void EngineAudio::update(const SoundIn &in) {
 }
 
 // "Crashes? Traumatizing." — and then, twice, "too loud": the engine leads.
+void EngineAudio::whoosh(double strength, double seconds) {
+  if (!stream || !mix || strength < 0.03) return;
+  SDL_LockAudioStream(stream);
+  Mixer::Whoosh *W = &mix->who[0];
+  for (auto &w : mix->who) { if (w.t < 0) { W = &w; break; } if (w.t / w.dur > W->t / W->dur) W = &w; }     // a free voice, or the one nearest its end
+  *W = Mixer::Whoosh{};
+  W->t = 0; W->dur = std::max(0.22, std::min(1.1, seconds)); W->g = 0.9 * std::min(1.0, strength);
+  SDL_UnlockAudioStream(stream);
+}
+
 void EngineAudio::hit(double closing) {
   if (!mix || t - lastCrash < 0.6) return;        // a wall grind is one crash, not one a substep
   lastCrash = t;

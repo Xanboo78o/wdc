@@ -664,6 +664,7 @@ int main(int argc, char **argv) {
   WeatherDirector wd("clear", 1);
   std::string wdMode;
   Fx fx;
+  std::vector<double> abeam;     // each rival's gap along the road last frame: a change of sign is a pass-by (the whoosh)
   double boomAt = -1;          // when your own car exploded, plus a few seconds: then the results (or a new car)                           // the crash drama (fx.hpp): reads the cars, draws into the scene
 
   auto showLoading = [&](const std::string &text) {
@@ -1150,6 +1151,21 @@ int main(int argc, char **argv) {
       // behind HOME the race is silent, as it is in the browser (sound=0)
       si.volume = (hidden || bgOn || screen == RESULTS) ? 0 : cfg.volume / 10.0;
       audio.update(si);
+      // THE PASS-BY: every car that comes level with you — it going by, or you going by it —
+      // within a few metres and at a real difference in speed, is heard doing it.
+      if (S.race && screen == DRIVE && si.volume > 0) {
+        if (abeam.size() != S.race->entries.size()) abeam.assign(S.race->entries.size(), 0.0);
+        const Entry &me = *S.race->me;
+        for (const Entry &e : S.race->entries) {
+          if (e.isPlayer || e.retired) { continue; }
+          const double ds = S.track.gap(e.proj.s, me.proj.s), was = abeam[(size_t)e.idx];
+          abeam[(size_t)e.idx] = ds;
+          if (was == 0 || (was > 0) == (ds > 0) || std::fabs(ds) > 12 || std::fabs(was) > 12) continue;
+          const double dv = std::fabs(e.car.speed - me.car.speed), dl = std::fabs(e.proj.lat - me.proj.lat);
+          if (dv < 6 || dl > 9) continue;
+          audio.whoosh(std::min(1.0, dv / 45) * (1 - dl / 11), 9.0 / dv + 0.18);
+        }
+      }
       if (const double boom = fx.takeBoom(); boom > 0 && screen == DRIVE) audio.hit(boom);     // an explosion, before the knock that set it off
       if (S.lastHit > 0) { if (screen == DRIVE) { audio.hit(S.lastHit); bridge.hit(S.lastHit / 14); } S.lastHit = 0; }
     }
