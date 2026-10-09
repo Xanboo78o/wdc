@@ -60,7 +60,7 @@ const Def DEF[N_PARTS] = {
   {"diff",   nullptr, {-2.00, 0.12, 0},      0.80, 0.35, {-0.15, 0.08, 0},      G_REAR, NONE},
   {"rain",   nullptr, {-2.335, 0.33, 0},     1.20, 0.50, {0, 0, 0},             G_REAR, NONE},
 };
-const bool wheelsDetach = false;      // js PARTS.wheelsDetach: never switched on in the game
+const bool wheelsDetach = true;       // js PARTS.wheelsDetach: on since 2026-10-08 ("crumble ... and fly"): physics reads car.wheelLost now
 
 struct Tree {
   int parent[N_PARTS];
