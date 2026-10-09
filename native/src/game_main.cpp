@@ -17,6 +17,10 @@
 // The driving loop is js/main.js's, substep for substep: the solo branch for a
 // hot lap, race.tick for a race.
 #include <SDL3/SDL.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <epoxy/gl.h>
 
 #include <algorithm>
@@ -383,21 +387,62 @@ static void resultMood(int pos, int n, bool retired, std::string &title, std::st
   else { if (r & 1) { title = "WELL. <span>THAT HAPPENED</span>"; line = "we move. we always move."; } else { title = "CHEQUERED <span>FLAG</span>"; line = "the car came home. the pace did not."; } }
 }
 
-// The rim's buttons by NAME (data/wheelbtn.json, measured on Adam's R3), heard
-// through the bridge. Nothing here knows a button index.
+// The rim's controls by NAME (data/wheelbtn.json, measured on Adam's R3). A
+// control is a button index or a hat direction ({ax: 8|9, dir}); nothing past
+// this struct knows either. The indices are joydev's, which is the order SDL
+// numbers a Linux joystick's buttons in too, so they are read straight off the
+// wheel — and from the bridge as well, when it is running.
 struct RimMap {
-  std::vector<std::pair<std::string, int>> b;
+  struct C { std::string name; int b = -1, ax = -1, dir = 0; };
+  std::vector<C> c;
   void load(const std::string &dataDir) {
     const Json j = Json::loadOpt(dataDir + "/wheelbtn.json");
     for (const auto &kv : j["map"].obj)
-      for (const auto &c : kv.second.arr)
-        if (c["b"].isNum()) b.emplace_back(kv.first, (int)c["b"].n());
+      for (const auto &e : kv.second.arr) {
+        if (e["b"].isNum()) c.push_back({kv.first, (int)e["b"].n(), -1, 0});
+        else if (e["ax"].isNum()) c.push_back({kv.first, -1, (int)e["ax"].n(), (int)e["dir"].n()});
+      }
   }
-  bool held(const std::set<int> &down, const char *name) const {
-    for (const auto &e : b) if (e.first == name && down.count(e.second)) return true;
+  bool held(SDL_Joystick *joy, const std::set<int> &bridge, const char *name) const {
+    for (const C &e : c) {
+      if (e.name != name) continue;
+      if (e.b >= 0) {
+        if (bridge.count(e.b)) return true;
+        if (joy && e.b < SDL_GetNumJoystickButtons(joy) && SDL_GetJoystickButton(joy, e.b)) return true;
+      } else if (joy) {
+        // the d-pad: joydev calls it axes 8 and 9, SDL calls it hat 0
+        if (SDL_GetNumJoystickHats(joy) > 0 && (e.ax == 8 || e.ax == 9)) {
+          const Uint8 h = SDL_GetJoystickHat(joy, 0);
+          if (e.ax == 8 && ((e.dir < 0 && (h & SDL_HAT_LEFT)) || (e.dir > 0 && (h & SDL_HAT_RIGHT)))) return true;
+          if (e.ax == 9 && ((e.dir < 0 && (h & SDL_HAT_UP)) || (e.dir > 0 && (h & SDL_HAT_DOWN)))) return true;
+        } else if (e.ax < SDL_GetNumJoystickAxes(joy)) {
+          const double v = SDL_GetJoystickAxis(joy, e.ax) / 32767.0;
+          if (std::fabs(v) > 0.5 && (v > 0) == (e.dir > 0)) return true;
+        }
+      }
+    }
     return false;
   }
 };
+
+// THE WHEEL'S FORCE. The bridge (tools/ffb.py) owns the motor; if it is not
+// running when force is wanted, the game starts it — at the ceiling Adam chose
+// on 2026-10-08 ("100% ceiling, but starts at 50%": the 50 is the game's own
+// WHEEL FORCE setting). The bridge still ramps in over three seconds, limits
+// how fast the torque may change, and zeroes the wheel if the game goes quiet.
+static pid_t spawnBridge(const std::string &repo) {
+  if (!std::filesystem::exists(repo + "/tools/ffb.py")) return -1;
+  const pid_t p = fork();
+  if (p == 0) {
+    setsid();
+    if (chdir(repo.c_str()) != 0) _exit(126);
+    const int fd = open("/tmp/xbr-ffb-bridge.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); }
+    execlp("python3", "python3", "-u", "tools/ffb.py", "--max", "1.0", (char *)nullptr);
+    _exit(127);
+  }
+  return p;
+}
 
 enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A_RESET, A_GO, A_PIT, A_COUNT };
 
@@ -722,6 +767,9 @@ int main(int argc, char **argv) {
   RimMap rim;
   rim.load(dataDir);
   Bridge bridge;
+  pid_t bridgePid = -1;
+  double bridgeWait = 0;
+  bool bridgeTried = false;
 
   EngineAudio audio;
   if (!noAudio && !audio.open(S.cls, dataDir)) std::fprintf(stderr, "xbr: no audio device (%s) — running silent\n", SDL_GetError());
@@ -747,6 +795,20 @@ int main(int argc, char **argv) {
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: { if (hidden) break; int w, h; SDL_GetWindowSizeInPixels(win, &w, &h); R.resize(w, h); K = std::max(1.0f, SDL_GetWindowPixelDensity(win)); break; }
         case SDL_EVENT_WINDOW_FOCUS_LOST: if (screen == DRIVE && !hidden && !autoDrive) { screen = PAUSE; pauseAt = 0; pauseSay = "it will still be here."; bridge.release(); } break;
         case SDL_EVENT_JOYSTICK_ADDED: case SDL_EVENT_JOYSTICK_REMOVED: dev.scan(); break;
+        case SDL_EVENT_MOUSE_MOTION: case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+          // window coordinates -> the pixels everything is drawn in
+          int ww = 1, wh = 1;
+          SDL_GetWindowSize(win, &ww, &wh);
+          const bool click = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT;
+          if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !click) break;
+          const float mx = (e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.x : e.button.x) * (float)R.W / (float)std::max(1, ww);
+          const float my = (e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.y : e.button.y) * (float)R.H / (float)std::max(1, wh);
+          auto in = [&](const GameHud::Box &b) { return mx >= b.x && my >= b.y && mx <= b.x + b.w && my <= b.y + b.h; };
+          if (screen == HOME) home.mouse(mx, my, click);
+          else if (screen == PAUSE) { for (size_t i = 0; i < hud.pauseBoxes.size(); i++) if (in(hud.pauseBoxes[i])) { pauseAt = (int)i; if (click) act[A_OK] = true; } }
+          else if (screen == RESULTS && click && in(hud.menuBox)) act[A_OK] = true;
+          break;
+        }
         case SDL_EVENT_KEY_DOWN: {
           if (e.key.repeat && screen == DRIVE) break;
           const bool menuish = screen != DRIVE;
@@ -786,10 +848,13 @@ int main(int argc, char **argv) {
     {
       bool held[A_COUNT] = {false};
       const std::set<int> &rb = bridge.buttons;
-      held[A_UP] = rim.held(rb, "up"); held[A_DOWN] = rim.held(rb, "down"); held[A_LEFT] = rim.held(rb, "left"); held[A_RIGHT] = rim.held(rb, "right");
-      held[A_OK] = rim.held(rb, "confirm"); held[A_BACK] = rim.held(rb, "back");
-      held[screen == HOME ? A_GO : A_PAUSE] = rim.held(rb, "pause");
-      held[A_CAM] = rim.held(rb, "cam"); held[A_DRS] = rim.held(rb, "drs");
+      SDL_Joystick *jy = dev.joy;
+      held[A_UP] = rim.held(jy, rb, "up"); held[A_DOWN] = rim.held(jy, rb, "down"); held[A_LEFT] = rim.held(jy, rb, "left"); held[A_RIGHT] = rim.held(jy, rb, "right");
+      held[A_OK] = rim.held(jy, rb, "confirm"); held[A_BACK] = rim.held(jy, rb, "back");
+      held[screen == HOME ? A_GO : A_PAUSE] = rim.held(jy, rb, "pause");
+      held[A_CAM] = rim.held(jy, rb, "cam"); held[A_DRS] = rim.held(jy, rb, "drs");
+      // on the wheel there is no Enter within reach: in the menus either paddle confirms too
+      if (screen != DRIVE) held[A_OK] |= rim.held(jy, rb, "shiftUp");
       if (dev.pad) {
         auto pb = [&](SDL_GamepadButton b) { return SDL_GetGamepadButton(dev.pad, b); };
         const double ax = SDL_GetGamepadAxis(dev.pad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0, ay = SDL_GetGamepadAxis(dev.pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0;
@@ -902,6 +967,20 @@ int main(int argc, char **argv) {
       const double sf = S.car->surface;
       const double rough = sf < 0.9 ? 0.45 : sf < 1 ? 0.22 : 0;
       bridge.update(*S.car, rough, dt, screen == DRIVE && !autoDrive && !bgOn && cfg.ffb > 0, cfg.ffb / 100.0);
+      // force is wanted and no bridge has answered for a few seconds: start it, once
+      if (!hidden && cfg.ffb > 0 && dev.joy && !bridge.live() && !bridgeTried) {
+        bridgeWait += dt;
+        if (bridgeWait > 3.5) {
+          bridgeTried = true;
+          bridgePid = spawnBridge(dataDir + "/..");
+          std::fprintf(stderr, bridgePid > 0 ? "xbr: started the wheel bridge (tools/ffb.py --max 1.0), log in /tmp/xbr-ffb-bridge.log\n"
+                                               : "xbr: could not start tools/ffb.py — no force feedback\n");
+        }
+      }
+      // the pointer belongs to the menus, not to the windscreen
+      static bool cursorOn = true;
+      const bool wantCursor = screen != DRIVE;
+      if (wantCursor != cursorOn) { cursorOn = wantCursor; if (cursorOn) SDL_ShowCursor(); else SDL_HideCursor(); }
     }
 
     FrameIn f = frameOf(dt);
@@ -918,6 +997,7 @@ int main(int argc, char **argv) {
     if (maxFrames > 0 && frames >= maxFrames) running = false;
   }
   bridge.release();
+  if (bridgePid > 0) { SDL_Delay(120); kill(bridgePid, SIGTERM); waitpid(bridgePid, nullptr, 0); }   // the bridge we started goes with us; its last act is to zero the wheel
   if (!savePath.empty()) cfg.save(savePath);
   if (maxFrames > 0) {
     // What the rig contributed: with --hidden there is no vsync, no compositor

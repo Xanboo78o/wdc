@@ -335,8 +335,10 @@ void GameHud::pause(Renderer &R, float k, const HudTheme &T, const std::vector<s
   R.textPx((x0 + 28) * k, y * k, 22 * k, "PAUSED", T.ink, LEFT, I9, 0.18f);
   y += 34;
   if (!say.empty()) { R.textPx((x0 + 28) * k, (y - 6) * k, 11 * k, say, DIM, LEFT, B7, 0.04f); y += 18; }
+  pauseBoxes.clear();
   for (size_t i = 0; i < items.size(); i++) {
     const bool on = (int)i == at;
+    pauseBoxes.push_back({x0 * k, y * k, w * k, 34 * k});
     if (on) {
       // the lit row: team colour fading out to the right, and a slanted tick
       for (int s = 0; s < 8; s++) R.rect((x0 + w * 0.1f * (float)s) * k, y * k, w * 0.1f * k + 1, 34 * k, alpha(T.pri, 0.24f * (1 - (float)s / 8)));
@@ -409,6 +411,7 @@ void GameHud::results(Renderer &R, float k, const HudTheme &T, Race &race, const
   y += tableH + 18;
   // MENU: the go button, a parallelogram in the team's colour
   const float bw = R.widthPx(17 * k, "MENU", I9, 0.2f) / k + 124, bx = W / 2 - bw / 2;
+  menuBox = {bx * k, y * k, bw * k, 47 * k};
   plate(R, k, bx + 12, y, bx + bw, y, bx + bw - 12, y + 47, bx, y + 47, T.pri);
   R.textPx(W / 2 * k, (y + 15) * k, 17 * k, "MENU", T.onpri, CENTRE, I9, 0.2f);
 }

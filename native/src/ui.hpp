@@ -50,6 +50,10 @@ class GameHud {
   // CHEQUERED FLAG. `title` uses <span>…</span> for the coloured half, as the JS does.
   void results(Renderer &R, float k, const HudTheme &T, Race &race, const std::string &title, const std::string &line);
   void loading(Renderer &R, float k, const HudTheme &T, const std::string &text);
+  // where the pause rows and the results' MENU button were last drawn (device pixels), for the mouse
+  struct Box { float x, y, w, h; };
+  std::vector<Box> pauseBoxes;
+  Box menuBox{0, 0, 0, 0};
   void reset() { seen = -1; shownAt = -99; hasLast = false; towerAcc = 9; rows.clear(); }
 
  private:

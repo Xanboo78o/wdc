@@ -20,7 +20,7 @@ struct MenuSave {
   bool noDnf = false;
   std::string time = "live", weather = "live", battle = "medium", field = "f1", theme = "light", music = "on";
   std::map<std::string, std::string> teams;      // league -> team key ("" = none yet)
-  int ffb = 0, cam = 0, volume = 8;              // native only: the wheel's force is OFF until you raise it
+  int ffb = 50, cam = 0, volume = 8;             // native only. ffb: percent of the bridge's ceiling (Adam: "starts at 50%")
   bool line = false;
   void load(const std::string &path);
   void save(const std::string &path) const;
@@ -39,6 +39,8 @@ class Home {
   bool wantStart = false, wantQuit = false;       // read and clear
   bool dirty = false;                             // the circuit or the car changed: the backdrop should follow
   void input(Nav n);
+  // the mouse, in device pixels: hovering lights a card, a click presses what is under it
+  void mouse(float x, float y, bool click);
   void draw(Renderer &R, float k, double clock, const LiveTower &live);
   bool overWorld() const { return page == "home"; }   // only HOME has the race behind it
   void say(const std::string &t) { if (!t.empty()) { sayText = t; sayAt = now; } }
@@ -49,6 +51,8 @@ class Home {
 
  private:
   struct Item { std::function<void()> ok, left, right; };
+  struct Hot { float x, y, w, h; int item; std::function<void()> fn; };
+  std::vector<Hot> hots;        // rebuilt by every draw
   std::vector<Item> items;
   int at = 0;
   std::function<void()> back;

@@ -71,15 +71,18 @@ static std::string greeting() {
 void MenuSave::load(const std::string &path) {
   std::ifstream f(path);
   std::string k, v;
+  int ffbSeen = -1, ffbVer = 0;
   while (f >> k && std::getline(f >> std::ws, v)) {
     if (k == "track") track = v; else if (k == "car") car = v; else if (k == "mode") mode = v; else if (k == "tier") tier = v;
     else if (k == "start") start = v; else if (k == "grid") grid = std::atoi(v.c_str()); else if (k == "laps") laps = std::atoi(v.c_str());
     else if (k == "noDnf") noDnf = v == "1"; else if (k == "time") time = v; else if (k == "weather") weather = v;
     else if (k == "battle") battle = v; else if (k == "field") field = v; else if (k == "theme") theme = v; else if (k == "music") music = v;
     else if (k == "team.f1") teams["f1"] = v; else if (k == "team.gt3") teams["gt3"] = v; else if (k == "team.f4") teams["f4"] = v;
-    else if (k == "ffb") ffb = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
+    else if (k == "ffb") ffbSeen = std::atoi(v.c_str()); else if (k == "ffbv") ffbVer = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
     else if (k == "volume") volume = std::atoi(v.c_str()); else if (k == "line") line = v == "1";
   }
+  // a record from before the wheel's force was set up said 0 because nothing else was possible
+  if (ffbSeen >= 0 && ffbVer >= 2) ffb = ffbSeen;
   if (!hasCarSpec(car)) car = "f1";
   grid = std::max(2, std::min(61, grid)); laps = std::max(1, std::min(999, laps));
   cam = std::max(0, std::min(3, cam)); ffb = std::max(0, std::min(100, ffb)); volume = std::max(0, std::min(10, volume));
@@ -90,7 +93,7 @@ void MenuSave::save(const std::string &path) const {
   std::ofstream f(path);
   f << "track " << track << "\ncar " << car << "\nmode " << mode << "\ntier " << tier << "\nstart " << start << "\ngrid " << grid
     << "\nlaps " << laps << "\nnoDnf " << (noDnf ? 1 : 0) << "\ntime " << time << "\nweather " << weather << "\nbattle " << battle
-    << "\nfield " << field << "\ntheme " << theme << "\nmusic " << music << "\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
+    << "\nfield " << field << "\ntheme " << theme << "\nmusic " << music << "\nffbv 2\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
     << "\nline " << (line ? 1 : 0) << "\n";
   for (const auto &kv : teams) if (!kv.second.empty()) f << "team." << kv.first << " " << kv.second << "\n";
 }
@@ -278,6 +281,20 @@ void Home::input(Nav n) {
   at = std::max(0, std::min((int)items.size() - 1, at + (n == Nav::Up ? -1 : 1)));
 }
 
+void Home::mouse(float x, float y, bool click) {
+  // the last one drawn is on top: search from the back
+  for (auto it = hots.rbegin(); it != hots.rend(); ++it) {
+    if (x < it->x || y < it->y || x > it->x + it->w || y > it->y + it->h) continue;
+    if (it->item >= 0 && it->item < (int)items.size()) at = it->item;
+    if (click) {
+      const std::function<void()> fn = it->fn;       // it may rebuild the page under us
+      if (fn) fn();
+      else if (it->item >= 0 && it->item < (int)items.size() && items[(size_t)it->item].ok) { const auto ok = items[(size_t)it->item].ok; ok(); }
+    }
+    return;
+  }
+}
+
 // ---- outlines: the circuit, from the surveyed centreline the car drives on ----------------
 const Home::Outline &Home::outline(const std::string &id) {
   auto it = outlines.find(id);
@@ -331,6 +348,8 @@ void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, con
 // ---- drawing ---------------------------------------------------------------------------
 void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   now = clock;
+  hots.clear();
+  auto hot = [&](float x, float y, float w, float h, int item, std::function<void()> fn = nullptr) { hots.push_back({x * k, y * k, w * k, h * k, item, std::move(fn)}); };
   const float W = (float)R.W / k, H = (float)R.H / k;
   const int A = Renderer::ANTON, RB = Renderer::RUBIK, MK = Renderer::MARKER;
   auto text = [&](float x, float y, float size, const std::string &s, const Rgba &c, Align al = LEFT, int font = 1, float track = 0) {
@@ -389,6 +408,8 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   auto foot = [&](const std::string &next, const std::string &hint, bool on) {
     float y = H - 22 - 50;
     R.card(24 * k, y * k, (width(26, "< BACK", A, 0.04f) + 60) * k, 50 * k, 12 * k, 2.5f * k, CARD, INK);
+    hot(24, y, width(26, "< BACK", A, 0.04f) + 60, 50, -1, [this] { if (back) back(); });
+    hot(W - 24 - (width(26, next + " >", A, 0.04f) + 60), y, width(26, next + " >", A, 0.04f) + 60, 50, (int)items.size() - 1);
     text(54, y + 13, 26, "< BACK", INK, LEFT, A, 0.04f);
     text(W / 2, y + 20, 10, hint, SOFT, CENTRE, RB, 0.14f);
     const std::string nl = next + " >";
@@ -422,6 +443,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         const float x = 30 + c * (cw + 9);
         if (on) R.rrect(x * k, (y + 5) * k, cw * k, m * k, 12 * k, RED);
         R.card(x * k, y * k, cw * k, m * k, 12 * k, (on ? 3 : 2.5f) * k, CARD, INK);
+        hot(x, y, cw, m, first + (int)i + c, [] {});
         text(x + 12, y + 10, 10, o.label, on ? RED : SOFT, LEFT, RB, 0.18f);
         float px = x + 12, py = y + 9 + 18;
         const std::string cur = get(o.key);
@@ -430,6 +452,11 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
           if (px + pw > x + cw - 12 && px > x + 12) { px = x + 12; py += 31; }
           const bool sel = p.first == cur;
           R.card(px * k, py * k, pw * k, 25 * k, 9 * k, 2 * k, sel ? INK : CARD, INK);
+          {
+            const std::string key = o.key, val = p.first, label = o.label, pg = page;
+            const int idx = first + (int)i + c;
+            hot(px, py, pw, 25, idx, [this, key, val, label, pg, idx] { set(key, val); show(pg, idx); say(sayFor(label, val)); });
+          }
           text(px + 14, py + 5, 16, p.second, sel ? PAPER : INK, LEFT, A, 0.04f);
           px += pw + 6;
         }
@@ -482,6 +509,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
       const bool on = at == 10;
       float y = 141;
       chunk(24, y, 250, 116, on, CARD);
+      hot(24, 141, 250, 116, 10);
       const Rgba fg = on ? PAPER : INK, sm = on ? alpha_(PAPER, 0.75f) : SOFT;
       std::string no = "?";
       if (team) { const auto dv = driversOf(tk); if (!dv.empty()) no = std::to_string(dv[0]->num); }
@@ -529,6 +557,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         const bool on = at == 1;
         float y = bottom - 180;
         chunk(24, y, 250, 180, on, CARD);
+        hot(24, bottom - 180, 250, 180, 1);
         const Rgba fg = on ? PAPER : INK, sm = on ? alpha_(PAPER, 0.75f) : SOFT;
         text(37, y + 12, 10, "NEXT UP", sm, LEFT, RB, 0.16f);
         drawMap(R, k, 37, y + 29, 224, 96, S.track, true, clock);
@@ -547,6 +576,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         const float x = W - 24 - 236;
         if (on) { y -= 3; R.rrect(x * k, (y + 6) * k, 236 * k, 112 * k, 16 * k, INK); }
         R.card(x * k, y * k, 236 * k, 112 * k, 16 * k, 3 * k, RED, INK);
+        hot(x, bottom - 112, 236, 112, 0);
         text(x + 118, y + 18, 58, "RACE", ONRED, CENTRE, A, 0.04f);
         char sub[96];
         if (S.mode == "race") std::snprintf(sub, sizeof sub, "%d LAPS - %d CARS - %s", S.laps, S.grid, upper(TRACKS[ti][1]).c_str());
@@ -566,6 +596,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
           const float rw = (float)inRow * 98 + (float)(inRow - 1) * 10;
           float x = x0 + (avail - rw) / 2 + (float)col * 108, y = bottom - 90 - (float)(rowsN - 1 - row) * 100;
           const bool on = at == 2 + i;
+          hot(x, y, 98, 90, 2 + i);
           chunk(x, y, 98, 90, on, CARD);
           const Rgba fg = on ? PAPER : INK, g1 = on ? hex("#d9d9d9") : hex("#5a5a5a"), g2 = on ? hex("#9a9a9a") : hex("#9c9c9c");
           const float cx = x + 49, cy = y + 34;
@@ -611,6 +642,9 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
       if (on) R.rrect(24 * k, (y + 5) * k, w * k, h * k, 12 * k, RED);
       R.card(24 * k, y * k, w * k, h * k, 12 * k, (on ? 3 : 2.5f) * k, CARD, INK);
       auto arrow = [&](float x, const char *g) { R.circle((x + 25) * k, (y + 57) * k, 25 * k, INK); R.circle((x + 25) * k, (y + 57) * k, 22.5f * k, CARD); text(x + 25, y + 44, 24, g, INK, CENTRE, RB); };
+      hot(24, y, w, h, 0, [] {});
+      hot(36, y + 32, 50, 50, 0, [this] { at = 0; input(Nav::Left); });
+      hot(W - 24 - 12 - 50, y + 32, 50, 50, 0, [this] { at = 0; input(Nav::Right); });
       arrow(36, "<");
       R.hudRot((102 + 23) * k, (y + 57) * k, -7);
       R.circle((102 + 23) * k, (y + 57) * k, 23 * k, INK); R.circle((102 + 23) * k, (y + 57) * k, 20.5f * k, YELL);
@@ -654,6 +688,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         const bool sel = S.car == LEAGUE_KEYS[q];
         const std::string tn = S.teams[LEAGUE_KEYS[q]].empty() ? "NO TEAM" : upper(teamByKey(S.teams[LEAGUE_KEYS[q]])->name);
         R.card(x * k, (y + 6) * k, tw3[q] * k, 46 * k, 12 * k, 2.5f * k, sel ? INK : CARD, INK);
+        { const std::string lk = LEAGUE_KEYS[q]; hot(x, y + 6, tw3[q], 46, 0, [this, lk] { if (S.car != lk) { S.car = lk; garageAt = -1; dirty = true; show("garage", 0); say(sayFor("CAR", lk)); } }); }
         text(x + tw3[q] / 2, y + 13, 22, LEAGUE_NAMES[q], sel ? PAPER : INK, CENTRE, A, 0.04f);
         text(x + tw3[q] / 2, y + 37, 9, tn, sel ? alpha_(PAPER, 0.7f) : SOFT, CENTRE, RB, 0.14f);
         x += tw3[q] + 8;
@@ -690,7 +725,9 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
       const float gap = 22, total = 64 + 18 + 188 + gap + mw + gap + 188 + 18 + 64;
       float x = W / 2 - total / 2;
       auto arrow = [&](float ax, const char *g) { R.circle((ax + 32) * k, cy * k, 32 * k, INK); R.circle((ax + 32) * k, cy * k, 29.5f * k, CARD); text(ax + 32, cy - 16, 30, g, INK, CENTRE, RB); };
+      hot(x, cy - 32, 64, 64, 1, [this] { at = 1; input(Nav::Left); });
       arrow(x, "<"); x += 64 + 18;
+      hot(x, cy - 113, 188, 226, 1, [this] { at = 1; input(Nav::Left); });
       side(keys[(size_t)((i - 1 + n) % n)], x); x += 188 + gap;
       {
         const std::string kk = keys[(size_t)i];
@@ -698,6 +735,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         const float y = cy - mh / 2;
         R.rrect(x * k, (y + 7) * k, mw * k, mh * k, 12 * k, RED);
         R.card(x * k, y * k, mw * k, mh * k, 12 * k, 3 * k, CARD, INK);
+        hot(x, y, mw, mh, 1);
         const float ns = std::max(26.0f, std::min(48.0f, W * 0.036f));
         const float lh = mh - 13 - 15 - 10 - ns - 4 - 14 - 5 - 16;
         livery(x + 15, y + 13, mw - 30, lh, t);
@@ -730,7 +768,9 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         if (boo && at == 1) pumpkin(x + mw + 2, y - 2, 32);
         x += mw + gap;
       }
+      hot(x, cy - 113, 188, 226, 1, [this] { at = 1; input(Nav::Right); });
       side(keys[(size_t)((i + 1) % n)], x); x += 188 + 18;
+      hot(x, cy - 32, 64, 64, 1, [this] { at = 1; input(Nav::Right); });
       arrow(x, ">");
       foot(S.teams[S.car] == keys[(size_t)i] ? "DONE" : "JOIN", "UP LEAGUE  -  LEFT / RIGHT TEAM  -  ENTER JOIN", at == 2);
     }
