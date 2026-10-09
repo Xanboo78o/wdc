@@ -14,7 +14,8 @@
 
     garage.html?car=p911&yaw=35&pitch=10&dist=7
       car    a key from data/cars/index.json
-      paint  a colour (hex, no #) to respray the paintwork; absent = as it came
+      livery which of the car's eighty teams (0-79); absent = the first
+      paint  a colour (hex, no #) for plain paintwork instead of a team's livery
       spin   0 stops the wheels
       steer  degrees of lock on the front wheels
 
@@ -34,6 +35,14 @@
   #info{position:fixed;right:14px;top:14px;text-align:right;background:#14161ad9;border-radius:6px;padding:10px 14px;font-weight:500;color:#a9adb3;line-height:1.55}
   #info b{color:#fff;font-size:17px;font-weight:700}
   #info a{color:#a9adb3}
+  #teams{position:fixed;right:14px;top:262px;bottom:14px;width:300px;overflow-y:auto;background:#14161ad9;border-radius:6px;padding:6px;scrollbar-width:thin}
+  #teams div{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer;font-weight:500;color:#cfd2d6;white-space:nowrap;overflow:hidden}
+  #teams div:hover{background:#2a2d33}
+  #teams div.on{background:#d6001c;color:#fff}
+  #teams b{display:inline-block;min-width:34px;text-align:right;font-weight:800}
+  #teams i{flex:none;width:30px;height:14px;border-radius:3px;border:1px solid #0008}
+  #teams small{color:#8a8f98;margin-left:auto;padding-left:8px;font-size:11px}
+  #teams div.on small{color:#ffd9de}
 </style>
 <script type="importmap">
 { "imports": { "three": "./js/vendor/three.module.min.js" } }
@@ -44,6 +53,7 @@
 <div id="cars"></div>
 <div id="paint"></div>
 <div id="info"></div>
+<div id="teams"></div>
 <script type="module">
 import * as THREE from 'three';
 
@@ -106,7 +116,7 @@ function makeMaterial(m, dir) {
   const map = m.map ? tex(dir, m.map) : null;
   let mat;
   switch (m.role) {
-    case 'paint': mat = new THREE.MeshPhysicalMaterial({ color: col, map, roughness: 0.34, metalness: 0.25, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.1 }); break;
+    case 'paint': mat = new THREE.MeshPhysicalMaterial({ color: col, map, roughness: 0.34, metalness: 0.25, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.1 }); mat.userData.livery = true; break;
     case 'glass': mat = new THREE.MeshPhysicalMaterial({ color: 0x0b0e12, roughness: 0.04, metalness: 0.2, transparent: true, opacity: 0.55, envMapIntensity: 1.6, depthWrite: false }); break;
     case 'tyre': mat = new THREE.MeshStandardMaterial({ color: map ? 0xffffff : 0x111214, map, roughness: 0.9, metalness: 0 }); break;
     case 'rim': mat = new THREE.MeshStandardMaterial({ color: map ? 0xffffff : (col.getHSL({}).l < 0.02 ? new THREE.Color(0x2a2c30) : col), map, roughness: 0.32, metalness: 0.85 }); break;
@@ -120,6 +130,7 @@ function makeMaterial(m, dir) {
   mat.side = THREE.DoubleSide;      // downloaded bodywork is often one skin thick
   mat.userData.role = m.role;
   mat.userData.orig = { color: mat.color.clone(), map: mat.map };
+  if (mat.userData.livery) liveried(mat);
   return mat;
 }
 async function loadCar(key) {
@@ -150,32 +161,103 @@ async function loadCar(key) {
   return { car, root, hubs, spins, mats };
 }
 
+// ---- liveries: the same shader the native game uses (data/livery/livery.glsl) ---------------
+const LIV_GLSL = await (await fetch('./data/livery/livery.glsl')).text().catch(() => '');
+const sheet = await tl.loadAsync('./data/livery/atlas.png').catch(() => null);
+if (sheet) { sheet.colorSpace = THREE.SRGBColorSpace; sheet.flipY = false; sheet.generateMipmaps = false; sheet.minFilter = sheet.magFilter = THREE.LinearFilter; }
+const v4s = n => Array.from({ length: n }, () => new THREE.Vector4());
+const LIV = {
+  uLivOn: { value: 0 }, uLivBase: { value: new THREE.Color() }, uLivFrame: { value: new THREE.Vector4(0, 2.3, 1.2, 1) },
+  uLivN: { value: 0 }, uLivType: { value: new Array(8).fill(0) }, uLivCol: { value: Array.from({ length: 8 }, () => new THREE.Color()) },
+  uLivP: { value: v4s(8) }, uLivSide: { value: new Array(8).fill(0) },
+  uStkN: { value: 0 }, uStkRect: { value: v4s(24) }, uStkUv: { value: v4s(24) }, uStkTint: { value: v4s(24) }, uStkPlane: { value: new Array(24).fill(0) },
+  uSheet: { value: sheet },
+};
+function liveried(mat) {
+  if (!LIV_GLSL) return;
+  mat.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, LIV);
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vCarP; varying vec3 vCarN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCarP = position; vCarN = normal;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+varying vec3 vCarP; varying vec3 vCarN;
+uniform int uLivOn; uniform vec3 uLivBase; uniform vec4 uLivFrame; uniform sampler2D uSheet;
+${LIV_GLSL}`).replace('#include <color_fragment>', `#include <color_fragment>
+if (uLivOn == 1) {
+  vec3 lp = vec3((vCarP.x - uLivFrame.x) / uLivFrame.y, vCarP.y / uLivFrame.z, vCarP.z / uLivFrame.w);
+  diffuseColor.rgb = stickers(livery(lp, uLivBase), lp, normalize(vCarN), uSheet);
+}`);
+  };
+  mat.customProgramCacheKey = () => 'xbr-livery';
+}
+let liveries = [], liveryIx = 0;
+function wear(ix) {
+  if (!now) return;
+  const L = liveries[ix];
+  const on = !!L && !paint;
+  LIV.uLivOn.value = on ? 1 : 0;
+  for (const m of now.mats) {
+    const role = m.userData.role, o = m.userData.orig;
+    if (role === 'paint') {
+      if (paint) { m.color.set('#' + paint); m.map = null; }
+      else if (on) { m.color.set(0xffffff); m.map = null; }
+      else { m.color.copy(o.color); m.map = o.map; }
+      const f = on ? L.finish : 0;      // 0 gloss · 1 matte · 2 metallic · 3 chrome · 4 pearl
+      m.roughness = f === 1 ? 0.72 : f === 3 ? 0.07 : 0.34; m.metalness = f === 2 ? 0.6 : f === 3 ? 1 : 0.25; m.clearcoat = f === 1 ? 0 : 1;
+      m.needsUpdate = true;
+    } else if (role === 'rim') {
+      if (on && L.rim) m.color.set('#' + L.rim); else m.color.copy(o.color);
+    }
+  }
+  if (!on) return;
+  liveryIx = ix;
+  const c = now.car;
+  LIV.uLivFrame.value.set((c.lo[0] + c.hi[0]) / 2, (c.hi[0] - c.lo[0]) / 2, c.hi[1], Math.max(c.hi[2], -c.lo[2]));
+  LIV.uLivBase.value.set('#' + L.base);
+  LIV.uLivN.value = L.layers.length;
+  L.layers.forEach((y, k) => { LIV.uLivType.value[k] = y.t; LIV.uLivCol.value[k].set('#' + y.c); LIV.uLivP.value[k].fromArray(y.q); LIV.uLivSide.value[k] = y.s || 0; });
+  LIV.uStkN.value = sheet ? L.stickers.length : 0;
+  L.stickers.forEach((y, k) => {
+    LIV.uStkRect.value[k].fromArray(y.rect); LIV.uStkUv.value[k].fromArray(y.uv); LIV.uStkPlane.value[k] = y.plane;
+    if (y.tint) { const t = new THREE.Color('#' + y.tint); LIV.uStkTint.value[k].set(t.r, t.g, t.b, 1); } else LIV.uStkTint.value[k].set(0, 0, 0, 0);
+  });
+  for (const d of teamsEl.children) d.classList.toggle('on', +d.dataset.ix === ix);
+  const hit = teamsEl.querySelector('.on'); if (hit) hit.scrollIntoView({ block: 'nearest' });
+  teamEl().innerHTML = `<b>#${L.num} ${L.name}</b><br>${L.design} &middot; ${L.way}<br>${L.title} + ${L.sponsors.length} more`;
+}
+const teamEl = () => document.getElementById('team') || Object.assign(infoEl.appendChild(document.createElement('div')), { id: 'team', style: 'margin-top:8px;padding-top:8px;border-top:1px solid #fff2' });
+
 // ---- the room ------------------------------------------------------------------------------
 const PAINTS = ['d6001c', 'ff5a1f', 'ffcc00', 'cfff1a', '2fb34a', '0b5b46', '00d2be', '47c7fc', '1a55d8', '0e1c43', '6a2fb0', 'ff5fa2', 'f2f2ee', '9a9ea4', '15161a'];
-let now = null, paint = q.get('paint');
-function respray() {
-  if (!now) return;
-  for (const m of now.mats) if (m.userData.role === 'paint') {
-    if (paint) { m.color.set('#' + paint); m.map = null; } else { m.color.copy(m.userData.orig.color); m.map = m.userData.orig.map; }
-    m.needsUpdate = true;
-  }
-}
+let now = null, paint = q.get('paint'), wantLivery = +(q.get('livery') || 0);
+function respray() { wear(liveryIx); }
 const index = await (await fetch('./data/cars/index.json')).json().catch(() => []);
-const carsEl = document.getElementById('cars'), infoEl = document.getElementById('info'), paintEl = document.getElementById('paint');
+const carsEl = document.getElementById('cars'), infoEl = document.getElementById('info'), paintEl = document.getElementById('paint'), teamsEl = document.getElementById('teams');
 async function show(key) {
   window.__garage = false;
   const next = await loadCar(key);
   if (now) scene.remove(now.root);
   now = next;
   scene.add(now.root);
-  respray();
+  liveries = await (await fetch(`./data/livery/${key}.json`)).json().catch(() => []);
+  teamsEl.innerHTML = '';
+  liveries.forEach((L, ix) => {
+    const d = document.createElement('div');
+    d.dataset.ix = ix;
+    d.innerHTML = `<i style="background:linear-gradient(90deg,#${L.chips[0]} 50%,#${L.chips[1]} 50% 80%,#${L.chips[2]} 80%)"></i><b>${L.num}</b>${L.name}<small>${L.design}</small>`;
+    d.onclick = () => { paint = null; wear(ix); url(); };
+    teamsEl.appendChild(d);
+  });
+  teamsEl.style.display = liveries.length ? '' : 'none';
+  liveryIx = Math.min(Math.max(0, wantLivery), Math.max(0, liveries.length - 1));
   for (const b of carsEl.children) b.classList.toggle('on', b.dataset.key === key);
   const c = now.car;
   infoEl.innerHTML = `<b>${c.title}</b><br>${c.klass.toUpperCase()} &middot; ${c.tris.toLocaleString()} triangles<br>` +
     `${c.size[0].toFixed(2)} m long &middot; ${c.size[2].toFixed(2)} wide &middot; ${c.size[1].toFixed(2)} high<br>wheelbase ${c.wheelbase.toFixed(2)} m &middot; tyres ${(c.wheels.fl.r * 200).toFixed(0)} cm<br>` +
     (c.credit.author ? `model by ${c.credit.author.replace(/\s*\(http.*/, '')} &middot; ${c.credit.licence ? c.credit.licence.replace(/\s*\(http.*/, '') : ''}` : '');
   target.set(0, c.size[1] * 0.42, 0);
-  history.replaceState(null, '', `?car=${key}` + (paint ? `&paint=${paint}` : ''));
+  wear(liveryIx);
+  url();
 }
 for (const c of index) {
   const b = document.createElement('button');
@@ -187,10 +269,16 @@ for (const c of index) {
 for (const p of [null, ...PAINTS]) {
   const i = document.createElement('i');
   if (p) i.style.background = '#' + p; else { i.className = 'orig'; i.title = 'as it came'; }
-  i.onclick = () => { paint = p; respray(); history.replaceState(null, '', `?car=${now.car.key}` + (paint ? `&paint=${paint}` : '')); };
+  i.onclick = () => { paint = p; respray(); url(); };
   paintEl.appendChild(i);
 }
 
+function url() { history.replaceState(null, '', `?car=${now.car.key}` + (paint ? `&paint=${paint}` : `&livery=${liveryIx}`)); }
+addEventListener('keydown', e => {
+  if (!liveries.length) return;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { paint = null; wear((liveryIx + 1) % liveries.length); url(); e.preventDefault(); }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { paint = null; wear((liveryIx + liveries.length - 1) % liveries.length); url(); e.preventDefault(); }
+});
 const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 400);
 const target = new THREE.Vector3(0, 0.5, 0);
 let yaw = (+(q.get('yaw') ?? 35)) * Math.PI / 180, pitch = (+(q.get('pitch') ?? 10)) * Math.PI / 180, dist = +(q.get('dist') ?? 7.2);

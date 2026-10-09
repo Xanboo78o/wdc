@@ -113,7 +113,7 @@ struct PackCar {
   size_t tris = 0;
   // the eighty teams this car can race as (data/livery/<key>.json), and the frame they are painted in
   struct Livery {
-    float base[3]; int finish = 0, nLayers = 0, nStk = 0;
+    float base[3]; float rim[4] = {0, 0, 0, 0}; int finish = 0, nLayers = 0, nStk = 0;
     int type[8]; float col[8][3], q[8][4], side[8];
     float rect[24][4], uv[24][4], tint[24][4], plane[24];
   };
@@ -142,7 +142,7 @@ static const char *LIV_STUB = "vec3 livery(vec3 p, vec3 b){ return b; }\nvec3 st
 static const char *CAR_FS_A = R"(#version 330 core
 in vec3 vW, vN, vP, vNo; in vec2 vU;
 uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish;
-uniform vec3 uLivBase; uniform vec4 uLivFrame;
+uniform vec3 uLivBase; uniform vec4 uLivFrame, uRim;
 )";
 static const char *CAR_FS_B = R"(
 uniform vec3 uColor, uPaint; uniform float uOpacity;
@@ -173,7 +173,11 @@ void main(){
   }
   else if (uRole == 2) { c = vec3(0.03, 0.04, 0.05); gloss = 0.9; shine = 120.0; mirror = 0.35; a = 0.62; }
   else if (uRole == 3) { if (uHasMap == 0) c = vec3(0.045); gloss = 0.04; shine = 8.0; }
-  else if (uRole == 4) { if (uHasMap == 0 && dot(c, vec3(0.333)) < 0.03) c = vec3(0.17, 0.17, 0.19); gloss = 0.45; shine = 40.0; mirror = 0.22; }
+  else if (uRole == 4) {
+    if (uHasMap == 0 && dot(c, vec3(0.333)) < 0.03) c = vec3(0.17, 0.17, 0.19);
+    // a team paints its wheels: the colour is theirs, the light and shade stay the wheel's own
+    if (uRim.a > 0.5) c = uRim.rgb * (uHasMap == 1 ? clamp(dot(t.rgb, vec3(0.333)) * 1.5 + 0.25, 0.3, 1.2) : 1.0);
+    gloss = 0.45; shine = 40.0; mirror = uRim.a > 0.5 ? 0.12 : 0.22; }
   else if (uRole == 7) { c = vec3(0.62, 0.63, 0.66); gloss = 0.8; shine = 90.0; mirror = 0.6; }
   else { gloss = 0.10; shine = 18.0; }
   float ndl = max(dot(n, uSun), 0.0);
@@ -242,6 +246,7 @@ const PackCar *Dress::pack(const std::string &key) {
       PackCar::Livery L{};
       hex(l["base"].s("d6001c"), L.base);
       L.finish = (int)l["finish"].n();
+      if (l["rim"].type == Json::Str) { hex(l["rim"].s(), L.rim); L.rim[3] = 1; }
       for (const Json &y : l["layers"].arr) {
         if (L.nLayers >= 8) break;
         const int k = L.nLayers++;
@@ -350,6 +355,8 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
     glUniform1i(U("uSheet"), 4);
     glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_2D, sheet);
   }
+  const float noRim[4] = {0, 0, 0, 0};
+  glUniform4fv(glGetUniformLocation(carProg, "uRim"), 1, L ? L->rim : noRim);
   const GLint uLivOn = glGetUniformLocation(carProg, "uLivOn");
   Mat4 hub[4], spin[4];
   for (int w = 0; w < 4; w++) {

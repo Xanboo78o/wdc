@@ -314,8 +314,10 @@ function build(key, carIx) {
     put('class:' + P.klass, 'side', [Z.door[0] - 0.1, Z.door[1] + 0.1, Z.sill[2], Z.door[3]], 0.30, 0.15, { want: [Z.door[1], Z.door[3]] });
     if (style !== 'clean') { put('safety:ext', 'side', [Z.door[0], Z.door[1] + 0.2, Z.door[2], Z.door[3] + 0.1], 0.11, 0.11, { want: [Z.door[1] + 0.1, Z.door[3]] }); put('safety:cut', 'side', [Z.door[0], Z.door[1] + 0.2, Z.door[2], Z.door[3] + 0.1], 0.11, 0.11, { want: [Z.door[1] + 0.1, Z.door[3] - 0.1] }); }
 
+    // the wheels: as they came, or in black, white, gold, bronze or one of the team's own colours
+    const rim = r() < 0.3 ? null : pick(['15161a', '15161a', 'f4f3ee', 'c9a13b', '8a5a2b', C[c], C[b], C[c]]);
     out.push({
-      name, num, design, way, style, title: title.n, sponsors: others.slice(0, n2).map(s => s.n), finish,
+      name, num, design, way, style, rim, title: title.n, sponsors: others.slice(0, n2).map(s => s.n), finish,
       base: C[a], chips: [C[a], C[b], C[c]], layers: liv.layers.slice(0, 8),
       stickers: S.slice(0, 24).map(s => ({ uv: uv(s.cell).map(v => +v.toFixed(5)), plane: s.plane, rect: s.rect, tint: s.tint })),
     });
