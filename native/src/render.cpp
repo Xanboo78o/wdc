@@ -893,11 +893,17 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
       P(i, ai, za, a); P(i, bi, zb, b); P(j, bj, zb, c); P(j, aj, za, d);
       m.flat(a, b, c, d, col, kind);
     };
-    strip(Li[4], Ri[4], Lj[4], Rj[4], ASPHALT, 1);
-    strip(Li[2], Li[3], Lj[2], Lj[3], ASPHALT, 1);
-    strip(Li[3], Li[4], Lj[3], Lj[4], WHITE, 0);
-    strip(Ri[4], Ri[3], Rj[4], Rj[3], WHITE, 0);
-    strip(Ri[3], Ri[2], Rj[3], Rj[2], ASPHALT, 1);
+    // THE ROAD MAY BE DIRT (track.road: 1 gravel, 2 snow — what the tyres already feel, now what you see):
+    // packed earth or snow from edge to edge, and no painted lines on either.
+    const int roadCode = track.road.empty() ? 0 : (int)track.road[(size_t)i];
+    static const float DIRT[3] = {0.47f, 0.37f, 0.26f}, SNOW[3] = {0.86f, 0.88f, 0.92f};
+    const float *RC = roadCode == 1 ? DIRT : roadCode == 2 ? SNOW : ASPHALT, *LC = roadCode ? RC : WHITE;
+    const float rk = roadCode == 1 ? 3 : roadCode == 2 ? 0 : 1, lk = roadCode ? rk : 0;
+    strip(Li[4], Ri[4], Lj[4], Rj[4], RC, rk);
+    strip(Li[2], Li[3], Lj[2], Lj[3], RC, rk);
+    strip(Li[3], Li[4], Lj[3], Lj[4], LC, lk);
+    strip(Ri[4], Ri[3], Rj[4], Rj[3], LC, lk);
+    strip(Ri[3], Ri[2], Rj[3], Rj[2], RC, rk);
     for (int side : {1, -1}) {
       const double *A = side > 0 ? Li : Ri, *B = side > 0 ? Lj : Rj;
       const int rt = std::max(0, std::min(3, side > 0 ? runL[i] : runR[i]));

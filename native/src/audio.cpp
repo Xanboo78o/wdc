@@ -22,6 +22,8 @@ const BoxSpec &boxFor(const std::string &cls) {
   static const BoxSpec gt3{1250, 7800, 7500, 0.70, {95, 130, 168, 205, 240, 273}};
   // a hypercar is geared like the GT car it is driven as, and revs like the V12 it sounds like
   static const BoxSpec hyper{1500, 9200, 8900, 0.70, {95, 130, 168, 205, 240, 273}};
+  static const BoxSpec rally{1400, 7800, 7500, 0.72, {62, 92, 122, 152, 182, 208}};
+  if (cls == "rally") return rally;
   if (cls == "f4") return f4;
   if (cls == "hyper") return hyper;
   if (cls == "gt3" || cls == "gt4" || cls == "gt" || cls == "911") return gt3;
@@ -125,7 +127,7 @@ const EngineP V12{12, 1500, 9200,
 const EngineP &paramsFor(int cls) { return cls == 0 ? I4 : cls == 2 ? V8 : cls == 3 ? V12 : V10; }
 // f4 | f1 | gt (gt3, gt4, 911 and the like) | hyper
 int clsIndex(const std::string &c) {
-  if (c == "f4") return 0;
+  if (c == "f4" || c == "rally") return 0;          // a four-cylinder, both of them
   if (c == "hyper") return 3;
   if (c == "gt3" || c == "gt4" || c == "gt" || c == "911") return 2;
   return 1;

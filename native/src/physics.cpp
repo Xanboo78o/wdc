@@ -106,6 +106,26 @@ static std::map<std::string, Spec> &specs() {
     hy.Fbrake = 30000; hy.brakeBal = 0.60;
     hy.mu = 1.88;
     m["hyper"] = hy;
+    // RALLY (Adam: "a dirt track and rally car so i can hard brake into tunrs and turn right to
+    // go left"). A short, tall, light car on gravel tyres, driven from the back. Three things make
+    // the pendulum turn work: a tyre whose grip barely falls away once it is sliding (broad
+    // curve), brakes biased rearward so the tail comes round when you stand on them turned in,
+    // and little yaw inertia, so a flick one way loads the car to swing the other.
+    Spec ra = gt;
+    ra.key = "rally"; ra.name = "RALLY"; ra.full = "RALLY CAR";
+    ra.m = 1230; ra.Izz = 1500; ra.Iyy = 1500; ra.Ixx = 480;
+    ra.L = 2.53; ra.a = 1.10; ra.b = 1.43;
+    ra.bodyL = 4.20; ra.bodyW = 1.88;
+    ra.h = 0.52;
+    ra.ClA = 0.55; ra.CdA = 0.86; ra.ClFloor = 0.2; ra.aeroBal = 0.42;
+    ra.Pmax = 285e3; ra.Fdrive = 11500;
+    // (scratch flick2.cpp, 30 m/s on gravel, 1.6 s of full lock then hands straight: it turns ~100 deg,
+    // slides to 70-85, and comes back on its own at 13-22 m/s. Looser than this it never comes back.)
+    ra.Fbrake = 20000; ra.brakeBal = 0.60;
+    ra.rollDist = 0.50;
+    ra.B = 8.0; ra.C = 1.45; ra.E = 0.60;
+    ra.mu = 1.36;
+    m["rally"] = ra;
     return m;
   }();
   return M;
@@ -536,6 +556,8 @@ Car makeCar(const std::string &cls) {
   car.spec = &carSpec(cls);
   makeTyres(car);
   car.aero = getAero(car.spec->key);
+  // a rally car is slid on purpose: less help than the circuit cars get, but not none
+  if (car.spec->key == "rally") car.aids = Aids{0.50, 0.40, 0.15};
   return car;
 }
 

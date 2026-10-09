@@ -33,6 +33,7 @@ struct MenuSave {
   bool xOn = false;
   // GT MODE (native only): hypercars, GT3 and GT4 on one grid; which of them you drive
   bool gtOn = false;
+  std::string gears = "auto";                   // native only: "manual" = the paddles are the gearbox, in any car (Xingus keeps its own, xGears)
   std::string gtClass = "gt3";
   std::string xStyle = "gt3", xGears = "manual", xTrack, xHeil = "heilgrand", xField = "4fun";
   int xBots = 0;                                 // 0 = the style's own number
@@ -72,6 +73,7 @@ class Home {
   // THE CAR YOU SIT IN. The setup page picks the car first, then the mode (Adam: "maybe just do car
   // type then mode"): F4, F1, GT3, GT4 or HYPERCAR, and any of them alone on a hot lap. The three GT
   // cars share the GT3 league (its teams, its garage); which of them is yours is S.gtClass.
+  bool noTeam() const { return S.xOn || S.car == "gt3" || S.car == "rally"; }      // cars that race without a team picked
   std::string seatCar() const { return eventOn || S.xOn || S.car != "gt3" ? S.car : S.gtClass; }
   std::string voice() const;
   std::string xTrackKey() const;                  // the circuit a Xingus session loads (a Heiligen route, the oval, or the usual one)

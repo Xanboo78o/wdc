@@ -204,6 +204,7 @@ struct Session {
   double t = 0, passAt = -9;
   Proj proj;
   bool xingus = false, xmanual = false;   // Xingus mode; and the paddles ARE the gearbox
+  bool manual = false;                    // MANUAL GEARS in the serious game, any car (Adam: "allow manual control no matter the car")
   bool hand = false;                      // handbrake held (X, or the rim's `handbrake`)
 };
 
@@ -272,6 +273,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     if (rs->freePace) o.duel = false;
     o.xingus = rs->xingus; o.xopt.car = rs->xcar; o.xopt.solo = rs->xsolo; o.xopt.derby = rs->xderby;
     o.xopt.stakes = rs->xstakes; o.xopt.loose = rs->xloose;
+    if (!rs->xingus) o.xopt.joker = false;      // a joker lap is Xingus's rule: in the serious game a fork is just another road
     o.real = true;                       // RACING REALISM (race.hpp): the game always races for real
     // GT MODE seats three classes; any other race in a GT class seats one, so that the
     // rivals are in the cars real racing asks of them (physics.hpp proSpec). Not Xingus: its cars are its own.
@@ -303,6 +305,19 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
 
 struct Toast { std::string msg; double t = 0; };
 
+// MANUAL GEARS, in the real car. The engine model has no gearbox of its own (power is power at
+// any speed), so the gear you are in does two honest things to your right foot: at the top of
+// it the limiter cuts the drive, and far below it the engine lugs and gives only part of it.
+static double gearThrottle(const Session &S, double throttle, double speed) {
+  if (!S.manual || !S.box || S.box->manual < 0) return throttle;
+  const auto &tops = S.box->box->tops;
+  const int g = std::max(0, std::min((int)tops.size() - 1, S.box->manual));
+  const double top = tops[(size_t)g] / 3.6, low = g > 0 ? tops[(size_t)g - 1] / 3.6 : 0;
+  if (speed >= top) return 0;
+  if (g > 0 && speed < low * 0.6) return throttle * std::max(0.3, speed / (low * 0.6));
+  return throttle;
+}
+
 // One 400 Hz substep of a HOT LAP. js/main.js, the solo branch.
 static void simStep(Session &S, const HandsIn &in, bool autoDrive, bool drsTap, Toast &toast) {
   Car &car = S.own;
@@ -318,6 +333,7 @@ static void simStep(Session &S, const HandsIn &in, bool autoDrive, bool drsTap, 
     car.brake = S.hands.brake;
     car.selector = S.hands.selector;
     car.delta = S.hands.wheel * steerLock(car.speed);
+    car.throttle = gearThrottle(S, car.throttle, car.speed);
   }
 
   const double al = std::fabs(proj.lat);
@@ -333,9 +349,15 @@ static void simStep(Session &S, const HandsIn &in, bool autoDrive, bool drsTap, 
   if (S.spec->drs && drsTap) car.drsOpen = !car.drsOpen;
   if (car.brake > 0.05) car.drsOpen = false;
 
+  // THE ROAD ITSELF may be gravel or snow (track.road, as the race reads it: race.cpp ROAD_MU / ROAD_DRAG)
+  double roadDrag = -1;
+  if (!track.road.empty() && al <= proj.w) {
+    const int code = (int)track.road[(size_t)proj.i];
+    if (code == 1) { surface = 0.8; roadDrag = 1.5; } else if (code == 2) { surface = 0.62; roadDrag = 1.3; }
+  }
   Env env;
   env.surface = surface; env.bank = proj.bank; env.bankDir = sign(proj.curv);
-  env.rollMul = dragFor(surface);
+  env.rollMul = roadDrag > 0 ? roadDrag : dragFor(surface);
   // gravity along the road: the surveyed gradient under the car's own heading
   env.slope = S.world->gradeAt(proj.s) * std::cos(car.hdg - track.hdg[(size_t)proj.i]);
   step(car, FIXED_DT, env);
@@ -378,7 +400,7 @@ static void raceStep(Session &S, const HandsIn &in, bool bot, bool drsTap, Toast
     pi.throttle = car.throttle; pi.brake = car.brake; pi.delta = car.delta;
   } else {
     S.hands.update(FIXED_DT, in);
-    pi.throttle = S.hands.throttle; pi.brake = S.hands.brake;
+    pi.throttle = gearThrottle(S, S.hands.throttle, car.speed); pi.brake = S.hands.brake;
     pi.delta = S.hands.wheel * steerLock(car.speed);
     pi.wheel = S.hands.wheel;
     car.selector = S.hands.selector;
@@ -738,7 +760,8 @@ int main(int argc, char **argv) {
     SP = std::move(N);
     usePack();
     SP->xmanual = cfg.xOn && cfg.xGears != "auto" && !autoDrive;      // a bot at the wheel does not pull paddles
-    if (SP->xmanual) SP->box->manual = 0;
+    SP->manual = !cfg.xOn && cfg.gears == "manual" && !autoDrive;
+    if (SP->xmanual || SP->manual) SP->box->manual = 0;
     bgOn = false;
     hud.reset();
     toast = {}; boomAt = -1;
@@ -1105,7 +1128,7 @@ int main(int argc, char **argv) {
       if (!autoDrive && (act[A_SHUP] || act[A_SHDN])) {
         Hands &hd = S.hands;
         const double v = S.car->speed;
-        if (S.xmanual) {
+        if (S.xmanual || S.manual) {
           Gearbox &b = *S.box;
           if (b.manual < 0) b.manual = 0;
           if (act[A_SHUP]) { if (hd.selector < 0) { hd.selector = 1; b.manual = 0; } else b.shift(1, v * 3.6); }
