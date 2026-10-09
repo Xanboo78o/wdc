@@ -9,6 +9,7 @@
 // was, and it read as "the steering is inverted".
 #pragma once
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "json.hpp"
@@ -104,6 +105,22 @@ class Renderer {
   void drawWorld(const FrameIn &f);
   // After the world and every car: develop the picture onto the screen. The HUD goes on top afterwards.
   void endScene(double time);
+  // THE SUSPENSION YOU CAN SEE. The sim keeps the wheels on the road; this is
+  // the body riding on its springs above them: it squats under downforce,
+  // goes down and comes back when the car lands, shakes over kerbs and grass,
+  // and lets the wheels hang when the car is in the air. One state a car.
+  struct Susp { float s = 0, v = 0, droop = 0, vzAir = 0, travel = 0.04f; bool air = false; double at = -1; unsigned rng = 1; };
+  std::unordered_map<const Car *, Susp> susp;
+  double frameT = 0;
+  float frameDt = 1.0f / 60;
+  const Susp &suspOf(const Car &car, const Spec &S);
+
+  // This frame's camera and light, for anything that draws itself into the scene
+  // between drawWorld() and endScene() (effects: smoke, fire, sparks, loose parts).
+  // The target is float when `post` is on: a colour above 1.0 blooms.
+  Mat4 curVP;
+  float curEye[3] = {0, 0, 0};
+  Look curLook;
   bool post = true;             // false: the plain picture, as it was (SETTINGS - LOOK)
   bool postOk = true;           // false: this GPU could not build the look at all
   bool treeShadows = true;

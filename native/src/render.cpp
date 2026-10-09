@@ -628,6 +628,7 @@ static std::vector<P2> polyOf(const Json &pts) {
 }
 
 void Renderer::buildWorld(const Track &track, const World &world, const Json &surf, const Json &env, const Line &raceLine) {
+  susp.clear();        // a new session: the cars are new cars
   const int n = track.n;
   const int segs = track.open ? n - 1 : n;
 
@@ -1129,17 +1130,59 @@ void Renderer::setDents(const Car *car) {
 }
 
 // One car: body, wings unless they have been knocked off, wheels unless lost.
+// One step of a car's body on its springs, once a frame however often it is asked for.
+const Renderer::Susp &Renderer::suspOf(const Car &car, const Spec &S) {
+  Susp &q = susp[&car];
+  if (q.at == frameT) return q;
+  const bool fresh = q.at < 0;
+  q.at = frameT;
+  // how the car is sprung: a single-seater barely moves and moves fast; a car with a roof rides
+  const bool gt = S.key == "gt3";
+  const float travel = S.key == "f1" ? 0.034f : gt ? 0.085f : 0.045f, hz = S.key == "f1" ? 4.6f : gt ? 2.1f : 3.6f, zeta = gt ? 0.34f : 0.48f;
+  q.travel = travel;
+  const float w = 2 * (float)PI * hz;
+  const float speed = (float)car.speed;
+  if (fresh) { q.air = car.airborne; q.s = 0; q.v = 0; return q; }
+  // the landing: what it was falling at goes into the springs
+  if (car.airborne) q.vzAir = (float)car.vz;
+  if (q.air && !car.airborne) q.v += std::max(-3.2f, std::min(0.0f, q.vzAir)) * 0.85f;
+  q.air = car.airborne;
+  // where it rests: pressed down by its wings, more the faster it goes
+  const float press = 0.5f * 1.225f * (float)S.ClA * speed * speed / (float)S.m;
+  const float rest = car.airborne ? travel * 0.55f : -std::min(travel * 0.62f, press / (w * w));
+  // what the road does to it
+  const double sf = car.surface;
+  const float rough = car.airborne ? 0 : sf < 0.5 ? 1.0f : sf < 0.7 ? 0.8f : sf < 0.999 ? 0.5f : 0.03f;
+  float dt = std::min(0.05f, frameDt);
+  while (dt > 1e-5f) {
+    const float h = std::min(dt, 1.0f / 240);
+    dt -= h;
+    q.rng = q.rng * 1664525u + 1013904223u;
+    const float kick = ((float)(q.rng >> 8) / 16777216.0f - 0.5f) * rough * std::min(1.0f, speed / 18) * 34.0f * travel / 0.05f;
+    q.v += (-w * w * (q.s - rest) - 2 * zeta * w * q.v + kick) * h;
+    q.s += q.v * h;
+    if (q.s < -travel) { q.s = -travel; if (q.v < 0) q.v *= -0.22f; }            // the bump stop
+    if (q.s > travel * 0.7f) { q.s = travel * 0.7f; if (q.v > 0) q.v *= -0.1f; }  // the droop limit
+  }
+  q.droop += ((car.airborne ? 1.0f : 0.0f) - q.droop) * std::min(1.0f, frameDt * 14);
+  return q;
+}
+
 void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPitch, double gRoll, const float paint[3], double rolled,
                        bool helmet) {
   const float gain = car.airborne ? 1.0f : 3.0f;
   const float gp = car.airborne ? 0.0f : (float)gPitch, gr = car.airborne ? 0.0f : (float)gRoll;
-  const Mat4 carM = Mat4::translate((float)car.x, (float)(groundH + std::max(0.0, car.z)), (float)-car.y)
-                  * Mat4::rotY((float)car.hdg) * Mat4::rotZ(gp + (float)car.pitch * gain) * Mat4::rotX(gr + (float)car.roll * gain);
+  const Mat4 wheelsM = Mat4::translate((float)car.x, (float)(groundH + std::max(0.0, car.z)), (float)-car.y)
+                     * Mat4::rotY((float)car.hdg) * Mat4::rotZ(gp + (float)car.pitch * gain) * Mat4::rotX(gr + (float)car.roll * gain);
+  // the body rides on its springs; the wheels stay on the road, and hang when there is none
+  const Susp &sp = suspOf(car, S);
+  const float hang = -sp.droop * sp.travel * 0.9f;
+  const Mat4 carM = wheelsM * Mat4::translate(0, sp.s, 0);
   if (packCar) {
     // The model stands on the road at mid-wheelbase; the sim's origin is the CG.
     const Mat4 M = carM * Mat4::translate((float)(S.a - S.L / 2), 0, 0);
     bool lost[4]; double sag[4];
-    for (int i = 0; i < 4; i++) { lost[i] = car.wheelLost[i]; sag[i] = car.hasSag ? car.sag[i] : 0; }
+    for (int i = 0; i < 4; i++) { lost[i] = car.wheelLost[i]; sag[i] = (car.hasSag ? car.sag[i] : 0) - sp.s + hang; }
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, false);
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, true);
     return;
@@ -1165,7 +1208,7 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     const double r = i < 2 ? wheelR_f : wheelR_r;
     // a flat tyre sits on its rim
     const float sag = car.hasSag ? (float)car.sag[i] : 0.0f;
-    Mat4 wm = carM * Mat4::translate((float)Wp[i][0], (float)r + sag, (float)-Wp[i][1]);
+    Mat4 wm = wheelsM * Mat4::translate((float)Wp[i][0], (float)r + sag + hang, (float)-Wp[i][1]);
     if (i < 2) wm = wm * Mat4::rotY((float)car.steerEff);
     wm = wm * Mat4::rotZ((float)(-rolled / r));
     drawMesh(i < 2 ? wheelF : wheelR, wm);
@@ -1390,7 +1433,9 @@ void Renderer::drawWorld(const FrameIn &f) {
   const float gain = (car.airborne || f.camMode == 0) ? 1.0f : 3.0f;
   const float carY = (float)(f.groundH + std::max(0.0, car.z));
   const float gp = car.airborne ? 0.0f : (float)f.gPitch, gr = car.airborne ? 0.0f : (float)f.gRoll;
-  const Mat4 carM = Mat4::translate((float)car.x, carY, (float)-car.y)
+  frameT = f.time; frameDt = (float)f.dt;
+  // a camera bolted to the car rides on its springs with it: a landing is felt in the picture
+  const Mat4 carM = Mat4::translate((float)car.x, carY + suspOf(car, S).s, (float)-car.y)
                   * Mat4::rotY((float)car.hdg) * Mat4::rotZ(gp + (float)car.pitch * gain) * Mat4::rotX(gr + (float)car.roll * gain);
 
   // ---- camera: the browser game's own rigs (js/render.js), each with its one
@@ -1436,6 +1481,8 @@ void Renderer::drawWorld(const FrameIn &f) {
   PROF.mark(0);
   glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, shTex); glActiveTexture(GL_TEXTURE0);
   if (dress) dress->frame(VP, eye, L, f.time);
+  curVP = VP; curLook = L;
+  for (int k = 0; k < 3; k++) curEye[k] = eye[k];
   glUniformMatrix4fv(uVP, 1, GL_FALSE, VP.m);
   glUniform3f(uEye, eye[0], eye[1], eye[2]);
   glUniform1i(uHasTex, hasTex ? 1 : 0);
