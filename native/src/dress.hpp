@@ -53,6 +53,12 @@ class Dress {
   // LIGHTS (Adam: "make their headlights and brake lights work and brakes glow").
   // How hard this car is on the brakes, 0..1: the next drawPack lights its tail lamps by it.
   void setBrake(float b) { brakeNow = b; }
+  // every car's lamps, for the paint of the downloaded cars (render.cpp gathers them): up to eight
+  void setLamps(int n, const float *pos4, const float *dir4, const float *col3) {
+    nLamp = n < 8 ? n : 8;
+    for (int i = 0; i < nLamp * 4; i++) { lampP[i] = pos4[i]; lampD[i] = dir4[i]; }
+    for (int i = 0; i < nLamp * 3; i++) lampC[i] = col3[i];
+  }
   // DAMAGE: the car's dents (physics Car::dents) for the next drawPack; null = none.
   // shift: how far ahead of the sim's origin (the CG) the pack's own origin (mid-wheelbase) is.
   void setDents(const Car *car, double shift);
@@ -76,7 +82,8 @@ class Dress {
   bool sheetTried = false, liveryOn = true;
   int liveryIx = -1;
   float wheelSweep = 0, brakeNow = 0;
-  int nDent = 0;
+  int nDent = 0, nLamp = 0;
+  float lampP[32] = {}, lampD[32] = {}, lampC[24] = {};
   float dentV[32] = {}, dentN[16] = {};
   unsigned glowProg = 0, glowVao = 0, glowVbo = 0;
   struct Heat { float h = 0; double t = -1; };

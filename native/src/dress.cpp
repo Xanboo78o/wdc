@@ -170,6 +170,10 @@ uniform vec3 uLivBase; uniform vec4 uLivFrame, uRim;
 static const char *CAR_FS_B = R"(
 uniform vec3 uColor, uPaint; uniform float uOpacity;
 uniform vec3 uEye, uSun, uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop; uniform float uFogK;
+// EVERY LAMP ON THE CIRCUIT, ON THE PAINT (Adam: "make all light reflect on the cars, especially
+// headlights"). Up to eight: xyz where it is and w how bright; xyz which way it shines and w how
+// narrow its beam (0 = all round); and its colour.
+uniform int uNL; uniform vec4 uLP[8], uLD[8]; uniform vec3 uLC[8];
 out vec4 o;
 vec3 skyAt(vec3 d){ return mix(uFog, uSkyTop, pow(clamp(d.y, 0.0, 1.0), 0.55)) * (d.y < 0.0 ? 0.45 : 1.0); }
 void main(){
@@ -219,6 +223,21 @@ void main(){
   vec3 h = normalize(uSun + V);
   lit = mix(lit, skyAt(reflect(-V, n)), clamp(mirror + fres * (mirror > 0.0 ? 0.5 : 0.0), 0.0, 0.9));
   lit += uSunCol * pow(max(dot(n, h), 0.0), shine) * gloss;
+  // the lamps of every car, on this one: paint, glass, chrome and rims all throw them back
+#define LSHINE max(shine, 40.0)
+#define LGLOSS (0.15 + gloss)
+#define LMIRROR (0.12 + mirror)
+  for (int li = 0; li < uNL; li++) {
+    vec3 Lv = uLP[li].xyz - vW; float d2 = dot(Lv, Lv); Lv *= inversesqrt(max(d2, 1e-4));
+    // is this surface in the lamp's beam? (a headlight shines forward: it does not light the car it is on)
+    float beam = uLD[li].w > 0.0 ? smoothstep(uLD[li].w - 0.35, uLD[li].w + 0.25, dot(-Lv, uLD[li].xyz)) : 1.0;
+    float att = uLP[li].w * beam / (1.0 + d2 * 0.018);
+    float nl = max(dot(n, Lv), 0.0);
+    vec3 hl = normalize(Lv + V);
+    lit += c * uLC[li] * nl * att * 0.55;                                              // the glow of it on the panel
+    lit += uLC[li] * pow(max(dot(n, hl), 0.0), LSHINE) * LGLOSS * att * 2.2 * step(0.0, nl);          // the glint
+    lit += uLC[li] * pow(max(dot(reflect(-V, n), Lv), 0.0), 420.0) * LMIRROR * att * 9.0;             // the lamp itself, in the lacquer
+  }
   if (uRole == 6) lit += (uHasMap == 1 ? t.rgb : vec3(0.75, 0.05, 0.04)) * (0.40 + 2.4 * uBrake);
   if (uRole == 5) lit += vec3(0.80, 0.86, 0.92) * 1.3;
   if (uRole == 2) a = clamp(a + fres * 0.35, 0.0, 1.0);
@@ -470,6 +489,14 @@ void Dress::setDents(const Car *car, double shift) {
 
 void Dress::lights(unsigned prog) {
   const Look &L = look;
+  if (prog == carProg) {
+    glUniform1i(glGetUniformLocation(prog, "uNL"), nLamp);
+    if (nLamp) {
+      glUniform4fv(glGetUniformLocation(prog, "uLP"), nLamp, lampP);
+      glUniform4fv(glGetUniformLocation(prog, "uLD"), nLamp, lampD);
+      glUniform3fv(glGetUniformLocation(prog, "uLC"), nLamp, lampC);
+    }
+  }
   const float sl = std::sqrt(L.sun[0] * L.sun[0] + L.sun[1] * L.sun[1] + L.sun[2] * L.sun[2]);
   glUniformMatrix4fv(glGetUniformLocation(prog, "uVP"), 1, GL_FALSE, VP.m);
   glUniform3f(glGetUniformLocation(prog, "uEye"), eye[0], eye[1], eye[2]);

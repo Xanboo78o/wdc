@@ -201,6 +201,10 @@ uniform vec3 uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop, uPaint; uniform float uFo
 uniform sampler2DShadow uShadow; uniform mat4 uShVP; uniform float uShOn, uHdr; uniform int uPass;
 uniform vec3 uLampPos, uLampDir; uniform float uLampOn, uTime, uCloud, uNight, uGhost;
 uniform sampler2D uMirror; uniform float uMirOn;
+// EVERY LAMP ON THE CIRCUIT, ON THE PAINT (Adam: "make all light reflect on the cars, especially
+// headlights"). Up to eight: xyz where it is and w how bright; xyz which way it shines and w how
+// narrow its beam (0 = all round); and its colour.
+uniform int uNL; uniform vec4 uLP[8], uLD[8]; uniform vec3 uLC[8];
 out vec4 o;
 // how much of the sun reaches this point: four soft looks at the shadow map
 float sunVis(vec3 p, vec3 n){
@@ -338,6 +342,21 @@ void main(){
     }
   }
   if (k == 6 || k == 12) {
+    // the lamps of every car, on this one's paint
+#define LSHINE 70.0
+#define LGLOSS 0.6
+#define LMIRROR 0.5
+  for (int li = 0; li < uNL; li++) {
+    vec3 Lv = uLP[li].xyz - vW; float d2 = dot(Lv, Lv); Lv *= inversesqrt(max(d2, 1e-4));
+    // is this surface in the lamp's beam? (a headlight shines forward: it does not light the car it is on)
+    float beam = uLD[li].w > 0.0 ? smoothstep(uLD[li].w - 0.35, uLD[li].w + 0.25, dot(-Lv, uLD[li].xyz)) : 1.0;
+    float att = uLP[li].w * beam / (1.0 + d2 * 0.018);
+    float nl = max(dot(n, Lv), 0.0);
+    vec3 hl = normalize(Lv + V);
+    lit += c * uLC[li] * nl * att * 0.55;                                              // the glow of it on the panel
+    lit += uLC[li] * pow(max(dot(n, hl), 0.0), LSHINE) * LGLOSS * att * 2.2 * step(0.0, nl);          // the glint
+    lit += uLC[li] * pow(max(dot(reflect(-V, n), Lv), 0.0), 420.0) * LMIRROR * att * 9.0;             // the lamp itself, in the lacquer
+  }
     vec3 h = normalize(uSun + V);
     if (uHdr > 0.5) {
       // PAINT UNDER LACQUER: the sky mirrored more the flatter you look along
@@ -1656,6 +1675,17 @@ const Renderer::Susp &Renderer::suspOf(const Car &car, const Spec &S) {
 
 void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPitch, double gRoll, const float paint[3], double rolled,
                        bool helmet) {
+  // its lamps, for every other car's paint (and the shader's uNL list): two white at the nose, shining
+  // forward, and two red at the tail that flare under braking. Brighter when it is dark or raining.
+  if (!mirrorPass && lampsNow.size() < 11 * 24) {
+    const float on = std::max(curLook.night, curLook.rain > 0.3f ? 0.6f : 0.0f);
+    const float ch = (float)std::cos(car.hdg), sh = (float)std::sin(car.hdg), y0 = (float)(groundH + std::max(0.0, car.z));
+    const float nose = (float)(S.bodyL * 0.5 - 0.15), tail = (float)(S.bodyL * 0.5 - 0.1);
+    const float head[11] = {(float)car.x + ch * nose, y0 + 0.62f, (float)-car.y - sh * nose, 0.30f + 2.6f * on, ch, -0.06f, -sh, 0.55f, 0.92f, 0.95f, 1.0f};
+    const float rear[11] = {(float)car.x - ch * tail, y0 + 0.70f, (float)-car.y + sh * tail, 0.12f + 0.55f * on + 1.5f * (float)car.brake, -ch, 0.0f, sh, 0.15f, 1.0f, 0.08f, 0.05f};
+    lampsNow.insert(lampsNow.end(), head, head + 11);
+    lampsNow.insert(lampsNow.end(), rear, rear + 11);
+  }
   // where every car drawn this frame is: the motion blur leaves them sharp
   if (!mirrorPass && mbSpots.size() < 24) { mbSpots.push_back((float)car.x); mbSpots.push_back((float)(groundH + std::max(0.0, car.z) + 0.5)); mbSpots.push_back((float)-car.y); }
   const float gain = car.airborne ? 1.0f : 3.0f;
@@ -2379,6 +2409,7 @@ void Renderer::drawWorld(const FrameIn &f) {
     mbView = view; mbTan = std::tan(fov * (float)PI / 360);
     mbAmt = car.speed > 30 ? (float)std::min(1.0, std::max(0.0, (car.speed * 3.6 - 110) / 150)) : 0;
     mbSpots.clear();
+    lampsWere.swap(lampsNow); lampsNow.clear();       // the lamps the cars put out this frame light the paint in the next
   }
   if (!mirrorPass) updateRainCB(f, view);
   const Mat4 VP = proj * view;
@@ -2407,6 +2438,28 @@ void Renderer::drawWorld(const FrameIn &f) {
     glUniform1f(uLampOn, on);
     glUniform1f(uTime, (float)std::fmod(f.time, 10000.0));
     glUniform1f(uCloud, L.cloud); glUniform1f(uNight, L.night);
+  }
+  // the lamps (last frame's): the eight nearest the camera, to this program and to the downloaded cars'
+  {
+    lampP.clear(); lampD.clear(); lampC.clear();
+    std::vector<std::pair<float, size_t>> order;
+    for (size_t i = 0; i + 10 < lampsWere.size(); i += 11) {
+      const float dx = lampsWere[i] - eye[0], dy = lampsWere[i + 1] - eye[1], dz = lampsWere[i + 2] - eye[2];
+      order.push_back({dx * dx + dy * dy + dz * dz, i});
+    }
+    std::sort(order.begin(), order.end());
+    for (size_t q = 0; q < order.size() && q < 8; q++) {
+      const float *l = &lampsWere[order[q].second];
+      lampP.insert(lampP.end(), l, l + 4); lampD.insert(lampD.end(), l + 4, l + 8); lampC.insert(lampC.end(), l + 8, l + 11);
+    }
+    const int nl = (int)(lampP.size() / 4);
+    glUniform1i(glGetUniformLocation(prog, "uNL"), nl);
+    if (nl) {
+      glUniform4fv(glGetUniformLocation(prog, "uLP"), nl, lampP.data());
+      glUniform4fv(glGetUniformLocation(prog, "uLD"), nl, lampD.data());
+      glUniform3fv(glGetUniformLocation(prog, "uLC"), nl, lampC.data());
+    }
+    if (dress) dress->setLamps(nl, lampP.data(), lampD.data(), lampC.data());
   }
   // the mirrors on the car itself show the same picture as the glass at the top of the screen
   {

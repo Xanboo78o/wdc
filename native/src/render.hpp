@@ -261,6 +261,8 @@ class Renderer {
   // motion blur (render.cpp COMP_FS): the camera's travel in view space, the view itself, and the cars to leave sharp
   float mbVel[3] = {0, 0, 0}, mbTan = 0.6f, mbAmt = 0, mbHole[4] = {-1, -1, -1, -1};
   Mat4 mbView;
+  // every car's lamps (render.cpp drawCar): gathered this frame, used on the paint in the next; 11 floats a lamp
+  std::vector<float> lampsNow, lampsWere, lampP, lampD, lampC;
   std::vector<float> mbSpots;
   bool sceneOpen = false;
   // THE GOVERNOR. The scene is drawn at `scale` of the window and enlarged when
