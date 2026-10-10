@@ -43,6 +43,7 @@
 #include "bridge.hpp"
 #include "collide.hpp"
 #include "knock.hpp"
+#include "radio.hpp"
 #include "driver.hpp"
 #include "drivers.hpp"
 #include "multiclass.hpp"
@@ -857,6 +858,9 @@ int main(int argc, char **argv) {
     }
   };
   // the crash effects watch every car, once a frame (fx.hpp): they read, and never write
+  // YOUR MUSIC, THROUGH THE GAME (radio.hpp): the browser's sound brought in, put in a room, and played with everything else
+  Radio radio;
+  double radioRetry = 0;
   // the foam blocks and braking boards (knock.hpp): every car on the circuit can send one flying
   auto knockTick = [&](double dt) {
     std::vector<Car *> cars;
@@ -912,6 +916,16 @@ int main(int argc, char **argv) {
                                     "FORCE FEEDBACK - " + std::to_string(cfg.ffb) + "%", "QUIT TO MENU"};
   };
   auto drawAll = [&](FrameIn &f) {
+    {
+      const bool want = cfg.tabFx != "off" && !offscreen && !hidden;
+      if (want && !radio.ok() && clock >= radioRetry) { if (!radio.start()) radioRetry = clock + 10; }
+      else if (!want && radio.ok()) radio.stop();
+      if (radio.ok()) {
+        const int room = cfg.tabFx == "clean" ? 0 : cfg.tabFx == "room" ? 1 : cfg.tabFx == "cathedral" ? 3 : 2;
+        // shut in a GT car, from the driver's seat, it is in the cabin with you
+        radio.set(room, cfg.tabVol / 100.0, screen == DRIVE && cfg.cam == 0 && S.spec && S.spec->gt);
+      }
+    }
     R.post = cfg.look != "plain" && R.postOk;
     R.scalePin = (float)scaleArg;
     // the mirror first, on alternate frames: the same world, looking back

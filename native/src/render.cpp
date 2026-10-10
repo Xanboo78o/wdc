@@ -1982,6 +1982,42 @@ void Renderer::endScene(double time) {
 // like the ads"). Frames of the cinematic advert, build/tex/menu-NN.ppm. One is laid on the
 // screen behind the menu instead of a live race: between two fractions of its height
 // (the film's bars stay black), filling that band, drifting a little so it is never still.
+// A PICTURE LAID ON THE SCREEN. (It was glBlitFramebuffer, which worked in every
+// photograph and showed NOTHING in the real window: a blit may not change size when the
+// framebuffer it draws into is multisampled, and the window is. A drawn rectangle may.)
+// dst: where, in pixels from the bottom left. src: which part of the texture, 0..1.
+void Renderer::drawPicture(unsigned tex, float dx0, float dy0, float dx1, float dy1, float u0, float v0, float u1, float v1) {
+  static GLuint prog2 = 0;
+  if (!prog2) {
+    static const char *VS = R"(#version 330 core
+uniform vec4 uDst, uSrc; out vec2 vU;
+void main(){ vec2 p = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1)); vU = mix(uSrc.xy, uSrc.zw, p); gl_Position = vec4(mix(uDst.xy, uDst.zw, p), 0.0, 1.0); }
+)";
+    static const char *FS = R"(#version 330 core
+in vec2 vU; uniform sampler2D uTex; out vec4 o;
+void main(){ o = vec4(texture(uTex, vU).rgb, 1.0); }
+)";
+    prog2 = link(VS, FS);
+  }
+  if (!prog2) return;
+  GLint was = 0;
+  glGetIntegerv(GL_CURRENT_PROGRAM, &was);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(0, 0, W, H);
+  glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND); glDisable(GL_CULL_FACE); glDepthMask(GL_FALSE);
+  glUseProgram(prog2);
+  glUniform4f(glGetUniformLocation(prog2, "uDst"), dx0 / W * 2 - 1, dy0 / H * 2 - 1, dx1 / W * 2 - 1, dy1 / H * 2 - 1);
+  glUniform4f(glGetUniformLocation(prog2, "uSrc"), u0, v0, u1, v1);
+  glUniform1i(glGetUniformLocation(prog2, "uTex"), 0);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glBindVertexArray(fsVao);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glBindVertexArray(0);
+  glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST);
+  glUseProgram((GLuint)was);
+}
+
 int Renderer::photoCount() {
   if (photosTried) return (int)photoFbo.size();
   photosTried = true;
@@ -2000,7 +2036,7 @@ int Renderer::photoCount() {
     glGenFramebuffers(1, &fb);
     glBindFramebuffer(GL_FRAMEBUFFER, fb);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
-    photoFbo.push_back(fb); photoW.push_back(w); photoH.push_back(h);
+    photoFbo.push_back(fb); photoTex.push_back(tex); photoW.push_back(w); photoH.push_back(h);
   }
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   return (int)photoFbo.size();
@@ -2023,11 +2059,9 @@ void Renderer::photoShow(int index, double t, float top, float bottom) {
   float sw2 = pw / zoom, sh2 = sw2 / bandAspect;
   if (sh2 > ph / zoom) { sh2 = ph / zoom; sw2 = sh2 * bandAspect; }
   const float cx = pw / 2 + (pw - sw2) * 0.45f * (float)std::sin(t * 0.045 + index * 1.7), cy = ph / 2 + (ph - sh2) * 0.45f * (float)std::cos(t * 0.038 + index);
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, photoFbo[(size_t)index]);
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
-  // (a PPM's first row is the top of the picture, and GL's first row is the bottom: so the source is taken upside down)
-  glBlitFramebuffer((int)(cx - sw2 / 2), (int)(cy + sh2 / 2), (int)(cx + sw2 / 2), (int)(cy - sh2 / 2), 0, dy0, W, dy1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  // (a PPM's first row is the top of the picture, and a texture's first row is its bottom: so v runs the other way)
+  drawPicture(photoTex[(size_t)index], 0, (float)dy0, (float)W, (float)dy1,
+              (cx - sw2 / 2) / pw, (cy + sh2 / 2) / ph, (cx + sw2 / 2) / pw, (cy - sh2 / 2) / ph);
 }
 
 // ---- THE WIPER (Adam: "p for windshield wipers, double tap to increase speed, single tap for
@@ -2233,10 +2267,7 @@ void Renderer::mirrorShow() {
   glClearColor(0.02f, 0.02f, 0.025f, 1);
   glClear(GL_COLOR_BUFFER_BIT);                       // the housing
   glDisable(GL_SCISSOR_TEST);
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, mirFbo);
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
-  glBlitFramebuffer(MIR_W, 0, 0, MIR_H, x, y, x + w, y + h, GL_COLOR_BUFFER_BIT, GL_LINEAR);     // left and right swapped
-  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  drawPicture(mirTex, (float)x, (float)y, (float)(x + w), (float)(y + h), 1, 0, 0, 1);     // left and right swapped
 }
 
 void Renderer::drawWorld(const FrameIn &f) {

@@ -223,7 +223,8 @@ class Renderer {
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;
   static constexpr int MIR_W = 840, MIR_H = 200;
-  std::vector<unsigned> photoFbo;
+  std::vector<unsigned> photoFbo, photoTex;
+  void drawPicture(unsigned tex, float dx0, float dy0, float dx1, float dy1, float u0, float v0, float u1, float v1);
   std::vector<int> photoW, photoH;
   bool photosTried = false;
   std::string texDirKept;
