@@ -31,6 +31,7 @@
 // costs; XBR_FXHALF=0 / XBR_FXSOFT=0 turn off the half-size puff pass / the
 // soft edges, to compare.
 #pragma once
+#include "collide.hpp"
 #include "physics.hpp"
 #include "render.hpp"
 #include "track.hpp"
@@ -63,6 +64,13 @@ class Fx {
   // An explosion since the last call, as a closing speed for EngineAudio::hit
   // (already faded by its distance from the camera); 0 = none.
   double takeBoom();
+
+  // THE BIG PIECES ARE REALLY THERE (collide.hpp Hazard). hazards(): every loose wheel and wing, where it is and
+  // how fast it is going, for the game to run the cars against. struck(): what a car did to one. sweep(): the
+  // marshals have carried it off. Fx still writes no Car: the game does the hitting, and tells the piece.
+  void hazards(std::vector<Hazard> &out);
+  void struck(const Struck &k);
+  void sweep(int id);
 
   // seconds of effects to run before a --shot (0 = no test asked for)
   static double testSeconds();

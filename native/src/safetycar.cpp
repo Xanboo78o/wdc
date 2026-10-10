@@ -209,6 +209,25 @@ void Director::incident(const char *kindC, Entry *e) {
   if (hasWant) escalate(want);
 }
 
+// A piece lying on the road, with no car to blame it on. A wing is a yellow; a wheel is a double yellow and a
+// virtual safety car, which lasts until the marshals have it (Race::setHazards, in a gap in the traffic).
+void Director::debris(double s, bool wheel, bool first) {
+  Race &r = *race;
+  if (!on || r.state != RaceState::Green) return;
+  const double now = r.time;
+  if (!first) {
+    // still there: the flags stay out, and nothing goes green over it
+    for (auto &x : incidents) if (!x->e && is(x->kind, "debris") && std::fabs(r.track->gap(x->s, s)) < 30) x->clearAt = std::max(x->clearAt, now + 6);
+    flag(s, wheel ? 2 : 1, 8);
+    return;
+  }
+  incidents.push_back(std::make_shared<Incident>(Incident{"debris", nullptr, s, now, now + 8, true}));
+  flag(s, wheel ? 2 : 1, 10);
+  const Corner *cn = r.track->cornerAt(s);
+  rc(std::string(wheel ? "WHEEL" : "DEBRIS") + " ON TRACK" + (cn && !cn->name.empty() ? " AT " + upper(cn->name) : ""), "debris");
+  if (wheel) escalate(RcMode::Vsc);
+}
+
 // Yellow in the incident's sector (double if lvl 2), a single yellow in the one before.
 void Director::flag(double s, int lvl, double secs) {
   const double now = race->time;
@@ -464,6 +483,7 @@ void Director::tick(double dt) {
 
   // Incidents clear themselves: a car being pushed is still an incident.
   for (auto &inc : incidents) {
+    if (!inc->e) continue;                       // a piece on the road (debris): no car behind it
     const Entry &e = *inc->e;
     const bool stopped = is(inc->kind, "stopped");
     if ((is(inc->kind, "beached") || stopped) && (e.recover.on || e.stuck > 0 || (stopped && !e.retired && e.car.speed < 3)))

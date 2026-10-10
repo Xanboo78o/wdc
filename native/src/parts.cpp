@@ -204,9 +204,27 @@ Parts *syncParts(Car &car) {
     if (P.gone[T.rw]) car.lostRearWing = true;
     P.lf = car.lostFrontWing; P.lr = car.lostRearWing;
   }
+  // (This was left out of the port, so until 2026-10-10 no wheel ever came off a car here: fx.cpp's flying wheel,
+  // physics.cpp's three-wheeled car and the renderer's empty corner were all waiting for a flag nobody set.)
+  if (wheelsDetach) {
+    static const int WH[4] = {9, 10, 11, 12};        // whlFL whlFR whlRL whlRR, wheelPos's order
+    for (int k = 0; k < 4; k++) car.wheelLost[k] = car.wheelLost[k] || P.gone[WH[k]] != 0;      // (or tyreHit tore it off: wheelsTear)
+  }
   summarise(P);
   P.ver++;
   return &P;
+}
+
+void refitWheels(Car &car) {
+  for (bool &w : car.wheelLost) w = false;
+  Parts &P = car.parts;
+  if (!P.exists) return;
+  bool any = false;
+  for (int i = 0; i < N_PARTS; i++) {
+    if ((DEF[i].flag != WHEEL && DEF[i].flag != SUS) || !P.gone[i]) continue;
+    P.gone[i] = 0; P.h[i] = 0.5f; any = true;
+  }
+  if (any) { summarise(P); P.ver++; }
 }
 
 }  // namespace xbr

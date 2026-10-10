@@ -193,6 +193,14 @@ void wheelPos(const Spec &S, double W[4][2]);
 void launch(Car &car, double jz, double lx = 0, double ly = 0);
 // Returns the wheel index hit, or -1 when the blow was too light to matter.
 int tyreHit(Car &car, double lx, double ly, double nby, double dv);
+// A WHEEL TEARS OFF (the native game only; Adam 2026-10-10: "we shoudlve already had this"). The parts model
+// (parts.cpp) can only take a wheel when the crush around it adds up to more than a crush can be, which measured
+// as never: not at 300 km/h, square into the wall. So tyreHit, which already knows which wheel a blow reached and
+// how much of it was sideways, also breaks the corner when that is enough: from 6 m/s (certain by 13) on an open
+// wheel, 10 to 18 on one inside a wheel arch. OFF until the game turns it on: the harnesses still match the JS.
+bool &wheelsTear();
+// A pit stop fits four wheels, to whatever is left of the corners they go on.
+void refitWheels(Car &car);
 void step(Car &car, double dt, const Env &env = Env{});
 // Bring car.parts up to date with the car's damage. Null for an untouched car.
 Parts *syncParts(Car &car);

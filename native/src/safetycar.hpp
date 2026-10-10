@@ -89,6 +89,7 @@ class Director {
   // ---- called by the race ----------------------------------------------------
   void incident(const char *kind, Entry *e);
   void flag(double s, int lvl, double secs);
+  void debris(double s, bool wheel, bool first);    // a loose piece lying on the road at s (Race::setHazards): called, then kept shown
   double wantBias(Entry &e, double want, double lineOff, double lim);
   void limit(Entry &e, DriveCtx &ctx);
   void tick(double dt);

@@ -185,6 +185,13 @@ class Race {
   void setSlopeAt(std::function<double(double)> f) { slopeAt = std::move(f); gnd_.reset(); crestOk_ = false; }
   const Ground &ground();
 
+  // WHAT CAME OFF IS ON THE ROAD (collide.hpp Hazard; not in the JS). The game hands over the loose wheels and
+  // wings once a frame. The drivers steer round the ones lying on the road that they can see; race control flags
+  // them, and the marshals fetch them: the ids in `swept` are gone, and whoever draws the pieces removes them.
+  std::vector<Hazard> hazards;
+  std::vector<int> swept;
+  void setHazards(const std::vector<Hazard> &hz, double dt);
+
   double progress(const Entry &e) const { return (e.lap + (e.crossed0 ? 1 : 0)) * track->length + e.proj.s; }
   void log(const char *kind, const std::string &text, const Entry *e = nullptr, const char *code = nullptr);
   void order();
@@ -212,6 +219,8 @@ class Race {
   bool crestOk_ = false, crestAny_ = false;
   std::vector<float> crest_;
   bool formSaid_ = false;
+  struct Lying { double t = 0, flagged = -99; bool called = false; };
+  std::map<int, Lying> lying_;         // hazard id -> how long it has lain on the road
 };
 
 }  // namespace xbr

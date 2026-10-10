@@ -55,4 +55,22 @@ struct CarHit {
 };
 CarHit resolveCars(Car &a, Car &b, double restitution = 0.18);
 
+// WHAT CAME OFF IS ON THE ROAD (the native game only; Adam 2026-10-10: "we shoudlve already had this"). A wheel or
+// a wing that has left a car is a thing the others can hit. Whoever simulates the pieces (fx.cpp) lists them, once a
+// frame; the race reads the list (its drivers go round what they can see, race control flags it and sends marshals)
+// and the game runs every car against it. A harness has no pieces, and nothing here ever runs in one.
+struct Hazard {
+  int id = 0;
+  double x = 0, y = 0, vx = 0, vy = 0;   // the sim's plane, m and m/s
+  double r = 0.3, mass = 10;             // r <= 0: already struck this frame
+  double lift = 0;                       // how far its lowest point is off the ground: a wheel in the air goes over you
+  bool wheel = false, still = false;     // still: lying where it stopped
+  double s = 0, lat = 0, w = 0;          // where that is on the lap (Race::setHazards fills these)
+};
+// What a car did to a piece: the speed it leaves at, and whether it survived. `blow` is the wall speed with the
+// same energy (m/s), for the sound and the wheel in your hands; `harm` what it added to the car's damage.
+struct Struck { int id = 0; double vx = 0, vy = 0, up = 0, blow = 0, harm = 0; bool shatter = false; };
+// False = not touching. Otherwise the car has been slowed, dented and perhaps punctured, and `out` is for the piece.
+bool resolveHazard(Car &car, const Hazard &h, Struck &out);
+
 }  // namespace xbr

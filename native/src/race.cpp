@@ -1077,6 +1077,29 @@ void Race::racecraft(Entry &e) {
     }
   }
 
+  // WHAT CAME OFF IS ON THE ROAD (collide.hpp Hazard). A wheel or a wing lying on the road is driven round, whatever
+  // else the driver had in mind (so this is last: a safety-car weave does not get a vote): by
+  // the side the car is already on, or the other if that side is off the road. A driver on another's gearbox does
+  // not see it until the car ahead has moved off it, which at speed is too late, and that one is hit.
+  static const bool blind = std::getenv("XBR_BLIND") != nullptr;      // nobody sees a thing: what xbr-debris measures the drivers against
+  for (const Hazard &h : hazards) {
+    if (blind || !h.still || std::fabs(h.lat) > h.w + 0.5) continue;
+    const double ds = t.gap(h.s, e.proj.s);        // + = ahead of me
+    const double toA = e.ahead ? t.gap(e.ahead->proj.s, e.proj.s) : 1e9;
+    const bool unsighted = toA > 0 && toA < 14 && toA < ds;
+    if (ds < -2 || ds > (unsighted ? 16.0 : std::max(45.0, e.car.speed * 2.2))) continue;
+    // (the line is not where it is here by the time it gets there: what matters is where this car will be AT the piece)
+    const size_t hi = (size_t)t.idx(h.s);
+    const double offH = lines->race.off[hi], limH = std::max(0.3, t.w[hi] - 1.0);
+    const double need = h.r + (spec->bodyW != 0 ? spec->bodyW : 2.0) / 2 + 0.35;
+    const double miss = offH + bias - h.lat;
+    if (std::fabs(miss) >= need) continue;
+    double side = miss >= 0 ? 1 : -1;
+    if (std::fabs(h.lat + side * need) > limH) side = -side;
+    if (std::fabs(h.lat + side * need) > limH) continue;      // it has shut the road: over it, then
+    bias = h.lat + side * need - offH;
+  }
+
   const double off = lines->race.off[(size_t)i];
   bias = std::max(-lim - off, std::min(lim - off, bias));
   // What the slew starts from next time is where the car was ALLOWED to go, pit bias excluded.
@@ -1591,6 +1614,43 @@ void Race::cheerTick() {
       log("pass", "YOU PASS " + o.name + " FOR P" + std::to_string(me->pos), me);
     }
   }
+}
+
+// Loose pieces (collide.hpp Hazard): where each is on the lap, and what race control does about the ones on the road.
+void Race::setHazards(const std::vector<Hazard> &hz, double dt) {
+  const Track &t = *track;
+  hazards.clear();
+  std::map<int, Lying> now;
+  for (Hazard h : hz) {
+    if (h.r <= 0) continue;
+    const Proj p = t.project(h.x, h.y);
+    h.s = p.s; h.lat = p.lat; h.w = p.w;
+    hazards.push_back(h);
+    const bool onRoad = std::fabs(p.lat) <= p.w + 0.3;
+    if (!h.still) continue;
+    Lying l = lying_.count(h.id) ? lying_[h.id] : Lying{};
+    l.t += dt;
+    // A wheel on the road is a virtual safety car; a wing is a yellow. Called once it has lain there a second
+    // (most of what comes off slides on into the run-off), and kept shown while it does.
+    if (onRoad && l.t > 1.0 && state == RaceState::Green && time - l.flagged > 4) {
+      rc.debris(h.s, h.wheel, !l.called);
+      l.called = true; l.flagged = time;
+    }
+    // THE MARSHALS run out for it in a gap in the traffic: nobody within 250 m of arriving (120 once the field
+    // is under control), and not in its first eight seconds. What lies in the run-off is tidied away in its own time.
+    bool gap = true;
+    if (onRoad) {
+      const double clear = rc.neutral() ? 120 : 250;
+      for (const Entry &e : entries) {
+        if (e.retired || e.inPit) continue;
+        const double ds = t.gap(h.s, e.proj.s);
+        if (ds > -5 && ds < clear) { gap = false; break; }
+      }
+    }
+    if (onRoad ? (l.t > 8 && gap) || l.t > 90 : l.t > 75) { swept.push_back(h.id); continue; }
+    now[h.id] = l;
+  }
+  lying_.swap(now);
 }
 
 // Only test pairs that are actually near each other: sorted by distance along the track.

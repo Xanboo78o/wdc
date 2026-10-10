@@ -61,7 +61,7 @@ $(BUILD)/tex/sky-%.ppm: ../data/sky/%.jpg | $(BUILD)
 	@mkdir -p $(BUILD)/tex
 	magick $< -strip -depth 8 $@
 
-all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(BUILD)/xbr-engineer $(BUILD)/xbr-pitwall $(TEX) $(FLORA) $(PROPTEX) $(MENUTEX) $(SKYTEX)
+all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(BUILD)/xbr-engineer $(BUILD)/xbr-pitwall $(BUILD)/xbr-debris $(TEX) $(FLORA) $(PROPTEX) $(MENUTEX) $(SKYTEX)
 
 $(BUILD)/tex/flora-leaf.pam: ../data/flora/leaf-c.jpg ../data/flora/leaf-a.png | $(BUILD)
 	@mkdir -p $(BUILD)/tex
@@ -91,6 +91,10 @@ $(BUILD)/xbr-pitwall: $(BUILD)/pitwall.o $(BUILD)/pitwall_main.o
 # the engineer on the pit wall of a headless race, every word printed (engineer_main.cpp)
 $(BUILD)/xbr-engineer: $(SIM_O) $(BUILD)/engineer.o $(BUILD)/engineer_main.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
+
+# a headless race with the loose wheels and wings simulated and hit, nothing drawn (debris_main.cpp)
+$(BUILD)/xbr-debris: $(SIM_O) $(filter-out $(BUILD)/game_main.o,$(GAME_O)) $(BUILD)/debris_main.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(GAME_LIBS)
 
 $(BUILD)/tex/%.ppm: ../data/tex/%.jpg | $(BUILD)
 	@mkdir -p $(BUILD)/tex

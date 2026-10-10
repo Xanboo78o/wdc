@@ -220,6 +220,61 @@ CarHit resolveCars(Car &a, Car &b, double restitution) {
   return out;
 }
 
+// ---- CAR TO A LOOSE PIECE -------------------------------------------------------
+// A wheel is 11 kg and a car 800: the car barely slows. What it takes is the ENERGY, in the one place it was
+// struck: 11 kg met at 60 m/s is the same 20 kJ as the whole car meeting a wall at 7. So the blow is scored as
+// that wall speed, on resolveBarrier's own damage curve, and a wing (which shatters) as six tenths of it.
+bool resolveHazard(Car &car, const Hazard &h, Struck &out) {
+  if (h.r <= 0 || !car.spec) return false;
+  const Spec &S = *car.spec;
+  const double hl = S.bodyL * 0.5, hw = S.bodyW * 0.5;
+  const double cs = std::cos(car.hdg), sn = std::sin(car.hdg);
+  const double dx = h.x - car.x, dy = h.y - car.y;
+  const double lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs;
+  if (std::fabs(lx) > hl + h.r || std::fabs(ly) > hw + h.r) return false;
+  if (h.lift > 0.75 || car.z > 0.9) return false;                    // it went over the car, or the car over it
+  const double cvx = car.vx * cs - car.vy * sn, cvy = car.vx * sn + car.vy * cs;
+  const double rx = cvx - h.vx, ry = cvy - h.vy;
+  const double closing = std::hypot(rx, ry);
+  const double px = clampd(lx, -hl, hl), py = clampd(ly, -hw, hw);   // where on the body
+  const double side = ly >= 0 ? 1 : -1;
+  out = Struck{};
+  out.id = h.id;
+  // nudged aside: it leaves with the car's speed and a little more, away from the car's middle
+  out.vx = cvx + (-sn) * side * 1.5; out.vy = cvy + cs * side * 1.5;
+  if (closing <= 3 || rx * dx + ry * dy <= 0) return true;
+
+  const double blow = closing * std::sqrt(h.mass / S.m) * (h.wheel ? 1.0 : 0.6);
+  out.blow = blow;
+  // momentum: what the piece takes, the car gives up, at the point it was struck
+  const double k = h.mass / (h.mass + S.m) * 1.3;
+  const double jx = -rx * k * S.m, jy = -ry * k * S.m;
+  const double wx = px * cs - py * sn, wy = px * sn + py * cs;
+  const double nvx = cvx + jx / S.m, nvy = cvy + jy / S.m;
+  car.vx = nvx * cs + nvy * sn; car.vy = -nvx * sn + nvy * cs;
+  car.r += (wx * jy - wy * jx) / S.Izz;
+  const double nx = -rx / closing, ny = -ry / closing;               // the way the blow pushes the car
+  if (blow > 0.8) {
+    const double harm = std::min(0.5, std::pow((blow - 0.8) / 12, 1.3));
+    car.damage = std::min(1.0, car.damage + harm);
+    car.hasCrush = true;
+    double *part = car.crushPart(region(px, py, S));
+    *part = std::min(1.0, *part + harm * 2.2);
+    mark(car, px, py, nx, ny, harm);
+    out.harm = harm;
+  }
+  // carbon under a tyre: a wing is the piece that punctures
+  tyreHit(car, px, py, h.wheel ? -nx * sn + ny * cs : 1.0, h.wheel ? blow : blow * 1.2);
+  // a wheel under the nose of an open-wheeled car lifts it
+  if (h.wheel && closing > 20 && !S.gt && px > 0) launch(car, h.mass * closing * 0.5, px, py * 0.5);
+  // the piece: thrown ahead and aside, and up; a wing hit hard is not a wing any more
+  const double thrown = 4 + closing * 0.05;
+  out.vx = cvx * 0.85 + (-sn) * side * thrown; out.vy = cvy * 0.85 + cs * side * thrown;
+  out.up = std::min(7.0, 1.5 + closing * 0.07);
+  out.shatter = !h.wheel && blow > 2.2;
+  return true;
+}
+
 BarrierWear &barrierWear() { static BarrierWear w; return w; }
 
 std::vector<char> wallFeet(const Track &t, int side) {

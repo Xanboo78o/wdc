@@ -626,8 +626,16 @@ int tyreHit(Car &car, double lx, double ly, double nby, double dv) {
     else if (u < pFlat + pSlow)
       q.leak = std::max(q.leak, 0.004 + 0.012 * ((u - pFlat) / std::max(1e-6, pSlow)));
   }
+  if (wheelsTear() && fresh && !car.wheelLost[wi]) {
+    const bool arch = S.gt || S.key == "gt3";
+    const double lo = arch ? 10 : 6, hi = arch ? 18 : 13;
+    const double h = std::sin(car.x * 4.1414 + car.y * 9.7311 + dv * 12.9898 + wi * 1.7) * 24634.6345;
+    if (h - std::floor(h) < (sv - lo) / (hi - lo)) car.wheelLost[wi] = true;
+  }
   return wi;
 }
+
+bool &wheelsTear() { static bool on = false; return on; }
 
 static double pac(const Spec &spec, double alpha, double D, double B) {
   const double x = B * alpha;

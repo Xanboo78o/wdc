@@ -316,6 +316,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
   if (rs && rs->easy && S.car && !S.car->xg.on) xingusCar(*S.car, "gt", false);
   { World *wk = S.world.get(); knock().ground = [wk](double x, double y) { return wk->heightAt(x, y); }; }
   barrierWear().reset(S.track);      // new session, straight barriers (collide.hpp: the game's walls give)
+  wheelsTear() = true;               // ...and a wheel hit hard enough leaves the car (physics.hpp)
   R.buildWorld(S.track, *S.world, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"),
                S.lines->race);
   R.setWorldModel(dataDir, key);
@@ -470,7 +471,8 @@ static void raceStep(Session &S, const HandsIn &in, bool bot, bool drsTap, Toast
   if (me.bump.has) {
     me.bump.has = false;
     S.lastHit = std::max(S.lastHit, me.bump.closing);
-    if (std::string(me.bump.what) == "car") toast = {me.bump.harm > 1.2 ? "CONTACT - WHEEL TO WHEEL" : "RUBBING", 1.6};
+    if (std::string(me.bump.what) == "debris") toast = {me.bump.harm > 0.05 ? "YOU HIT DEBRIS" : "DEBRIS", 1.6};
+    else if (std::string(me.bump.what) == "car") toast = {me.bump.harm > 1.2 ? "CONTACT - WHEEL TO WHEEL" : "RUBBING", 1.6};
     else if (me.bump.harm > 0.12) {
       std::string p = me.bump.part;
       for (char &c : p) c = (char)std::toupper((unsigned char)c);
@@ -1041,6 +1043,27 @@ int main(int argc, char **argv) {
     if (S.race) for (Entry &e : S.race->entries) { paintOf(e.col, pc); fx.car(e.car, e.proj, pc, e.isPlayer, dt); }
     else { const Team *t = teamByKey(home.teamKey()); if (t) paintOf(t->col, pc); fx.car(*S.car, S.proj, pc, true, dt); }
     fx.end(dt);
+    // WHAT CAME OFF IS ON THE ROAD (collide.hpp Hazard): every car is run against the loose wheels and wings, the
+    // race is told where they lie (its drivers go round them, race control flags them), and the marshals' ones go.
+    {
+      static std::vector<Hazard> hz;
+      fx.hazards(hz);
+      auto strike = [&](Car &car, Entry *e) {
+        for (Hazard &h : hz) {
+          Struck k;
+          if (!resolveHazard(car, h, k)) continue;
+          fx.struck(k);
+          h.r = 0;                                   // one car a frame: it is somewhere else now
+          if (e && e->isPlayer && k.blow > 0.5) e->bump = Bump{true, "debris", k.blow, k.harm, "", nullptr};
+        }
+      };
+      if (S.race) {
+        for (Entry &e : S.race->entries) if (!e.retired && !e.inPit && std::isnan(e.garageT)) strike(e.car, &e);
+        S.race->setHazards(hz, dt);
+        for (int id : S.race->swept) fx.sweep(id);
+        S.race->swept.clear();
+      } else if (S.car) strike(*S.car, nullptr);
+    }
     // NOTHING DRIVES AWAY FROM AN EXPLOSION. A car that has gone up is out of the
     // race, where it stands; yours takes you to the results a few seconds later,
     // and on a hot lap you are given another car.

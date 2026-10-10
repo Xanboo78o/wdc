@@ -374,7 +374,7 @@ struct Body {
   float R = 0.3f, hw = 0.15f;
   int hint = -1, gtick = 0;
   float gy = 0, wnx = 0, wnz = 0, wout = 0, wbase = 0, sleep = 0, slowT = 0, flameT = 0;
-  double born = 0;
+  double born = 0, immune = 0;        // immune: not a hazard before this (it has just left a car, or just been struck)
 };
 struct KindGL {
   GLuint vao = 0, vbo = 0, ibo = 0;
@@ -393,6 +393,7 @@ struct CarSt {
   bool seen = false;
   float crush[4] = {0, 0, 0, 0};
   bool lostF = false, lostR = false, wl[4] = {false, false, false, false}, air = false;
+  unsigned gone = 0;                  // which of the car's parts (parts.cpp) had left it, a bit each
   int bin = -1;
   float acc[16] = {0};
   V3 velPrev, posPrev;
@@ -522,6 +523,7 @@ struct Fx::Impl {
   bool haveEye = false;
   float wet = 0;
   double boom = 0;
+  bool hazOn = false;                 // somebody is running the cars against the big pieces (Fx::hazards): the kick below leaves those alone
   // unseen checks
   unsigned test = 0;
   int testCar = -1, callIx = 0;
@@ -612,7 +614,7 @@ struct Fx::Impl {
     for (Body &b : K.pool) if (!b.on) { slot = &b; break; }
     if (!slot) { slot = &K.pool[0]; for (Body &b : K.pool) if (b.born < slot->born) slot = &b; }      // full: the oldest goes
     *slot = Body{};
-    slot->on = true; slot->kind = kind; slot->born = t; slot->hint = spawnHint;
+    slot->on = true; slot->kind = kind; slot->born = t; slot->immune = t + 0.6; slot->hint = spawnHint;
     K.dirty = true;
     return *slot;
   }
@@ -804,7 +806,7 @@ struct Fx::Impl {
         K.live++;
         if (b.small && t - b.born > SHARD_LIFE - SHARD_FADE) K.dirty = true;
         // cars kick what they run over. Only the PIECE moves: a car's physics never hears of it.
-        if (b.asleep) {
+        if (b.asleep && !(hazOn && kd <= K_WR)) {
           for (const Kick &c : kicks) {
             if (c.speed < 4) continue;
             const float dx = b.pos.x - c.x, dz = b.pos.z - c.z;
@@ -1143,6 +1145,65 @@ int Fx::phaseOf(const Car &car) const {
   return st ? st->phase : 0;
 }
 
+void Fx::hazards(std::vector<Hazard> &out) {
+  Impl &I = *d;
+  out.clear();
+  I.hazOn = true;
+  for (int kd = K_FW; kd <= K_WR; kd++) {
+    const KindGL &K = I.kinds[kd];
+    for (size_t i = 0; i < K.pool.size(); i++) {
+      const Body &b = K.pool[i];
+      if (!b.on || I.t < b.immune) continue;
+      Hazard h;
+      h.id = kd * 256 + (int)i;
+      h.x = b.pos.x; h.y = -b.pos.z; h.vx = b.vel.x; h.vy = -b.vel.z;
+      h.wheel = b.wheel;
+      h.r = b.wheel ? b.R : clampf(0.5f * (b.half.x + b.half.z), 0.35f, 0.7f);
+      h.mass = b.mass;
+      h.lift = std::max(0.0f, b.pos.y - b.gy - (b.wheel ? b.R : 0.25f));
+      h.still = b.asleep || dot(b.vel, b.vel) < 2.25f;
+      out.push_back(h);
+    }
+  }
+}
+
+void Fx::struck(const Struck &k) {
+  Impl &I = *d;
+  const int kd = k.id / 256, ix = k.id % 256;
+  if (kd < K_FW || kd > K_WR || ix >= (int)I.kinds[kd].pool.size()) return;
+  Body &b = I.kinds[kd].pool[(size_t)ix];
+  if (!b.on) return;
+  const V3 vel{(float)k.vx, (float)k.up, (float)-k.vy};
+  I.kinds[kd].dirty = true;
+  if (k.shatter) {
+    // a wing met at speed is carbon in the air
+    const float col[3] = {b.col.x, b.col.y, b.col.z};
+    int hint = b.hint;
+    const float gy = I.ground(b.pos.x, b.pos.z, hint);
+    I.spawnHint = b.hint;
+    I.shards(34, b.pos, vel, col, 0.12f, 6, 4);
+    I.spark(50, b.pos, vel * 0.6f, gy, 6, 3);
+    b.on = false;
+    return;
+  }
+  b.asleep = false; b.sleep = 0; b.slide = false; b.slowT = 0;
+  b.vel = vel;
+  if (k.up > 0) {
+    b.pos.y += 0.05f;
+    b.w = V3{I.rng.c(), I.rng.c(), I.rng.c()} * (b.wheel ? 9.0f : 22.0f);
+    I.spark(12, b.pos, vel * 0.5f, b.gy, 4, 2.5f);
+  }
+  b.immune = I.t + 0.35;
+}
+
+void Fx::sweep(int id) {
+  Impl &I = *d;
+  const int kd = id / 256, ix = id % 256;
+  if (kd < K_FW || kd > K_WR || ix >= (int)I.kinds[kd].pool.size()) return;
+  I.kinds[kd].pool[(size_t)ix].on = false;
+  I.kinds[kd].dirty = true;
+}
+
 void Fx::tint(const Car &car, float paint[3]) const {
   const CarSt *st = d->find(&car);
   if (!st || st->burn <= 0) return;
@@ -1193,6 +1254,7 @@ void Fx::car(const Car &car, const Proj &proj, const float paint[3], bool mine, 
     // FIRST SIGHT: whatever state the car is in is not news. A car that joins already hurt must not explode at load.
     st.seen = true;
     for (int k = 0; k < 4; k++) { st.crush[k] = crush[k]; st.wl[k] = car.wheelLost[k]; }
+    if (car.parts.exists) for (int i = 0; i < N_PARTS; i++) if (car.parts.gone[i]) st.gone |= 1u << i;
     st.lostF = lostF; st.lostR = lostR; st.air = car.airborne;
     st.velPrev = vel; st.posPrev = pos; st.speedPrev = speed; st.dmg = car.damage;
     Rng r2; r2.s = st.seed * 747796405u + 2891336453u; r2.f();
@@ -1277,6 +1339,39 @@ void Fx::car(const Car &car, const Proj &proj, const float paint[3], bool mine, 
     I.shards(18, at(-hl * 0.87f, 0.8f, 0), vel, col, 0.09f, 4, 3);
   }
   st.lostR = lostR;
+
+  // ---- the smaller bodywork (parts.cpp): a mirror, a sidepod, a bargeboard, the floor's edge. Each leaves as a
+  // piece of its own size in the car's colour, from where it was, and lies where it stops.
+  {
+    unsigned gone = 0;
+    if (car.parts.exists) for (int i = 0; i < N_PARTS; i++) if (car.parts.gone[i]) gone |= 1u << i;
+    // (the wings, the corners and the wheels leave as themselves, above and below)
+    static const struct { int i; float x, y, z, sx, sy, sz, kg; } PIECE[] = {
+      {13, 0.37f, 0.63f, -0.44f, 0.16f, 0.10f, 0.14f, 0.3f}, {14, 0.37f, 0.63f, 0.44f, 0.16f, 0.10f, 0.14f, 0.3f},      // mirrors
+      {15, -0.10f, 0.40f, -0.66f, 1.10f, 0.34f, 0.30f, 4.0f}, {16, -0.10f, 0.40f, 0.66f, 1.10f, 0.34f, 0.30f, 4.0f},    // sidepods
+      {19, -0.30f, 0.10f, -0.85f, 1.30f, 0.03f, 0.22f, 1.6f}, {20, -0.30f, 0.10f, 0.85f, 1.30f, 0.03f, 0.22f, 1.6f},    // floor edges
+      {21, 1.15f, 0.15f, -0.48f, 0.50f, 0.26f, 0.05f, 0.8f}, {22, 1.15f, 0.15f, 0.48f, 0.50f, 0.26f, 0.05f, 0.8f},      // bargeboards
+      {24, -0.62f, 0.795f, 0.0f, 0.22f, 0.10f, 0.10f, 0.4f},                                                             // the camera pod
+      {29, -2.36f, 0.41f, 0.0f, 0.12f, 0.05f, 0.80f, 1.2f}, {30, -2.00f, 0.12f, 0.0f, 0.70f, 0.05f, 0.90f, 2.5f},       // beam wing, diffuser
+    };
+    const unsigned fresh = gone & ~st.gone;
+    if (fresh) for (const auto &pc : PIECE) {
+      if (!(fresh & (1u << pc.i))) continue;
+      Body &b = I.alloc(K_CHUNK);
+      const V3 hk = I.kinds[K_CHUNK].half;
+      b.scale = {pc.sx * 0.5f / hk.x, pc.sy * 0.5f / hk.y, pc.sz * 0.5f / hk.z};
+      I.shape(b, hk, pc.kg, 1.0f);
+      b.pos = at(pc.x, pc.y, pc.z);
+      b.q = qFromMat(M);
+      const V3 right = rot(b.q, V3{0, 0, 1});
+      b.vel = vel * (0.6f + rng.f() * 0.3f) + right * ((pc.z < 0 ? -1.0f : pc.z > 0 ? 1.0f : rng.c()) * (2 + rng.f() * 5)) + V3{0, 1.5f + rng.f() * 4, 0};
+      b.w = V3{rng.c() * 16, rng.c() * 10, rng.c() * 16};
+      b.col = {col[0], col[1], col[2]};
+      b.e = 0.22f; b.mu = 0.5f;
+      I.shards(5, b.pos, vel, col, 0.06f, 3, 2.5f);
+    }
+    st.gone = gone;
+  }
 
   // ---- a wheel comes off: 11 kg of it (22 on the coupe), bouncing and rolling as far as its speed takes it
   auto wheel = [&](int i, V3 extra) {

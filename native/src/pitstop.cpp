@@ -116,6 +116,7 @@ double laneProgress(const Track &track, const Lane &lane, double s) {
 
 bool shouldPit(const Car &car) {
   if (car.hasLost && (car.lostFrontWing || car.lostRearWing)) return true;
+  if (car.wheelLost[0] || car.wheelLost[1] || car.wheelLost[2] || car.wheelLost[3]) return true;
   return car.damage > 0.55;
 }
 
@@ -168,6 +169,7 @@ void repair(Car &car, const std::vector<std::string> &jobs) {
   }
   if (has(jobs, "floor")) car.damage = std::max(0.0, car.damage - 0.25);
   if (has(jobs, "tyres")) {
+    refitWheels(car);
     AxleTyre &t = car.tyre;
     t.wf = 0; t.wr = 0; t.age = 0; t.Tf = 80; t.Tr = 80;
   }
