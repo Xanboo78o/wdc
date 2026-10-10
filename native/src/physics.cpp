@@ -749,7 +749,12 @@ void step(Car &car, double dt, const Env &env) {
   }
   car.steerEff = steer;
 
-  const double af = std::atan((car.vy + S.a * car.r) / vSafe) - steer;
+  // GOING BACKWARDS (not in the JS; Adam's dad's friend, 2026-10-10: "reversing is backwards, like the turning"):
+  // the road comes at the front tyres from behind, so a wheel turned left is pushed RIGHT. The nose swings
+  // away from the lock and the tail goes where the wheel points, as a real car's does. It was the other way.
+  // Only in reverse gear: a car sliding backwards out of a spin is left exactly as the JS has it (native/check.sh).
+  const double steerDir = car.selector == -1 && car.vx < -0.3 ? -1.0 : 1.0;
+  const double af = std::atan((car.vy + S.a * car.r) / vSafe) - steer * steerDir;
   const double ar = std::atan((car.vy - S.b * car.r) / vSafe);
 
   const double lowV = std::min(1.0, v / 3.0);

@@ -1429,8 +1429,15 @@ int main(int argc, char **argv) {
             else if (hd.selector > 0 && !b.shift(-1, v * 3.6)) toast = {"TOO FAST FOR THAT GEAR", 2};
           }
         } else {
-          if (act[A_SHUP] && hd.selector < 0) { hd.selector = 1; toast = {"DRIVE", 2}; }
-          if (act[A_SHDN] && hd.selector > 0) { if (v < 5) { hd.selector = -1; toast = {"REVERSE", 2}; } else toast = {"TOO FAST FOR REVERSE", 2}; }
+          // (2026-10-10, from a first-time driver.) LEFT is always reverse. RIGHT is drive; RIGHT again opens the DRS,
+          // and RIGHT once more shuts it. LEFT from anywhere is reverse again, with the wing shut.
+          if (act[A_SHUP]) {
+            if (hd.selector < 0) { hd.selector = 1; toast = {"DRIVE", 2}; }
+            else if (S.spec->drs) { drsTap = true; toast = {S.car->drsOpen ? "DRS SHUT" : "DRS OPEN", 1.5}; }
+          }
+          if (act[A_SHDN] && hd.selector > 0) {
+            if (v < 5) { hd.selector = -1; S.car->drsOpen = false; toast = {"REVERSE", 2}; } else toast = {"TOO FAST FOR REVERSE", 2};
+          }
         }
       }
       if (act[A_PIT] && S.race) { S.race->me->pitRequest = !S.race->me->pitRequest; toast = {S.race->me->pitRequest ? "BOX THIS LAP" : "STAY OUT", 2}; }
