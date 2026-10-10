@@ -102,6 +102,46 @@ const RECIPES = {
     wheels: { by: 'material', mats: ['NEUMA', 'material_11'], tyre: 'NEUMA' },      // four wheels named tyre, tyre1, tyre2 and tyre: cut by quarter
     role: { CAR_PAINT: 'paint', NEUMA: 'tyre', material_11: 'rim', phong1: 'glass', RED_GLASS: 'tail', LIGHTS: 'lamp' },
   },
+  // 2026-10-10, later: "find me gt4 and hyper car models so we dont have the same gt4 and hypers but 4 diff gt3s".
+  m4g4: {
+    title: 'BMW M4 GT4 (F82)', klass: 'gt4', length: 4.80,
+    skip: /STEERING_WHEEL/, plain: /_TYRE_/, noAerial: true,
+    skipMat: ['badges'],
+    wheels: { by: 'material', mats: ['tire', 'wheel', 'rotor'], tyre: 'tire' },
+    nodeRole: [[/_mm_ext_carbon/, 'paint']],      // its bare carbon bonnet and roof: a team paints those
+    role: { material: 'paint', material_6: 'paint', tire: 'tyre', wheel: 'rim', glass: 'glass', lights: 'lamp', emis: 'tail' },
+  },
+  amg4: {
+    title: 'Mercedes-AMG GT4', klass: 'gt4', length: 4.619, reverse: true,
+    plain: /Object_26$/,                                                   // the tyres
+    // the star, and five see-through coloured blocks the model's author left on the suspension
+    skipMat: ['Tex1Mtl', 'Upperarmb1Mtl', 'Cupper1Mtl', 'Springtop1Mtl', 'Upperarm1Mtl', 'Hub1Mtl'],
+    wheels: { by: 'material', mats: ['Tyre1Mtl', 'Rim1Mtl', 'Rotor1Mtl', 'Caliper1Mtl'], tyre: 'Tyre1Mtl', hub: ['Caliper1Mtl'] },
+    role: { Paint1Mtl: 'paint', Windows1Mtl: 'glass', Windows2Mtl: 'glass', Glass1Mtl: 'glass', Tyre1Mtl: 'tyre', Rim1Mtl: 'rim', Lights4Mtl: 'tail', Lights1Mtl: 'lamp', Lights3Mtl: 'chrome', Lights13Mtl: 'chrome' },
+  },
+  f499: {
+    title: 'Ferrari 499P', klass: 'hyper', length: 5.10,
+    skip: /STEER_HR|Rim_Blur|RIM_RR1_002/, plain: /EXT_Tyre/,          // (the right rear rim is in the file twice)
+    skipMat: ['logo_cos'],
+    wheels: { by: 'material', mats: ['EXT_Tyre', 'RIMS', 'brake_disk', 'Wheels', 'caliper'], tyre: 'EXT_Tyre', hub: ['caliper'] },
+    role: { Body: 'paint', EXT_Tyre: 'tyre', RIMS: 'rim', Wheels: 'rim', Glass: 'glass', INT_Glass: 'glass', SM_Light_Front: 'lamp', MIRRORS: 'chrome', Mirrorsx: 'chrome' },
+  },
+  a110: {
+    title: 'Alpine A110 GT4', klass: 'gt4', length: 4.26,
+    skip: /_Int_Steer/, plain: /Rotor_LOD0_Tire/,
+    wheels: { by: 'node', fl: /_W_FL_Rotor/, fr: /_W_FR_Rotor/, rl: /_W_RL_Rotor/, rr: /_W_RR_Rotor/,
+              hub: { fl: /_W_FL_Stator/, fr: /_W_FR_Stator/, rl: /_W_RL_Stator/, rr: /_W_RR_Stator/ }, tyre: /_Tire/ },
+    role: { A110_GT4_Ext_Paint_13: 'paint', A110_GT4_Ext_Paint: 'paint', A110_GT4_Ext_Glass: 'glass', A110_GT4_Ext_BrakeOn: 'tail', A110_GT4_Ext_Mirror: 'chrome' },
+    nodeRole: [[/_Tire/, 'tyre'], [/Rotor_LOD0_Details(?!Met)/, 'rim'], [/_Glass/, 'glass']],
+  },
+  p9x8: {
+    title: 'Peugeot 9X8', klass: 'hyper', length: 5.00,
+    skip: /_Int_Steer|_LOD[12]_/, plain: /Rotor_LOD0_Tire/,
+    wheels: { by: 'node', fl: /_W_FL_Rotor/, fr: /_W_FR_Rotor/, rl: /_W_RL_Rotor/, rr: /_W_RR_Rotor/,
+              hub: { fl: /_W_FL_Stator/, fr: /_W_FR_Stator/, rl: /_W_RL_Stator/, rr: /_W_RR_Stator/ }, tyre: /_Tire/ },
+    role: { '9X8_Ext_Paint': 'paint', '9X8_Ext_Glass': 'glass', '9X8_Ext_LightBrakes': 'tail', '9X8_Ext_Mirror': 'chrome' },
+    nodeRole: [[/_Tire/, 'tyre'], [/Rotor_LOD0_Details(?!Met)/, 'rim'], [/_Glass/, 'glass']],
+  },
   // The 2022 grand prix car. A million triangles as it came, 726,000 of them one hidden lump the size of
   // a shoebox between the rear wheels ('material'): left off, with the steering wheel he holds himself.
   f122: {
@@ -212,6 +252,8 @@ for (const t of tris) for (const arr of [t.p, t.n]) for (let k = 0; k < 9; k += 
   const x = arr[k], z = arr[k + 2];
   arr[k] = z; arr[k + 2] = -x;
 }
+// ...and one that came facing backwards (its recipe says so) is turned round
+if (R.reverse) for (const t of tris) for (const arr of [t.p, t.n]) for (let k = 0; k < 9; k += 3) { arr[k] = -arr[k]; arr[k + 2] = -arr[k + 2]; }
 const box = list => {
   const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
   for (const t of list) for (let k = 0; k < 9; k++) { lo[k % 3] = Math.min(lo[k % 3], t.p[k]); hi[k % 3] = Math.max(hi[k % 3], t.p[k]); }

@@ -165,6 +165,12 @@ const ZONES = {
   p992: { door: [-0.30, 0.30, 0.20, 0.60], quarter: [-0.82, -0.34, 0.55, 0.76], fender: [0.34, 0.86, 0.48, 0.64], sill: [-0.36, 0.36, 0.10, 0.24], bonnet: [-0.52, 0.52, 0.50, 0.90], roof: [-0.42, 0.42, -0.22, 0.16], deck: [-0.6, 0.6, -0.96, -0.74] },
   hura: { door: [-0.36, 0.30, 0.20, 0.60], quarter: [-0.86, -0.40, 0.54, 0.76], fender: [0.34, 0.82, 0.48, 0.66], sill: [-0.40, 0.36, 0.10, 0.22], bonnet: [-0.52, 0.52, 0.58, 0.96], roof: [-0.40, 0.40, -0.12, 0.26], deck: [-0.6, 0.6, -0.96, -0.74] },
   f122: { door: [-0.50, 0.22, 0.24, 0.60], quarter: [-0.90, -0.40, 0.45, 0.80], fender: [0.30, 0.92, 0.18, 0.46], sill: [-0.50, 0.22, 0.12, 0.30], bonnet: [-0.20, 0.20, 0.44, 0.96], roof: [-0.30, 0.30, -0.62, -0.08], deck: [-0.5, 0.5, -1.0, -0.84] },
+  // later the same day: two more GT4s and a second hypercar
+  m4g4: { door: [-0.30, 0.25, 0.20, 0.60], quarter: [-0.85, -0.40, 0.50, 0.72], fender: [0.35, 0.85, 0.45, 0.65], sill: [-0.30, 0.30, 0.10, 0.22], bonnet: [-0.50, 0.50, 0.45, 0.90], roof: [-0.40, 0.40, -0.35, 0.05], deck: [-0.6, 0.6, -0.95, -0.75] },
+  amg4: { door: [-0.35, 0.15, 0.20, 0.60], quarter: [-0.90, -0.50, 0.50, 0.72], fender: [0.30, 0.85, 0.45, 0.65], sill: [-0.35, 0.30, 0.10, 0.22], bonnet: [-0.50, 0.50, 0.35, 0.90], roof: [-0.38, 0.38, -0.50, -0.20], deck: [-0.6, 0.6, -0.98, -0.80] },
+  f499: { door: [-0.50, 0.30, 0.15, 0.45], quarter: [-0.95, -0.20, 0.45, 0.80], fender: [0.40, 0.90, 0.30, 0.50], sill: [-0.40, 0.30, 0.08, 0.20], bonnet: [-0.30, 0.30, 0.50, 0.95], roof: [-0.30, 0.30, -0.20, 0.20], deck: [-0.30, 0.30, -0.90, -0.40] },
+  a110: { door: [-0.30, 0.25, 0.20, 0.60], quarter: [-0.85, -0.40, 0.50, 0.72], fender: [0.35, 0.85, 0.45, 0.62], sill: [-0.30, 0.30, 0.10, 0.22], bonnet: [-0.50, 0.50, 0.50, 0.90], roof: [-0.40, 0.40, -0.30, 0.20], deck: [-0.5, 0.5, -0.95, -0.78] },
+  p9x8: { door: [-0.45, 0.30, 0.15, 0.50], quarter: [-0.90, -0.30, 0.50, 0.85], fender: [0.40, 0.90, 0.30, 0.50], sill: [-0.40, 0.30, 0.08, 0.22], bonnet: [-0.30, 0.30, 0.55, 0.95], roof: [-0.30, 0.30, -0.25, 0.15], deck: [-0.5, 0.5, -0.95, -0.60] },
 };
 
 // ---- who they are ----------------------------------------------------------------------------------
@@ -182,6 +188,11 @@ const PADDOCK = {
   p992: { klass: 'GT3', pre: Array.from({ length: 36 }, (_, k) => 'P' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
   hura: { klass: 'GT3', pre: Array.from({ length: 36 }, (_, k) => 'H' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
   f122: { klass: 'PRO', pre: Array.from({ length: 36 }, (_, k) => 'F' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
+  m4g4: { klass: 'GT4', pre: Array.from({ length: 36 }, (_, k) => 'B' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
+  amg4: { klass: 'GT4', pre: Array.from({ length: 36 }, (_, k) => 'A' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
+  f499: { klass: 'HYPER', pre: Array.from({ length: 36 }, (_, k) => 'R' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
+  a110: { klass: 'GT4', pre: Array.from({ length: 36 }, (_, k) => 'L' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
+  p9x8: { klass: 'HYPER', pre: Array.from({ length: 36 }, (_, k) => 'X' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
 };
 
 // ---- a pride flag, as paint -----------------------------------------------------------------
@@ -262,7 +273,7 @@ const uv = name => { const c = atlas.cells[name]; if (!c) throw new Error('no st
 const isBadge = n => SPONSORS.find(s => s.n === n)?.lay === 'badge';
 
 // low cars with little flank: two-digit numbers, a smaller number panel, a longer title
-const SMALL = new Set(['a480', 'f122']);
+const SMALL = new Set(['a480', 'f122', 'f499', 'p9x8']);
 function build(key, carIx) {
   const Z = ZONES[key], P = PADDOCK[key];
   if (!Z || !P) throw new Error(`bake: no zones or paddock for ${key} — add them at the top of tools/livery/bake.mjs`);
