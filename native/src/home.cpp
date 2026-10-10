@@ -175,7 +175,7 @@ void MenuSave::save(const std::string &path) const {
 }
 
 Home::Home(const std::string &dataDir_, const std::string &savePath_) : dataDir(dataDir_), savePath(savePath_) {
-  if (!savePath.empty()) S.load(savePath);
+  if (!savePath.empty()) { S.load(savePath); S.save(savePath); }      // (saved at once: the iPad's pairing code is made in load, and must be the same next time)
   const Json idx = Json::loadOpt(dataDir + "/cars/index.json");
   if (idx.isArr()) for (size_t i = 0; i < idx.size(); i++) packs.push_back({idx[i]["key"].s(""), idx[i]["title"].s(""), idx[i]["klass"].s("gt3")});
   // nobody has chosen yet: the GT3 seat gets the real GT3 car if this machine has one, not the stand-in body
