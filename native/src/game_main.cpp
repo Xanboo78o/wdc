@@ -1040,7 +1040,9 @@ int main(int argc, char **argv) {
             case SDL_SCANCODE_R: if (!menuish) act[A_RESET] = true; break;
             case SDL_SCANCODE_C: if (!menuish) act[A_CAM] = true; break;
             case SDL_SCANCODE_M: if (!menuish) { R.mirrorOn = !R.mirrorOn; toast = {R.mirrorOn ? "MIRROR ON" : "MIRROR OFF", 2}; } break;
-            case SDL_SCANCODE_P: if (!menuish) act[A_PIT] = true; break;
+            case SDL_SCANCODE_B: if (!menuish) act[A_PIT] = true; break;                 // B for box (it was P; P is the wipers now)
+            case SDL_SCANCODE_X: if (!menuish) act[A_DRS] = true; break;                 // DRS, as well as SPACE
+            case SDL_SCANCODE_P: if (!menuish) { if (const char *m = R.wiperTap(clock)) toast = {m, 2}; } break;
             case SDL_SCANCODE_E: if (!menuish) act[A_SHUP] = true; break;
             case SDL_SCANCODE_Q: if (!menuish) act[A_SHDN] = true; break;
             case SDL_SCANCODE_L: if (!menuish) cfg.line = !cfg.line; break;
@@ -1199,6 +1201,7 @@ int main(int argc, char **argv) {
       si.rpm = S.box->rpm; si.throttle = c.throttle; si.speed = c.speed;
       si.slip = c.slipR; si.peak = S.spec->pk; si.surf = c.surface; si.wall = c.wallTouch;
       si.rain = rainNow;
+      si.cabin = cfg.cam == 0 && S.spec->gt;
       si.dt = dt; si.paused = screen == PAUSE;
       // behind HOME the race is silent, as it is in the browser (sound=0)
       si.volume = (hidden || bgOn || screen == RESULTS) ? 0 : cfg.volume / 10.0;

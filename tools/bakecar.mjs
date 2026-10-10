@@ -60,6 +60,8 @@ const RECIPES = {
   },
   g55: {
     title: 'Ginetta G55', klass: 'gt4', length: null,           // already in metres
+    // the driver's eyes: the automatic guess sat 23 cm under the roof skin and the near plane cut the roof open (Adam, 2026-10-09)
+    eye: [-0.26, 0.895, -0.34],
     skip: /RIM_BLUR/,
     plain: /ext_windows_banner/,
     skipMat: ['ext_stickers', 'stickers_g55'],     // a real tyre maker's windscreen banner, a flag and a number: the team's own stickers go on instead

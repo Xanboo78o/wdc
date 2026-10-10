@@ -84,12 +84,18 @@ static std::map<std::string, Spec> &specs() {
     // GT4: a road car with a cage. Heavier, a third less power, a wing for show.
     Spec g4 = gt;
     g4.key = "gt4"; g4.name = "GT4"; g4.full = "GT4";
-    g4.m = 1420; g4.Izz = 2080; g4.Iyy = 2080; g4.Ixx = 600;
-    g4.h = 0.48;
+    // Adam, 2026-10-09: "it doesnt feel heavy enough, yet also not nimble enough". Both
+    // are true of a real one: it is 1.4 tonnes on a short wheelbase. So the WEIGHT is in
+    // how it stops and leans (a higher centre of mass, brakes of its class, a little less
+    // tyre than a GT3), and the NIMBLENESS is in how it turns (less yaw inertia than the
+    // long GT3 it was copied from, and a tyre that answers the wheel sooner).
+    g4.m = 1420; g4.Izz = 1800; g4.Iyy = 2080; g4.Ixx = 600;
+    g4.h = 0.53;
+    g4.B = 12.6;
     g4.ClA = 1.25; g4.CdA = 1.22; g4.ClFloor = 0.9;
     g4.Pmax = 330e3; g4.Fdrive = 9500;
-    g4.Fbrake = 23500;
-    g4.mu = 1.76;
+    g4.Fbrake = 21000;
+    g4.mu = 1.70;
     g4.aeroBal = 0.34; g4.brakeBal = 0.65;      // what little wing it has is at the back: measured, it stops the slow drivers spinning
     m["gt4"] = g4;
     // HYPERCAR: a prototype. A quarter-tonne lighter, more power, and a floor

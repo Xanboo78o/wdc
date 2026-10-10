@@ -303,9 +303,13 @@ void main(){
   float ndl = max(dot(n, uSun), 0.0);
   // WET: tarmac darkens as it soaks and starts to mirror the sky at a glance
   float shine = 0.0;
+  float pool = 0.0;
   if (uWet > 0.0 && (k == 1 || k == 10 || k == 4) && n.y > 0.5) {
-    c *= 1.0 - 0.38 * uWet;
-    shine = uWet * pow(1.0 - max(dot(n, V), 0.0), 4.0);
+    // (Adam: "the pavement should get wet and reflective") The water does not
+    // lie evenly: it stands in the low places, and those are the mirrors.
+    pool = smoothstep(0.42, 0.68, vnoise(vW.xz * 0.23) * 0.65 + vnoise(vW.xz * 0.9 + 3.7) * 0.35) * smoothstep(0.35, 1.0, uWet);
+    c *= 1.0 - (0.46 + 0.14 * pool) * uWet;
+    shine = uWet * (0.10 + 0.90 * pow(1.0 - max(dot(n, V), 0.0), 3.2)) * (0.55 + 0.45 * pool);
   }
   vec3 amb = mix(uGndAmb, uSkyAmb, n.y * 0.5 + 0.5);
   float vis = sunVis(vW, normalize(vN) * (dot(normalize(vN), uSun) < 0.0 ? -1.0 : 1.0));
@@ -319,8 +323,20 @@ void main(){
     float cone = smoothstep(0.86, 0.985, ca) + 0.38 * smoothstep(0.35, 0.92, ca);
     if (cone > 0.0) lit += c * vec3(1.0, 0.95, 0.84) * cone * (0.34 + 0.66 * max(dot(n, -ln), 0.0)) * 4.6 / (1.0 + d2 * 0.0026) * uLampOn;
   }
-  lit = mix(lit, uFog * 1.05, shine * 0.75);
-  if (uWet > 0.0 && shine > 0.0) { vec3 hw = normalize(uSun + V); lit += uSunCol * pow(max(dot(n, hw), 0.0), 90.0) * uWet * 0.9 * vis; }
+  if (shine > 0.0) {
+    // what a wet road mirrors: the sky where you are looking along it, lighter at the horizon
+    vec3 Rw = reflect(-V, mix(n, vec3(0.0, 1.0, 0.0), 0.6 + 0.4 * pool));
+    vec3 skyR = mix(uFog * 1.08, uSkyTop, pow(clamp(Rw.y, 0.0, 1.0), 0.55));
+    lit = mix(lit, skyR, clamp(shine * 0.95, 0.0, 0.88));
+    vec3 hw = normalize(uSun + V);
+    lit += uSunCol * (pow(max(dot(n, hw), 0.0), 90.0) * 0.9 + pow(max(dot(n, hw), 0.0), 700.0) * 3.0 * pool) * uWet * vis;
+    // your own lamps come back off the water as a long smear toward you
+    if (uLampOn > 0.0) {
+      vec3 ld = vW - uLampPos; float dl = length(ld);
+      float ahead = max(dot(ld / max(dl, 0.01), uLampDir), 0.0);
+      lit += vec3(0.80, 0.86, 0.92) * uLampOn * pow(ahead, 30.0) * shine * 1.6 / (1.0 + dl * 0.03);
+    }
+  }
   if (k == 6 || k == 12) {
     vec3 h = normalize(uSun + V);
     if (uHdr > 0.5) {
@@ -382,6 +398,12 @@ void main(){
 )";
 static const char *COMP_FS = R"(#version 330 core
 in vec2 vU; uniform sampler2D uTex, uBloom, uDepth; uniform float uExp, uSharp, uFar; uniform vec2 uK, uPx; out vec4 o;
+// RAIN (Adam: "the rain overlay is also in my car", "i want the raindrops on my windshield"):
+// uRain how hard it is falling; uGlass 1 when you are looking through a screen or a visor;
+// uDrops how much water stands on it; uWipe where the blade is across its sweep (-1: parked)
+// and uWiped 1 while it is on its way out (what is behind it is clear).
+uniform float uRain, uGlass, uDrops, uWipe, uWiped, uRainT, uRainV;
+float rhash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 // MOTION BLUR (js/speedfx.js SpeedBlur): the camera's own travel, known, and every pixel's real distance
 uniform vec3 uMbVel; uniform float uMbTan, uMbAsp, uMbAmt, uMbShutter, uMbMax; uniform vec4 uMbCar[8]; uniform int uMbN; uniform vec4 uMbHole;
 vec3 viewAt(vec2 v01, vec2 us){
@@ -397,7 +419,45 @@ float nearCar(vec3 P){ float k = 1.0; for (int i = 0; i < uMbN; i++) k = min(k, 
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 void main(){
   vec2 u = min(vU * uK, uK - uPx * 0.5);
-  vec3 c = max(texture(uTex, u).rgb, 0.0);
+  // ---- water on the glass in front of you: each drop a small lens, and the wiper's fan
+  float wet0 = 0.0, blade = 0.0, dz = 0.0;
+  if (uRain > 0.01 || uDrops > 0.01 || uWipe >= 0.0) dz = viewAt(vU, u).z * -1.0;
+  if (uGlass > 0.5 && dz > 1.15) {
+    // the fan: pivot under the middle of the screen, sweeping left to right
+    vec2 pv = (vU - vec2(0.5, -0.32)) * vec2(uMbAsp, 1.0);
+    float a01 = atan(pv.x, pv.y) / 1.9 + 0.5, rad = length(pv);
+    float inFan = step(0.42, rad) * step(rad, 1.42) * step(0.0, a01) * step(a01, 1.0);
+    float amount = uDrops * (uWiped > 0.5 && a01 < uWipe && inFan > 0.5 ? 0.0 : 1.0);
+    if (uWipe >= 0.0) blade = inFan * smoothstep(0.011, 0.004, abs(a01 - uWipe));
+    if (amount > 0.01) {
+      // at speed the air pushes the drops up the glass; standing still they creep down
+      vec2 g = vU * vec2(uMbAsp, 1.0) * 15.0 + vec2(0.0, -uRainT * (uRainV * 2.2 - 0.06));
+      vec2 id = floor(g), fq = fract(g) - 0.5;
+      float h = rhash(id);
+      if (h < amount * 0.72) {
+        vec2 ctr = (vec2(rhash(id + 3.1), rhash(id + 7.7)) - 0.5) * 0.5;
+        float r = 0.09 + 0.17 * rhash(id + 1.3), d = length(fq - ctr);
+        if (d < r) {
+          // a drop shows the world behind it upside down and small
+          vec2 nrm = (fq - ctr) / r;
+          u = clamp(u - nrm * (1.0 - d / r) * 0.060 * uK, vec2(0.0), uK - uPx * 0.5);
+          wet0 = 0.10 * smoothstep(r, r * 0.2, d) + 0.22 * smoothstep(0.35, 0.0, length(nrm - vec2(-0.35, 0.4)));
+        }
+      }
+    }
+  }
+  vec3 c = max(texture(uTex, u).rgb, 0.0) * (1.0 + wet0);
+  // ---- rain falling in the air: only on what is out there, never on the inside of your own car
+  if (uRain > 0.01 && dz > 2.6) {
+    float sx = (vU.x + (1.0 - vU.y) * 0.05 * uRainV) * uMbAsp;
+    float col = floor(sx * 190.0), hx = rhash(vec2(col, 1.7)), hz = rhash(vec2(col, 9.2));
+    float len = (0.05 + 0.10 * uRainV) * (0.6 + hz);
+    float fall = fract(uRainT * (1.3 + 1.4 * hz) + hx * 7.0) * (1.0 + len) - len;
+    float yy = 1.0 - vU.y;
+    float on = step(hx, 0.34 * uRain) * step(fall, yy) * step(yy, fall + len) * smoothstep(0.0, 0.25, fract(sx * 190.0)) * smoothstep(1.0, 0.75, fract(sx * 190.0));
+    c = mix(c, vec3(0.82, 0.86, 0.92), on * (0.16 + 0.10 * uRainV) * (uGlass > 0.5 ? 0.6 : 1.0));
+  }
+  c = mix(c, vec3(0.015), blade * 0.9);
   // 350 km/h, as a camera records it: each pixel streaked along the way the
   // world went past it during the shutter. Nothing at the point you are driving
   // towards, longest in the lower corners; the centre of the frame — where you
@@ -1468,8 +1528,9 @@ const Renderer::Susp &Renderer::suspOf(const Car &car, const Spec &S) {
   const bool fresh = q.at < 0;
   q.at = frameT;
   // how the car is sprung: a single-seater barely moves and moves fast; a car with a roof rides
-  const bool gt = S.key == "gt3";
-  const float travel = S.key == "f1" ? 0.034f : gt ? 0.085f : 0.045f, hz = S.key == "f1" ? 4.6f : gt ? 2.1f : 3.6f, zeta = gt ? 0.34f : 0.48f;
+  // (a GT4 is a road car with a cage: it rides softer and further than a GT3, and you see its weight move)
+  const bool gt = S.gt, g4 = S.key == "gt4";
+  const float travel = S.key == "f1" ? 0.034f : g4 ? 0.115f : gt ? 0.085f : 0.045f, hz = S.key == "f1" ? 4.6f : g4 ? 1.75f : gt ? 2.1f : 3.6f, zeta = g4 ? 0.30f : gt ? 0.34f : 0.48f;
   q.travel = travel;
   const float w = 2 * (float)PI * hz;
   const float speed = (float)car.speed;
@@ -1579,6 +1640,7 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
 
 // Rain you drive through: streaks across the view, more and faster with speed.
 void Renderer::drawRain(const FrameIn &f) {
+  if (post) return;                 // the developed picture draws its own rain, and keeps it out of the car (COMP_FS)
   if (f.look.rain <= 0.01f) return;
   const float W_ = (float)W, H_ = (float)H;
   const int n = (int)(260 * f.look.rain);
@@ -1775,6 +1837,13 @@ void Renderer::endScene(double time) {
   // the soft distance: a ring this many pixels wide at its widest, on a 900-line picture. XBR_FAR=0 turns it off.
   static const float farSoft = std::getenv("XBR_FAR") ? (float)std::atof(std::getenv("XBR_FAR")) : 1.7f;
   glUniform1i(glGetUniformLocation(compProg, "uDepth"), 2);
+  glUniform1f(glGetUniformLocation(compProg, "uRain"), rainNow);
+  glUniform1f(glGetUniformLocation(compProg, "uGlass"), glassNow ? 1.0f : 0.0f);
+  glUniform1f(glGetUniformLocation(compProg, "uDrops"), glassNow ? wiper.drops : 0.0f);
+  glUniform1f(glGetUniformLocation(compProg, "uWipe"), glassNow ? wiper.pos : -1.0f);
+  glUniform1f(glGetUniformLocation(compProg, "uWiped"), wiper.out ? 1.0f : 0.0f);
+  glUniform1f(glGetUniformLocation(compProg, "uRainT"), (float)std::fmod(time, 3600.0));
+  glUniform1f(glGetUniformLocation(compProg, "uRainV"), rainSpeed);
   // motion blur: XBR_BLUR=0 off, 0.5 gentler, 1.5 the most
   static const float blurK = std::getenv("XBR_BLUR") ? std::min(1.5f, (float)std::atof(std::getenv("XBR_BLUR"))) : 1.0f;
   {
@@ -1812,6 +1881,37 @@ void Renderer::endScene(double time) {
   gpuAt ^= 1;
   if (PROF.on && PROF.frames % 100 == 0) std::fprintf(stderr, "governor: GPU %.1f ms a frame, drawing at %.0f%%\n", gpuMs, scale * 100);
   PROF.mark(6);
+}
+
+// ---- THE WIPER (Adam: "p for windshield wipers, double tap to increase speed, single tap for
+// just 1 wipe"). One tap is one wipe. Two taps inside 0.35 s move it up a speed:
+// off, slow, steady, fast, off. Water gathers on the glass while it rains and the
+// blade takes it off on the way out.
+const char *Renderer::wiperTap(double now) {
+  static const char *NAME[4] = {"WIPERS OFF", "WIPERS: SLOW", "WIPERS: STEADY", "WIPERS: FAST"};
+  const bool twice = now - wiper.tapAt < 0.35;
+  wiper.tapAt = now;
+  if (twice) { wiper.level = (wiper.level + 1) % 4; wiper.next = 0; return NAME[wiper.level]; }
+  if (wiper.pos < 0) wiper.go = true;
+  return wiper.level ? nullptr : "ONE WIPE";
+}
+void Renderer::wiperStep(float dt, double now) {
+  Wiper &w = wiper;
+  w.drops = std::min(1.0f, w.drops + rainNow * 0.75f * dt);
+  if (rainNow < 0.02f) w.drops = std::max(0.0f, w.drops - 0.05f * dt);        // it dries, slowly
+  static const float EVERY[4] = {0, 2.6f, 1.35f, 0.0f};
+  if (w.level && w.pos < 0) { w.next -= dt; if (w.next <= 0) { w.go = true; w.next = EVERY[w.level]; } }
+  if (w.go && w.pos < 0) { w.go = false; w.pos = 0; w.out = true; }
+  if (w.pos >= 0) {
+    const float speed = w.level == 3 ? 2.6f : 2.0f;                            // sweeps a second, each way
+    if (w.out) { w.pos += speed * dt; if (w.pos >= 1) { w.pos = 1; w.out = false; w.drops = 0; } }
+    else { w.pos -= speed * dt; if (w.pos <= 0) w.pos = -1; }
+  }
+  (void)now;
+  // for a photograph: XBR_DROPS=0.8 puts that much water on the glass, XBR_WIPE=0.5 stops the blade half way out
+  static const char *ed = std::getenv("XBR_DROPS"), *ew = std::getenv("XBR_WIPE");
+  if (ed) w.drops = (float)std::atof(ed);
+  if (ew) { w.pos = (float)std::atof(ew); w.out = true; }
 }
 
 // ---- THE SHAKE (js/speedfx.js SpeedShake, and js/render.js's rule for when it runs).
@@ -2030,6 +2130,11 @@ void Renderer::drawWorld(const FrameIn &f) {
     const double cx = std::cos(camYaw), cy = std::sin(camYaw);
     eye[0] = (float)(car.x - cx * 4.9); eye[1] = carY + 1.28f; eye[2] = (float)-(car.y - cy * 4.9);
     at[0] = (float)(car.x + cx * 15); at[1] = carY + 0.62f; at[2] = (float)-(car.y + cy * 15);
+  }
+  if (!mirrorPass) {
+    rainNow = f.look.rain; rainSpeed = (float)std::min(1.0, car.speed / 70.0);
+    glassNow = f.camMode == 0;                    // the driver's eyes: behind a windscreen, or a visor
+    wiperStep((float)f.dt, f.time);
   }
   if (!mirrorPass) shakeCamera(f, eye, at, up);
   if (mirrorPass) {

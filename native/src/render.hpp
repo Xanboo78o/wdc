@@ -115,6 +115,8 @@ class Renderer {
   void mirrorBegin();
   void mirrorEnd();
   void mirrorShow();
+  // P: one tap is one wipe, two quick taps the next speed. Returns what to tell the driver, or null.
+  const char *wiperTap(double now);
   void mirrorClear() { mirHas = false; }
   // After the world and every car: develop the picture onto the screen. The HUD goes on top afterwards.
   void endScene(double time);
@@ -218,6 +220,11 @@ class Renderer {
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;
   static constexpr int MIR_W = 840, MIR_H = 200;
+  // rain on the glass and the wiper that clears it (render.cpp wiperTap, wiperStep, COMP_FS)
+  struct Wiper { int level = 0; float pos = -1, drops = 0, next = 0; bool out = false, go = false; double tapAt = -10; } wiper;
+  float rainNow = 0, rainSpeed = 0;
+  bool glassNow = false;
+  void wiperStep(float dt, double now);
   // the camera's shake (render.cpp shakeCamera): only ever on grass or in a crash
   struct Shake { float level = 0, spdWas = 0, jit[3] = {0, 0, 0}, accT = 0, accHeld = 0, lastSpd = 0, acc = 0, dist = 0, kick = 0, hf[3] = {0, 0, 0}, kn = 0, dv = 0, dx = 0, gv = 0, lv = 0, lx = 0; } shake;
   void shakeCamera(const FrameIn &f, float eye[3], float at[3], float up[3]);

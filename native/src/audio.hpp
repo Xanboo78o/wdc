@@ -40,6 +40,7 @@ struct SoundIn {
   double surf = 1;                           // car.surface: 1 tarmac, 0.93 kerb, 0.58 gravel, 0.42 grass
   bool wall = false;                         // bodywork along a barrier
   double rain = 0;                           // 0..1
+  bool cabin = false;                        // you are shut inside a car with a roof: the rain is on its glass
   double dt = 1.0 / 60;
   bool paused = false;
   double volume = 1;
@@ -83,6 +84,8 @@ class EngineAudio {
   // main-thread state
   double t = 0, duck = 1, kerbDist = 1.9, lastStone = 0, lastCrash = -9;
   bool wasOff = false;
+  double thunderAt = -1;
+  int lastThunder = -1;
   unsigned rngS = 12345;
   double rnd();
   void once(int sample, double gain, double rate = 1);

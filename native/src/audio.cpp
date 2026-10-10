@@ -213,8 +213,10 @@ struct EngineAudio::Core {
 
 // ---- the mix -----------------------------------------------------------------------
 namespace {
-enum { S_TYRE, S_GRAVEL, S_GRASS, S_SCRAPE, S_DIRT1, S_DIRT2, S_DIRT3, S_DIRT4, S_BUMP1, S_BUMP2, S_HEAVY, S_CRASH1, S_COUNT = S_CRASH1 + 11 };
-const int N_LOOPS = 4, N_SHOTS = 12;
+// (the first N_LOOPS are loops. RAIN: recordings — Adam, 2026-10-09: "find rain and storm noises and play those,
+// better if the rain is on window or metal" — the open air, and rain on the glass of a closed car)
+enum { S_TYRE, S_GRAVEL, S_GRASS, S_SCRAPE, S_RAIN, S_ROOF, S_DIRT1, S_DIRT2, S_DIRT3, S_DIRT4, S_BUMP1, S_BUMP2, S_HEAVY, S_CRASH1, S_THUNDER1 = S_CRASH1 + 11, S_COUNT = S_THUNDER1 + 3 };
+const int N_LOOPS = 6, N_SHOTS = 12;
 }
 
 struct EngineAudio::Mixer {
@@ -371,10 +373,11 @@ bool EngineAudio::open(const std::string &cls, const std::string &dataDir) {
   makeupNext = classMakeup(clsIndex(cls));
   pendingCls = clsIndex(cls);
   mix = new Mixer();
-  static const char *FILES[S_CRASH1] = {"tyre_squeal", "surf_gravel", "surf_grass", "scrape", "dirt_1", "dirt_2", "dirt_3", "dirt_4",
+  static const char *FILES[S_CRASH1] = {"tyre_squeal", "surf_gravel", "surf_grass", "scrape", "rain_out", "rain_roof", "dirt_1", "dirt_2", "dirt_3", "dirt_4",
                                         "bump_1", "bump_2", "crash_heavy"};
   for (int i = 0; i < S_CRASH1; i++) mix->load(i, dataDir + "/audio/" + FILES[i] + ".wav");
   for (int i = 0; i < 11; i++) { char b[32]; std::snprintf(b, sizeof b, "/audio/crash_%02d.wav", i + 1); mix->load(S_CRASH1 + i, dataDir + b); }
+  for (int i = 0; i < 3; i++) mix->load(S_THUNDER1 + i, dataDir + "/audio/thunder_" + std::to_string(i + 1) + ".wav");
   SDL_AudioSpec spec{SDL_AUDIO_F32, 1, 48000};
   stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, audioCb, this);
   if (!stream) return false;
@@ -449,7 +452,29 @@ void EngineAudio::update(const SoundIn &in) {
   const double sn = std::min(1.0, kmh / 321);
   const double gust = 0.55 * std::sin(t * 0.43) + 0.30 * std::sin(t * 0.96 + 1.1) + 0.15 * std::sin(t * 2.05 + 2.7);
   mix->wind = (float)(live * 0.20 * std::pow(sn, 1.7) * std::max(0.0, 1 + 0.36 * gust));
-  mix->rain = (float)(live * 0.10 * in.rain * (0.5 + 0.5 * sn));
+  // RAIN, recorded. In the open (an open cockpit, any outside camera) it is the
+  // rain itself, brighter the faster you go into it. Shut in a car it is the
+  // rain on the glass and the roof over your head: closer, duller, louder.
+  // The old hiss of noise stays only if the recordings are missing.
+  const bool haveRain = !mix->buf[S_RAIN].empty() && !mix->buf[S_ROOF].empty();
+  mix->rain = (float)(haveRain ? 0 : live * 0.10 * in.rain * (0.5 + 0.5 * sn));
+  const double rk = std::pow(std::min(1.0, in.rain), 0.7);
+  mix->loop[S_RAIN].gain = (float)(live * master * (in.cabin ? 0.55 : 2.4) * rk * (in.rain > 0.01 ? 1 : 0));
+  mix->loop[S_RAIN].rate = (float)(1.0 + 0.10 * sn);
+  mix->loop[S_RAIN].cut = (float)(in.cabin ? 1400 : 7000 + 6000 * sn);
+  mix->loop[S_ROOF].gain = (float)(in.cabin && in.rain > 0.01 ? live * master * 2.6 * rk * (0.75 + 0.5 * sn) : 0);
+  mix->loop[S_ROOF].rate = (float)(0.92 + 0.22 * sn);            // faster into the rain, more of it hits the screen
+  mix->loop[S_ROOF].cut = 5200;
+  // THUNDER, when it is a storm: every ten to thirty seconds, never the same clap twice running
+  if (!in.paused && in.rain > 0.8) {
+    if (thunderAt < 0) thunderAt = t + 4 + rnd() * 10;
+    if (t > thunderAt) {
+      int pick = (int)(rnd() * 3); if (pick == lastThunder) pick = (pick + 1) % 3;
+      lastThunder = pick;
+      once(S_THUNDER1 + pick, (in.cabin ? 1.1 : 1.6) * (0.7 + 0.3 * rnd()), 0.92 + 0.14 * rnd());
+      thunderAt = t + 10 + rnd() * 20;
+    }
+  } else if (in.rain <= 0.8) thunderAt = -1;
 }
 
 // "Crashes? Traumatizing." — and then, twice, "too loud": the engine leads.

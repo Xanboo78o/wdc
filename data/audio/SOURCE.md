@@ -79,3 +79,18 @@ Converted to mono 16-bit 44.1 kHz with ffmpeg. The three loops
 first 120 ms so they repeat without a click at the seam (jump 3984 -> 700 on
 gravel, which is the size of an ordinary sample-to-sample step in that noise).
 crash/01.wav (peaks at -15 dB) and dirt2.wav (-13 dB) were left out as too quiet.
+
+# Rain and thunder (2026-10-09)
+
+All **CC0** (public domain) from OpenGameArt. Recordings, not synthesis.
+
+| file | from | author |
+|---|---|---|
+| rain_out.wav | "Rain (loopable)", 3.ogg — https://opengameart.org/content/rain-loopable | Ylmir |
+| rain_roof.wav | "Rain (loopable)", 1.ogg — recorded at a window: rain on glass | Ylmir |
+| thunder_1.wav | "Rain + Long Thunder", 21.3-34.0 s — https://opengameart.org/content/rain-long-thunder | (see page) |
+| thunder_2.wav, thunder_3.wav | "rain and thunders" (Dark_Rainy_Night), 33.2-38.5 s and 89.3-94.5 s — https://opengameart.org/content/rain-and-thunders | (see page) |
+
+Converted to mono 16-bit 44.1 kHz with ffmpeg; the thunder cuts are faded in
+over 0.2 s and out over about 2 s. The cuts were FOUND BY MEASUREMENT (the
+loudest low-frequency moments), not by ear: nobody has listened to them yet.
