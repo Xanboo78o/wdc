@@ -167,7 +167,7 @@ void GameHud::draw(Renderer &R, float k, const HudTheme &T, const HudIn &in) {
     const bool over = in.box->rpm >= bx.shiftUp - 60;
     const bool blink = over && std::fmod(in.clock * 1000, 160) < 80;
     const Rgba OFFC = alpha(T.ink, 0.12f), G = hex("#3ddc6a"), Rd = hex("#ff3b2f"), Bl = hex("#4a8cff");
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < 15 && !in.rimLights; i++) {
       const Rgba *c = &OFFC;
       if (blink) c = &Bl;
       else if (i < lit && !over) c = i < 5 ? &G : i < 10 ? &Rd : &Bl;

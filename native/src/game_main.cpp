@@ -46,6 +46,7 @@
 #include "driver.hpp"
 #include "drivers.hpp"
 #include "multiclass.hpp"
+#include "rimlights.hpp"
 #include "fx.hpp"
 #include "grid.hpp"
 #include "home.hpp"
@@ -703,6 +704,8 @@ int main(int argc, char **argv) {
   WeatherDirector wd("clear", 1);
   std::string wdMode;
   Fx fx;
+  RimLights rimLed;              // the rev lights on the real wheel (rimlights.hpp); absent = nothing happens
+  if (!hidden && !offscreen) rimLed.open();
   std::vector<double> abeam;     // each rival's gap along the road last frame: a change of sign is a pass-by (the whoosh)
   double boomAt = -1;          // when your own car exploded, plus a few seconds: then the results (or a new car)                           // the crash drama (fx.hpp): reads the cars, draws into the scene
 
@@ -888,6 +891,7 @@ int main(int argc, char **argv) {
     h.usingPad = S.hands.usingPad; h.msg = toast.t > 0 ? toast.msg : "";
     h.race = S.race.get(); h.clock = clock;
     h.passFlash = S.race && S.race->time - S.passAt < 2.6;
+    h.rimLights = rimLed.ok();
     return h;
   };
   auto liveOf = [&]() {
@@ -1228,6 +1232,28 @@ int main(int argc, char **argv) {
       // behind HOME the race is silent, as it is in the browser (sound=0)
       si.volume = (hidden || bgOn || screen == RESULTS) ? 0 : cfg.volume / 10.0;
       audio.update(si);
+      // THE RIM: what the ten lights on the wheel say this frame (rimlights.hpp)
+      if (rimLed.ok()) {
+        if (screen != DRIVE || bgOn) rimLed.off();
+        else {
+          RimIn ri;
+          ri.clock = clock;
+          const BoxSpec &bx = *S.box->box;
+          ri.revs = (S.box->rpm - (bx.idle + (bx.shiftUp - bx.idle) * 0.45)) / ((bx.shiftUp - bx.idle) * 0.55);
+          ri.shift = S.box->rpm >= bx.shiftUp - 60;
+          if (S.race) {
+            const Entry &me = *S.race->me;
+            ri.grid = S.race->state == RaceState::Grid; ri.lightsIn = S.race->lights;
+            ri.pit = me.inPit; ri.neutral = S.race->rc.neutral(); ri.blue = me.blue != nullptr;
+            for (const Entry &e : S.race->entries) {
+              if (e.isPlayer || e.retired || e.inPit) continue;
+              const double dl = e.proj.lat - me.proj.lat;
+              if (std::fabs(S.track.gap(e.proj.s, me.proj.s)) < 5.2 && std::fabs(dl) > 1.2 && std::fabs(dl) < 5.5) ri.alongside = dl > 0 ? 1 : -1;
+            }
+          }
+          rimLed.update(ri);
+        }
+      }
       // THE PASS-BY: every car that comes level with you — it going by, or you going by it —
       // within a few metres and at a real difference in speed, is heard doing it.
       if (S.race && screen == DRIVE && si.volume > 0) {
