@@ -10,6 +10,7 @@
 #include <ctime>
 
 #include "home.hpp"
+#include "multiclass.hpp"
 #include "homestyle.hpp"
 #include "race.hpp"
 #include "ui.hpp"
@@ -176,6 +177,7 @@ bool Home::startEvent(const EventDef &e, bool inCareer) {
     if (L.track.rfind("heil", 0) == 0) { S.xTrack = "heiligen"; S.xHeil = L.track; }
     else { S.xTrack = L.track; if (L.track != "speedway") S.track = L.track; }
   } else S.track = L.track;
+  gtLeagues = 7;
   wantStart = true;
   return true;
 }

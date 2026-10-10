@@ -26,6 +26,11 @@ GtField gtField(const Track &track, int grid, int playerClass, double where, boo
   F.count[1] = n - F.count[0] - F.count[2];
   const int pc = std::max(0, std::min(GT_CLASSES - 1, playerClass));
   if (F.count[pc] == 0) { F.count[1] -= 1; F.count[pc] += 1; }      // a grid of one or two still has a seat for you
+  // a league switched off hands its seats to the GT3s if they race, or to yours
+  if (!single) for (int k = 0; k < GT_CLASSES; k++) if (k != pc && !((gtLeagues >> k) & 1)) {
+    const int to = k != 1 && ((gtLeagues >> 1) & 1) ? 1 : pc;
+    F.count[to] += F.count[k]; F.count[k] = 0;
+  }
   if (single) { for (int k = 0; k < GT_CLASSES; k++) F.count[k] = 0; F.count[pc] = n; }
   for (int k = 0; k < GT_CLASSES; k++) {
     F.spec[k] = pro ? &proSpec(CLASSES[k].key) : &carSpec(CLASSES[k].key);

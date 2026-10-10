@@ -140,11 +140,13 @@ void MenuSave::load(const std::string &path) {
     else if (k.rfind("model.", 0) == 0) modelBy[k.substr(6)] = v == "-" ? "" : v;
     else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "gears") gears = v == "manual" ? "manual" : "auto";
+    else if (k == "endur") endur = v == "1"; else if (k == "canon") canon = v == "1"; else if (k == "leagues") leagues = std::atoi(v.c_str()) & 7;
     else if (k == "gton") gtOn = v == "1"; else if (k == "gtclass") gtClass = gtClassOf(v) >= 0 ? v : "gt3";
-    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "easy") easy = v == "1"; else if (k == "tabfx") tabFx = v; else if (k == "dash") dash = v == "1"; else if (k == "dashcode") dashCode = v; else if (k == "tabvol") tabVol = std::max(0, std::min(200, std::atoi(v.c_str()))); else if (k == "xminutes") xMinutes = std::max(5, std::min(360, std::atoi(v.c_str()))); else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
+    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "easy") easy = v == "1"; else if (k == "tabfx") tabFx = v; else if (k == "dash") dash = v == "1"; else if (k == "dashcode") dashCode = v; else if (k == "tabvol") tabVol = std::max(0, std::min(200, std::atoi(v.c_str()))); else if (k == "xminutes") xMinutes = std::max(1, std::min(1440, std::atoi(v.c_str()))); else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
     else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
   xStyle = xstyle(xStyle).key; xBots = std::max(0, std::min(60, xBots));
+  if (leagues <= 0) leagues = gtOn ? 7 : 1 << std::max(0, gtClassOf(gtClass));
   // a record from before the wheel's force was set up said 0 because nothing else was possible
   if (ffbSeen >= 0 && ffbVer >= 2) ffb = ffbSeen;
   if (gtClassOf(car) >= 0 && car != "gt3") { gtClass = car; car = "gt3"; }      // a record that named a GT4 or a hypercar as the car
@@ -171,7 +173,7 @@ void MenuSave::save(const std::string &path) const {
   for (const auto &kv : modelBy) f << "model." << kv.first << " " << (kv.second.empty() ? "-" : kv.second) << "\n";
   f << "look " << look << "\n";
   f << "xon " << (xOn ? 1 : 0) << "\neasy " << (easy ? 1 : 0) << "\ndash " << (dash ? 1 : 0) << "\ndashcode " << (dashCode.empty() ? "-" : dashCode) << "\ntabfx " << tabFx << "\ntabvol " << tabVol << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
-  f << "gears " << gears << "\n";
+  f << "gears " << gears << "\nendur " << (endur ? 1 : 0) << "\ncanon " << (canon ? 1 : 0) << "\nleagues " << (leagues & 7) << "\n";
   f << "gton " << (gtOn ? 1 : 0) << "\ngtclass " << gtClass << "\n";
   if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
   for (const auto &kv : teams) if (!kv.second.empty()) f << "team." << kv.first << " " << kv.second << "\n";
@@ -430,7 +432,10 @@ std::vector<Home::Opt> Home::setupRows() const {
 
 // ---- pages ---------------------------------------------------------------------------
 void Home::show(const std::string &name, int keep) {
-  page = name;
+  page = name == "setup" && S.xOn ? "xsetup" : name;      // the arcade page is the old list, behind the hub's XINGUS tile
+  editing = false; typedAt = -1;
+  static const char *shotPage = std::getenv("XBR_PAGE");               // for a photograph: XBR_PAGE=mode with --screen setup
+  if (shotPage && name == "setup" && !S.xOn) page = shotPage;
   build();
   at = std::max(0, std::min((int)items.size() - 1, keep));
   if (name == "debrief") at = 1;                                       // CONTINUE
@@ -442,6 +447,8 @@ void Home::show(const std::string &name, int keep) {
 
 void Home::lightsOut() {
   if (!noTeam() && S.teams[S.car].empty()) { show("garage"); say("pick a team first. then we race."); return; }
+  if (!eventOn && !S.xOn) { S.noDnf = false; if (S.canon) S.laps = canonLaps(); }      // (Adam: "remove retirement")
+  gtLeagues = eventOn || S.xOn ? 7 : S.leagues & 7;
   if (!savePath.empty() && !eventOn) S.save(savePath);
   wantStart = true;
 }
@@ -461,7 +468,7 @@ void Home::build() {
         set(row.key, v);
         int keep = at;
         // a change may add or drop rows above this one: stay on the setting, not on its old place
-        if (pg == "setup") { const auto now = setupRows(); for (size_t q = 0; q < now.size(); q++) if (now[q].key == row.key) keep = first + (int)q; }
+        if (pg == "xsetup") { const auto now = setupRows(); for (size_t q = 0; q < now.size(); q++) if (now[q].key == row.key) keep = first + (int)q; }
         show(pg, keep);
         say(sayFor(row.label, v));
       };
@@ -532,7 +539,13 @@ void Home::build() {
       if (!e || !startEvent(*e, inCareer)) show(inCareer ? "career" : "events");
     }, nullptr, nullptr});
     items.push_back({[this] { afterDebrief(); }, nullptr, nullptr});
-  } else if (page == "setup") {
+  } else if (racePage()) {
+    tidy();
+    static const char *PG[5] = {"track", "mode", "sky", "level", "details"};
+    for (int q = 0; q < 5; q++) if (page == PG[q]) back = [this, q] { show("setup", q); };
+    for (const Cell &c : cells(mW, mH, [](float sz, const std::string &t) { return sz * 0.5f * (float)t.size(); }))
+      if (c.focus) items.push_back({c.ok, c.left, c.right, c.up, c.down});
+  } else if (page == "xsetup") {
     auto step = [this](int d) {
       const auto L = circuits();
       const std::string cur = circuitId();
@@ -544,16 +557,16 @@ void Home::build() {
       if (id != "heiligen" && id != "speedway") S.track = id;
       if (id == "speedway" && !xstyle(S.xStyle).rivals) S.xStyle = "gt3";      // an oval is a pack: not a style that is alone
       dirty = true;
-      show("setup", 0);
+      show("xsetup", 0);
       say(id == "heiligen" ? "heiligen. fourteen ways round. pick one." : id == "speedway" ? "the oval. turn left. repeat." : sayFor("CIRCUIT", id));
     };
     items.push_back({[this] { if (circuitId() == "heiligen") show("heiligen"); else at = 1; }, [step] { step(-1); }, [step] { step(1); }});
-    optItems(setupRows(), "setup", 1);
+    optItems(setupRows(), "xsetup", 1);
     items.push_back({[this] { lightsOut(); }, nullptr, nullptr});
   } else if (page == "heiligen") {
-    back = [this] { show("setup"); };
+    back = [this] { show("xsetup"); };
     optItems(heilRows(), "heiligen");
-    items.push_back({[this] { show("setup"); }, nullptr, nullptr});
+    items.push_back({[this] { show("xsetup"); }, nullptr, nullptr});
   } else if (page == "garage") {
     auto league = [this](int d) {
       int i = 0;
@@ -607,18 +620,20 @@ void Home::build() {
 
 void Home::input(Nav n) {
   if (n == Nav::Back) { if (back) back(); else wantQuit = true; return; }
-  if (n == Nav::Go) { if (page == "setup") lightsOut(); else if (page == "home") { const EventDef *e = career.next(); if (e && career.unlocked(*e)) launchCareer(*e); else show("career"); } return; }
+  if (n == Nav::Go) { if (page == "xsetup" || racePage()) lightsOut(); else if (page == "home") { const EventDef *e = career.next(); if (e && career.unlocked(*e)) launchCareer(*e); else show("career"); } return; }
   if (items.empty()) return;
   const Item it = items[(size_t)at];
   if (n == Nav::Ok) { if (it.ok) it.ok(); return; }
   if (n == Nav::Left || n == Nav::Right) {
     const auto &f = n == Nav::Left ? it.left : it.right;
     if (f) f();
+    else if (racePage()) move(n);
     else at = std::max(0, std::min((int)items.size() - 1, at + (n == Nav::Left ? -1 : 1)));
     return;
   }
   const auto &v = n == Nav::Up ? it.up : it.down;
   if (v) { v(); at = std::max(0, std::min((int)items.size() - 1, at)); return; }
+  if (racePage()) { move(n); return; }
   at = std::max(0, std::min((int)items.size() - 1, at + (n == Nav::Up ? -1 : 1)));
 }
 
@@ -905,7 +920,8 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   if (page == "story") { drawStory(R, k, clock); return; }
   if (page == "debrief") { drawDebrief(R, k, clock); return; }
 
-  if (page == "setup") {
+  if (racePage()) { drawRace(R, k, clock); return; }
+  if (page == "xsetup") {
     const auto L = circuits();
     const int nL = (int)L.size();
     const std::string cid = circuitId(), mapId = S.xOn ? xTrackKey() : S.track;

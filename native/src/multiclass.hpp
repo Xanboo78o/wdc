@@ -28,6 +28,8 @@ struct GtField {
 // `where` 0..1: how far back in your own class you start.
 // single: the whole grid is your class. pro: the rivals drive proSpec cars on their own
 // lines, and (hasPlayer) your own slot is left as an empty seat — the race's own spec and line.
+// WHICH LEAGUES ARE ON THE ROAD (bit 0 hyper, 1 gt3, 2 gt4): the menu's toggles. Your own class always races.
+inline int gtLeagues = 7;
 GtField gtField(const Track &track, int grid, int playerClass, double where, bool single = false, bool pro = false, bool hasPlayer = true);
 
 // Position within its class (1-based) of every entry, by race position.

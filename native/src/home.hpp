@@ -48,6 +48,10 @@ struct MenuSave {
   bool easy = false;                 // HANDLING - EASY: Xingus's forgiving handling on your car, in the ordinary game
   int xMinutes = 30;                 // Xingus ENDURANCE: how long the race is, 5 minutes to 6 hours
   int xBots = 0;                                 // 0 = the style's own number
+  // THE RACE PAGES (2026-10-10): ENDURANCE is a GT race against the clock (xMinutes), in real handling;
+  // leagues = which of hyper / gt3 / gt4 are on the road (bits 0..2); canon = the laps are the circuit's own number
+  bool endur = false, canon = false;
+  int leagues = -1;
   void load(const std::string &path);
   void save(const std::string &path) const;
 };
@@ -77,7 +81,10 @@ class Home {
   // what the radio hears, once a frame: turned into the look's pulse, eased (homestyle.hpp STYLE_PULSE / STYLE_BASS)
   void music(int beats, float bass, double clock);
   // Xingus ENDURANCE: seconds the race runs for, or 0 when it is run to a number of laps
-  double timeLimit() const { return S.xOn && S.xStyle == "endurance" ? S.xMinutes * 60.0 : 0; }
+  double timeLimit() const {
+    if (S.xOn) return S.xStyle == "endurance" ? S.xMinutes * 60.0 : 0;
+    return !eventOn && S.endur && S.mode == "race" && S.car == "gt3" ? S.xMinutes * 60.0 : 0;
+  }
   // the pro menus stand on a photograph, not a live race (Renderer::photoShow): which one, and the band of the screen it fills
   int photoIndex(double clock, int count) const;
   bool hub() const { return page == "home"; }
@@ -176,6 +183,27 @@ class Home {
   void drawStory(Renderer &R, float k, double clock);
   void drawDebrief(Renderer &R, float k, double clock);
   void set(const std::string &key, const std::string &v);
+  // ---- THE RACE PAGES: banners that lead to a page each (home_race.cpp)
+  enum { K_HEAD, K_BANNER, K_TRACK, K_MODE, K_RADIO, K_TOGGLE, K_NUM, K_SUN, K_BTN };
+  struct Cell {
+    int kind = 0; float x = 0, y = 0, w = 0, h = 0;
+    std::string label, sub, id; bool on = false, focus = true;
+    std::function<void()> ok, left, right, up, down;
+    std::function<int()> val; std::function<void(int)> setv;
+  };
+  std::vector<Cell> cells(float W, float H, const std::function<float(float, const std::string &)> &tw);
+  std::vector<Cell> lastCells;                    // as last drawn: what the d-pad walks
+  float mW = 1600, mH = 900;
+  bool editing = false;                           // a number box: LEFT / RIGHT change it instead of leaving it
+  std::string typed; int typedAt = -1;
+  bool racePage() const { return page == "setup" || page == "track" || page == "mode" || page == "sky" || page == "level" || page == "details"; }
+  void move(Nav n);
+  std::string modeNow() const;
+  void setMode(const std::string &m);
+  void syncLeagues();
+  void tidy();
+  int canonLaps();
+  void drawRace(Renderer &R, float k, double clock);
 };
 
 }  // namespace xbr
