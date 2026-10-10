@@ -2637,7 +2637,9 @@ void Renderer::drawWorld(const FrameIn &f) {
   }
   PROF.mark(2);
   // (in the mirror: every tree as its two photographs and every rail as its big faces — a small picture needs no more)
-  if (dress && !worldPack) { if (mirrorPass) dress->drawShadow(); else dress->drawWorld(); }
+  // (a modelled circuit too: its surveyed town is empty, so this is only the braking boards. They are real things you
+  // can hit, and left undrawn they were "entirely invisible barriers" — Adam, on the first drive of Silverstone.)
+  if (dress) { if (mirrorPass) dress->drawShadow(); else dress->drawWorld(); }
   if (props && !worldPack) { props->farOnly = mirrorPass; const BarrierWear &bw = barrierWear(); if (bw.on) props->deform(bw.bend, bw.broke, bw.version); props->draw(); }
   PROF.mark(3);
 

@@ -101,14 +101,15 @@ if (flags.includes('--write')) {
   let noWall = 0;
   for (let i = 0; i < n; i++) {
     const a = (i - 1 + n) % n, b = (i + 1) % n, l = Math.hypot(X[b] - X[a], Y[b] - Y[a]), nx = -(Y[b] - Y[a]) / l, ny = (X[b] - X[a]) / l;
-    const reach = sgn => { for (let d = T.w[i] + 0.5; d <= T.w[i] + 60; d += 0.25) if (kindAt(X[i] + sgn * nx * d, Y[i] + sgn * ny * d) === 3) return Math.max(1, d - T.w[i] - 0.4); noWall++; return 30; };
+    const reach = sgn => { for (let d = T.w[i] + 0.5; d <= T.w[i] + 60; d += 0.25) if (kindAt(X[i] + sgn * nx * d, Y[i] + sgn * ny * d) === 3) return Math.min(48, Math.max(1, d - T.w[i] - 0.4)); noWall++; return 48; };      // (no barrier in the model within 60 m: none in the game either, as near as makes no difference)
     runL.push(+reach(1).toFixed(1)); runR.push(+reach(-1).toFixed(1));
     const q = at(X[i], Y[i]); let h = q >= 0 ? hgt[q] : NaN; if (!(h === h) && q >= 0) h = gnd[q];
     hS.push(h === h ? h : null);
   }
   for (let i = 0; i < n; i++) if (hS[i] === null) { let k = 1; while (k < n && hS[(i + k) % n] === null) k++; hS[i] = hS[(i + k) % n] ?? 0; }
-  // (a wall cannot jump: no sample's run-off more than 1.5 m wider than its neighbour's, as the survey bakes have it)
-  for (const R of [runL, runR]) for (let pass = 0; pass < 3; pass++) { for (let i = 0; i < n; i++) R[i] = Math.min(R[i], R[(i - 1 + n) % n] + 1.5); for (let i = n - 1; i >= 0; i--) R[i] = Math.min(R[i], R[(i + 1) % n] + 1.5); }
+  // (a wall cannot jump more than the gate allows, 3 m a sample; but it opens as fast as that allows, because past the end of a
+  // real barrier the game's wall is a slope of nothing you can see)
+  for (const R of [runL, runR]) for (let pass = 0; pass < 3; pass++) { for (let i = 0; i < n; i++) R[i] = Math.min(R[i], R[(i - 1 + n) % n] + 2.4); for (let i = n - 1; i >= 0; i--) R[i] = Math.min(R[i], R[(i + 1) % n] + 2.4); }
   const out = { ...T, x: X, y: Y, runL: runL.map(v => +v.toFixed(1)), runR: runR.map(v => +v.toFixed(1)) };
   out.geo = { ...T.geo, note: `moved into the frame of the modelled circuit (data/cars/${key}): turned ${(best.a * 180 / Math.PI).toFixed(2)} deg, shifted ${best.tx.toFixed(1)}, ${best.ty.toFixed(1)} m; the projection origin no longer applies` };
   out.bbox = { x0: Math.min(...X), y0: Math.min(...Y), x1: Math.max(...X), y1: Math.max(...Y) };
@@ -128,5 +129,5 @@ if (flags.includes('--write')) {
   fs.writeFileSync(`data/env/${key}.json`, JSON.stringify({ ...V, bbox: out.bbox, buildings: [], areas: [], sea: [], trees: [], note: 'emptied by tools/circuit/fit.mjs: the modelled circuit brings its own buildings and trees' }));
   const rs = [...runL, ...runR].sort((a, b) => a - b);
   console.log(`wrote data/tracks/${key}.json, data/elev/${key}.json, data/env/${key}.json`);
-  console.log(`  centre moved by up to ${Math.max(...corr.map(Math.abs)).toFixed(2)} m; road height ${Math.min(...hS).toFixed(1)} to ${Math.max(...hS).toFixed(1)} m; run-off to the model's barriers ${rs[0]} to ${rs[rs.length - 1]} m (median ${rs[rs.length >> 1]}), ${noWall} sides with no barrier within 60 m (given 30 m)`);
+  console.log(`  centre moved by up to ${Math.max(...corr.map(Math.abs)).toFixed(2)} m; road height ${Math.min(...hS).toFixed(1)} to ${Math.max(...hS).toFixed(1)} m; run-off to the model's barriers ${rs[0]} to ${rs[rs.length - 1]} m (median ${rs[rs.length >> 1]}), ${noWall} sides with no barrier within 60 m (given 48 m, the widest the game's walls stay well-behaved round a corner)`);
 }

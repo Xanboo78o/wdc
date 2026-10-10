@@ -12,7 +12,7 @@ const acc = i => { const a = g.accessors[i], bv = g.bufferViews[a.bufferView]; c
   if (a.componentType === 5123) { const o = new Uint32Array(a.count); for (let k = 0; k < a.count; k++) o[k] = buf.readUInt16LE(off + k * 2); return o; }
   throw new Error('type ' + a.componentType); };
 export const CELL = 0.5, X0 = -1100, Z0 = -1460, W = 4300, H = 5720;
-const wallY = new Float32Array(W * H).fill(1e9);
+const wallY = new Float32Array(W * H).fill(1e9), wallTop = new Float32Array(W * H).fill(-1e9);
 const kind = new Uint8Array(W * H), hgt = new Float32Array(W * H).fill(NaN), gnd = new Float32Array(W * H).fill(NaN);
 // 1 road  2 kerb  3 barrier (a wall you hit)  4 other ground (grass, sand, run-off tarmac)
 const KIND = [[/^asphalt|^groove|asph_pit/, 1], [/[Cc]urb/, 2], [/^barriers|^tyreswall|^jersey|^walls|^metals1|^fences1/, 3], [/^grass|^sand|^top2/, 4]];
@@ -25,7 +25,7 @@ function tri(k, a, b, c) {
       for (let s = 0; s <= st; s++) {
         const x = p[0] + (q[0] - p[0]) * s / st, z = p[2] + (q[2] - p[2]) * s / st;
         const i = Math.floor((x - X0) / CELL), j = Math.floor((z - Z0) / CELL);
-        if (i >= 0 && j >= 0 && i < W && j < H) wallY[j * W + i] = Math.min(wallY[j * W + i], p[1] + (q[1] - p[1]) * s / st);
+        if (i >= 0 && j >= 0 && i < W && j < H) { const y = p[1] + (q[1] - p[1]) * s / st; wallY[j * W + i] = Math.min(wallY[j * W + i], y); wallTop[j * W + i] = Math.max(wallTop[j * W + i], y); }
       }
     }
     return;
@@ -60,7 +60,12 @@ function walk(i, M) {
 }
 for (const r of g.scenes[0].nodes) walk(r, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 // a wall where a barrier's foot is within a metre and a half of the ground there (and not on the road itself)
-for (let q = 0; q < W * H; q++) if (wallY[q] < 1e8 && kind[q] !== 1 && (!(gnd[q] === gnd[q]) || wallY[q] - gnd[q] < 1.5)) kind[q] = 3;
+// AND it stands at least half a metre tall there. (Adam hit "entirely invisible barriers": a drain cover, a painted
+// panel lying flat and a kerb-side plate are all 'metal' or 'barrier' material, and none of them is a wall.)
+for (let q = 0; q < W * H; q++) if (wallY[q] < 1e8 && kind[q] !== 1) {
+  const g0 = gnd[q] === gnd[q] ? gnd[q] : wallY[q];
+  if (wallY[q] - g0 < 1.2 && wallTop[q] - g0 >= 0.5) kind[q] = 3;
+}
 const n = [0, 0, 0, 0, 0]; for (let q = 0; q < W * H; q++) n[kind[q]]++;
 console.log('cells: road', n[1], 'kerb', n[2], 'barrier', n[3], 'ground', n[4], ' road area m2', n[1] * CELL * CELL);
 fs.writeFileSync(S + '/silv-kind.bin', kind); fs.writeFileSync(S + '/silv-hgt.bin', Buffer.from(hgt.buffer)); fs.writeFileSync(S + '/silv-gnd.bin', Buffer.from(gnd.buffer));
