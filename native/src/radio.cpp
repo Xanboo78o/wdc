@@ -70,6 +70,17 @@ void Radio::render(float *out, int frames) {
     if (r != w) { in[0] = ring[r]; in[1] = ring[(r + 1) % RING]; r = (r + 2) % RING; }
     wetNow += (WET[room] - wetNow) * 0.0004f; volNow += (volT - volNow) * 0.0008f; cabinNow += (cabinT - cabinNow) * 0.0006f;
     const float mono = (in[0] + in[1]) * 0.015f;        // Freeverb's input gain
+    // the beat: what is under about 150 Hz, followed quickly up and slowly down, against its own average over a second.
+    // A kick is the moment the quick one jumps clear of the slow one.
+    {
+      const float dry = (in[0] + in[1]) * 0.5f;
+      bLP1 += (dry - bLP1) * 0.0196f; bLP2 += (bLP1 - bLP2) * 0.0196f;
+      const float e = std::fabs(bLP2);
+      envFast += (e - envFast) * (e > envFast ? 0.012f : 0.00045f);
+      envSlow += (e - envSlow) * 0.00003f;
+      sinceBeat += 1.0f / 48000;
+      if (sinceBeat > 0.19f && envFast > 0.012f && envFast > envSlow * 1.55f + 0.004f && e >= envFast * 0.98f) { beatOut.fetch_add(1); sinceBeat = 0; }
+    }
     for (int c = 0; c < 2; c++) {
       float acc = 0;
       for (Comb &q : comb[c]) {
@@ -102,6 +113,7 @@ void Radio::render(float *out, int frames) {
   }
   rd.store(r);
   levelOut.store(std::max(peak, levelOut.load() * 0.9f));
+  bassOut.store(std::min(1.0f, envFast * 5.0f));
 }
 
 bool Radio::start() {

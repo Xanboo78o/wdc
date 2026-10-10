@@ -67,6 +67,8 @@ class Home {
   void draw(Renderer &R, float k, double clock, const LiveTower &live);
   // sets the menu's colours from the THEME setting; true when it is the pro look (homestyle.hpp)
   bool style(double clock = -1) const;
+  // what the radio hears, once a frame: turned into the look's pulse, eased (homestyle.hpp STYLE_PULSE / STYLE_BASS)
+  void music(int beats, float bass, double clock);
   // Xingus ENDURANCE: seconds the race runs for, or 0 when it is run to a number of laps
   double timeLimit() const { return S.xOn && S.xStyle == "endurance" ? S.xMinutes * 60.0 : 0; }
   // the pro menus stand on a photograph, not a live race (Renderer::photoShow): which one, and the band of the screen it fills
@@ -122,6 +124,8 @@ class Home {
   int garageAt = -1;
   struct Outline { std::vector<float> xy; double len = 0; float x0 = 0, y0 = 0, x1 = 1, y1 = 1; bool ok = false; };
   std::map<std::string, Outline> outlines;
+  int musicBeats = 0;
+  double musicAt = -1;
   std::map<std::string, std::vector<float>> lapTimes;      // circuit/car -> when the map's little car reaches each point of the outline
   const Outline &outline(const std::string &id);
   void drawMap(Renderer &R, float k, float x, float y, float w, float h, const std::string &id, bool car, double clock);

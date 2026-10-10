@@ -44,6 +44,10 @@ static const StyleColour STYLE_COLOURS[] = {
   {"aurora", "AURORA (MOVING)", 4, {"#3dffa0", "#2fd6e8", "#6f7bff", "#c45cff"}, 60},
 };
 inline bool STYLE_MOVING = false;
+// THE MUSIC IN THE LOOK. PULSE jumps to 1 on a kick and eases away; BASS is the low end now; DRIFT is
+// how far the music has pushed a moving colour round its ring. Home::music sets them; nothing playing = all zero.
+inline float STYLE_PULSE = 0, STYLE_BASS = 0;
+inline double STYLE_DRIFT = 0;
 inline Rgba STYLE_GLOW = hex("#ff2d46");          // where the ring will be a quarter-turn on: for a wash of two colours
 static inline Rgba styleRing(const StyleColour &c, double turn) {
   turn -= std::floor(turn);
@@ -62,7 +66,10 @@ inline bool applyStyle(const std::string &theme, const std::string &colour = "fi
     ONRED = hex("#ffffff"); YELL = hex("#ffffff"); PLUM = hex("#ff2d46");
     for (const StyleColour &c : STYLE_COLOURS) if (colour == c.key) {
       if (c.n == 1) RED = hex(c.ring[0]);
-      else { STYLE_MOVING = true; RED = styleRing(c, clock / c.period); STYLE_GLOW = styleRing(c, clock / c.period + 0.27); }
+      else { STYLE_MOVING = true; RED = styleRing(c, (clock + STYLE_DRIFT) / c.period); STYLE_GLOW = styleRing(c, (clock + STYLE_DRIFT) / c.period + 0.27); }
+      if (c.n == 1) STYLE_GLOW = RED;
+      // on the beat the colour flashes toward white, and eases back
+      if (STYLE_PULSE > 0.01f) RED = mix(hex("#ffffff"), RED, 0.32f * STYLE_PULSE);
       PLUM = RED;
       ONRED = inkOn(RED);
     }

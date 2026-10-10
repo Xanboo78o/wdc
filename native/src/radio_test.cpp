@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
   if (!r.start()) { std::fprintf(stderr, "radio: could not start (no pactl/parec, or already running)\n"); return 1; }
   r.set(room, 1.0, false);
   float most = 0;
-  for (int i = 0; i < (int)(secs * 10); i++) { SDL_Delay(100); most = r.level() > most ? r.level() : most; if (i % 10 == 9) std::fprintf(stderr, "radio: %.0f s, level %.3f\n", (i + 1) / 10.0, r.level()); }
+  for (int i = 0; i < (int)(secs * 10); i++) { SDL_Delay(100); most = r.level() > most ? r.level() : most; if (i % 10 == 9) std::fprintf(stderr, "radio: %.0f s, level %.3f, bass %.2f, beats so far %d\n", (i + 1) / 10.0, r.level(), r.bass(), r.beats()); }
   r.stop();
   std::fprintf(stderr, "radio: loudest %.3f — %s\n", most, most > 0.005f ? "music came through" : "SILENCE (nothing was playing, or nothing was moved onto the radio)");
   return 0;

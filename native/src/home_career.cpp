@@ -290,11 +290,12 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
     for (int i = 0; i < 28; i++) P.rect((float)i * 22, bar, 22.5f, H - 2 * bar, alpha_(PAPER, 0.62f * (1 - (float)i / 28)));
     for (int i = 0; i < 22; i++) P.rect(W - (float)(i + 1) * 22, bar, 22.5f, H - 2 * bar, alpha_(PAPER, 0.55f * (1 - (float)i / 22)));
     // a moving colour breathes over the photograph too (homestyle.hpp STYLE_MOVING)
-    if (STYLE_MOVING) {
+    if (STYLE_MOVING || STYLE_BASS > 0.02f) {
       const int N = 22;
+      const float amt = (STYLE_MOVING ? 1.0f : 0.0f) + 1.6f * STYLE_BASS + 0.7f * STYLE_PULSE;    // the music fills the picture with it
       for (int q = 0; q < N; q++) {
         const float t = (float)q / (N - 1);
-        const float a = 0.10f * (0.5f + 0.5f * std::sin(t * 3.1f + (float)clock * 0.11f)) + 0.03f;
+        const float a = (0.10f * (0.5f + 0.5f * std::sin(t * 3.1f + (float)clock * 0.11f)) + 0.03f) * amt;
         P.rect(0, bar + t * (H - 2 * bar), W, (H - 2 * bar) / N + 1, alpha_(mix(STYLE_GLOW, RED, t), a));
       }
     }
@@ -307,8 +308,9 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
     // the mark, as the film ends on it
     {
       const float x = 56, y = bar / 2 - 23;
-      const float w1 = P.text(x, y, 46, "XB", INK, LEFT, A, 0.02f);
-      P.text(x + w1, y, 46, "R", RED, LEFT, A, 0.02f);
+      const float ms = 46 * (1 + 0.07f * STYLE_PULSE);                 // the mark bumps on the beat
+      const float w1 = P.text(x, y - (ms - 46) / 2, ms, "XB", INK, LEFT, A, 0.02f);
+      P.text(x + w1, y - (ms - 46) / 2, ms, "R", RED, LEFT, A, 0.02f);
       P.text(W - 56, bar / 2 - 6, 11, "R A C I N G   F O R   A L L", SOFT, RIGHT, RB, 0.5f);
     }
     const EventDef *nx = career.next();
@@ -329,10 +331,10 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
       for (int i = 0; i < 6; i++) {
         const bool on = at == i;
         hot(x - 16, y - 6, 470, step, i);
-        const float size = on ? 58 : 44;
+        const float size = on ? 58 * (1 + 0.055f * STYLE_PULSE) : 44;    // the word you are on bumps, and eases back
         const float w = P.text(x, y + (on ? 0 : 7), size, names[i], on ? INK : alpha_(INK, 0.46f), LEFT, A, 0.045f);
         if (on) {
-          P.rect(x, y + 64, w, RULE, RED);
+          P.rect(x, y + 64, w * (1 + 0.10f * STYLE_PULSE), RULE * (1 + 1.6f * STYLE_PULSE), RED);
           P.text(x + w + 22, y + 26, 11, P.fit(11, subs[i], RB, 0.32f, 430), alpha_(INK, 0.82f), LEFT, RB, 0.32f);
         }
         y += step;

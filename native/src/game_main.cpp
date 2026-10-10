@@ -44,6 +44,7 @@
 #include "collide.hpp"
 #include "knock.hpp"
 #include "radio.hpp"
+#include "homestyle.hpp"
 #include "driver.hpp"
 #include "drivers.hpp"
 #include "multiclass.hpp"
@@ -925,6 +926,8 @@ int main(int argc, char **argv) {
         // shut in a GT car, from the driver's seat, it is in the cabin with you
         radio.set(room, cfg.tabVol / 100.0, screen == DRIVE && cfg.cam == 0 && S.spec && S.spec->gt);
       }
+      // the menus move to it (homestyle.hpp STYLE_PULSE): a bump on every kick, eased away
+      home.music(radio.ok() ? radio.beats() : 0, radio.ok() ? radio.bass() : 0.0f, clock);
     }
     R.post = cfg.look != "plain" && R.postOk;
     R.scalePin = (float)scaleArg;
@@ -935,7 +938,7 @@ int main(int argc, char **argv) {
     const bool photoMenu = screen == HOME && home.style(clock) && R.photoCount() > 0;
     if (photoMenu) {
       R.mirrorClear();
-      R.photoShow(home.photoIndex(clock, R.photoCount()), clock, home.hub() ? 0.115f : 0.0f, home.hub() ? 0.885f : 1.0f);
+      R.photoShow(home.photoIndex(clock, R.photoCount()), clock, home.hub() ? 0.115f : 0.0f, home.hub() ? 0.885f : 1.0f, STYLE_PULSE);
     } else {
     if (driving && R.mirrorWanted(f.camMode)) {
       if (mirrorTick++ % 3 == 0) { R.mirrorBegin(); R.drawWorld(f); drawField(); R.mirrorEnd(); }

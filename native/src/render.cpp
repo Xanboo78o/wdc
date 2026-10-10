@@ -2041,7 +2041,7 @@ int Renderer::photoCount() {
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   return (int)photoFbo.size();
 }
-void Renderer::photoShow(int index, double t, float top, float bottom) {
+void Renderer::photoShow(int index, double t, float top, float bottom, float bump) {
   const int n = photoCount();
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glViewport(0, 0, W, H);
@@ -2055,7 +2055,7 @@ void Renderer::photoShow(int index, double t, float top, float bottom) {
   const int dy0 = (int)((1 - bottom) * H), dy1 = (int)((1 - top) * H);
   const float bandAspect = (float)W / (float)std::max(1, dy1 - dy0);
   // the part of the photograph that fills the band, a little inside its edges, wandering slowly
-  const float zoom = 1.07f + 0.035f * (float)std::sin(t * 0.07 + index);
+  const float zoom = 1.07f + 0.035f * (float)std::sin(t * 0.07 + index) + 0.014f * bump;      // (bump: the music's beat, 0..1)
   float sw2 = pw / zoom, sh2 = sw2 / bandAspect;
   if (sh2 > ph / zoom) { sh2 = ph / zoom; sw2 = sh2 * bandAspect; }
   const float cx = pw / 2 + (pw - sw2) * 0.45f * (float)std::sin(t * 0.045 + index * 1.7), cy = ph / 2 + (ph - sh2) * 0.45f * (float)std::cos(t * 0.038 + index);

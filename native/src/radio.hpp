@@ -30,13 +30,19 @@ class Radio {
   bool ok() const { return running.load(); }
   void set(int room, double volume, bool cabin) { roomSet = room; volSet = (float)volume; cabinSet = cabin; }
   float level() const { return levelOut.load(); }          // what is coming through, 0..1: for a meter, and for checking it works
+  // THE MUSIC, FOR THE EYE (Adam: "make the ui and colors bump and ease wit my music"):
+  // beats() goes up by one at every kick of the bass; bass() is how much low end there is now, 0..1.
+  int beats() const { return beatOut.load(); }
+  float bass() const { return bassOut.load(); }
 
   void render(float *out, int frames);                    // the audio thread: stereo, interleaved
 
  private:
   std::atomic<bool> running{false};
   std::atomic<int> roomSet{1};
-  std::atomic<float> volSet{1.0f}, levelOut{0};
+  std::atomic<float> volSet{1.0f}, levelOut{0}, bassOut{0};
+  std::atomic<int> beatOut{0};
+  float bLP1 = 0, bLP2 = 0, envFast = 0, envSlow = 0, sinceBeat = 1;
   std::atomic<bool> cabinSet{false};
   int module = -1;
   FILE *rec = nullptr;

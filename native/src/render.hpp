@@ -117,7 +117,7 @@ class Renderer {
   void mirrorShow();
   // the menus' photographs (render.cpp): how many there are, and one laid behind the menu in a band of the screen (0 = top, 1 = bottom)
   int photoCount();
-  void photoShow(int index, double t, float top, float bottom);
+  void photoShow(int index, double t, float top, float bottom, float bump = 0);
   // P: one tap is one wipe, two quick taps the next speed. Returns what to tell the driver, or null.
   const char *wiperTap(double now);
   void mirrorClear() { mirHas = false; }
