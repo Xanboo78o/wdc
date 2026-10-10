@@ -63,6 +63,9 @@ class Home {
   void draw(Renderer &R, float k, double clock, const LiveTower &live);
   // sets the menu's colours from the THEME setting; true when it is the pro look (homestyle.hpp)
   bool style() const;
+  // the pro menus stand on a photograph, not a live race (Renderer::photoShow): which one, and the band of the screen it fills
+  int photoIndex(double clock, int count) const;
+  bool hub() const { return page == "home"; }
   bool overWorld() const { return page == "home"; }   // only HOME has the race behind it
   void say(const std::string &t) { if (!t.empty()) { sayText = t; sayAt = now; } }
   void show(const std::string &name, int keep = 0);

@@ -609,6 +609,13 @@ void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, con
 
 // ---- drawing ---------------------------------------------------------------------------
 bool Home::style() const { return applyStyle(S.theme); }
+int Home::photoIndex(double clock, int count) const {
+  if (count <= 0) return 0;
+  if (page == "home") return (int)(clock / 11.0) % count;          // the front page turns its photographs over
+  unsigned h = 7;
+  for (char c : page) h = h * 31 + (unsigned char)c;               // every other page has one of its own
+  return (int)(h % (unsigned)count);
+}
 
 void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   now = clock;
@@ -731,6 +738,110 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     const std::string cid = circuitId(), mapId = S.xOn ? xTrackKey() : S.track;
     int i = 0;
     for (int q = 0; q < nL; q++) if (L[(size_t)q].id == cid) i = q;
+    if (STYLE_PRO) {
+      // ---- THE FILM'S RACE SETUP. The circuit is the picture: its outline large,
+      // its name as a title, the ones either side of it waiting in the wings. Under
+      // it the session, a line a setting; the one you are on opens along the bottom.
+      const auto rows = setupRows();
+      const int nR = (int)rows.size(), last = 1 + nR;
+      const float RULE = 3, X0 = 70;
+      // the mark, and what car this is for
+      {
+        const float w1 = text(X0, 26, 40, "XB", INK, LEFT, A, 0.02f);
+        text(X0 + w1, 26, 40, "R", RED, LEFT, A, 0.02f);
+        text(X0 + w1 + 44, 42, 11, "R A C E   S E T U P", SOFT, LEFT, RB, 0.4f);
+        const std::string who = (S.xOn ? std::string("XINGUS") : upper(carSpec(seatCar()).full)) + "  -  " + (S.xOn ? upper(xstyle(S.xStyle).line) : gt() ? "THREE CLASSES, ONE ROAD" : team ? upper(team->name) : "NO TEAM");
+        text(W - X0, 42, 11, who, SOFT, RIGHT, RB, 0.32f);
+      }
+      // ---- the circuit
+      {
+        const bool on = at == 0;
+        const float y = 96, mh = 300, mw = 440;
+        hot(X0 - 20, y, W / 2 - X0 + 20, mh + 40, 0, [this] { at = 0; input(Nav::Left); });
+        hot(W / 2, y, W / 2 - X0 + 20, mh + 40, 0, [this] { at = 0; input(Nav::Right); });
+        drawMap(R, k, X0 - 8, y, mw, mh, mapId, true, clock);
+        if (cid == "heiligen") hot(X0 - 8, y, mw, mh, 0, [this] { show("heiligen"); });
+        const float tx = X0 + mw + 50;
+        char no[24];
+        std::snprintf(no, sizeof no, "%02d / %02d", i + 1, nL);
+        const float sw = text(tx, y + 34, 11, "C I R C U I T", RED, LEFT, RB, 0.4f);
+        text(tx + sw + 18, y + 34, 11, no, SOFT, LEFT, RB, 0.3f);
+        const std::string name = upper(L[(size_t)i].name);
+        float size = 112;
+        while (size > 56 && width(size, name, A, 0.03f) > W - tx - X0) size -= 6;
+        const float nw = text(tx, y + 58, size, name, INK, LEFT, A, 0.03f);
+        R.rect(tx * k, (y + 58 + size + 8) * k, (on ? nw : 90) * k, RULE * k, RED);
+        const Outline &o = outline(mapId);
+        char km[32];
+        std::snprintf(km, sizeof km, "%.3f KM", o.len / 1000);
+        std::string facts = upper(L[(size_t)i].tag) + (o.ok ? std::string("  -  ") + km : "") + (cid == "heiligen" ? "  -  ENTER: CHOOSE THE ROUTE" : "");
+        text(tx, y + 58 + size + 26, 12, facts, alpha_(INK, 0.85f), LEFT, RB, 0.32f);
+        // the wings: two before, two after
+        float wx = tx;
+        const float wy = y + mh - 26;
+        for (int d = -2; d <= 2; d++) {
+          if (nL < 2) break;
+          const int q = ((i + d) % nL + nL) % nL;
+          const std::string nm = (d == -2 ? "<   " : "") + upper(L[(size_t)q].name) + (d == 2 ? "   >" : "");
+          const float w2 = text(wx, wy, 22, nm, d == 0 ? INK : alpha_(INK, d == -1 || d == 1 ? 0.5f : 0.28f), LEFT, A, 0.05f);
+          if (d == 0) R.rect(wx * k, (wy + 30) * k, w2 * k, 2 * k, RED);
+          wx += w2 + 34;
+          if (wx > W - X0 - 60) break;
+        }
+        if (on) text(tx, wy - 30, 10, "LEFT / RIGHT  -  CHANGE THE CIRCUIT", alpha_(INK, 0.5f), LEFT, RB, 0.3f);
+      }
+      // ---- the session: a line a setting, in two columns
+      const float y0 = 96 + 300 + 64, rowH = 44;
+      const int perCol = (nR + 1) / 2;
+      const float colW = (W - 2 * X0) / 2;
+      R.rect(X0 * k, (y0 - 18) * k, (W - 2 * X0) * k, 1 * k, alpha_(INK, 0.22f));
+      for (int r = 0; r < nR; r++) {
+        const Opt &o = rows[(size_t)r];
+        const bool on = at == 1 + r;
+        const float x = X0 + (float)(r / perCol) * colW, y = y0 + (float)(r % perCol) * rowH;
+        hot(x - 10, y - 4, colW - 20, rowH - 2, 1 + r, [] {});
+        const std::string cur = get(o.key);
+        std::string val = cur;
+        for (const auto &p : o.opts) if (p.first == cur) val = p.second;
+        if (on) R.rect((x - 14) * k, (y + 2) * k, 4 * k, 26 * k, RED);
+        text(x, y + 10, 11, o.label, on ? INK : SOFT, LEFT, RB, 0.34f);
+        text(x + 200, y + 1, 27, val, on ? INK : alpha_(INK, 0.72f), LEFT, A, 0.04f);
+      }
+      // ---- the chosen setting, opened: every value it can take
+      if (at >= 1 && at <= nR) {
+        const Opt &o = rows[(size_t)(at - 1)];
+        const std::string cur = get(o.key);
+        const float y = H - 150;
+        R.rect(X0 * k, (y - 14) * k, (W - 2 * X0) * k, 1 * k, alpha_(INK, 0.22f));
+        float x = X0 + text(X0, y + 8, 11, o.label, RED, LEFT, RB, 0.34f) + 30;
+        for (const auto &p : o.opts) {
+          const bool sel = p.first == cur;
+          const float w2 = width(24, p.second, A, 0.04f);
+          {
+            const std::string key = o.key, val = p.first, label = o.label, pg = page;
+            const int idx = at;
+            hot(x - 8, y - 6, w2 + 16, 40, idx, [this, key, val, label, pg, idx] { set(key, val); show(pg, idx); say(sayFor(label, val)); });
+          }
+          text(x, y, 24, p.second, sel ? INK : alpha_(INK, 0.42f), LEFT, A, 0.04f);
+          if (sel) R.rect(x * k, (y + 31) * k, w2 * k, 2 * k, RED);
+          x += w2 + 30;
+        }
+      }
+      // ---- back, and go
+      {
+        const float y = H - 78;
+        text(X0, y + 16, 12, "<   B A C K", alpha_(INK, 0.8f), LEFT, RB, 0.3f);
+        hot(X0 - 10, y, 170, 50, -1, [this] { if (back) back(); });
+        text(W / 2, y + 18, 10, "UP / DOWN MOVE  -  LEFT / RIGHT CHANGE  -  G = LIGHTS OUT", alpha_(INK, 0.45f), CENTRE, RB, 0.3f);
+        const std::string next = !noTeam() && S.teams[S.car].empty() ? "P I C K   A   T E A M" : "L I G H T S   O U T";
+        const float bw = width(13, next, RB, 0.3f) + 70, bx = W - X0 - bw;
+        hot(bx, y, bw, 50, last);
+        if (at == last) R.rect(bx * k, y * k, bw * k, 50 * k, RED);
+        else { R.rect(bx * k, y * k, bw * k, 50 * k, alpha_(INK, 0.6f)); R.rect((bx + 1.5f) * k, (y + 1.5f) * k, (bw - 3) * k, 47 * k, hex("#0b0b0e")); }
+        text(bx + bw / 2, y + 18, 13, next, INK, CENTRE, RB, 0.3f);
+      }
+      return;
+    }
     const float tw = title("RACE SETUP");
     {
       const std::string small = S.xOn ? "XINGUS" : gt() ? "THREE CLASSES - ONE ROAD" : team ? upper(team->name) : "NO TEAM",

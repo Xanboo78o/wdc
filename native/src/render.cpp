@@ -659,6 +659,7 @@ static GLuint link(const char *vs, const char *fs) {
 bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
   dataRoot = dataDir;
   loadFonts(dataDir);
+  texDirKept = texDir;
   hasTex = loadTextures(texDir);
   if (!hasTex) std::fprintf(stderr, "xbr: no textures in %s (run make) — drawing procedural surfaces\n", texDir.c_str());
   prog = link(VS, FS);
@@ -1947,6 +1948,58 @@ void Renderer::endScene(double time) {
   gpuAt ^= 1;
   if (PROF.on && PROF.frames % 100 == 0) std::fprintf(stderr, "governor: GPU %.1f ms a frame, drawing at %.0f%%\n", gpuMs, scale * 100);
   PROF.mark(6);
+}
+
+// ---- THE MENUS' PHOTOGRAPHS (Adam: "for the bg just do some cool art and photography u make
+// like the ads"). Frames of the cinematic advert, build/tex/menu-NN.ppm. One is laid on the
+// screen behind the menu instead of a live race: between two fractions of its height
+// (the film's bars stay black), filling that band, drifting a little so it is never still.
+int Renderer::photoCount() {
+  if (photosTried) return (int)photoFbo.size();
+  photosTried = true;
+  for (int i = 1; i <= 40; i++) {
+    char name[64];
+    std::snprintf(name, sizeof name, "/menu-%02d.ppm", i);
+    int w, h;
+    std::vector<unsigned char> px;
+    if (!readPPM(texDirKept + name, w, h, px)) break;
+    GLuint tex = 0, fb = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, px.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glGenFramebuffers(1, &fb);
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+    photoFbo.push_back(fb); photoW.push_back(w); photoH.push_back(h);
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  return (int)photoFbo.size();
+}
+void Renderer::photoShow(int index, double t, float top, float bottom) {
+  const int n = photoCount();
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(0, 0, W, H);
+  glDisable(GL_SCISSOR_TEST);
+  glClearColor(0, 0, 0, 1);
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  sceneOpen = false;
+  if (n <= 0) return;
+  index = ((index % n) + n) % n;
+  const float pw = (float)photoW[(size_t)index], ph = (float)photoH[(size_t)index];
+  const int dy0 = (int)((1 - bottom) * H), dy1 = (int)((1 - top) * H);
+  const float bandAspect = (float)W / (float)std::max(1, dy1 - dy0);
+  // the part of the photograph that fills the band, a little inside its edges, wandering slowly
+  const float zoom = 1.07f + 0.035f * (float)std::sin(t * 0.07 + index);
+  float sw2 = pw / zoom, sh2 = sw2 / bandAspect;
+  if (sh2 > ph / zoom) { sh2 = ph / zoom; sw2 = sh2 * bandAspect; }
+  const float cx = pw / 2 + (pw - sw2) * 0.45f * (float)std::sin(t * 0.045 + index * 1.7), cy = ph / 2 + (ph - sh2) * 0.45f * (float)std::cos(t * 0.038 + index);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, photoFbo[(size_t)index]);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+  // (a PPM's first row is the top of the picture, and GL's first row is the bottom: so the source is taken upside down)
+  glBlitFramebuffer((int)(cx - sw2 / 2), (int)(cy + sh2 / 2), (int)(cx + sw2 / 2), (int)(cy - sh2 / 2), 0, dy0, W, dy1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 }
 
 // ---- THE WIPER (Adam: "p for windshield wipers, double tap to increase speed, single tap for

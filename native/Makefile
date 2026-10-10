@@ -49,7 +49,13 @@ $(BUILD)/tex/prop-%.pam: $$(wildcard ../data/props/$$*/base.jpg ../data/props/$$
 	@mkdir -p $(BUILD)/tex
 	magick $< -colorspace sRGB -type TrueColorAlpha -depth 8 pam:$@
 
-all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA) $(PROPTEX)
+# The menus' photographs (data/menu/NN.jpg: frames of the cinematic advert) as plain PPMs.
+MENUTEX := $(patsubst ../data/menu/%.jpg,$(BUILD)/tex/menu-%.ppm,$(wildcard ../data/menu/*.jpg))
+$(BUILD)/tex/menu-%.ppm: ../data/menu/%.jpg | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $< -strip -depth 8 $@
+
+all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA) $(PROPTEX) $(MENUTEX)
 
 $(BUILD)/tex/flora-leaf.pam: ../data/flora/leaf-c.jpg ../data/flora/leaf-a.png | $(BUILD)
 	@mkdir -p $(BUILD)/tex

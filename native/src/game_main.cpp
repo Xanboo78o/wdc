@@ -898,6 +898,12 @@ int main(int argc, char **argv) {
     // the mirror first, on alternate frames: the same world, looking back
     static unsigned mirrorTick = 0;
     const bool driving = screen != HOME && screen != RESULTS;
+    // THE PRO MENUS stand on a photograph (frames of the cinematic advert), not on a live race
+    const bool photoMenu = screen == HOME && home.style() && R.photoCount() > 0;
+    if (photoMenu) {
+      R.mirrorClear();
+      R.photoShow(home.photoIndex(clock, R.photoCount()), clock, home.hub() ? 0.115f : 0.0f, home.hub() ? 0.885f : 1.0f);
+    } else {
     if (driving && R.mirrorWanted(f.camMode)) {
       if (mirrorTick++ % 3 == 0) { R.mirrorBegin(); R.drawWorld(f); drawField(); R.mirrorEnd(); }
     } else R.mirrorClear();
@@ -906,6 +912,7 @@ int main(int argc, char **argv) {
     fx.draw(R, f.time);
     R.endScene(f.time);
     if (driving && R.mirrorWanted(f.camMode)) R.mirrorShow();
+    }
     R.hudBegin();
     R.drawRain(f);
     // the menus' own look (homestyle.hpp): PRO draws square, level and plain

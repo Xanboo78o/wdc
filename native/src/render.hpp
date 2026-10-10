@@ -115,6 +115,9 @@ class Renderer {
   void mirrorBegin();
   void mirrorEnd();
   void mirrorShow();
+  // the menus' photographs (render.cpp): how many there are, and one laid behind the menu in a band of the screen (0 = top, 1 = bottom)
+  int photoCount();
+  void photoShow(int index, double t, float top, float bottom);
   // P: one tap is one wipe, two quick taps the next speed. Returns what to tell the driver, or null.
   const char *wiperTap(double now);
   void mirrorClear() { mirHas = false; }
@@ -220,6 +223,10 @@ class Renderer {
   float shKey[6] = {1e9f, 0, 0, 0, 0, 0};
   Mat4 shVP;
   static constexpr int MIR_W = 840, MIR_H = 200;
+  std::vector<unsigned> photoFbo;
+  std::vector<int> photoW, photoH;
+  bool photosTried = false;
+  std::string texDirKept;
   // rain on the glass and the wiper that clears it (render.cpp wiperTap, wiperStep, COMP_FS)
   struct Wiper { int level = 0; float pos = -1, drops = 0, next = 0, since = 0, before = 0, sweepWater = 0.25f; bool out = false, go = false; double tapAt = -10; } wiper;
   // THE GLASS'S CONSTANT BLOCK: five rows of four floats, each row on a 16-byte boundary,

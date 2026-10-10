@@ -289,6 +289,11 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
     const float bar = H * 0.115f, RULE = 3;
     for (int i = 0; i < 28; i++) P.rect((float)i * 22, bar, 22.5f, H - 2 * bar, alpha_(PAPER, 0.62f * (1 - (float)i / 28)));
     for (int i = 0; i < 22; i++) P.rect(W - (float)(i + 1) * 22, bar, 22.5f, H - 2 * bar, alpha_(PAPER, 0.55f * (1 - (float)i / 22)));
+    // the photograph turns over every eleven seconds, through black
+    {
+      const float ph = (float)std::fmod(clock, 11.0), a = std::max(1 - ph / 0.8f, (ph - 10.2f) / 0.8f);
+      if (a > 0) P.rect(0, bar, W, H - 2 * bar, alpha_(PAPER, std::min(1.0f, a)));
+    }
     P.rect(0, 0, W, bar, PAPER); P.rect(0, H - bar, W, bar, PAPER);
     // the mark, as the film ends on it
     {
