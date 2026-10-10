@@ -404,6 +404,39 @@ in vec2 vU; uniform sampler2D uTex, uBloom, uDepth; uniform float uExp, uSharp, 
 // and uWiped 1 while it is on its way out (what is behind it is clear).
 uniform float uRain, uGlass, uDrops, uWipe, uWiped, uRainT, uRainV;
 float rhash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+// THE GLASS, as one block of constants (render.hpp RainSystemCB, five vec4s, filled every frame from the physics):
+//   [0] xyz the air over the glass, m/s, in the glass's own axes (x to the right, y up the glass, z off it)   w the car's speed
+//   [1] x lateral g (+ = a left-hander)   y longitudinal g (+ = accelerating)   z the screen's rake, radians from flat   w the wiper's angle, radians from upright
+//   [2] x water on the glass before the last sweep (0..1)   y how fast it gathers, per second   z seconds of rain since that sweep began   w how long the sweep takes
+//   [3] xy how far the running drops have travelled (integrated on the CPU, so a change of wind never makes them jump)   z time   w 1 = you are looking through glass
+//   [4] xyz the brightest light, in view space   w how bright it is
+uniform vec4 uRainCB[5];
+// VORONOI. For a point p: the nearest of the jittered feature points of the 3x3 cells round it.
+// Returns xy = the vector from that feature point to p, z = a random number of its own (which drop it is).
+vec3 voronoi(vec2 p){
+  vec2 ip = floor(p), fp = fract(p);
+  vec3 best = vec3(0.0, 0.0, 0.0); float bd = 8.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 g = vec2(float(i), float(j)), id = ip + g;
+    vec2 o = vec2(rhash(id + 3.1), rhash(id + 7.7)) * 0.72 + 0.14;
+    vec2 r = fp - g - o;
+    float d = dot(r, r);
+    float take = step(d, bd);                       // no branch: keep the nearer of the two
+    bd = mix(bd, d, take); best = mix(best, vec3(r, rhash(id + 1.3)), take);
+  }
+  return best;
+}
+// A DROP IS A CAP OF A SPHERE. With r the vector from its centre (in units of its radius R) and
+// q = |r| / R, its height is h(q) = sqrt(1 - q^2) inside the rim and 0 outside. The surface normal
+// is (-dh/dx, -dh/dy, 1) normalised, and dh/dx = -(r.x / R^2) / h — so the normal leans OUTWARD,
+// gently at the crown and steeply at the rim, which is exactly how a drop bends what is behind it.
+// Returns xy = the normal's lean (0 at the crown, up to `bulge` at the rim), z = the drop's cover (0 or 1, soft).
+vec3 dropNormal(vec2 r, float R, float bulge){
+  float q2 = dot(r, r) / (R * R);
+  float inside = smoothstep(1.0, 0.86, q2);
+  float h = sqrt(max(1.0 - q2, 0.02));
+  return vec3(r / (R * h) * bulge * inside, inside);
+}
 // MOTION BLUR (js/speedfx.js SpeedBlur): the camera's own travel, known, and every pixel's real distance
 uniform vec3 uMbVel; uniform float uMbTan, uMbAsp, uMbAmt, uMbShutter, uMbMax; uniform vec4 uMbCar[8]; uniform int uMbN; uniform vec4 uMbHole;
 vec3 viewAt(vec2 v01, vec2 us){
@@ -419,34 +452,66 @@ float nearCar(vec3 P){ float k = 1.0; for (int i = 0; i < uMbN; i++) k = min(k, 
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 void main(){
   vec2 u = min(vU * uK, uK - uPx * 0.5);
-  // ---- water on the glass in front of you: each drop a small lens, and the wiper's fan
-  float wet0 = 0.0, blade = 0.0, dz = 0.0;
-  if (uRain > 0.01 || uDrops > 0.01 || uWipe >= 0.0) dz = viewAt(vU, u).z * -1.0;
-  if (uGlass > 0.5 && dz > 1.15) {
-    // the fan: pivot under the middle of the screen, sweeping left to right
+  // ---- WATER ON THE GLASS, in three layers (Adam's sheet, 2026-10-09):
+  //   A  standing drops: surface tension holds them where they landed; as the air
+  //      over the glass rises they flatten, and past a speed they are gone
+  //   B  running drops: the ones the air has torn free, drawn out into streaks along
+  //      V = gravity down the rake + the air over the glass + what the g-forces add
+  //   C  the wiper: a fan, by angle; whatever the blade has passed starts again from dry
+  float wet0 = 0.0, blade = 0.0, dz = 0.0, spec0 = 0.0;
+  if (uRain > 0.01 || uRainCB[2].x > 0.01 || uRainCB[2].z > 0.01 || uWipe >= 0.0) dz = viewAt(vU, u).z * -1.0;
+  if (uRainCB[3].w > 0.5 && dz > 1.15) {
+    float speed = uRainCB[0].w, rake = uRainCB[1].z;
+    vec2 P = vU * vec2(uMbAsp, 1.0);
+    // ---- C: the fan. Pivot under the middle of the screen; a01 runs 0..1 across the sweep.
     vec2 pv = (vU - vec2(0.5, -0.32)) * vec2(uMbAsp, 1.0);
-    float a01 = atan(pv.x, pv.y) / 1.9 + 0.5, rad = length(pv);
+    float ang = atan(pv.x, pv.y), a01 = ang / 1.9 + 0.5, rad = length(pv);
     float inFan = step(0.42, rad) * step(rad, 1.42) * step(0.0, a01) * step(a01, 1.0);
-    float amount = uDrops * (uWiped > 0.5 && a01 < uWipe && inFan > 0.5 ? 0.0 : 1.0);
-    if (uWipe >= 0.0) blade = inFan * smoothstep(0.011, 0.004, abs(a01 - uWipe));
-    if (amount > 0.01) {
-      // at speed the air pushes the drops up the glass; standing still they creep down
-      vec2 g = vU * vec2(uMbAsp, 1.0) * 15.0 + vec2(0.0, -uRainT * (uRainV * 2.2 - 0.06));
-      vec2 id = floor(g), fq = fract(g) - 0.5;
-      float h = rhash(id);
-      if (h < amount * 0.72) {
-        vec2 ctr = (vec2(rhash(id + 3.1), rhash(id + 7.7)) - 0.5) * 0.5;
-        float r = 0.09 + 0.17 * rhash(id + 1.3), d = length(fq - ctr);
-        if (d < r) {
-          // a drop shows the world behind it upside down and small
-          vec2 nrm = (fq - ctr) / r;
-          u = clamp(u - nrm * (1.0 - d / r) * 0.060 * uK, vec2(0.0), uK - uPx * 0.5);
-          wet0 = 0.10 * smoothstep(r, r * 0.2, d) + 0.22 * smoothstep(0.35, 0.0, length(nrm - vec2(-0.35, 0.4)));
-        }
-      }
-    }
+    float bladeA01 = uRainCB[1].w / 1.9 + 0.5;
+    // has the blade been over this pixel on this sweep? on the way out: only behind it. After: everywhere in the fan.
+    float passed = inFan * max(step(a01, bladeA01), 1.0 - uWiped) * step(0.0, uRainCB[2].z);
+    // water here = what has gathered since the blade passed (it reached a01 that far into the sweep), or what was there before
+    float since = max(uRainCB[2].z - a01 * uRainCB[2].w, 0.0);
+    float water = mix(clamp(uRainCB[2].x + uRainCB[2].y * uRainCB[2].z, 0.0, 1.0), clamp(uRainCB[2].y * since, 0.0, 1.0), passed);
+    blade = (uWipe >= 0.0 ? 1.0 : 0.0) * inFan * smoothstep(0.011, 0.004, abs(a01 - bladeA01));
+    // ---- how hard the air is pulling at the drops: 0 parked, 1 by about 150 km/h
+    float pull = clamp(speed * 0.024, 0.0, 1.0);
+    // ---- A: standing drops. Radius grows a little and the bulge falls as they flatten; they thin out, then vanish.
+    vec3 va = voronoi(P * 17.0);
+    float keepA = step(va.z, water * 0.78 * (1.0 - smoothstep(0.35, 0.85, pull)));
+    float RA = (0.16 + 0.20 * fract(va.z * 7.31)) * (1.0 + 0.5 * pull);
+    vec3 nA = dropNormal(va.xy, RA, 1.0 - 0.75 * pull) * keepA;
+    // ---- B: running drops. The composite velocity over the glass, in screen axes (x right, y up):
+    //   gravity pulls down the rake      (0, -9.81 * sin(rake))
+    //   the air pushes up and across      uRainCB[0].xy   (already the air RELATIVE to the car)
+    //   lateral g throws them sideways, braking throws them forward — which on a raked screen is UP
+    vec2 Vf = vec2(0.0, -9.81 * sin(rake)) * 0.35 + uRainCB[0].xy * 0.20 + vec2(-uRainCB[1].x, -uRainCB[1].y * cos(rake)) * 2.4;
+    float vlen = length(Vf);
+    vec2 dir = Vf / max(vlen, 0.001), across = vec2(-dir.y, dir.x);
+    // the drop's own frame: along the flow, and across it; drawn out along the flow by its speed
+    float stretch = 1.0 + 5.0 * clamp(vlen * 0.06, 0.0, 1.0);
+    vec2 Q = vec2(dot(P, dir) / stretch, dot(P, across)) * 23.0 - vec2(dot(uRainCB[3].xy, dir) / stretch, dot(uRainCB[3].xy, across)) * 23.0;
+    vec3 vb = voronoi(Q);
+    float broken = smoothstep(0.12, 0.55, pull + abs(uRainCB[1].x) * 0.12);      // free once speed x drag beats surface tension
+    float keepB = step(vb.z, water * 0.55 * broken);
+    float RB = 0.13 + 0.14 * fract(vb.z * 5.17);
+    vec3 nB = dropNormal(vb.xy, RB, 0.9) * keepB;
+    // back out of the drop's stretched frame into the screen's
+    vec2 leanB = dir * nB.x / stretch + across * nB.y;
+    // ---- together: the normal of the water, and what it does to the picture behind it
+    vec2 lean = nA.xy + leanB;
+    float cover = clamp(nA.z + nB.z, 0.0, 1.0);
+    vec3 N = normalize(vec3(lean, 1.0));
+    // REFRACTION: the scene is looked up where the bent ray lands. A drop is a strong
+    // little lens, so the picture inside it is the world upside down and small: the
+    // offset is against the lean, and large (0.055 of the screen at the rim).
+    u = clamp(u - lean * 0.055 * uK * vec2(1.0 / uMbAsp, 1.0), vec2(0.0), uK - uPx * 0.5);
+    // SPECULAR: the light (the sun; at night, the lamps) glancing off the water, Blinn-Phong on the drop's normal
+    vec3 Ld = normalize(uRainCB[4].xyz), Hh = normalize(Ld + vec3(0.0, 0.0, 1.0));
+    spec0 = pow(max(dot(N, Hh), 0.0), 60.0) * uRainCB[4].w * cover;
+    wet0 = 0.08 * cover + 0.16 * cover * smoothstep(0.2, 0.9, length(lean));       // the rim of a drop gathers light
   }
-  vec3 c = max(texture(uTex, u).rgb, 0.0) * (1.0 + wet0);
+  vec3 c = max(texture(uTex, u).rgb, 0.0) * (1.0 + wet0) + vec3(1.0, 0.98, 0.94) * spec0;
   // ---- rain falling in the air: only on what is out there, never on the inside of your own car
   if (uRain > 0.01 && dz > 2.6) {
     float sx = (vU.x + (1.0 - vU.y) * 0.05 * uRainV) * uMbAsp;
@@ -1844,6 +1909,7 @@ void Renderer::endScene(double time) {
   glUniform1f(glGetUniformLocation(compProg, "uWiped"), wiper.out ? 1.0f : 0.0f);
   glUniform1f(glGetUniformLocation(compProg, "uRainT"), (float)std::fmod(time, 3600.0));
   glUniform1f(glGetUniformLocation(compProg, "uRainV"), rainSpeed);
+  glUniform4fv(glGetUniformLocation(compProg, "uRainCB"), 5, (const float *)&rainCB);
   // motion blur: XBR_BLUR=0 off, 0.5 gentler, 1.5 the most
   static const float blurK = std::getenv("XBR_BLUR") ? std::min(1.5f, (float)std::atof(std::getenv("XBR_BLUR"))) : 1.0f;
   {
@@ -1899,19 +1965,64 @@ void Renderer::wiperStep(float dt, double now) {
   Wiper &w = wiper;
   w.drops = std::min(1.0f, w.drops + rainNow * 0.75f * dt);
   if (rainNow < 0.02f) w.drops = std::max(0.0f, w.drops - 0.05f * dt);        // it dries, slowly
+  // the same, kept the way the shader wants it: seconds of rain since the last sweep began
+  w.since += rainNow * dt;
+  if (rainNow < 0.02f) { w.since = std::max(0.0f, w.since - 0.07f * dt); w.before = std::max(0.0f, w.before - 0.05f * dt); }
   static const float EVERY[4] = {0, 2.6f, 1.35f, 0.0f};
   if (w.level && w.pos < 0) { w.next -= dt; if (w.next <= 0) { w.go = true; w.next = EVERY[w.level]; } }
-  if (w.go && w.pos < 0) { w.go = false; w.pos = 0; w.out = true; }
+  if (w.go && w.pos < 0) {
+    w.go = false; w.pos = 0; w.out = true;
+    w.before = std::min(1.0f, w.before + 0.75f * w.since); w.since = 0;      // what the blade is about to take
+    w.sweepWater = rainNow * (w.level == 3 ? 0.38f : 0.5f);                  // how much rain falls while it crosses
+  }
   if (w.pos >= 0) {
     const float speed = w.level == 3 ? 2.6f : 2.0f;                            // sweeps a second, each way
-    if (w.out) { w.pos += speed * dt; if (w.pos >= 1) { w.pos = 1; w.out = false; w.drops = 0; } }
+    if (w.out) { w.pos += speed * dt; if (w.pos >= 1) { w.pos = 1; w.out = false; w.drops = 0; w.before = 0; } }
     else { w.pos -= speed * dt; if (w.pos <= 0) w.pos = -1; }
   }
   (void)now;
   // for a photograph: XBR_DROPS=0.8 puts that much water on the glass, XBR_WIPE=0.5 stops the blade half way out
   static const char *ed = std::getenv("XBR_DROPS"), *ew = std::getenv("XBR_WIPE");
-  if (ed) w.drops = (float)std::atof(ed);
+  if (ed) { w.drops = (float)std::atof(ed); w.before = w.drops; w.since = w.drops / 0.75f; }
   if (ew) { w.pos = (float)std::atof(ew); w.out = true; }
+}
+
+// ---- THE GLASS'S CONSTANTS, every frame, from the physics (render.hpp RainSystemCB; read by COMP_FS).
+void Renderer::updateRainCB(const FrameIn &f, const Mat4 &view) {
+  static_assert(sizeof(RainSystemCB) == 80 && alignof(RainSystemCB) == 16, "RainSystemCB is five 16-byte rows");
+  const Car &car = *f.car;
+  const float dt = (float)std::min(0.1, std::max(0.0, f.dt));
+  RainSystemCB &cb = rainCB;
+  // the wind: a weather wind that swings round and gusts, harder the harder it rains, in the world...
+  const double bearing = 0.7 + 0.35 * std::sin(f.time * 0.05), gust = 1 + 0.35 * std::sin(f.time * 0.9) + 0.2 * std::sin(f.time * 2.3 + 1);
+  const double wsp = (3.0 + 9.0 * f.look.rain) * gust;
+  const double wx = std::cos(bearing) * wsp, wy = std::sin(bearing) * wsp;
+  // ...and as the car meets it: its own speed through the air, plus the wind, in the car's axes (forward, left)
+  const double ch = std::cos(car.hdg), sh = std::sin(car.hdg);
+  const double vwx = car.vx * ch - car.vy * sh, vwy = car.vx * sh + car.vy * ch;        // the car over the ground, world
+  const double rx = wx - vwx, ry = wy - vwy;                                            // the air relative to the car, world
+  const double aFwd = rx * ch + ry * sh, aLeft = -rx * sh + ry * ch;
+  // on the glass: air coming at the car (aFwd negative) runs UP the screen; air from the left runs to the right
+  const bool closed = f.spec->gt;
+  cb.rake = closed ? 0.52f : 0.95f;                                                     // a GT's screen lies back; a visor stands nearly upright
+  cb.wind[0] = (float)(-aLeft); cb.wind[1] = (float)(-aFwd * std::cos(cb.rake)); cb.wind[2] = (float)(-aFwd * std::sin(cb.rake));
+  cb.speed = (float)std::fabs(car.speed);
+  cb.gLat = (float)std::max(-5.0, std::min(5.0, car.vx * car.r / 9.81));
+  cb.gLong = shake.acc / 9.81f;
+  cb.wiperAngle = wiper.pos >= 0 ? (wiper.pos - 0.5f) * 1.9f : -9.0f;
+  cb.waterBefore = wiper.before; cb.gather = 0.75f; cb.rainSince = wiper.since; cb.sweep = wiper.sweepWater;
+  // the running drops' travel: the same composite velocity the shader draws them along, integrated
+  const float vfx = cb.wind[0] * 0.20f - cb.gLat * 2.4f, vfy = -9.81f * std::sin(cb.rake) * 0.35f + cb.wind[1] * 0.20f - cb.gLong * std::cos(cb.rake) * 2.4f;
+  flowX += vfx * dt * 0.035f; flowY += vfy * dt * 0.035f;
+  if (std::fabs(flowX) > 500 || std::fabs(flowY) > 500) { flowX = 0; flowY = 0; }
+  cb.flow[0] = flowX; cb.flow[1] = flowY;
+  cb.time = (float)std::fmod(f.time, 3600.0);
+  cb.glass = glassNow ? 1.0f : 0.0f;
+  // the brightest light, into view space: the sun by day; by night, lamps behind you in the glass
+  const Look &L = f.look;
+  const float *m = view.m;
+  for (int k = 0; k < 3; k++) cb.light[k] = m[k] * L.sun[0] + m[4 + k] * L.sun[1] + m[8 + k] * L.sun[2];
+  cb.lightPower = std::min(1.6f, 0.35f + 0.9f * (L.sunCol[0] + L.sunCol[1] + L.sunCol[2]) / 3 + 0.8f * L.night);
 }
 
 // ---- THE SHAKE (js/speedfx.js SpeedShake, and js/render.js's rule for when it runs).
@@ -2136,6 +2247,7 @@ void Renderer::drawWorld(const FrameIn &f) {
     glassNow = f.camMode == 0;                    // the driver's eyes: behind a windscreen, or a visor
     wiperStep((float)f.dt, f.time);
   }
+  // (the glass's constants are filled below, once the view is known: updateRainCB)
   if (!mirrorPass) shakeCamera(f, eye, at, up);
   if (mirrorPass) {
     // from just above your head, straight back down the road: one wide glass
@@ -2156,6 +2268,7 @@ void Renderer::drawWorld(const FrameIn &f) {
     mbAmt = car.speed > 30 ? (float)std::min(1.0, std::max(0.0, (car.speed * 3.6 - 110) / 150)) : 0;
     mbSpots.clear();
   }
+  if (!mirrorPass) updateRainCB(f, view);
   const Mat4 VP = proj * view;
   static const bool noSh = std::getenv("XBR_NOSH") != nullptr;
   if (std::getenv("XBR_NOTREESH")) treeShadows = false;

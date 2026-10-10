@@ -221,7 +221,27 @@ class Renderer {
   Mat4 shVP;
   static constexpr int MIR_W = 840, MIR_H = 200;
   // rain on the glass and the wiper that clears it (render.cpp wiperTap, wiperStep, COMP_FS)
-  struct Wiper { int level = 0; float pos = -1, drops = 0, next = 0; bool out = false, go = false; double tapAt = -10; } wiper;
+  struct Wiper { int level = 0; float pos = -1, drops = 0, next = 0, since = 0, before = 0, sweepWater = 0.25f; bool out = false, go = false; double tapAt = -10; } wiper;
+  // THE GLASS'S CONSTANT BLOCK: five rows of four floats, each row on a 16-byte boundary,
+  // sent to the develop shader as uRainCB[5] (render.cpp updateRainCB fills it from the physics).
+  struct alignas(16) RainSystemCB {
+    float wind[3];        // the air over the glass, m/s: x to the right, y up the glass, z off it
+    float speed;          // the car's speed, m/s
+    float gLat, gLong;    // lateral g (+ in a left-hander), longitudinal g (+ accelerating)
+    float rake;           // the screen's angle, radians from flat
+    float wiperAngle;     // the blade, radians from upright (-9: parked)
+    float waterBefore;    // water on the glass before the last sweep, 0..1
+    float gather;         // how fast it gathers, per second of rain
+    float rainSince;      // seconds of rain since that sweep began
+    float sweep;          // seconds of rain that fall while the blade crosses
+    float flow[2];        // how far the running drops have travelled
+    float time;
+    float glass;          // 1: you are looking through a screen or a visor
+    float light[3];       // the brightest light, view space
+    float lightPower;
+  } rainCB;
+  float flowX = 0, flowY = 0;
+  void updateRainCB(const FrameIn &f, const Mat4 &view);
   float rainNow = 0, rainSpeed = 0;
   bool glassNow = false;
   void wiperStep(float dt, double now);
