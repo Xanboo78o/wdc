@@ -55,7 +55,13 @@ $(BUILD)/tex/menu-%.ppm: ../data/menu/%.jpg | $(BUILD)
 	@mkdir -p $(BUILD)/tex
 	magick $< -strip -depth 8 $@
 
-all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA) $(PROPTEX) $(MENUTEX)
+# The sky's photograph (data/sky/*.jpg, SOURCE.md there) as a plain PPM.
+SKYTEX := $(patsubst ../data/sky/%.jpg,$(BUILD)/tex/sky-%.ppm,$(wildcard ../data/sky/*.jpg))
+$(BUILD)/tex/sky-%.ppm: ../data/sky/%.jpg | $(BUILD)
+	@mkdir -p $(BUILD)/tex
+	magick $< -strip -depth 8 $@
+
+all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA) $(PROPTEX) $(MENUTEX) $(SKYTEX)
 
 $(BUILD)/tex/flora-leaf.pam: ../data/flora/leaf-c.jpg ../data/flora/leaf-a.png | $(BUILD)
 	@mkdir -p $(BUILD)/tex

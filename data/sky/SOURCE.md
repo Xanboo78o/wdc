@@ -19,3 +19,7 @@ that horizon, so the shadows agree with the clouds you can see and the haze
 agrees with the sky behind it.
 
 Refetch with `node tools/getsky.mjs [name|all] [--force]`.
+
+- `forest-clearing.jpg` — the sky of "Forest Clearing 1 Ground Skybox" by Luis Vidal
+  (https://sketchfab.com/3d-models/forest-clearing-1-ground-skybox-a78ae6a11957401a83fd074004aafcc0),
+  CC-BY-4.0. Changed: turned the right way up, cut to the sky above its trees (26 to 90 degrees), resized.

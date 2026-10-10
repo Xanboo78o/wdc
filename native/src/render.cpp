@@ -200,6 +200,7 @@ uniform sampler2DArray uCol, uNrm; uniform int uHasTex;
 uniform vec3 uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop, uPaint; uniform float uFogK, uWet;
 uniform sampler2DShadow uShadow; uniform mat4 uShVP; uniform float uShOn, uHdr; uniform int uPass;
 uniform vec3 uLampPos, uLampDir; uniform float uLampOn, uTime, uCloud, uNight, uGhost;
+uniform sampler2D uSkyPic; uniform float uSkyOn, uSkyTurn; uniform vec3 uSkyTint;
 uniform sampler2D uMirror; uniform float uMirOn;
 // EVERY LAMP ON THE CIRCUIT, ON THE PAINT (Adam: "make all light reflect on the cars, especially
 // headlights"). Up to eight: xyz where it is and w how bright; xyz which way it shines and w how
@@ -229,6 +230,16 @@ void main(){
     vec3 sky = mix(uFog, uSkyTop, vC.r);
     if (uHdr > 0.5) {
       vec3 d = normalize(vW - uEye);
+      // A PHOTOGRAPHED SKY (Adam: "wire in my skyboxes"): by day the real clouds of a panorama, turned so its
+      // sun stands where the game's does, tinted by the hour and greyed by the weather, and melted into the
+      // haze at the horizon so the land still meets it. The painted clouds below stand down while it is up.
+      float pic = uSkyOn * (1.0 - uNight) * smoothstep(-0.01, 0.10, d.y);
+      if (pic > 0.0) {
+        vec2 su = vec2(atan(d.z, d.x) * 0.15915494 + uSkyTurn + uTime * 0.00025, asin(clamp(d.y, 0.0, 1.0)) * 0.63661977);
+        vec3 ph = textureLod(uSkyPic, su, 0.0).rgb * uSkyTint * 1.18;
+        ph = mix(ph, vec3(dot(ph, vec3(0.3, 0.59, 0.11))) * 0.82, uCloud * 0.85);
+        sky = mix(sky, ph, pic);
+      }
       // stars, where the sky is dark enough to have them
       if (uNight > 0.5 && d.y > 0.02) {
         vec2 sp = d.xz / (d.y + 0.35) * 190.0;
@@ -244,7 +255,7 @@ void main(){
         vec2 uv = d.xz / (d.y + 0.12) * 1.15 + vec2(uTime * 0.006, uTime * 0.0025);
         float f = vnoise(uv) * 0.5 + vnoise(uv * 2.03 + 7.1) * 0.25 + vnoise(uv * 4.01 + 3.7) * 0.125 + vnoise(uv * 8.1) * 0.0625;
         float cov = mix(0.56, 0.16, uCloud);
-        float a = smoothstep(cov, cov + 0.26, f) * smoothstep(0.0, 0.16, d.y);
+        float a = smoothstep(cov, cov + 0.26, f) * smoothstep(0.0, 0.16, d.y) * (1.0 - pic * (1.0 - 0.6 * uCloud));
         float thick = smoothstep(cov + 0.10, cov + 0.55, f);
         vec3 lit = uSunCol * (0.42 + 0.30 * pow(sd, 4.0)) + uSkyAmb * 0.95;
         vec3 shade = uSkyAmb * 0.70 + uFog * 0.18;
@@ -2495,6 +2506,34 @@ void Renderer::drawWorld(const FrameIn &f) {
     glUniform1f(uLampOn, on);
     glUniform1f(uTime, (float)std::fmod(f.time, 10000.0));
     glUniform1f(uCloud, L.cloud); glUniform1f(uNight, L.night);
+    // the sky's photograph: loaded once, on unit 6
+    if (!skyTried) {
+      skyTried = true;
+      int w, h; std::vector<unsigned char> px;
+      const char *off = std::getenv("XBR_SKY");
+      if (!(off && std::string(off) == "0") && readPPM(texDirKept + "/sky-forest-clearing.ppm", w, h, px)) {
+        // (a PPM's first row is the top of the picture; a texture's first row is its bottom)
+        std::vector<unsigned char> up(px.size());
+        for (int y = 0; y < h; y++) std::copy(px.begin() + (size_t)y * w * 3, px.begin() + (size_t)(y + 1) * w * 3, up.begin() + (size_t)(h - 1 - y) * w * 3);
+        glGenTextures(1, &skyTex);
+        glBindTexture(GL_TEXTURE_2D, skyTex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, up.data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+      }
+    }
+    glUniform1f(glGetUniformLocation(prog, "uSkyOn"), skyTex ? 1.0f : 0.0f);
+    if (skyTex) {
+      const Look day;
+      // its sun is a tenth of the way round the picture; turn it to the game's
+      glUniform1f(glGetUniformLocation(prog, "uSkyTurn"), 0.10f - (float)(std::atan2(L.sun[2], L.sun[0]) / (2 * PI)) - 0.5f);
+      glUniform3f(glGetUniformLocation(prog, "uSkyTint"), std::min(1.5f, L.skyTop[0] / std::max(0.05f, day.skyTop[0])), std::min(1.5f, L.skyTop[1] / std::max(0.05f, day.skyTop[1])),
+                  std::min(1.5f, L.skyTop[2] / std::max(0.05f, day.skyTop[2])));
+      glUniform1i(glGetUniformLocation(prog, "uSkyPic"), 6);
+      glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_2D, skyTex); glActiveTexture(GL_TEXTURE0);
+    }
   }
   // the lamps (last frame's): the eight nearest the camera, to this program and to the downloaded cars'
   {
