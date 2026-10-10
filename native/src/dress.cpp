@@ -164,7 +164,7 @@ void main(){
 static const char *LIV_STUB = "vec3 livery(vec3 p, vec3 b){ return b; }\nvec3 stickers(vec3 c, vec3 p, vec3 n, sampler2D s){ return c; }\n";
 static const char *CAR_FS_A = R"(#version 330 core
 in vec3 vW, vN, vP, vNo; in vec2 vU; in float vHurt;
-uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish; uniform float uBrake;
+uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish, uCabin; uniform float uBrake; uniform vec3 uCabinEye;
 uniform vec3 uLivBase; uniform vec4 uLivFrame, uRim;
 )";
 static const char *CAR_FS_B = R"(
@@ -185,6 +185,11 @@ void main(){
     vec3 j = fract(sin(vec3(dot(q, vec3(12.9898, 78.233, 37.719)), dot(q, vec3(39.346, 11.135, 83.155)), dot(q, vec3(73.156, 52.235, 9.151)))) * 43758.5453) - 0.5;
     n = normalize(n + j * 1.3 * vHurt);
   }
+  // THE CABIN (Adam: "the inside shouldnt be shiny"): when the camera sits in this car, what it sees
+  // of it from within is the inside: the backs of the panels and the glass, and all the trim.
+  // (Some cars line the roof and doors with the body's own paint, facing in: so paint counts as inside by where it is,
+  // above the driver's eyes or beside and behind them. The bonnet, ahead and below, stays outside.)
+  bool inside = uCabin == 1 && (!gl_FrontFacing || uRole == 0 || uRole == 3 || vP.y > uCabinEye.y - 0.10 || vP.x < uCabinEye.x + 0.55);
   if (dot(n, V) < 0.0) n = -n;
   vec4 t = uHasMap == 1 ? texture(uTex, vU) : vec4(1.0);
   if (uCutout == 1 && t.a < 0.5) discard;
@@ -216,7 +221,17 @@ void main(){
   else { gloss = 0.10; shine = 18.0; }
   // where it was hit the paint is scuffed to the primer and the shine is gone
   if (uRole != 2) { c = mix(c, vec3(dot(c, vec3(0.333)) * 0.45 + 0.03), vHurt * 0.55); gloss *= 1.0 - 0.8 * vHurt; mirror *= 1.0 - 0.9 * vHurt; }
-  float ndl = max(dot(n, uSun), 0.0);
+  float lampK = (uRole == 0 || uRole == 3) ? 0.0 : 1.0;           // rubber and plain trim throw no lamp back
+  if (inside) {
+    // nothing in there gleams; and trim modelled pure black is lifted to a dark grey, so that a dashboard,
+    // a wheel and a cage can be told apart by the daylight coming in through the glass
+    gloss = 0.0; mirror = 0.0; lampK = 0.0;
+    if (uRole != 2) c = max(c, vec3(0.085, 0.087, 0.092));
+    if (uRole == 1) c = vec3(0.10);
+    // a sun strip's artwork is printed on the outside of the glass: from the seat it is a dark band
+    if (uRole == 0 && uHasMap == 1 && vP.y > uCabinEye.y + 0.05) c = vec3(0.05) + c * 0.10;                               // the back of a body panel is bare, not livery
+  }
+  float ndl = max(dot(n, uSun), 0.0) * (inside ? 0.25 : 1.0);
   vec3 amb = mix(uGndAmb, uSkyAmb, n.y * 0.5 + 0.5);
   vec3 lit = c * (amb + uSunCol * ndl * 0.78);
   float fres = pow(1.0 - max(dot(n, V), 0.0), 4.0);
@@ -231,7 +246,7 @@ void main(){
     vec3 Lv = uLP[li].xyz - vW; float d2 = dot(Lv, Lv); Lv *= inversesqrt(max(d2, 1e-4));
     // is this surface in the lamp's beam? (a headlight shines forward: it does not light the car it is on)
     float beam = uLD[li].w > 0.0 ? smoothstep(uLD[li].w - 0.35, uLD[li].w + 0.25, dot(-Lv, uLD[li].xyz)) : 1.0;
-    float att = uLP[li].w * beam / (1.0 + d2 * 0.018);
+    float att = lampK * uLP[li].w * beam / (1.0 + d2 * 0.018);
     float nl = max(dot(n, Lv), 0.0);
     vec3 hl = normalize(Lv + V);
     lit += c * uLC[li] * nl * att * 0.05;                                              // (Adam: "i dont want spread i want shine": next to no glow on the panel)
@@ -240,7 +255,7 @@ void main(){
   }
   if (uRole == 6) lit += (uHasMap == 1 ? t.rgb : vec3(0.75, 0.05, 0.04)) * (0.40 + 2.4 * uBrake);
   if (uRole == 5) lit += vec3(0.80, 0.86, 0.92) * 1.3;
-  if (uRole == 2) a = clamp(a + fres * 0.35, 0.0, 1.0);
+  if (uRole == 2 && !inside) a = clamp(a + fres * 0.35, 0.0, 1.0);
   float f = 1.0 - exp(-dist * uFogK);
   o = vec4(mix(lit, uFog, f), a);
 }
@@ -521,6 +536,14 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
               uOpacity = glGetUniformLocation(carProg, "uOpacity");
   glUniform1i(glGetUniformLocation(carProg, "uTex"), 0);
   glUniform1f(glGetUniformLocation(carProg, "uBrake"), brakeNow);
+  {
+    // is the camera sitting in this car? (its place in the car's own frame, against the size of a car)
+    const float d[3] = {eye[0] - carM.m[12], eye[1] - carM.m[13], eye[2] - carM.m[14]};
+    const float lx = d[0] * carM.m[0] + d[1] * carM.m[1] + d[2] * carM.m[2], ly = d[0] * carM.m[4] + d[1] * carM.m[5] + d[2] * carM.m[6],
+                lz = d[0] * carM.m[8] + d[1] * carM.m[9] + d[2] * carM.m[10];
+    glUniform3f(glGetUniformLocation(carProg, "uCabinEye"), lx, ly, lz);
+    glUniform1i(glGetUniformLocation(carProg, "uCabin"), std::fabs(lx) < 2.2f && ly > 0.0f && ly < 1.45f && std::fabs(lz) < 0.95f ? 1 : 0);
+  }
   if (paint) glUniform3f(uPaint, paint[0], paint[1], paint[2]); else glUniform3f(uPaint, -1, 0, 0);
   // WHICH TEAM. The one asked for (setLivery), else one chosen by the paint
   // colour the game hands every car — so a rival keeps its livery all race and
