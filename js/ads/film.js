@@ -87,16 +87,17 @@ export async function runFilm(def) {
   let scale = Q.has('scale') ? +Q.get('scale') : (!still && stage.weak ? 0.6 : 1);
   const minScale = stage.weak ? 0.3 : 0.42;
   function resize() {
-    // the picture is 16:9, fitted inside the window
-    const W = innerWidth, H = innerHeight, w = Math.min(W, H * 16 / 9), h = w * 9 / 16;
+    // the picture is 16:9 (or def.aspect, e.g. 9 / 16 for a phone film), fitted inside the window
+    const AR = def.aspect || 16 / 9;
+    const W = innerWidth, H = innerHeight, w = Math.min(W, H * AR), h = w / AR;
     stageEl.style.width = w + 'px'; stageEl.style.height = h + 'px';
     stageEl.style.left = (W - w) / 2 + 'px'; stageEl.style.top = (H - h) / 2 + 'px';
     stageEl.style.fontSize = (h / 100) + 'px';            // 1em = 1% of picture height
     const dpr = still ? 1 : Math.min(devicePixelRatio || 1, 1.5);
     const cw = Math.round(w * dpr), ch = Math.round(h * dpr);
     stage.renderer.setSize(cw, ch, false);
-    grade.setSize(Math.max(320, Math.round(cw * scale)), Math.max(180, Math.round(ch * scale)));
-    camera.aspect = 16 / 9; camera.updateProjectionMatrix();
+    grade.setSize(Math.max(AR < 1 ? 180 : 320, Math.round(cw * scale)), Math.max(AR < 1 ? 320 : 180, Math.round(ch * scale)));
+    camera.aspect = AR; camera.updateProjectionMatrix();
   }
   addEventListener('resize', () => { resize(); if (still || ended) draw(lastT); });
   resize();

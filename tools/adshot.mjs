@@ -23,7 +23,7 @@ for (const a of args) if (a.startsWith('--') && !KNOWN.has(a)) { console.error('
 const flag = (n, d = null) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : d; };
 const pos = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && ['--out', '--q', '--size', '--eval', '--port', '--tag', '--play'].includes(args[i - 1])));
 const which = pos[0];
-if (!['cinematic', 'deadpan'].includes(which)) { console.error('usage: adshot.mjs cinematic|deadpan [times] [--audio]'); process.exit(2); }
+if (!['cinematic', 'deadpan', 'gt'].includes(which)) { console.error('usage: adshot.mjs cinematic|deadpan|gt [times] [--audio]'); process.exit(2); }
 const AUDIO = args.includes('--audio');
 const PLAY = flag('play') ? +flag('play') : 0;     // --play 8: click the card and let it run 8 s of wall time
 let times = [];
