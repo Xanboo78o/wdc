@@ -55,6 +55,9 @@ struct MenuSave {
   // A HOT LAP'S GHOST: a driver of a chosen standard, lapping with you, that you cannot touch
   bool ghost = false;
   std::string ghostTier = "medium";
+  // YOUR LIVERY, a car: which of a downloaded car's liveries (data/livery/<key>.json) is yours. None = the team's paint chooses.
+  std::map<std::string, int> liveryBy;
+  bool liverySet = false;
   // WEATHER BY AREA: blobs laid on the map of ONE circuit (zoneTrack). Track metres; rot in radians as drawn (north up).
   struct WxZone { std::string kind; float x = 0, y = 0, r = 100, stretch = 1.6f, rot = 0; };
   bool wxAdv = false;
@@ -81,6 +84,11 @@ class Home {
   bool wantStart = false, wantQuit = false;       // read and clear
   int wxAt = -1;                                  // the weather blob in your hands on the map (-1 = none): the pad's buttons are its
   bool placing() const { return page == "wx" && wxAt >= 0; }
+  int livery() const;                             // your livery on the car you are in (-1 = the paint chooses)
+  // the DETAILS page's showroom: the car being looked at (a pack, or "" = the game's own body), and what it wears
+  std::string showKey;
+  const std::string &showCar() const { return showKey; }
+  int showLivery() const { const auto it = S.liveryBy.find(showKey); return it == S.liveryBy.end() ? -1 : it->second; }
   int click = 0;                                  // read and clear: a switch went on (1), off (2), or a choice was made (3)
   bool dirty = false;                             // the circuit or the car changed: the backdrop should follow
   void input(Nav n);

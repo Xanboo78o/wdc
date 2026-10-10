@@ -889,7 +889,7 @@ int main(int argc, char **argv) {
   // ---- the light and the air
   auto phaseNow = [&]() -> std::string {
     std::string t = cfg.time;
-    if (bgOn) t = "night";                                      // the front door is a paddock at night
+    if (bgOn) t = screen == HOME && home.page == "details" ? "day" : "night";      // (the showroom is in daylight)                                      // the front door is a paddock at night
     if (t == "live") {
       // where the sun really is, here, now (New Hampshire, where this is driven)
       const Sun sun = solarPosition((double)std::time(nullptr) * 1000.0, 43.13, -71.46);
@@ -994,14 +994,15 @@ int main(int argc, char **argv) {
         // WHO IT IS (Adam, 2026-10-10: "make bots actual named teams their livery is"): every rival gets a livery of
         // its own, not one shared by paint colour, and is CALLED by that livery's team on the tower and the radio.
         // (The grand prix car: the actual grid, one driver a car. 7 shares no factor with 80: no two rivals match.)
-        const int look = want == "f122" ? e.idx % 22 : e.idx * 7 + 3;
+        int look = want == "f122" ? e.idx % 22 : e.idx * 7 + 3;
+        if (want == mine && home.livery() >= 0 && R.liveryName(want, look) == R.liveryName(want, home.livery())) look += 1;      // nobody else wears yours
         R.setLivery(look);
         const std::string team = R.liveryName(want, look);
         if (!team.empty() && e.name != team) e.name = team;
       }
       R.drawCar(e.car, *e.car.spec, S.terrain->h(e.proj.s, e.proj.lat), g.pitch, g.roll, paint, std::fmod(S.race->progress(e), 1000.0));
     }
-    if (mixField) { R.setLivery(-1); if (!R.setCarPack(mine)) R.setCarPack(""); }       // and yours back in yours
+    if (mixField) { R.setLivery(bgOn ? -1 : home.livery()); if (!R.setCarPack(mine)) R.setCarPack(""); }       // and yours back in yours
     // the safety car, when it is out: the same body in silver, until its own is drawn
     const SafetyCar &sc = S.race->rc.sc;
     if (sc.out) {
@@ -1142,7 +1143,11 @@ int main(int argc, char **argv) {
     static unsigned mirrorTick = 0;
     const bool driving = screen != HOME && screen != RESULTS;
     // THE PRO MENUS stand on a photograph (frames of the cinematic advert), not on a live race
-    const bool photoMenu = screen == HOME && home.style(clock) && R.photoCount() > 0;
+    // THE SHOWROOM (the menu's DETAILS page): the car you are looking at, standing on the grid in daylight,
+    // the camera walking round it (Adam, 2026-10-10: "show me what the car looks like up top, make it spinnn")
+    const bool showroom = screen == HOME && bgOn && home.page == "details";
+    static Car showCar;
+    const bool photoMenu = !showroom && screen == HOME && home.style(clock) && R.photoCount() > 0;
     if (photoMenu) {
       R.mirrorClear();
       R.photoShow(home.photoIndex(clock, R.photoCount()), clock, home.hub() ? 0.115f : 0.0f, home.hub() ? 0.885f : 1.0f, STYLE_PULSE);
@@ -1150,8 +1155,23 @@ int main(int argc, char **argv) {
     if (driving && R.mirrorWanted(f.camMode)) {
       if (mirrorTick++ % 3 == 0) { R.mirrorBegin(); R.drawWorld(f); drawField(); R.mirrorEnd(); }
     } else R.mirrorClear();
+    R.turntable = showroom;
+    if (showroom) {
+      double px, py, ph;
+      int pi;
+      const double at = std::min(140.0, S.track.length * 0.05);      // a little way down the straight, clear of the gantry
+      const double off = S.lines->race.off[S.track.idx(at)];
+      S.track.point(at, off, px, py, ph, pi);
+      showCar = makeCar(S.spec->key);
+      showCar.x = px; showCar.y = py; showCar.hdg = ph;
+      f.car = &showCar; f.camMode = 1; f.groundH = S.terrain->h(at, off); f.gPitch = f.gRoll = 0; f.wheelAngle = 0; f.handWheel = 0;
+      R.turnYaw = (float)(clock * 0.55); R.turnX = -0.60f; R.turnY = 0.56f;
+      if (!R.setCarPack(home.showCar())) R.setCarPack("");
+    }
+    R.setLivery(showroom ? home.showLivery() : bgOn ? -1 : home.livery());      // YOUR livery (the DETAILS page), on your car
     R.drawWorld(f);
-    drawField();
+    if (!showroom) drawField();
+    else if (!R.setCarPack(home.pack())) R.setCarPack("");
     fx.draw(R, f.time);
     R.endScene(f.time);
     if (driving && R.mirrorWanted(f.camMode)) R.mirrorShow();

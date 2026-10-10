@@ -151,6 +151,10 @@ class Renderer {
   // see-through, lit from inside, brightest at its edges. Read and cleared by drawCar.
   float ghost = 0;
   float scalePin = 0;           // > 0: draw the scene at this share of the window (--scale) instead of letting the governor choose
+  // THE TURNTABLE (the menu's DETAILS page): the camera walks round the car at turnYaw (radians), and the
+  // finished picture is slid by (turnX, turnY) of the screen (-1..1) so the car stands where the page has room for it.
+  bool turntable = false;
+  float turnYaw = 0, turnX = 0, turnY = 0;
   bool hudFlat = false;         // the pro menus: square corners, hairlines, no tilt, no handwriting (homestyle.hpp)
   bool post = true;             // false: the plain picture, as it was (SETTINGS - LOOK)
   bool postOk = true;           // false: this GPU could not build the look at all

@@ -140,6 +140,7 @@ void MenuSave::load(const std::string &path) {
     else if (k.rfind("model.", 0) == 0) modelBy[k.substr(6)] = v == "-" ? "" : v;
     else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "gears") gears = v == "manual" ? "manual" : "auto";
+    else if (k.rfind("livery.", 0) == 0) liveryBy[k.substr(7)] = std::atoi(v.c_str()); else if (k == "liveryset") liverySet = true;
     else if (k == "ghost") ghost = v == "1"; else if (k == "ghosttier") ghostTier = v; else if (k == "wxadv") wxAdv = v == "1"; else if (k == "zonetrack") zoneTrack = v;
     else if (k == "zone") { WxZone z; char kind[32] = ""; if (std::sscanf(v.c_str(), "%31s %f %f %f %f %f", kind, &z.x, &z.y, &z.r, &z.stretch, &z.rot) == 6) { z.kind = kind; zones.push_back(z); } }
     else if (k == "endur") endur = v == "1"; else if (k == "canon") canon = v == "1"; else if (k == "leagues") leagues = std::atoi(v.c_str()) & 7;
@@ -148,6 +149,9 @@ void MenuSave::load(const std::string &path) {
     else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
   xStyle = xstyle(xStyle).key; xBots = std::max(0, std::min(60, xBots));
+  // (Adam, 2026-10-10, of the M4's blue, orange and black camouflage with Google on it: "i love it, make that mine".)
+  // Once: that car, in that livery, is yours.
+  if (!liverySet) { liverySet = true; liveryBy["m4"] = 41; car = "gt3"; gtClass = "gt3"; model = "m4"; modelSeen = true; }
   if (leagues <= 0) leagues = gtOn ? 7 : 1 << std::max(0, gtClassOf(gtClass));
   // a record from before the wheel's force was set up said 0 because nothing else was possible
   if (ffbSeen >= 0 && ffbVer >= 2) ffb = ffbSeen;
@@ -175,6 +179,8 @@ void MenuSave::save(const std::string &path) const {
   for (const auto &kv : modelBy) f << "model." << kv.first << " " << (kv.second.empty() ? "-" : kv.second) << "\n";
   f << "look " << look << "\n";
   f << "xon " << (xOn ? 1 : 0) << "\neasy " << (easy ? 1 : 0) << "\ndash " << (dash ? 1 : 0) << "\ndashcode " << (dashCode.empty() ? "-" : dashCode) << "\ntabfx " << tabFx << "\ntabvol " << tabVol << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
+  f << "liveryset 1\n";
+  for (const auto &kv : liveryBy) if (kv.second >= 0) f << "livery." << kv.first << " " << kv.second << "\n";
   f << "ghost " << (ghost ? 1 : 0) << "\nghosttier " << ghostTier << "\nwxadv " << (wxAdv ? 1 : 0) << "\n";
   if (!zoneTrack.empty()) f << "zonetrack " << zoneTrack << "\n";
   for (const WxZone &z : zones) f << "zone " << z.kind << " " << z.x << " " << z.y << " " << z.r << " " << z.stretch << " " << z.rot << "\n";
@@ -208,6 +214,7 @@ Home::Home(const std::string &dataDir_, const std::string &savePath_) : dataDir(
     if (std::sscanf(z, "%31s %f %f %f %f %f", kind, &w.x, &w.y, &w.r, &w.stretch, &w.rot) == 6) { w.kind = kind; S.zones.push_back(w); S.wxAdv = true; S.zoneTrack = S.track; }
   }
   if (const char *t = std::getenv("XBR_TIME")) S.time = t;
+  if (std::getenv("XBR_MINE")) { S.liveryBy["m4"] = 41; S.car = "gt3"; S.gtClass = "gt3"; S.model = "m4"; S.modelSeen = true; }
   sayText = greeting();
   build();
 }
@@ -248,6 +255,11 @@ std::string Home::pack() const {
   if (!S.xOn && S.car != "gt3") return "";
   for (const Pack &p : packs) if (p.key == S.model) return p.key;
   return "";
+}
+int Home::livery() const {
+  if (eventOn || S.xOn) return -1;
+  const auto it = S.liveryBy.find(pack());
+  return it == S.liveryBy.end() ? -1 : it->second;
 }
 // "class" or "class:car": a car that has an engine of its own (audio.cpp NAMED) is named after its class
 std::string Home::voice() const {
@@ -561,6 +573,7 @@ void Home::build() {
       back = [this] { wxAt = -1; show("sky", 0); };
       if (S.zoneTrack != S.track) { S.zones.clear(); S.zoneTrack = S.track; wxAt = -1; }      // blobs belong to the circuit they were laid on
     } else wxAt = -1;
+    if (page == "details") showKey = pack();
     for (const Cell &c : cells(mW, mH, [](float sz, const std::string &t) { return sz * 0.5f * (float)t.size(); }))
       if (c.focus) items.push_back({c.ok, c.left, c.right, c.up, c.down});
   } else if (page == "xsetup") {

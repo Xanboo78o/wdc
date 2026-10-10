@@ -16,12 +16,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <ctime>
 
 #include "home.hpp"
 #include "homestyle.hpp"
 #include "audio.hpp"
 #include "driver.hpp"
+#include "json.hpp"
 #include "multiclass.hpp"
 #include "physics.hpp"
 #include "ui.hpp"
@@ -30,7 +32,7 @@ namespace xbr {
 
 // (same day: "for the car selector do it like the tracks, do anything with over 4 options like the tracks")
 // A choice of five or more is a row of TILES, each with its own small picture; four or fewer stay circles.
-static const int K_TILE = 20;
+static const int K_TILE = 20, K_STEP = 21;      // K_STEP: one line that LEFT / RIGHT walk through a long list
 static std::string up(std::string s) { for (char &c : s) c = (char)std::toupper((unsigned char)c); return s; }
 static const char *TIMES[8] = {"dawn", "sunrise", "morning", "day", "evening", "sunset", "dusk", "night"};
 // where the sun stands for each, in degrees round the orb (0 = the right-hand horizon, 90 = overhead)
@@ -462,6 +464,30 @@ std::vector<Home::Cell> Home::cells(float W, float H, const std::function<float(
     }
     y = gy0 + (float)rows * (ch + gap) + 16;
   }
+  {
+    // YOUR LIVERY on the car you have: the liveries baked for it (data/livery/<key>.json), or the team's paint
+    const std::string key = pack();
+    static std::map<std::string, std::vector<std::string>> NAMES;
+    if (!key.empty() && !NAMES.count(key)) {
+      std::vector<std::string> v;
+      const Json j = Json::loadOpt(dataDir + "/livery/" + key + ".json");
+      for (size_t q = 0; q < j.size(); q++) v.push_back(j[q]["name"].s(""));
+      NAMES[key] = v;
+    }
+    const int n = key.empty() ? 0 : (int)NAMES[key].size();
+    if (n > 0) {
+      line("LIVERY");
+      const auto it = S.liveryBy.find(key);
+      const int cur = it == S.liveryBy.end() ? -1 : std::min(n - 1, it->second);
+      Cell c; c.kind = K_STEP; c.x = VX; c.y = y; c.w = 760; c.h = rowH - 8;
+      c.label = cur < 0 ? "THE TEAM'S OWN PAINT" : up(NAMES[key][(size_t)cur]);
+      c.sub = cur < 0 ? "-- / " + std::to_string(n) : std::to_string(cur + 1) + " / " + std::to_string(n);
+      auto stepBy = [this, key, cur, n](int d) { int v = cur + d; if (v < -1) v = n - 1; if (v >= n) v = -1; if (v < 0) S.liveryBy.erase(key); else S.liveryBy[key] = v; click = 3; };
+      c.left = [stepBy] { stepBy(-1); }; c.right = [stepBy] { stepBy(1); }; c.ok = [stepBy] { stepBy(1); };
+      C.push_back(c);
+      end();
+    }
+  }
   line("HANDLING");
   radio("easy", "false", "REAL"); radio("easy", "true", "EASY");
   end();
@@ -503,7 +529,9 @@ void Home::drawRace(Renderer &R, float k, double clock) {
     R.path(p.data(), (int)p.size() / 2, stroke * k, c, true);
   };
   const Rgba PANEL = alpha_(CARD, 0.82f), DARK = hex("#0d0e12");
-  R.rect(0, 0, (float)R.W, (float)R.H, hex("#08080b", 0.5f));      // the photograph steps back: these pages are for reading
+  // the photograph steps back: these pages are for reading. (DETAILS stands on the showroom: the car, top left, is left in the light)
+  if (page == "details") { R.rect(0, 290 * k, (float)R.W, (float)R.H - 290 * k, hex("#08080b", 0.72f)); R.rect(540 * k, 0, (float)R.W - 540 * k, 290 * k, hex("#08080b", 0.55f)); }
+  else R.rect(0, 0, (float)R.W, (float)R.H, hex("#08080b", 0.5f));
 
   // ---- the icons: a few plain shapes each, seen from above
   auto iconF1 = [&](float cx, float cy, float s, const Rgba &c) {
@@ -659,11 +687,12 @@ void Home::drawRace(Renderer &R, float k, double clock) {
     const Cell *f = nullptr, *mine = nullptr;
     for (const Cell &c : C) if (c.focus) { if (c.kind == K_TILE && c.on) mine = &c; if (q == at && c.kind == K_TILE) f = &c; q++; }
     if (!f) f = mine;
+    // the showroom draws THIS car, turning, in the top left corner (game_main.cpp, Renderer::turntable)
+    showKey = f && f->sub.find('|') != std::string::npos ? f->sub.substr(f->sub.find('|') + 1) : pack();
     if (f) {
-      iconCar(f->id.substr(2), X0 + 70, 190, 170, INK);
-      const float tx = X0 + 190;
+      const float tx = 560;
       float size = 88;
-      while (size > 40 && width(size, f->label, A, 0.03f) > W - tx - X0 - 470) size -= 4;
+      while (size > 34 && width(size, f->label, A, 0.03f) > W - tx - X0 - 470) size -= 4;
       const float sw = text(tx, 100, 11, "C A R", RED, LEFT, RB, 0.4f);
       if (f->on) text(tx + sw + 18, 100, 11, "YOURS NOW", SOFT, LEFT, RB, 0.3f);
       const float nw = text(tx, 122, size, f->label, INK, LEFT, A, 0.03f);
@@ -814,6 +843,15 @@ void Home::drawRace(Renderer &R, float k, double clock) {
           text(tx, c.y + c.h / 2 - size * 0.5f - 8, size, c.label, ic, LEFT, A, 0.03f);
           fit(c.sub.substr(0, c.sub.find('|')), tx, c.y + c.h / 2 + size * 0.5f, room, LEFT);
         }
+        break;
+      }
+      case K_STEP: {
+        const float cy = c.y + c.h / 2;
+        text(c.x, cy - 12, 20, "<", on ? INK : alpha_(INK, 0.4f), LEFT, RB);
+        const float nw = text(c.x + 34, cy - 15, 24, c.label, on ? INK : alpha_(INK, 0.8f), LEFT, A, 0.04f);
+        text(c.x + 34 + nw + 18, cy - 12, 20, ">", on ? INK : alpha_(INK, 0.4f), LEFT, RB);
+        text(c.x + 34 + nw + 56, cy - 5, 10, c.sub + (on ? "   LEFT / RIGHT: THE CAR ABOVE WEARS IT" : ""), alpha_(INK, 0.6f), LEFT, RB, 0.3f);
+        if (on) R.rect((c.x + 34) * k, (cy + 18) * k, nw * k, 2 * k, RED);
         break;
       }
       case K_MODE: {

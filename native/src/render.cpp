@@ -2461,6 +2461,13 @@ void Renderer::drawWorld(const FrameIn &f) {
     eye[0] = (float)(car.x - cx * 4.9); eye[1] = carY + 1.28f; eye[2] = (float)-(car.y - cy * 4.9);
     at[0] = (float)(car.x + cx * 15); at[1] = carY + 0.62f; at[2] = (float)-(car.y + cy * 15);
   }
+  if (turntable && !mirrorPass) {
+    // from nine metres, a little above the roof, looking at the middle of the car (close, so that little of the circuit stands between)
+    fov = 55;
+    eye[0] = (float)car.x + std::cos(turnYaw) * 9.0f; eye[1] = carY + 1.45f; eye[2] = (float)-car.y + std::sin(turnYaw) * 9.0f;
+    at[0] = (float)car.x; at[1] = carY + 0.55f; at[2] = (float)-car.y;
+    up[0] = 0; up[1] = 1; up[2] = 0;
+  }
   if (!mirrorPass) {
     rainNow = f.look.rain; rainSpeed = (float)std::min(1.0, car.speed / 70.0);
     glassNow = f.camMode == 0;                    // the driver's eyes: behind a windscreen, or a visor
@@ -2475,7 +2482,8 @@ void Renderer::drawWorld(const FrameIn &f) {
     xform(carM, e, 1, eye); xform(carM, t, 1, at); xform(carM, u, 0, up);
     fov = 24;
   }
-  const Mat4 proj = Mat4::perspective(fov * (float)PI / 180, mirrorPass ? (float)MIR_W / (float)MIR_H : (float)W / (float)std::max(1, H), 0.12f, 12000.0f);
+  Mat4 proj = Mat4::perspective(fov * (float)PI / 180, mirrorPass ? (float)MIR_W / (float)MIR_H : (float)W / (float)std::max(1, H), 0.12f, 12000.0f);
+  if (turntable && !mirrorPass) proj = Mat4::translate(turnX, turnY, 0) * proj;
   const Mat4 view = Mat4::lookAt(eye, at, up);
   // for the motion blur (endScene): how the camera is travelling, in its own frame.
   // Fades in from 110 to 260 km/h, as the browser game's does.
@@ -2484,7 +2492,7 @@ void Renderer::drawWorld(const FrameIn &f) {
     const float wv[3] = {(float)(std::cos(dir) * car.speed), 0, (float)(-std::sin(dir) * car.speed)};
     for (int k = 0; k < 3; k++) mbVel[k] = view.m[k] * wv[0] + view.m[4 + k] * wv[1] + view.m[8 + k] * wv[2];
     mbView = view; mbTan = std::tan(fov * (float)PI / 360);
-    mbAmt = car.speed > 30 ? (float)std::min(1.0, std::max(0.0, (car.speed * 3.6 - 110) / 150)) : 0;
+    mbAmt = turntable ? 0 : car.speed > 30 ? (float)std::min(1.0, std::max(0.0, (car.speed * 3.6 - 110) / 150)) : 0;
     mbSpots.clear();
     lampsWere.swap(lampsNow); lampsNow.clear();       // the lamps the cars put out this frame light the paint in the next
   }
