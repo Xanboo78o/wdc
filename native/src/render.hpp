@@ -114,6 +114,7 @@ class Renderer {
   void setWorldModel(const std::string &dataDir, const std::string &key);
   // which of a downloaded car's teams the next car drawn wears: an index, or -1 for the one its paint chooses
   void setLivery(int index);
+  std::string liveryName(const std::string &pack, int index);      // the team name of a pack's livery ("" if there is none)
   void snapCamera() { camReady = false; }
   void drawWorld(const FrameIn &f);
   // the mirror (render.cpp): mirrorBegin, drawWorld + the rivals, mirrorEnd; then mirrorShow after endScene

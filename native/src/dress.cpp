@@ -119,6 +119,7 @@ struct PackCar {
     float base[3]; float rim[4] = {0, 0, 0, 0}; int finish = 0, nLayers = 0, nStk = 0;
     int type[12]; float col[12][3], q[12][4], side[12];
     float rect[24][4], uv[24][4], tint[24][4], plane[24];
+    std::string name; int num = 0;      // who races it (tools/livery/roster.json): the tower calls a rival by this
   };
   std::vector<Livery> liveries;
   float frame[4] = {0, 2.3f, 1.2f, 1.0f};
@@ -126,6 +127,7 @@ struct PackCar {
   float lampP[2][3] = {}, tailP[2][3] = {};
 };
 size_t Dress::liveryCount(const PackCar &pc) const { return pc.liveries.size(); }
+std::string Dress::liveryName(const PackCar &pc, int index) const { return pc.liveries.empty() || index < 0 ? std::string() : pc.liveries[(size_t)index % pc.liveries.size()].name; }
 PackInfo packInfo(const PackCar &pc) {
   PackInfo I;
   for (int k = 0; k < 3; k++) I.eye[k] = pc.eye[k];
@@ -330,6 +332,7 @@ const PackCar *Dress::pack(const std::string &key) {
       PackCar::Livery L{};
       hex(l["base"].s("d6001c"), L.base);
       L.finish = (int)l["finish"].n();
+      L.name = l["name"].s(""); L.num = (int)l["num"].n();
       if (l["rim"].type == Json::Str) { hex(l["rim"].s(), L.rim); L.rim[3] = 1; }
       for (const Json &y : l["layers"].arr) {
         if (L.nLayers >= 12) break;

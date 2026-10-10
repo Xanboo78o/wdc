@@ -48,6 +48,7 @@ class Dress {
   // colour passed to drawPack choose (the default). XBR_LIVERY=N or =off overrides.
   void setLivery(int index) { liveryIx = index; }
   size_t liveryCount(const PackCar &pc) const;
+  std::string liveryName(const PackCar &pc, int index) const;      // the team that livery belongs to ("" if none)
   // How far the wheels turn while the shutter is open, radians (0 = sharp): the next drawPack smears them by it.
   void setWheelSweep(float radians) { wheelSweep = radians; }
   // LIGHTS (Adam: "make their headlights and brake lights work and brakes glow").

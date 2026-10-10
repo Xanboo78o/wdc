@@ -43,6 +43,8 @@
 #include "bridge.hpp"
 #include "collide.hpp"
 #include "knock.hpp"
+#include "engineer.hpp"
+#include "pitwall.hpp"
 #include "radio.hpp"
 #include "homestyle.hpp"
 #include "driver.hpp"
@@ -989,7 +991,13 @@ int main(int argc, char **argv) {
         const auto all = home.packsOf(cls);
         const std::string want = all.empty() ? (S.multi ? std::string(gtClass(e.klass).pack) : mine) : all[(size_t)e.idx % all.size()];
         if (!R.setCarPack(want)) R.setCarPack("");
-        R.setLivery(want == "f122" ? e.idx % 22 : -1);            // the grand prix car: the actual grid, one driver a car
+        // WHO IT IS (Adam, 2026-10-10: "make bots actual named teams their livery is"): every rival gets a livery of
+        // its own, not one shared by paint colour, and is CALLED by that livery's team on the tower and the radio.
+        // (The grand prix car: the actual grid, one driver a car. 7 shares no factor with 80: no two rivals match.)
+        const int look = want == "f122" ? e.idx % 22 : e.idx * 7 + 3;
+        R.setLivery(look);
+        const std::string team = R.liveryName(want, look);
+        if (!team.empty() && e.name != team) e.name = team;
       }
       R.drawCar(e.car, *e.car.spec, S.terrain->h(e.proj.s, e.proj.lat), g.pitch, g.roll, paint, std::fmod(S.race->progress(e), 1000.0));
     }
@@ -1009,6 +1017,16 @@ int main(int argc, char **argv) {
   Radio radio;
   DashFeed dashFeed;
   double radioRetry = 0;
+  // YOUR ENGINEER (engineer.hpp is his head, pitwall.hpp his voice and his ears). On the wall in any race that is
+  // yours; T, or the rim's radio button, held = you are talking to him.
+  Engineer eng;
+  Pitwall pit;
+  Race *engRace = nullptr;
+  double engT = 0;
+  bool pitTried = false;
+  // XBR_RADIO_TEST=1: he is on the wall in a --hidden run too, silent, with every line on stderr (how the wiring is checked)
+  const bool radioTest = std::getenv("XBR_RADIO_TEST") != nullptr;
+  eng.say = [&pit, radioTest](const std::string &text, int pri) { if (radioTest) std::fprintf(stderr, "radio: [%d] %s\n", pri, text.c_str()); pit.say(text, pri); };
   // the foam blocks and braking boards (knock.hpp): every car on the circuit can send one flying
   auto knockTick = [&](double dt) {
     std::vector<Car *> cars;
@@ -1437,6 +1455,30 @@ int main(int argc, char **argv) {
     }
     drsTap = false;
     {
+      Race *er = S.race && !bgOn && ((!offscreen && !hidden) || radioTest) && cfg.volume > 0 ? S.race.get() : nullptr;
+      if (er != engRace || (er && er->time < engT)) {
+        engRace = er; eng.begin(er);
+        if (er && !pit.ok() && !pitTried) { pitTried = true; if (!pit.start(dataDir + "/..")) std::fprintf(stderr, "xbr: no radio (%s)\n", SDL_GetError()); }
+      }
+      if (er) engT = er->time;
+      if (pit.ok()) {
+        pit.setVolume(screen == PAUSE || !er || hidden ? 0 : std::min(1.0, cfg.volume / 10.0 * 1.3));
+        if (er && screen == DRIVE) eng.tick(dt);
+        pit.ptt(er && screen == DRIVE && (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_T] || rim.held(dev.joy, bridge.buttons, "radio")));
+        std::string said;
+        if (pit.heard(said)) {
+          if (said.empty()) pit.say("Say again, " + eng.driver + "? You broke up.", 2);
+          else if (const std::string a = eng.hear(said); !a.empty()) pit.say(a, 2);
+          else pit.ask(said, eng.facts(), eng.driver);
+        }
+        if (std::string line; pit.caption(line)) {
+          if (radioTest) std::fprintf(stderr, "radio: on air at %.1f s: %s\n", er ? er->time : 0.0, line.c_str());
+          if (screen == DRIVE) { if (line.size() > 96) line = line.substr(0, 93) + "..."; toast = {line, 2.2 + line.size() * 0.045}; }
+        }
+        pit.update(dt);
+      }
+    }
+    {
       SoundIn si;
       const Car &c = *S.car;
       si.rpm = S.box->rpm; si.throttle = c.throttle; si.speed = c.speed;
@@ -1445,8 +1487,34 @@ int main(int argc, char **argv) {
       si.cabin = cfg.cam == 0 && S.spec->gt;
       si.dt = dt; si.paused = screen == PAUSE;
       // behind HOME the race is silent, as it is in the browser (sound=0)
-      si.volume = (hidden || bgOn || screen == RESULTS) ? 0 : cfg.volume / 10.0;
+      si.volume = (hidden || bgOn || screen == RESULTS) ? 0 : cfg.volume / 10.0 * pit.duck();      // the engine steps back while the radio is open
       audio.update(si);
+      // THE FIELD, ALL ROUND YOU: the four rivals nearest your head, each where it is (audio.hpp `field`)
+      {
+        EngineAudio::FieldCar near[EngineAudio::FIELD_VOICES]; double nearD[EngineAudio::FIELD_VOICES]; int nNear = 0;
+        if (S.race && screen == DRIVE && si.volume > 0) {
+          const double fx_ = std::cos(c.hdg), fy_ = std::sin(c.hdg);
+          for (const Entry &e : S.race->entries) {
+            if (e.isPlayer || e.retired) continue;
+            const double rx = e.car.x - c.x, ry = e.car.y - c.y, d = std::hypot(rx, ry);
+            if (d > 260) continue;
+            int at = nNear;
+            while (at > 0 && nearD[at - 1] > d) at--;
+            if (at >= EngineAudio::FIELD_VOICES) continue;
+            for (int k = std::min(nNear, EngineAudio::FIELD_VOICES - 1); k > at; k--) { near[k] = near[k - 1]; nearD[k] = nearD[k - 1]; }
+            EngineAudio::FieldCar &f = near[at];
+            f.id = e.idx; f.cls = e.car.spec ? e.car.spec->key : std::string("f1");
+            f.throttle = e.car.throttle; f.speed = e.car.speed;
+            f.ahead = rx * fx_ + ry * fy_; f.right = rx * fy_ - ry * fx_;
+            // how fast the gap is closing: its velocity less yours, along the line between you
+            const double vx = e.car.speed * std::cos(e.car.hdg) - c.speed * fx_, vy = e.car.speed * std::sin(e.car.hdg) - c.speed * fy_;
+            f.closing = d > 0.5 ? -(vx * rx + vy * ry) / d : 0;
+            nearD[at] = d;
+            if (nNear < EngineAudio::FIELD_VOICES) nNear++;
+          }
+        }
+        audio.field(near, nNear, dt, si.paused ? 0 : si.volume);
+      }
       // THE RIM: what the ten lights on the wheel say this frame (rimlights.hpp)
       if (rimLed.ok()) {
         if (screen != DRIVE || bgOn) rimLed.off();
@@ -1537,6 +1605,7 @@ int main(int argc, char **argv) {
                  S.car->speed * 3.6, S.proj.s, audio.ok() ? "open" : "off", bridge.live() ? "connected" : "not connected");
   }
 
+  pit.stop();
   audio.close();
   dev.close();
   SP.reset();

@@ -815,6 +815,7 @@ bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
 }
 
 void Renderer::setLivery(int index) { if (dress) dress->setLivery(index); }
+std::string Renderer::liveryName(const std::string &pack, int index) { const PackCar *pc = dress ? dress->pack(pack) : nullptr; return pc ? dress->liveryName(*pc, index) : std::string(); }
 void Renderer::setWorldModel(const std::string &dataDir, const std::string &key) {
   worldPack = nullptr;
   if (key.empty() || !dress) return;

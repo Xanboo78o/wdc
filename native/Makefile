@@ -16,7 +16,7 @@ BUILD    := build
 SIM  := physics.cpp parts.cpp track.cpp driver.cpp collide.cpp world.cpp
 # the race layer: js/race.js and everything it imports that is pure logic
 SIM  += grid.cpp drivers.cpp pitstop.cpp xingus.cpp safetycar.cpp race.cpp weather.cpp multiclass.cpp brain.cpp
-GAME := game_main.cpp rimlights.cpp render.cpp audio.cpp bridge.cpp carmesh.cpp ui.cpp home.cpp dress.cpp props.cpp knock.cpp radio.cpp fx.cpp career.cpp home_career.cpp home_race.cpp
+GAME := game_main.cpp rimlights.cpp render.cpp audio.cpp bridge.cpp carmesh.cpp ui.cpp home.cpp dress.cpp props.cpp knock.cpp radio.cpp fx.cpp career.cpp home_career.cpp home_race.cpp engineer.cpp pitwall.cpp
 
 SIM_O  := $(SIM:%.cpp=$(BUILD)/%.o)
 GAME_O := $(GAME:%.cpp=$(BUILD)/%.o)
@@ -61,7 +61,7 @@ $(BUILD)/tex/sky-%.ppm: ../data/sky/%.jpg | $(BUILD)
 	@mkdir -p $(BUILD)/tex
 	magick $< -strip -depth 8 $@
 
-all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(TEX) $(FLORA) $(PROPTEX) $(MENUTEX) $(SKYTEX)
+all: $(BUILD)/xbr-drive $(BUILD)/xbr-race $(BUILD)/xbr $(BUILD)/xbr-engineer $(BUILD)/xbr-pitwall $(TEX) $(FLORA) $(PROPTEX) $(MENUTEX) $(SKYTEX)
 
 $(BUILD)/tex/flora-leaf.pam: ../data/flora/leaf-c.jpg ../data/flora/leaf-a.png | $(BUILD)
 	@mkdir -p $(BUILD)/tex
@@ -82,6 +82,14 @@ $(BUILD)/tex/flora-bark.pam: ../data/flora/bark-c.jpg | $(BUILD)
 sim: $(BUILD)/xbr-drive $(BUILD)/xbr-race
 
 $(BUILD)/xbr-race: $(SIM_O) $(BUILD)/race_main.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
+
+# the engineer's voice, radio and language model with no game round them (pitwall_main.cpp)
+$(BUILD)/xbr-pitwall: $(BUILD)/pitwall.o $(BUILD)/pitwall_main.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(shell pkg-config --libs sdl3) -lm
+
+# the engineer on the pit wall of a headless race, every word printed (engineer_main.cpp)
+$(BUILD)/xbr-engineer: $(SIM_O) $(BUILD)/engineer.o $(BUILD)/engineer_main.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
 
 $(BUILD)/tex/%.ppm: ../data/tex/%.jpg | $(BUILD)
