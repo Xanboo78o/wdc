@@ -87,7 +87,18 @@ export function xingusStep(car, inp, dt) {
   const x = car.xg;
   if (!x) return;
   // It forgives — unless there are stakes.
-  if (!x.stakes) car.damage = 0;
+  if (!x.stakes) {
+    car.damage = 0;
+    // ...and the tyres and the wheels too (native/src/xingus.cpp says why: a slow leak after a brush
+    // with a wall left the car crawling round the Nordschleife on its rims).
+    if (car.tyres) for (const q of car.tyres) {
+      q.leak = 0; q.flat = false; q.dmg = 0;
+      if (q.air < q.p0) q.air = q.p0;
+      if (!x.gCap && q.wear > 0.5) q.wear = 0.5;
+    }
+    if (car.wheelLost) for (let i = 0; i < car.wheelLost.length; i++) car.wheelLost[i] = false;
+    if (!x.gCap && car.tyre) { car.tyre.wf = Math.min(car.tyre.wf, 0.5); car.tyre.wr = Math.min(car.tyre.wr, 0.5); }
+  }
   if (!x.stakes && car.onRoof && car.speed < 12) { car.onRoof = false; car.airborne = false; car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0; }
   if (car.airborne) return;                               // in the air it is the air's
   const vx = car.vx, v = Math.hypot(car.vx, car.vy);

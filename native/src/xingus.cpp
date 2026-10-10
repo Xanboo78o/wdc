@@ -61,7 +61,21 @@ void xingusStep(Car &car, const PlayerInput &inp, double dt) {
   const double iDelta = std::isnan(inp.delta) ? 0 : inp.delta;
   const double iBrake = std::isnan(inp.brake) ? 0 : inp.brake;
   // It forgives — unless there are stakes.
-  if (!x.stakes) car.damage = 0;
+  if (!x.stakes) {
+    car.damage = 0;
+    // ...and that means the tyres and the wheels too. (Adam, 2026-10-09, three quarters round the
+    // Nordschleife in ENDURANCE: "stuck in gear 2 with my top speed declining, i reached the gantry
+    // at gear 1 top speed 12 mph on full throttle". A brush with a wall can start a slow leak; a
+    // leaking tyre gives 30% of its drive and drags, and a lost wheel gives none. damage = 0 forgave
+    // the bodywork and left the car crawling on its rims.)
+    if (car.hasTyres) for (CornerTyre &q : car.tyres) {
+      q.leak = 0; q.flat = false; q.dmg = 0;
+      if (q.air < q.p0) q.air = q.p0;
+      if (x.gCap == 0 && q.wear > 0.5) q.wear = 0.5;                 // (an oval's stock rules run their own tyre wear)
+    }
+    for (bool &w : car.wheelLost) w = false;
+    if (x.gCap == 0) { car.tyre.wf = std::min(car.tyre.wf, 0.5); car.tyre.wr = std::min(car.tyre.wr, 0.5); }
+  }
   if (!x.stakes && car.onRoof && car.speed < 12) {
     car.onRoof = false; car.airborne = false; car.z = 0; car.vz = 0; car.pitch = 0; car.roll = 0; car.pRate = 0; car.rRate = 0;
   }
