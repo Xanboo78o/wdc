@@ -34,7 +34,7 @@ static const int N_TRACKS = 13;
 static const char *OPTIONAL[][3] = {
   {"gravenmoor", "Gravenmoor", "THE MOOR - ONLY EVER AT NIGHT"}, {"nordschleife", "Nordschleife", "GERMANY - 20.8 KM"},
   {"bathurst", "Mount Panorama", "AUSTRALIA - THE MOUNTAIN"}, {"lagunaseca", "Laguna Seca", "USA - THE CORKSCREW"}, {"lemans", "", ""},
-  {"brandshatch", "Brands Hatch", "UNITED KINGDOM"}, {"macau", "", ""},
+  {"brandshatch", "Brands Hatch", "UNITED KINGDOM"}, {"silverstone", "Silverstone", "UNITED KINGDOM"}, {"macau", "", ""},
 };
 static const char *LEAGUE_KEYS[3] = {"f1", "gt3", "f4"}, *LEAGUE_NAMES[3] = {"F1", "GT3", "F4"};
 static const char *leagueName(const std::string &k) { for (int i = 0; i < 3; i++) if (k == LEAGUE_KEYS[i]) return LEAGUE_NAMES[i]; return "F1"; }
@@ -85,9 +85,10 @@ static std::string sayFor(const std::string &row, const std::string &v) {
     {"CIRCUIT", "bathurst", "up the mountain between concrete walls. then down conrod, flat."},
     {"CIRCUIT", "lagunaseca", "the corkscrew: five storeys down in two corners."},
     {"CIRCUIT", "brandshatch", "paddock hill bend drops away under you. the rest is in the woods."},
+    {"CIRCUIT", "silverstone", "an old airfield. maggotts, becketts, chapel: all one breath."},
     {"CIRCUIT", "nordschleife", "twenty kilometres. nobody has finished counting the corners."}, {"CIRCUIT", "spa", "seven kilometres of forest and one hill everybody talks about."},
     {"CAR", "f4", "small car. big dreams."}, {"CAR", "gt3", "the one with a roof."}, {"CAR", "f1", "the big one. hands at ten and two."},
-    {"MODE", "hotlap", "just you and the clock. the clock is mean."}, {"MODE", "race", "wheel to wheel. elbows out."}, {"MODE", "gt", "three classes, one road. mind your mirrors."},
+    {"RACE TYPE", "hotlap", "just you and the clock. the clock is mean."}, {"RACE TYPE", "race", "wheel to wheel. elbows out."}, {"RACE TYPE", "gt", "three classes, one road. mind your mirrors."},
     {"CAR", "hyper", "the prototype. everything else is traffic."}, {"CAR", "gt3", "the proper GT car. heavy, loud, honest."},
     {"CAR", "gt4", "a road car with a cage. slower. more fun than it should be."},
     {"CAR", "rally", "dirt. brake hard, turn right to go left."}, {"GEARS", "manual", "your gears now. mind the limiter."},
@@ -272,10 +273,11 @@ std::string Home::get(const std::string &key) const {
   if (key == "model") return pack();
   if (key == "look") return S.look;
   if (key == "modeX") return S.xOn ? "xingus" : S.gtOn && S.car == "gt3" ? "gt" : S.mode;
+  if (key == "typeX") return S.xOn ? "x:" + S.xStyle : S.gtOn && S.car == "gt3" ? "gt" : S.mode == "race" ? "race" : "hotlap";
   if (key == "carX") return seatCar();
   if (key == "gears") return S.gears;
   if (key == "xStyle") return S.xStyle;
-  if (key == "easy") return S.easy ? "true" : "false";
+  if (key == "easy") return S.easy || S.xOn ? "true" : "false";
   if (key == "tabFx") return S.tabFx;
   if (key == "dash") return S.dash ? "on" : "off";
   if (key == "tabVol") return std::to_string(S.tabVol);
@@ -320,6 +322,14 @@ void Home::set(const std::string &key, const std::string &v) {
   }
   else if (key == "look") S.look = v;
   else if (key == "modeX") { S.xOn = v == "xingus"; S.gtOn = v == "gt"; if (!S.xOn) S.mode = v == "race" || v == "gt" ? "race" : "hotlap"; dirty = true; }
+  else if (key == "typeX") {
+    S.xOn = v.rfind("x:", 0) == 0; S.gtOn = v == "gt";
+    if (S.xOn) S.xStyle = xstyle(v.substr(2)).key;
+    else S.mode = v == "hotlap" ? "hotlap" : "race";
+    // three classes on one road is a GT car's race: it puts you in one
+    if (S.gtOn && S.car != "gt3") { S.car = "gt3"; if (S.track.rfind("heil", 0) == 0) S.track = "monza"; garageAt = -1; }
+    dirty = true;
+  }
   else if (key == "carX") {
     if (gtClassOf(v) >= 0) { S.car = "gt3"; S.gtClass = v; } else { S.car = v == "f4" ? "f4" : v == "rally" ? "rally" : "f1"; }
     // a rally car belongs on a dirt stage: the first time, it is taken to one
@@ -329,7 +339,7 @@ void Home::set(const std::string &key, const std::string &v) {
   }
   else if (key == "gears") S.gears = v == "manual" ? "manual" : "auto";
   else if (key == "xMinutes") S.xMinutes = std::atoi(v.c_str());
-  else if (key == "easy") S.easy = v == "true";
+  else if (key == "easy") { if (!S.xOn) S.easy = v == "true"; }
   else if (key == "tabFx") S.tabFx = v;
   else if (key == "dash") S.dash = v == "on";
   else if (key == "tabVol") S.tabVol = std::atoi(v.c_str());
@@ -358,23 +368,20 @@ std::vector<Home::Opt> Home::heilRows() const {
 }
 std::vector<Home::Opt> Home::setupRows() const {
   std::vector<Opt> rows;
-  // the car first, then what to do with it
+  // (Adam, 2026-10-10: "the ui for selecting a race type is confusing as fuck")
+  // ONE row says what kind of race this is, and it is the same list whatever the car. A type that needs
+  // a particular car puts you in it (set "typeX"); the arcade ones are the Xingus styles under plain names.
+  rows.push_back({"RACE TYPE", "typeX", {{"hotlap", "HOT LAP"}, {"race", "RACE"}, {"gt", "MULTICLASS"}, {"x:endurance", "ENDURANCE"},
+                                         {"x:rally", "RALLY STAGE"}, {"x:rallycross", "RALLYCROSS"}, {"x:derby", "DEMO DERBY"}, {"x:gt3", "ARCADE RACE"},
+                                         {"x:gt3lonely", "ARCADE HOT LAP"}, {"x:hotlaps", "RALLY PRACTICE"}, {"x:rallygt", "RALLY GT"}}});
   if (!S.xOn) rows.push_back({"CAR", "carX", {{"f4", "F4"}, {"f1", "F1"}, {"gt3", "GT3"}, {"gt4", "GT4"}, {"hyper", "HYPERCAR"}, {"rally", "RALLY"}}});
-  {
-    Opt m{"MODE", "modeX", {{"hotlap", "HOT LAP - ALONE"}, {"race", "RACE"}}};
-    if (S.car == "gt3" || S.xOn) m.opts.push_back({"gt", "MULTICLASS"});      // three classes on one road: a GT car's own kind of race
-    m.opts.push_back({"xingus", "XINGUS"});
-    rows.push_back(m);
-  }
   // the paddles as the gearbox, in any car (Xingus has its own row below)
   if (!S.xOn) rows.push_back({"GEARS", "gears", {{"auto", "AUTOMATIC"}, {"manual", "MANUAL - PADDLES (E / Q)"}}});
   // (Adam, 2026-10-09: "make xingus just ez physics for when i js wanna chill thats the only diff")
   // The same car, circuit, rivals and rules; only the handling forgives.
-  if (!S.xOn) rows.push_back({"HANDLING", "easy", {{"false", "REAL"}, {"true", "EASY - XINGUS"}}});
+  if (!S.xOn) rows.push_back({"HANDLING", "easy", {{"false", "REAL"}, {"true", "EASY"}}});
+  else rows.push_back({"HANDLING", "easy", {{"true", "EASY  -  ALWAYS, IN THIS RACE TYPE"}}});
   if (S.xOn) {
-    Opt st{"STYLE", "xStyle", {}};
-    for (const XStyle &x : XSTYLES) st.opts.push_back({x.key, x.label});
-    rows.push_back(st);
     rows.push_back({"GEARS", "xGears", {{"manual", "PADDLES (E / Q)"}, {"auto", "AUTOMATIC"}}});
     const XStyle &x = xstyle(S.xStyle);
     if (x.rivals && S.xStyle == "endurance")
@@ -425,6 +432,8 @@ void Home::show(const std::string &name, int keep) {
   build();
   at = std::max(0, std::min((int)items.size() - 1, keep));
   if (name == "debrief") at = 1;                                       // CONTINUE
+  static const char *shotAt = std::getenv("XBR_AT");                   // for a photograph: XBR_AT=3 stands on the fourth item
+  if (shotAt) at = std::max(0, std::min((int)items.size() - 1, std::atoi(shotAt)));
   if (name == "career" && keep == 0) { const EventDef *e = career.next(); if (e && e->season == viewSeason) at = e->index; }
   if (!savePath.empty() && !eventOn) S.save(savePath);
 }
@@ -438,17 +447,19 @@ void Home::lightsOut() {
 void Home::build() {
   items.clear();
   back = page == "home" ? std::function<void()>() : [this] { show("home"); };
-  auto optItems = [this](const std::vector<Opt> &rows, const std::string &pg) {
+  auto optItems = [this](const std::vector<Opt> &rows, const std::string &pg, int first = 0) {
     for (const Opt &o : rows) {
       const Opt row = o;
-      auto step = [this, row, pg](int d) {
+      auto step = [this, row, pg, first](int d) {
         const std::string cur = get(row.key);
         int i = 0;
         for (size_t q = 0; q < row.opts.size(); q++) if (row.opts[q].first == cur) i = (int)q;
         const int n = (int)row.opts.size();
         const std::string v = row.opts[(size_t)((i + d + n) % n)].first;
         set(row.key, v);
-        const int keep = at;
+        int keep = at;
+        // a change may add or drop rows above this one: stay on the setting, not on its old place
+        if (pg == "setup") { const auto now = setupRows(); for (size_t q = 0; q < now.size(); q++) if (now[q].key == row.key) keep = first + (int)q; }
         show(pg, keep);
         say(sayFor(row.label, v));
       };
@@ -535,7 +546,7 @@ void Home::build() {
       say(id == "heiligen" ? "heiligen. fourteen ways round. pick one." : id == "speedway" ? "the oval. turn left. repeat." : sayFor("CIRCUIT", id));
     };
     items.push_back({[this] { if (circuitId() == "heiligen") show("heiligen"); else at = 1; }, [step] { step(-1); }, [step] { step(1); }});
-    optItems(setupRows(), "setup");
+    optItems(setupRows(), "setup", 1);
     items.push_back({[this] { lightsOut(); }, nullptr, nullptr});
   } else if (page == "heiligen") {
     back = [this] { show("setup"); };
@@ -951,42 +962,56 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         }
         if (on) text(tx, wy - 30, 10, "LEFT / RIGHT  -  CHANGE THE CIRCUIT", alpha_(INK, 0.5f), LEFT, RB, 0.3f);
       }
-      // ---- the session: a line a setting, in two columns
-      const float y0 = 96 + 300 + 64, rowH = 44;
-      const int perCol = (nR + 1) / 2;
-      const float colW = (W - 2 * X0) / 2;
+      // ---- the session: ONE column, a line a setting. The line you are on opens where it stands:
+      // its values run along it, so LEFT / RIGHT moves the way it looks. More rows than fit: the list rolls.
+      // (Adam, 2026-10-10: "the boxes in the middle is ass and its so hard to navigate with dpad" - it was two
+      // columns that UP / DOWN walked as one, with the values a screen away along the bottom.)
+      const float y0 = 96 + 300 + 64, rowH = 42, VX = X0 + 220, VEND = W - X0;
+      const int vis = std::max(3, std::min(nR, (int)((H - 96 - y0) / rowH)));
+      const int sel = at >= 1 && at <= nR ? at - 1 : at == 0 ? 0 : nR - 1;
+      const int top = std::max(0, std::min(nR - vis, sel - vis / 2));
       R.rect(X0 * k, (y0 - 18) * k, (W - 2 * X0) * k, 1 * k, alpha_(INK, 0.22f));
-      for (int r = 0; r < nR; r++) {
+      if (top > 0) text(W - X0, y0 - 38, 10, "MORE ABOVE", alpha_(INK, 0.5f), RIGHT, RB, 0.3f);
+      if (top + vis < nR) text(W - X0, y0 + (float)vis * rowH - 2, 10, "MORE BELOW", alpha_(INK, 0.5f), RIGHT, RB, 0.3f);
+      for (int r = top; r < top + vis; r++) {
         const Opt &o = rows[(size_t)r];
         const bool on = at == 1 + r;
-        const float x = X0 + (float)(r / perCol) * colW, y = y0 + (float)(r % perCol) * rowH;
-        hot(x - 10, y - 4, colW - 20, rowH - 2, 1 + r, [] {});
+        const float x = X0, y = y0 + (float)(r - top) * rowH;
+        hot(x - 10, y - 4, W - 2 * X0 + 20, rowH - 2, 1 + r, [] {});
         const std::string cur = get(o.key);
-        std::string val = cur;
-        for (const auto &p : o.opts) if (p.first == cur) val = p.second;
         if (on) R.rect((x - 14) * k, (y + 2) * k, 4 * k, 26 * k, RED);
         text(x, y + 10, 11, o.label, on ? INK : SOFT, LEFT, RB, 0.34f);
-        text(x + 200, y + 1, 27, val, on ? INK : alpha_(INK, 0.72f), LEFT, A, 0.04f);
-      }
-      // ---- the chosen setting, opened: every value it can take
-      if (at >= 1 && at <= nR) {
-        const Opt &o = rows[(size_t)(at - 1)];
-        const std::string cur = get(o.key);
-        const float y = H - 150;
-        R.rect(X0 * k, (y - 14) * k, (W - 2 * X0) * k, 1 * k, alpha_(INK, 0.22f));
-        float x = X0 + text(X0, y + 8, 11, o.label, RED, LEFT, RB, 0.34f) + 30;
+        if (!on) {
+          std::string val = cur;
+          for (const auto &p : o.opts) if (p.first == cur) val = p.second;
+          text(VX, y + 1, 27, val, alpha_(INK, 0.72f), LEFT, A, 0.04f);
+          continue;
+        }
+        // every value it can take, the chosen one kept in view
+        const float gap = 34;
+        float total = 0, selX = 0, selW = 0;
+        for (const auto &p : o.opts) { const float w2 = width(27, p.second, A, 0.04f); if (p.first == cur) { selX = total; selW = w2; } total += w2 + gap; }
+        total -= gap;
+        const float room = VEND - VX - 40;
+        const float off = total <= room ? 0 : std::max(0.0f, std::min(total - room, selX + selW / 2 - room / 2));
+        float px = VX + (total <= room ? 0 : 20) - off;
+        bool cutL = false, cutR = false;
         for (const auto &p : o.opts) {
-          const bool sel = p.first == cur;
-          const float w2 = width(24, p.second, A, 0.04f);
-          {
+          const bool is = p.first == cur;
+          const float w2 = width(27, p.second, A, 0.04f);
+          if (px < VX - 1) cutL = true;
+          else if (px + w2 > VEND - 20 + 1 && total > room) cutR = true;
+          else {
             const std::string key = o.key, val = p.first, label = o.label, pg = page;
             const int idx = at;
-            hot(x - 8, y - 6, w2 + 16, 40, idx, [this, key, val, label, pg, idx] { set(key, val); show(pg, idx); say(sayFor(label, val)); });
+            hot(px - 8, y - 4, w2 + 16, rowH - 2, idx, [this, key, val, label, pg, idx] { set(key, val); show(pg, idx); say(sayFor(label, val)); });
+            text(px, y + 1, 27, p.second, is ? INK : alpha_(INK, 0.4f), LEFT, A, 0.04f);
+            if (is) R.rect(px * k, (y + 34) * k, w2 * k, 2 * k, RED);
           }
-          text(x, y, 24, p.second, sel ? INK : alpha_(INK, 0.42f), LEFT, A, 0.04f);
-          if (sel) R.rect(x * k, (y + 31) * k, w2 * k, 2 * k, RED);
-          x += w2 + 30;
+          px += w2 + gap;
         }
+        if (cutL) text(VX - 22, y + 6, 18, "<", alpha_(INK, 0.6f), LEFT, RB);
+        if (cutR) text(VEND - 12, y + 6, 18, ">", alpha_(INK, 0.6f), LEFT, RB);
       }
       // ---- back, and go
       {
