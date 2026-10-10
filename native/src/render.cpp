@@ -1740,7 +1740,7 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, false);
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, true);
     // THE WHEEL IN YOUR HANDS (Adam: "i downloaded that wheel put that in the game"). On its column in front of
-    // the driver's eyes, leaning back toward them, and turning as the real one turns: 270 degrees each way.
+    // the driver's eyes, leaning back toward them, and turning as the real one turns: a turn and a half each way (Adam: "its 1.5 rots from middle either direction").
     // (Not in the 720: its model came with a wheel of its own, and two would sit one inside the other.)
     if (rimWant && packKey != "m720") {
       static const PackCar *rim = dress->pack("wheel");
@@ -1749,7 +1749,7 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
       if (!env) { env = true; if (const char *e = std::getenv("XBR_RIM")) std::sscanf(e, "%f,%f,%f", &fwd, &down, &test); }
       if (rim) {
         const PackInfo pi = packInfo(*packCar);
-        const Mat4 Mw = M * Mat4::translate(pi.eye[0] + fwd, pi.eye[1] - down, pi.eye[2]) * Mat4::rotZ(-0.33f) * Mat4::rotX(-(rimTurn + test) * 4.712f);
+        const Mat4 Mw = M * Mat4::translate(pi.eye[0] + fwd, pi.eye[1] - down, pi.eye[2]) * Mat4::rotZ(-0.33f) * Mat4::rotX(-(rimTurn + test) * 9.4248f);
         dress->setDents(nullptr, 0);                 // the car's dents are not the wheel's
         dress->setCabinLift(1.6f);
         glDepthRange(0.0, 0.02);                     // nearer than anything else in the car: a dashboard modelled too close never cuts it in half
