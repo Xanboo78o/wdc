@@ -263,6 +263,7 @@ class Renderer {
   Mat4 mbView;
   // every car's lamps (render.cpp drawCar): gathered this frame, used on the paint in the next; 11 floats a lamp
   std::vector<float> lampsNow, lampsWere, lampP, lampD, lampC;
+  std::vector<float> floods;                    // the circuit's floodlights, xyz each (buildWorld); lit at night
   std::vector<float> mbSpots;
   bool sceneOpen = false;
   // THE GOVERNOR. The scene is drawn at `scale` of the window and enlarged when

@@ -327,6 +327,21 @@ void main(){
     float cone = smoothstep(0.86, 0.985, ca) + 0.38 * smoothstep(0.35, 0.92, ca);
     if (cone > 0.0) lit += c * vec3(1.0, 0.95, 0.84) * cone * (0.34 + 0.66 * max(dot(n, -ln), 0.0)) * 4.6 / (1.0 + d2 * 0.0026) * uLampOn;
   }
+  // EVERYBODY ELSE'S LAMPS, AND THE CIRCUIT'S (Adam: "yes do it"): the headlights of the cars round
+  // you lay their own pools on the road, their tail lights a little red behind them, and at night the
+  // floodlights along the circuit a pool each. The same list the paint reflects (uNL).
+  if (uLampOn > 0.0) {
+    for (int li = 0; li < uNL; li++) {
+      vec3 ld = vW - uLP[li].xyz; float d2 = dot(ld, ld);
+      if (d2 > 8100.0 || distance(uLP[li].xyz, uLampPos) < 2.6) continue;      // out of reach; or your own headlights, done above
+      vec3 ln = ld * inversesqrt(max(d2, 1e-4));
+      float ca = dot(ln, uLD[li].xyz), kind = uLD[li].w;
+      // a headlight (a beam), a tail light (a soft glow behind), a floodlight (straight down, all round)
+      float cone = kind > 0.4 ? smoothstep(0.86, 0.985, ca) + 0.38 * smoothstep(0.35, 0.92, ca) : kind > 0.0 ? 0.6 * smoothstep(-0.1, 0.8, ca) : smoothstep(0.15, 0.75, -ln.y);
+      float reach = kind > 0.4 ? 1.6 / (1.0 + d2 * 0.0026) : kind > 0.0 ? 0.9 / (1.0 + d2 * 0.06) : 0.95 / (1.0 + d2 * 0.0030);
+      lit += c * uLC[li] * cone * (0.34 + 0.66 * max(dot(n, -ln), 0.0)) * uLP[li].w * reach * uLampOn;
+    }
+  }
   if (shine > 0.0) {
     // what a wet road mirrors: the sky where you are looking along it, lighter at the horizon
     vec3 Rw = reflect(-V, mix(n, vec3(0.0, 1.0, 0.0), 0.6 + 0.4 * pool));
@@ -1236,6 +1251,16 @@ void Renderer::buildWorld(const Track &track, const World &world, const Json &su
     }
     props->buildWorld(track.wall, edges);
     if (folded) std::fprintf(stderr, "props: %s — %d m of run-off edge is not a wall (inside corners tighter than their run-off): no rail there\n", track.key.c_str(), folded * 2);
+  }
+  // THE CIRCUIT'S FLOODLIGHTS: one every seventy metres, on alternate sides, fifteen metres up behind the barrier.
+  // (Lights only, for now: they light the road and the cars at night; no mast is drawn under them.)
+  floods.clear();
+  for (int i = 0, q = 0; i < n; i += std::max(1, (int)(70 / track.ds)), q++) {
+    const int side = q & 1 ? 1 : -1;
+    const double lat = side * (track.w[i] + std::max(0.05, side > 0 ? track.runL[i] : track.runR[i]) + 3.0);
+    double fp[3];
+    P(i, lat, 15.0, fp);
+    floods.push_back((float)fp[0]); floods.push_back((float)fp[2]); floods.push_back((float)-fp[1]);
   }
   // the gantry over the line
   {
@@ -2448,9 +2473,23 @@ void Renderer::drawWorld(const FrameIn &f) {
       order.push_back({dx * dx + dy * dy + dz * dz, i});
     }
     std::sort(order.begin(), order.end());
-    for (size_t q = 0; q < order.size() && q < 8; q++) {
+    const bool night = L.night > 0.3f && !floods.empty();
+    for (size_t q = 0; q < order.size() && q < (night ? 5u : 8u); q++) {
       const float *l = &lampsWere[order[q].second];
       lampP.insert(lampP.end(), l, l + 4); lampD.insert(lampD.end(), l + 4, l + 8); lampC.insert(lampC.end(), l + 8, l + 11);
+    }
+    if (night) {
+      std::vector<std::pair<float, size_t>> near;
+      for (size_t i = 0; i + 2 < floods.size(); i += 3) {
+        const float dx = floods[i] - eye[0], dz = floods[i + 2] - eye[2];
+        near.push_back({dx * dx + dz * dz, i});
+      }
+      std::partial_sort(near.begin(), near.begin() + std::min<size_t>(3, near.size()), near.end());
+      for (size_t q = 0; q < near.size() && q < 3; q++) {
+        const float *fp = &floods[near[q].second];
+        const float lp[4] = {fp[0], fp[1], fp[2], 2.4f * L.night}, ldd[4] = {0, -1, 0, 0}, lc[3] = {1.0f, 0.93f, 0.80f};
+        lampP.insert(lampP.end(), lp, lp + 4); lampD.insert(lampD.end(), ldd, ldd + 4); lampC.insert(lampC.end(), lc, lc + 3);
+      }
     }
     const int nl = (int)(lampP.size() / 4);
     glUniform1i(glGetUniformLocation(prog, "uNL"), nl);
