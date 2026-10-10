@@ -266,6 +266,7 @@ class Renderer {
   unsigned mirFbo = 0, mirTex = 0, mirDepth = 0;
   // THE SKY'S PHOTOGRAPH (data/sky, Adam: "wire in my skyboxes"): a real sky by day, in place of the painted one
   unsigned skyTex = 0; bool skyTried = false;
+  bool skyWhole = true; float skySun = 0.6f, skyGain = 1;      // a whole-sphere picture; where its sun is round it (0..1); its brightness
   bool mirrorPass = false, mirHas = false;
   // motion blur (render.cpp COMP_FS): the camera's travel in view space, the view itself, and the cars to leave sharp
   float mbVel[3] = {0, 0, 0}, mbTan = 0.6f, mbAmt = 0, mbHole[4] = {-1, -1, -1, -1};

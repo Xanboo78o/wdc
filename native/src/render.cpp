@@ -200,7 +200,7 @@ uniform sampler2DArray uCol, uNrm; uniform int uHasTex;
 uniform vec3 uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop, uPaint; uniform float uFogK, uWet;
 uniform sampler2DShadow uShadow; uniform mat4 uShVP; uniform float uShOn, uHdr; uniform int uPass;
 uniform vec3 uLampPos, uLampDir; uniform float uLampOn, uTime, uCloud, uNight, uGhost;
-uniform sampler2D uSkyPic; uniform float uSkyOn, uSkyTurn; uniform vec3 uSkyTint;
+uniform sampler2D uSkyPic; uniform float uSkyOn, uSkyTurn; uniform vec3 uSkyTint; uniform vec3 uSkyMap;
 uniform sampler2D uMirror; uniform float uMirOn;
 // EVERY LAMP ON THE CIRCUIT, ON THE PAINT (Adam: "make all light reflect on the cars, especially
 // headlights"). Up to eight: xyz where it is and w how bright; xyz which way it shines and w how
@@ -235,8 +235,8 @@ void main(){
       // haze at the horizon so the land still meets it. The painted clouds below stand down while it is up.
       float pic = uSkyOn * (1.0 - uNight) * smoothstep(-0.01, 0.10, d.y);
       if (pic > 0.0) {
-        vec2 su = vec2(atan(d.z, d.x) * 0.15915494 + uSkyTurn + uTime * 0.00025, asin(clamp(d.y, 0.0, 1.0)) * 0.63661977);
-        vec3 ph = textureLod(uSkyPic, su, 0.0).rgb * uSkyTint * 1.18;
+        vec2 su = vec2(atan(d.z, d.x) * 0.15915494 + uSkyTurn + uTime * 0.00025, uSkyMap.x + uSkyMap.y * asin(clamp(d.y, 0.0, 1.0)) * 0.63661977);
+        vec3 ph = textureLod(uSkyPic, su, 0.0).rgb * uSkyTint * uSkyMap.z;
         ph = mix(ph, vec3(dot(ph, vec3(0.3, 0.59, 0.11))) * 0.82, uCloud * 0.85);
         sky = mix(sky, ph, pic);
       }
@@ -2518,8 +2518,14 @@ void Renderer::drawWorld(const FrameIn &f) {
     if (!skyTried) {
       skyTried = true;
       int w, h; std::vector<unsigned char> px;
-      const char *off = std::getenv("XBR_SKY");
-      if (!(off && std::string(off) == "0") && readPPM(texDirKept + "/sky-forest-clearing.ppm", w, h, px)) {
+      // WHICH SKY. (Adam, of the forest clearing's heavy grey one: "add a better sky box i can barely read the track".)
+      // The fair-weather one is the default now: blue, with white cloud, and bright. XBR_SKY=forest brings the other
+      // back; XBR_SKY=0 the painted sky. A whole-sphere picture uses its upper half; the forest one is sky only.
+      const char *env = std::getenv("XBR_SKY");
+      const std::string which = env ? env : "cloud";
+      skyWhole = which != "forest";
+      skySun = skyWhole ? 0.60f : 0.10f; skyGain = skyWhole ? 1.0f : 1.18f;
+      if (which != "0" && readPPM(texDirKept + (skyWhole ? "/sky-" + which + ".ppm" : std::string("/sky-forest-clearing.ppm")), w, h, px)) {
         // (a PPM's first row is the top of the picture; a texture's first row is its bottom)
         std::vector<unsigned char> up(px.size());
         for (int y = 0; y < h; y++) std::copy(px.begin() + (size_t)y * w * 3, px.begin() + (size_t)(y + 1) * w * 3, up.begin() + (size_t)(h - 1 - y) * w * 3);
@@ -2536,7 +2542,8 @@ void Renderer::drawWorld(const FrameIn &f) {
     if (skyTex) {
       const Look day;
       // its sun is a tenth of the way round the picture; turn it to the game's
-      glUniform1f(glGetUniformLocation(prog, "uSkyTurn"), 0.10f - (float)(std::atan2(L.sun[2], L.sun[0]) / (2 * PI)) - 0.5f);
+      glUniform1f(glGetUniformLocation(prog, "uSkyTurn"), skySun - (float)(std::atan2(L.sun[2], L.sun[0]) / (2 * PI)) - 0.5f);
+      glUniform3f(glGetUniformLocation(prog, "uSkyMap"), skyWhole ? 0.5f : 0.0f, skyWhole ? 0.5f : 1.0f, skyGain);
       glUniform3f(glGetUniformLocation(prog, "uSkyTint"), std::min(1.5f, L.skyTop[0] / std::max(0.05f, day.skyTop[0])), std::min(1.5f, L.skyTop[1] / std::max(0.05f, day.skyTop[1])),
                   std::min(1.5f, L.skyTop[2] / std::max(0.05f, day.skyTop[2])));
       glUniform1i(glGetUniformLocation(prog, "uSkyPic"), 6);
