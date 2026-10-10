@@ -52,6 +52,14 @@ struct MenuSave {
   // leagues = which of hyper / gt3 / gt4 are on the road (bits 0..2); canon = the laps are the circuit's own number
   bool endur = false, canon = false;
   int leagues = -1;
+  // A HOT LAP'S GHOST: a driver of a chosen standard, lapping with you, that you cannot touch
+  bool ghost = false;
+  std::string ghostTier = "medium";
+  // WEATHER BY AREA: blobs laid on the map of ONE circuit (zoneTrack). Track metres; rot in radians as drawn (north up).
+  struct WxZone { std::string kind; float x = 0, y = 0, r = 100, stretch = 1.6f, rot = 0; };
+  bool wxAdv = false;
+  std::string zoneTrack;
+  std::vector<WxZone> zones;
   void load(const std::string &path);
   void save(const std::string &path) const;
 };
@@ -63,7 +71,7 @@ const XStyle &xstyle(const std::string &key);
 struct LiveRow { int p; std::string col, name, gap; bool you; };
 struct LiveTower { bool up = false; std::string track; int lap = 0, laps = 0; std::vector<LiveRow> rows; };
 
-enum class Nav { Up, Down, Left, Right, Ok, Back, Go };
+enum class Nav { Up, Down, Left, Right, Ok, Back, Go, X, Y };      // X and Y: the pad's other two, for the weather map
 
 class Home {
  public:
@@ -71,6 +79,9 @@ class Home {
   MenuSave S;
   std::string page = "home";
   bool wantStart = false, wantQuit = false;       // read and clear
+  int wxAt = -1;                                  // the weather blob in your hands on the map (-1 = none): the pad's buttons are its
+  bool placing() const { return page == "wx" && wxAt >= 0; }
+  int click = 0;                                  // read and clear: a switch went on (1), off (2), or a choice was made (3)
   bool dirty = false;                             // the circuit or the car changed: the backdrop should follow
   void input(Nav n);
   // the mouse, in device pixels: hovering lights a card, a click presses what is under it
@@ -196,7 +207,8 @@ class Home {
   float mW = 1600, mH = 900;
   bool editing = false;                           // a number box: LEFT / RIGHT change it instead of leaving it
   std::string typed; int typedAt = -1;
-  bool racePage() const { return page == "setup" || page == "track" || page == "mode" || page == "sky" || page == "level" || page == "details"; }
+  bool racePage() const { return page == "setup" || page == "track" || page == "mode" || page == "sky" || page == "level" || page == "details" || page == "wx"; }
+  void wxInput(Nav n);
   void move(Nav n);
   std::string modeNow() const;
   void setMode(const std::string &m);

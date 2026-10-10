@@ -16,9 +16,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 
 #include "home.hpp"
 #include "homestyle.hpp"
+#include "audio.hpp"
 #include "driver.hpp"
 #include "multiclass.hpp"
 #include "physics.hpp"
@@ -32,8 +34,28 @@ static const int K_TILE = 20;
 static std::string up(std::string s) { for (char &c : s) c = (char)std::toupper((unsigned char)c); return s; }
 static const char *TIMES[8] = {"dawn", "sunrise", "morning", "day", "evening", "sunset", "dusk", "night"};
 // where the sun stands for each, in degrees round the orb (0 = the right-hand horizon, 90 = overhead)
-static const float SUN_DEG[8] = {200, 180, 135, 90, 45, 0, -20, -90};
-static int timeIndex(const std::string &t) { for (int i = 0; i < 8; i++) if (t == TIMES[i]) return i; return 3; }
+// THE HOUR. The record's `time` is "live", one of the eight old names, or "h:13.5" — an hour of the day, which
+// is what the orb turns (the names are kept so that old records and the events still say what they said).
+static const float NAME_HOUR[8] = {5.5f, 6.5f, 9.0f, 12.5f, 16.5f, 18.5f, 19.5f, 23.0f};
+static double hourOf(const std::string &t) {
+  if (t.rfind("h:", 0) == 0) return std::fmod(std::fmod(std::atof(t.c_str() + 2), 24.0) + 24.0, 24.0);
+  for (int i = 0; i < 8; i++) if (t == TIMES[i]) return NAME_HOUR[i];
+  return 12.5;
+}
+static const char *phaseOf(double h) {
+  return h < 5 ? "NIGHT" : h < 6.25 ? "DAWN" : h < 8 ? "SUNRISE" : h < 11 ? "MORNING" : h < 15.5 ? "DAY" : h < 17.75 ? "EVENING" : h < 19 ? "SUNSET" : h < 20.5 ? "DUSK" : "NIGHT";
+}
+static std::string clockOf(double h) { char b[16]; std::snprintf(b, sizeof b, "%02d:%02d", (int)h, (int)std::lround((h - std::floor(h)) * 60) % 60); return b; }
+// ---- what a car is: its class's numbers (the physics every car of the class shares), and the engine that is its own
+static const char *engineOf(const std::string &cls, const std::string &key) {
+  static const char *E[][2] = {{"hura", "5.2 V10"}, {"m4", "3.0 TWIN-TURBO STRAIGHT SIX"}, {"m720", "4.0 TWIN-TURBO V8"}, {"nsx", "3.5 TWIN-TURBO V6"},
+                               {"p992", "4.2 FLAT SIX"}, {"p992r", "4.2 FLAT SIX"}, {"p911", "4.0 FLAT SIX"}, {"a110", "1.8 TURBO FOUR"}, {"amg4", "4.0 TWIN-TURBO V8"},
+                               {"g55", "3.7 V6"}, {"m4g4", "3.0 TWIN-TURBO STRAIGHT SIX"}, {"a480", "4.5 V8"}, {"f499", "3.0 TWIN-TURBO V6 HYBRID"},
+                               {"p9x8", "2.6 TWIN-TURBO V6 HYBRID"}, {"f122", "1.6 TURBO V6 HYBRID"}};
+  for (auto &e : E) if (key == e[0]) return e[1];
+  return cls == "f1" ? "3.0 V10" : cls == "hyper" ? "V12" : cls == "f4" || cls == "rally" ? "TURBO FOUR" : "V8";
+}
+static const char *WX_KINDS[5][2] = {{"clear", "CLEAR"}, {"cloudy", "CLOUDY"}, {"overcast", "OVERCAST"}, {"rain", "RAIN"}, {"storm", "STORM"}};
 
 // ---- what kind of race this is -----------------------------------------------------------------
 std::string Home::modeNow() const {
@@ -101,6 +123,30 @@ void Home::move(Nav n) {
   if (best >= 0) at = best;
 }
 
+// ---- the weather map: a blob in your hands (Adam: "u can hit y/a to grow or small, and x/b to rotate then obvi dpad to position")
+void Home::wxInput(Nav n) {
+  if (wxAt < 0 || wxAt >= (int)S.zones.size()) { wxAt = -1; return; }
+  MenuSave::WxZone &z = S.zones[(size_t)wxAt];
+  const Outline &o = outline(S.track);
+  const float size = o.ok ? std::max(o.x1 - o.x0, o.y1 - o.y0) : 1000, step = size * 0.03f;
+  click = 3;
+  switch (n) {
+    case Nav::Left: z.x -= step; break;
+    case Nav::Right: z.x += step; break;
+    case Nav::Up: z.y += step; break;                 // (the map is north up; the track's own y runs the other way)
+    case Nav::Down: z.y -= step; break;
+    case Nav::Y: z.r = std::min(size * 0.6f, z.r * 1.12f); break;
+    case Nav::Ok:
+      z.r /= 1.12f;
+      if (z.r < size * 0.035f) { S.zones.erase(S.zones.begin() + wxAt); wxAt = -1; click = 2; show("wx", 0); say("gone."); }
+      break;
+    case Nav::X: z.rot -= 0.2618f; break;
+    case Nav::Back: z.rot += 0.2618f; break;
+    case Nav::Go: { const int keep = 5 + wxAt; wxAt = -1; click = 1; show("wx", keep); break; }
+  }
+  if (o.ok && wxAt >= 0) { z.x = std::max(o.x0, std::min(o.x1, z.x)); z.y = std::max(-o.y1, std::min(-o.y0, z.y)); }
+}
+
 // ---- the cells of each page ------------------------------------------------------------------
 std::vector<Home::Cell> Home::cells(float W, float H, const std::function<float(float, const std::string &)> &tw) {
   std::vector<Cell> C;
@@ -166,10 +212,10 @@ std::vector<Home::Cell> Home::cells(float W, float H, const std::function<float(
         c.sub = a + "\n" + b;
         c.ok = [this, m] { static const char *O[4] = {"gt", "f1", "endurance", "hotlap"}; int i = 0; for (int q2 = 0; q2 < 4; q2++) if (m == O[q2]) i = q2; show("mode", i); };
       } else if (id == "sky") {
-        c.sub = (S.time == "live" ? std::string("THE REAL HOUR") : up(S.time)) + "\n" + (S.weather == "live" ? std::string("THE REAL WEATHER") : up(S.weather));
+        c.sub = (S.time == "live" ? std::string("THE REAL HOUR") : clockOf(hourOf(S.time)) + "  " + phaseOf(hourOf(S.time))) + "\n" + (S.wxAdv && S.zoneTrack == S.track && !S.zones.empty() ? std::to_string(S.zones.size()) + " AREAS OVER " : std::string()) + (S.weather == "live" ? std::string("THE REAL WEATHER") : up(S.weather));
         c.ok = [this] { show("sky", 0); };
       } else if (id == "level") {
-        c.sub = m == "hotlap" ? std::string("NOBODY TO BEAT\nBUT YOURSELF") : up(tierFor(S.tier)->name) + "\nYOU START " + (S.start == "pole" ? "ON POLE" : S.start == "front" ? "AT THE FRONT" : S.start == "back" ? "LAST" : "MIDFIELD");
+        c.sub = m == "hotlap" ? (S.ghost ? "A GHOST\n" + up(tierFor(S.ghostTier)->name) + " PACE" : std::string("NOBODY TO BEAT\nBUT YOURSELF")) : up(tierFor(S.tier)->name) + "\nYOU START " + (S.start == "pole" ? "ON POLE" : S.start == "front" ? "AT THE FRONT" : S.start == "back" ? "LAST" : "MIDFIELD");
         c.ok = [this] { show("level", 0); };
       } else {
         c.sub = up(carSpec(seatCar()).full) + "\n" + (S.easy ? "EASY" : "REAL") + " HANDLING  -  " + (S.gears == "manual" ? "PADDLES" : "AUTOMATIC");
@@ -216,6 +262,7 @@ std::vector<Home::Cell> Home::cells(float W, float H, const std::function<float(
         const std::string key = LG[q][0];
         put(K_TOGGLE, LG[q][1], (S.leagues >> q) & 1, [this, q, key, re] {
           const int bit = 1 << q;
+          click = (S.leagues & bit) ? 2 : 1;
           if (!(S.leagues & bit)) S.leagues |= bit;
           else if ((S.leagues & 7) == bit) { say("one league has to race."); return; }
           else {
@@ -259,6 +306,20 @@ std::vector<Home::Cell> Home::cells(float W, float H, const std::function<float(
       C.back().y += (tH - (rowH - 8)) / 2;
       endTiles();
     }
+    if (m == "hotlap") {
+      line("A GHOST TO CHASE");
+      put(K_TOGGLE, S.ghost ? "ON  -  IT LAPS WITH YOU, AND YOU CANNOT TOUCH IT" : "OFF", S.ghost, [this, re] { click = S.ghost ? 2 : 1; S.ghost = !S.ghost; re(); });
+      end();
+      if (S.ghost) {
+        line("THE GHOST DRIVES");
+        if (allTiers().size() > 4) {
+          tW = 170; tH = 110;
+          int q = 0;
+          for (const Tier &t : allTiers()) { const std::string v = t.key; tile("t:" + std::to_string(q++) + "/" + std::to_string(allTiers().size()), up(t.name), "", S.ghostTier == v, [this, v, re] { S.ghostTier = v; re(); }); }
+          endTiles();
+        } else { for (const Tier &t : allTiers()) { const std::string v = t.key; put(K_RADIO, up(t.name), S.ghostTier == v, [this, v, re] { S.ghostTier = v; re(); }); } end(); }
+      }
+    }
     if (m != "hotlap") {
       line("CARS ON THE GRID");
       for (const char *v : {"6", "12", "16", "22"}) radio("grid", v, v);
@@ -277,21 +338,67 @@ std::vector<Home::Cell> Home::cells(float W, float H, const std::function<float(
     // ---- the sun goes round an orb; under it, the weather
     {
       Cell c; c.kind = K_SUN; c.id = "sun"; c.w = 560; c.h = 360; c.x = W / 2 - c.w / 2; c.y = 110;
-      auto turn = [this](int d) { const int i = S.time == "live" ? 3 : timeIndex(S.time); S.time = TIMES[((i + d) % 8 + 8) % 8]; };
+      // half an hour a press, all the way round
+      auto turn = [this](int d) {
+        const double h = std::fmod(hourOf(S.time == "live" ? "day" : S.time) + 0.5 * d + 24.0, 24.0);
+        char b[24]; std::snprintf(b, sizeof b, "h:%.1f", h);
+        S.time = b;
+      };
       c.left = [turn] { turn(-1); }; c.right = [turn] { turn(1); };
       c.ok = [turn] { turn(1); };
       C.push_back(c);
     }
     y = 500;
     line("THE HOUR");
-    put(K_TOGGLE, "USE THE REAL HOUR, WHERE YOU ARE", S.time == "live", [this, re] { S.time = S.time == "live" ? "day" : "live"; re(); });
+    put(K_TOGGLE, "USE THE REAL HOUR, WHERE YOU ARE", S.time == "live", [this, re] { click = S.time == "live" ? 2 : 1; S.time = S.time == "live" ? "h:12.5" : "live"; re(); });
     end();
     line("WEATHER");
     tW = 150; tH = 110;
     static const char *WX[7][2] = {{"live", "THE REAL ONE"}, {"clear", "CLEAR"}, {"cloudy", "CLOUDY"}, {"overcast", "OVERCAST"}, {"rain", "RAIN"}, {"storm", "STORM"}, {"changing", "CHANGING"}};
     for (auto &wx : WX) { const std::string v = wx[0]; tile("w:" + v, wx[1], "", S.weather == v, [this, v, re] { S.weather = v; re(); }); }
     endTiles();
+    line("BY AREA");
+    const bool mine = S.zoneTrack == S.track;
+    put(K_TOGGLE, "DIFFERENT WEATHER IN DIFFERENT PLACES", S.wxAdv, [this, re] { click = S.wxAdv ? 2 : 1; S.wxAdv = !S.wxAdv; re(); });
+    if (S.wxAdv) put(K_RADIO, "OPEN THE MAP  -  " + std::to_string(mine ? S.zones.size() : 0) + " PLACED", false, [this] { show("wx", 0); });
+    end();
     done(2);
+    return C;
+  }
+
+  if (page == "wx") {
+    // ---- the map on the left (drawn, not a cell); on the right what you can lay on it, and what is there
+    const float cx0 = W - X0 - 330;
+    Cell hd; hd.kind = K_HEAD; hd.x = cx0; hd.y = 104; hd.w = 330; hd.h = 30; hd.label = "LAY DOWN"; hd.focus = false;
+    C.push_back(hd);
+    for (int q = 0; q < 5; q++) {
+      Cell c; c.kind = K_TILE; c.id = std::string("w:") + WX_KINDS[q][0]; c.label = WX_KINDS[q][1];
+      c.x = cx0 + (float)(q % 3) * 112; c.y = 140 + (float)(q / 3) * 102; c.w = 104; c.h = 94;
+      const std::string kind = WX_KINDS[q][0];
+      c.ok = [this, kind] {
+        if (S.zones.size() >= 8) { say("eight is plenty."); return; }
+        const Outline &o = outline(S.track);
+        MenuSave::WxZone z; z.kind = kind;
+        z.x = o.ok ? (o.x0 + o.x1) / 2 : 0; z.y = o.ok ? -(o.y0 + o.y1) / 2 : 0; z.r = (o.ok ? std::max(o.x1 - o.x0, o.y1 - o.y0) : 1000) * 0.14f;
+        S.zones.push_back(z); S.zoneTrack = S.track; wxAt = (int)S.zones.size() - 1; click = 1;
+        build();
+      };
+      C.push_back(c);
+    }
+    Cell h2; h2.kind = K_HEAD; h2.x = cx0; h2.y = 352; h2.w = 330; h2.h = 30; h2.label = S.zones.empty() ? "NOTHING PLACED YET" : "PLACED  -  ENTER TO MOVE ONE"; h2.focus = false;
+    C.push_back(h2);
+    for (int q = 0; q < (int)S.zones.size(); q++) {
+      Cell c; c.kind = K_RADIO; c.label = std::to_string(q + 1) + "   " + up(S.zones[(size_t)q].kind); c.on = wxAt == q;
+      c.x = cx0 + (float)(q % 2) * 168; c.y = 388 + (float)(q / 2) * 46; c.w = 160; c.h = 40;
+      c.ok = [this, q] { wxAt = q; click = 1; };
+      C.push_back(c);
+    }
+    if (!S.zones.empty()) {
+      Cell c; c.kind = K_RADIO; c.label = "TAKE THEM ALL OFF"; c.x = cx0; c.y = 388 + (float)(((int)S.zones.size() + 1) / 2) * 46 + 10; c.w = 300; c.h = 40;
+      c.ok = [this] { S.zones.clear(); wxAt = -1; click = 2; show("wx", 0); };
+      C.push_back(c);
+    }
+    button("D O N E", "done", [this] { wxAt = -1; show("sky", 0); });
     return C;
   }
 
@@ -342,7 +449,7 @@ std::vector<Home::Cell> Home::cells(float W, float H, const std::function<float(
       const Car car = L[(size_t)q];
       const bool models = car.cls != "f4" && car.cls != "rally";
       Cell c; c.kind = K_TILE; c.id = "c:" + car.cls; c.label = car.name;
-      c.sub = car.cls == "hyper" ? "HYPERCAR" : up(car.cls);
+      c.sub = (car.cls == "hyper" ? std::string("HYPERCAR") : up(car.cls)) + "|" + car.key;
       c.x = X0 + (float)(q % cols) * (cw + gap); c.y = gy0 + (float)(q / cols) * (ch + gap); c.w = cw; c.h = ch;
       c.on = seatCar() == car.cls && (!models || pack() == car.key);
       c.ok = [this, car, models, re] {
@@ -443,29 +550,31 @@ void Home::drawRace(Renderer &R, float k, double clock) {
   // the sun on its way round the orb
   auto orb = [&](float cx, float cy, float r, bool big) {
     const bool live = S.time == "live";
-    const int ti = live ? 3 : timeIndex(S.time);
+    double h = hourOf(S.time);
+    if (live) { const std::time_t t = std::time(nullptr); const std::tm *lt = std::localtime(&t); h = lt->tm_hour + lt->tm_min / 60.0; }
+    auto degOf = [](double hh) { return (float)(180.0 - (hh - 6.0) * 15.0); };      // 06:00 on the left horizon, noon overhead, midnight underneath
     const float orbit = r * 1.75f;
     ring(cx, cy, orbit, big ? 1.5f : 1.0f, alpha_(INK, 0.28f));
     R.circle(cx * k, cy * k, r * k, alpha_(INK, 0.16f));
     R.circle(cx * k, cy * k, (r - (big ? 2.5f : 1.5f)) * k, hex("#0d0e12"));
     R.rect((cx - orbit - r * 0.5f) * k, cy * k, (2 * orbit + r) * k, 1 * k, alpha_(INK, 0.35f));      // the horizon
     if (big) for (int q = 0; q < 8; q++) {
-      const float a = SUN_DEG[q] * 0.0174533f, px = cx + std::cos(a) * orbit, py = cy - std::sin(a) * orbit;
+      const float a = degOf(NAME_HOUR[q]) * 0.0174533f, px = cx + std::cos(a) * orbit, py = cy - std::sin(a) * orbit;
       R.circle(px * k, py * k, 3.5f * k, alpha_(INK, 0.45f));
       const float lx = cx + std::cos(a) * (orbit + 26), ly = cy - std::sin(a) * (orbit + 26);
-      text(lx, ly - 6, 10, up(TIMES[q]), q == ti && !live ? INK : alpha_(INK, 0.5f), std::cos(a) > 0.3f ? LEFT : std::cos(a) < -0.3f ? RIGHT : CENTRE, RB, 0.3f);
+      text(lx, ly - 6, 10, up(TIMES[q]), up(TIMES[q]) == phaseOf(h) ? INK : alpha_(INK, 0.5f), std::cos(a) > 0.3f ? LEFT : std::cos(a) < -0.3f ? RIGHT : CENTRE, RB, 0.3f);
     }
-    const float a = SUN_DEG[ti] * 0.0174533f, px = cx + std::cos(a) * orbit, py = cy - std::sin(a) * orbit;
+    const float a = degOf(h) * 0.0174533f, px = cx + std::cos(a) * orbit, py = cy - std::sin(a) * orbit;
     const bool below = std::sin(a) < -0.05f;
-    const Rgba sun = live ? alpha_(INK, 0.5f) : below ? hex("#9fb4ff") : hex("#ffd23f");
+    const Rgba sun = live ? mix(INK, hex("#0d0e12"), 0.6f) : below ? hex("#9fb4ff") : hex("#ffd23f");
     R.circle(px * k, py * k, r * 0.26f * k, alpha_(sun, 0.25f));
     R.circle(px * k, py * k, r * 0.17f * k, sun);
   };
 
   // ---- the top of every page: the mark, where you are, what you have chosen
   const std::string m = modeNow();
-  static const char *SLUG[6][2] = {{"setup", "R A C E   S E T U P"}, {"track", "T R A C K"}, {"mode", "M O D E"}, {"sky", "T I M E   +   W E A T H E R"},
-                                   {"level", "D I F F I C U L T Y"}, {"details", "D E T A I L S"}};
+  static const char *SLUG[7][2] = {{"setup", "R A C E   S E T U P"}, {"track", "T R A C K"}, {"mode", "M O D E"}, {"sky", "T I M E   +   W E A T H E R"},
+                                   {"level", "D I F F I C U L T Y"}, {"details", "D E T A I L S"}, {"wx", "W E A T H E R   B Y   A R E A"}};
   {
     const float w1 = text(X0, 26, 40, "XB", INK, LEFT, A, 0.02f);
     text(X0 + w1, 26, 40, "R", RED, LEFT, A, 0.02f);
@@ -554,19 +663,72 @@ void Home::drawRace(Renderer &R, float k, double clock) {
       iconCar(f->id.substr(2), X0 + 70, 190, 170, INK);
       const float tx = X0 + 190;
       float size = 88;
-      while (size > 44 && width(size, f->label, A, 0.03f) > W - tx - X0) size -= 6;
+      while (size > 40 && width(size, f->label, A, 0.03f) > W - tx - X0 - 470) size -= 4;
       const float sw = text(tx, 100, 11, "C A R", RED, LEFT, RB, 0.4f);
       if (f->on) text(tx + sw + 18, 100, 11, "YOURS NOW", SOFT, LEFT, RB, 0.3f);
       const float nw = text(tx, 122, size, f->label, INK, LEFT, A, 0.03f);
       R.rect(tx * k, (122 + size + 8) * k, nw * k, 3 * k, RED);
-      text(tx, 122 + size + 26, 12, up(carSpec(f->id.substr(2)).full), alpha_(INK, 0.85f), LEFT, RB, 0.32f);
+      const std::string cls = f->id.substr(2), key = f->sub.find('|') == std::string::npos ? "" : f->sub.substr(f->sub.find('|') + 1);
+      const Spec &sp = carSpec(cls);
+      const BoxSpec &bx = boxFor(key.empty() ? cls : cls + ":" + key);
+      char rev[48]; std::snprintf(rev, sizeof rev, "  -  %d RPM", (int)bx.limit);
+      text(tx, 122 + size + 26, 12, up(sp.full) + "  -  " + engineOf(cls, key) + rev, alpha_(INK, 0.85f), LEFT, RB, 0.32f);
+      // THE NUMBERS: the class's own (every car of a class is the same car to the physics; the engine note is its own)
+      const double hp = sp.Pmax / 745.7, top = std::cbrt(2 * sp.Pmax / (sp.rho * sp.CdA)) * 3.6;
+      const double grip = sp.mu * (1 + 0.5 * sp.rho * sp.ClA * 55.6 * 55.6 / (sp.m * 9.81));      // sideways g at 200 km/h
+      struct Stat { const char *name; double v, lo, hi; const char *fmt; } ST[4] = {
+          {"POWER", hp, 100, 1000, "%.0f HP"}, {"WEIGHT", sp.m, 500, 1500, "%.0f KG"}, {"TOP SPEED", top, 180, 380, "%.0f KM/H"}, {"CORNERING", grip, 1, 5, "%.1f G"}};
+      const float sx = W - X0 - 430, bw = 190;
+      for (int q2 = 0; q2 < 4; q2++) {
+        const float sy = 104 + (float)q2 * 40;
+        text(sx, sy + 4, 10, ST[q2].name, SOFT, LEFT, RB, 0.3f);
+        R.rect((sx + 120) * k, (sy + 4) * k, bw * k, 10 * k, alpha_(INK, 0.16f));
+        const float fr = (float)std::max(0.04, std::min(1.0, (ST[q2].v - ST[q2].lo) / (ST[q2].hi - ST[q2].lo)));
+        R.rect((sx + 120) * k, (sy + 4) * k, bw * fr * k, 10 * k, q2 == 1 ? INK : RED);
+        char v[32]; std::snprintf(v, sizeof v, ST[q2].fmt, ST[q2].v);
+        text(sx + 120 + bw + 14, sy - 2, 18, v, INK, LEFT, A, 0.04f);
+      }
     }
+  }
+
+  // ---- THE WEATHER MAP: the circuit, and the weather lying on it
+  if (page == "wx") {
+    const float mx = X0, my = 96, mw = W - 2 * X0 - 370, mh = H - my - 110;
+    R.rect(mx * k, my * k, mw * k, mh * k, alpha_(CARD, 0.55f));
+    box(mx, my, mw, mh, 1, alpha_(INK, 0.2f));
+    const Outline &o = outline(S.track);
+    if (o.ok) {
+      const float size = std::max(o.x1 - o.x0, o.y1 - o.y0), pad = size * 0.12f;
+      const float vw = o.x1 - o.x0 + 2 * pad, vh = o.y1 - o.y0 + 2 * pad, sc = std::min(mw / vw, mh / vh);
+      const float ox = mx + (mw - vw * sc) / 2 - (o.x0 - pad) * sc, oy = my + (mh - vh * sc) / 2 - (o.y0 - pad) * sc;
+      auto colOf = [&](const std::string &kd) { return kd == "clear" ? hex("#ffd23f") : kd == "cloudy" ? hex("#c9ced6") : kd == "overcast" ? hex("#8a909c") : kd == "rain" ? hex("#4f8dff") : hex("#9a5cff"); };
+      for (int q = 0; q < (int)S.zones.size(); q++) {
+        const MenuSave::WxZone &z = S.zones[(size_t)q];
+        const float cx = ox + z.x * sc, cy = oy - z.y * sc, ra = z.r * z.stretch * sc, rb = z.r * sc, cr = std::cos(z.rot), sr = std::sin(z.rot);
+        float pts[80];
+        for (int e = 0; e < 40; e++) {
+          const float a = (float)e / 40 * 6.2831853f, ux = std::cos(a) * ra, uy = std::sin(a) * rb;
+          pts[e * 2] = (cx + ux * cr - uy * sr) * k; pts[e * 2 + 1] = (cy + ux * sr + uy * cr) * k;
+        }
+        const Rgba col = colOf(z.kind);
+        R.poly(pts, 40, alpha_(col, q == wxAt ? 0.42f : 0.26f));
+        R.path(pts, 40, (q == wxAt ? 3.0f : 1.5f) * k, q == wxAt ? RED : alpha_(col, 0.9f), true);
+        text(cx, cy - 8, 16, std::to_string(q + 1), INK, CENTRE, A);
+      }
+      std::vector<float> p(o.xy.size());
+      for (size_t i = 0; i < o.xy.size(); i += 2) { p[i] = (ox + o.xy[i] * sc) * k; p[i + 1] = (oy + o.xy[i + 1] * sc) * k; }
+      R.path(p.data(), (int)p.size() / 2, 3.5f * k, INK, true);
+    }
+    if (wxAt >= 0) {
+      text(mx + mw / 2, my + mh - 46, 11, "D-PAD MOVES IT  -  Y GROWS  -  A SHRINKS (TO NOTHING = GONE)  -  X / B TURN  -  START SETS IT DOWN", INK, CENTRE, RB, 0.22f);
+      text(mx + mw / 2, my + mh - 26, 10, "KEYS:  ARROWS  -  = AND -  -  [ AND ]  -  ENTER", alpha_(INK, 0.6f), CENTRE, RB, 0.26f);
+    } else text(mx + mw / 2, my + mh - 30, 10, S.zones.empty() ? "PICK A KIND OF WEATHER ON THE RIGHT: IT LANDS IN THE MIDDLE, IN YOUR HANDS" : "EVERYWHERE ELSE HAS THE WEATHER YOU CHOSE ON THE PAGE BEFORE", alpha_(INK, 0.6f), CENTRE, RB, 0.26f);
   }
 
   int idx = -1;
   for (const Cell &c : C) {
     if (c.focus) idx++;
-    const bool on = c.focus && idx == at;
+    const bool on = c.focus && idx == at && !(page == "wx" && wxAt >= 0);
     if (c.focus) hot(c.x, c.y, c.w, c.h, idx);
     switch (c.kind) {
       case K_HEAD: text(c.x, c.y + 16, 11, c.label, SOFT, LEFT, RB, 0.34f); break;
@@ -650,7 +812,7 @@ void Home::drawRace(Renderer &R, float k, double clock) {
           float size = 20;
           while (size > 11 && width(size, c.label, A, 0.03f) > room) size -= 1;
           text(tx, c.y + c.h / 2 - size * 0.5f - 8, size, c.label, ic, LEFT, A, 0.03f);
-          fit(c.sub, tx, c.y + c.h / 2 + size * 0.5f, room, LEFT);
+          fit(c.sub.substr(0, c.sub.find('|')), tx, c.y + c.h / 2 + size * 0.5f, room, LEFT);
         }
         break;
       }
@@ -705,10 +867,14 @@ void Home::drawRace(Renderer &R, float k, double clock) {
       case K_SUN: {
         box(c.x, c.y, c.w, c.h, on ? 2.5f : 1.0f, on ? RED : alpha_(INK, 0.18f));
         orb(c.x + c.w / 2, c.y + c.h / 2 + 10, 74, true);
-        const std::string nm = S.time == "live" ? "THE REAL HOUR" : up(S.time);
-        text(c.x + c.w / 2, c.y + c.h / 2 - 8, 24, nm, INK, CENTRE, A, 0.05f);
+        if (S.time == "live") text(c.x + c.w / 2, c.y + c.h / 2 - 8, 24, "THE REAL HOUR", INK, CENTRE, A, 0.05f);
+        else {
+          const double hh = hourOf(S.time);
+          text(c.x + c.w / 2, c.y + c.h / 2 - 20, 34, clockOf(hh), INK, CENTRE, A, 0.05f);
+          text(c.x + c.w / 2, c.y + c.h / 2 + 28, 10, phaseOf(hh), alpha_(INK, 0.7f), CENTRE, RB, 0.3f);
+        }
         if (on) { text(c.x + 18, c.y + c.h / 2 - 2, 22, "<", INK, LEFT, RB); text(c.x + c.w - 18, c.y + c.h / 2 - 2, 22, ">", INK, RIGHT, RB); }
-        if (on) text(c.x + c.w / 2, c.y + c.h + 10, 10, "LEFT / RIGHT  -  TURN THE SUN", alpha_(INK, 0.6f), CENTRE, RB, 0.3f);
+        if (on) text(c.x + c.w / 2, c.y + c.h + 10, 10, "LEFT / RIGHT  -  TURN THE SUN, HALF AN HOUR A PRESS", alpha_(INK, 0.6f), CENTRE, RB, 0.3f);
         break;
       }
       case K_BTN: {

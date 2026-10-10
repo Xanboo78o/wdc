@@ -211,6 +211,14 @@ struct Session {
   bool xingus = false, xmanual = false;   // Xingus mode; and the paddles ARE the gearbox
   bool manual = false;                    // MANUAL GEARS in the serious game, any car (Adam: "allow manual control no matter the car")
   bool hand = false;                      // handbrake held (X, or the rim's `handbrake`)
+  // A HOT LAP'S GHOST (the menu's MODE page): a second car on the same road, with a driver of its own
+  // standard. Nothing can touch it, and it is put back on the line if it ever stops.
+  bool ghostOn = false;
+  Car ghost;
+  Driver ghostDrv;
+  std::unique_ptr<Autopilot> ghostPilot;
+  int ghostHint = 0;
+  double ghostStuck = 0, ghostRolled = 0;
 };
 
 static void resetCar(Session &S) {
@@ -226,6 +234,7 @@ static void resetCar(Session &S) {
   S.hands = Hands{};
   S.hint = i; S.sPrev = 0; S.lapT = 0; S.lap = 0; S.invalid = false; S.offT = 0;
   S.proj = track.project(S.own.x, S.own.y, S.hint);
+  if (S.ghostOn) { S.ghost = makeCar(S.spec->key); S.ghost.x = px; S.ghost.y = py; S.ghost.hdg = line.hdg[i]; S.ghost.tyre.Tf = S.ghost.tyre.Tr = 70; S.ghostHint = i; S.ghostStuck = 0; }
 }
 
 // js/main.js rejoin(): beached, and the race is still going. Back on the line a
@@ -401,6 +410,31 @@ static void simStep(Session &S, const HandsIn &in, bool autoDrive, bool drsTap, 
   S.sPrev = s;
   S.lapT += FIXED_DT;
   S.rolled = std::fmod(S.rolled + car.vx * FIXED_DT, 1000.0);
+
+  // ---- the ghost: the same road, the same physics, its own driver
+  if (S.ghostOn && S.ghostPilot) {
+    Car &g = S.ghost;
+    const Proj gp = track.project(g.x, g.y, S.ghostHint);
+    S.ghostHint = gp.i;
+    S.ghostPilot->drive(g, gp, FIXED_DT);
+    const double gl = std::fabs(gp.lat);
+    Env ge;
+    ge.surface = gl > gp.w + gp.run ? SURFACE::grass : gl > gp.w + 1.2 ? SURFACE::runoff : gl > gp.w ? SURFACE::kerb : SURFACE::track;
+    ge.bank = gp.bank; ge.bankDir = sign(gp.curv); ge.rollMul = dragFor(ge.surface);
+    ge.slope = S.world->gradeAt(gp.s) * std::cos(g.hdg - track.hdg[(size_t)gp.i]);
+    step(g, FIXED_DT, ge);
+    resolveBarrier(g, track, S.ghostHint);
+    S.ghostRolled = std::fmod(S.ghostRolled + g.vx * FIXED_DT, 1000.0);
+    S.ghostStuck = g.speed < 3 ? S.ghostStuck + FIXED_DT : 0;
+    if (S.ghostStuck > 4) {
+      double px, py, ph;
+      int pi;
+      track.point(gp.s, S.lines->race.off[track.idx(gp.s)], px, py, ph, pi);
+      g = makeCar(S.spec->key);
+      g.x = px; g.y = py; g.hdg = ph; g.vx = 12; g.tyre.Tf = g.tyre.Tr = 70;
+      S.ghostStuck = 0;
+    }
+  }
 }
 
 // One substep of a RACE. The race decides everything; this hands it your pedals.
@@ -566,7 +600,7 @@ static std::string jstr(const std::string &s) {
   return o + "\"";
 }
 
-enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A_RESET, A_GO, A_PIT, A_SHUP, A_SHDN, A_COUNT };
+enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A_RESET, A_GO, A_PIT, A_SHUP, A_SHDN, A_X, A_Y, A_COUNT };
 
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
@@ -828,6 +862,15 @@ int main(int argc, char **argv) {
     usePack();
     SP->xmanual = cfg.xOn && cfg.xGears != "auto" && !autoDrive;      // a bot at the wheel does not pull paddles
     SP->manual = !cfg.xOn && cfg.gears == "manual" && !autoDrive;
+    if (!racing && !ev && cfg.ghost && !cfg.xOn) {
+      Session &G = *SP;
+      G.ghostDrv = makeDriver(2, cfg.ghostTier, G.track.corners.empty() ? 24 : (int)G.track.corners.size());
+      G.ghostPilot = std::make_unique<Autopilot>(G.track, *G.lines, *G.spec, peakSlip(*G.spec), &G.ghostDrv);
+      G.ghost = makeCar(G.spec->key);
+      G.ghost.x = G.own.x; G.ghost.y = G.own.y; G.ghost.hdg = G.own.hdg; G.ghost.tyre.Tf = G.ghost.tyre.Tr = 70;
+      G.ghostHint = G.hint;
+      G.ghostOn = true;
+    }
     if (SP->xmanual || SP->manual) SP->box->manual = 0;
     bgOn = false;
     hud.reset();
@@ -850,6 +893,7 @@ int main(int argc, char **argv) {
       const Sun sun = solarPosition((double)std::time(nullptr) * 1000.0, 43.13, -71.46);
       t = dayPhase(sun.elevation, sun.azimuth).name;
     }
+    if (t.rfind("h:", 0) == 0) { const double h = std::atof(t.c_str() + 2); return h < 5 || h >= 20.5 ? "night" : h < 7.5 ? "dawn" : h < 17.5 ? "day" : "dusk"; }
     if (t == "sunrise") return "dawn";
     if (t == "morning" || t == "evening") return "day";
     if (t == "sunset") return "dusk";
@@ -864,7 +908,40 @@ int main(int argc, char **argv) {
     rainNow = sky.rain;
     const std::string ch = wd.takeChange();
     if (!ch.empty() && screen == DRIVE) { std::string u = ch; for (char &c : u) c = (char)std::toupper((unsigned char)c); toast = {"WEATHER: " + u, 3}; }
-    return makeLook(phaseNow(), sky.cloud, sky.road, sky.rain);
+    // WEATHER BY AREA (the menu's map): where your car is decides what it is under, and the road there is already
+    // as wet as its sky. (One wetness for the whole field: the rivals have yours, wherever they are.)
+    double cloud = sky.cloud, road = sky.road, rain = sky.rain;
+    if (!bgOn && SP && cfg.wxAdv && cfg.zoneTrack == S.key && !home.event() && !cfg.xOn) {
+      for (const MenuSave::WxZone &z : cfg.zones) {
+        const double dx = S.car->x - z.x, dy = -(S.car->y - z.y), cr = std::cos(z.rot), sr = std::sin(z.rot);
+        const double u = (dx * cr + dy * sr) / std::max(1.0f, z.r * z.stretch), v = (-dx * sr + dy * cr) / std::max(1.0f, z.r);
+        double w = std::max(0.0, std::min(1.0, (1.2 - std::hypot(u, v)) / 0.45));
+        w = w * w * (3 - 2 * w);
+        const double zc = z.kind == "clear" ? 0.05 : z.kind == "cloudy" ? 0.45 : z.kind == "overcast" ? 0.9 : z.kind == "rain" ? 0.95 : 1.0;
+        const double zr = z.kind == "rain" ? 0.6 : z.kind == "storm" ? 1.0 : 0.0;
+        cloud += (zc - cloud) * w; rain += (zr - rain) * w; road += ((zr > 0 ? 0.55 + 0.45 * zr : 0.0) - road) * w;
+      }
+      setWetness(road);
+      rainNow = rain;
+    }
+    const auto lookOf = [&](const std::string &ph) { return makeLook(ph, cloud, road, rain); };
+    // THE HOUR, FREELY (the menu's orb): the four lights the game has, blended round the clock, and the sun
+    // where that hour puts it. (The photographed sky does not turn with it.)
+    if (!bgOn && cfg.time.rfind("h:", 0) == 0) {
+      const double h = std::fmod(std::fmod(std::atof(cfg.time.c_str() + 2), 24.0) + 24.0, 24.0);
+      static const struct { double h; const char *p; } HK[8] = {{0, "night"}, {4.5, "night"}, {6.0, "dawn"}, {8.5, "day"}, {15.5, "day"}, {18.5, "dusk"}, {20.5, "night"}, {24, "night"}};
+      int q = 0;
+      while (q < 6 && h >= HK[q + 1].h) q++;
+      const float t = (float)((h - HK[q].h) / (HK[q + 1].h - HK[q].h));
+      Look a = lookOf(HK[q].p);
+      const Look b = lookOf(HK[q + 1].p);
+      float *fa = (float *)&a;
+      const float *fb = (const float *)&b;
+      for (size_t e = 0; e < sizeof(Look) / sizeof(float); e++) fa[e] += (fb[e] - fa[e]) * t;
+      if (h > 6.0 && h < 18.5) { const double sa = (h - 6.0) / 12.5 * 3.14159265; a.sun[0] = (float)(std::cos(sa) * 0.9); a.sun[1] = (float)std::max(0.07, std::sin(sa) * 0.92); a.sun[2] = 0.36f; }
+      return a;
+    }
+    return lookOf(phaseNow());
   };
   auto paintOf = [&](const std::string &col, float out[3]) { const Rgba c = hex(col.empty() ? "#ffffff" : col); out[0] = c.c[0]; out[1] = c.c[1]; out[2] = c.c[2]; };
   auto frameOf = [&](double dt) {
@@ -883,7 +960,17 @@ int main(int argc, char **argv) {
   };
   // everyone else on the circuit
   auto drawField = [&]() {
-    if (!S.race) return;
+    if (!S.race) {
+      if (S.ghostOn) {
+        const float pale[3] = {0.80f, 0.88f, 1.0f};
+        const Proj gp = S.track.project(S.ghost.x, S.ghost.y, S.ghostHint);
+        Gnd g;
+        S.terrain->under(S.ghost, gp, g);
+        R.ghost = 0.75f;
+        R.drawCar(S.ghost, *S.spec, S.terrain->h(gp.s, gp.lat), g.pitch, g.roll, pale, S.ghostRolled);
+      }
+      return;
+    }
     const std::string mine = home.pack(), mineKlass = home.klassOf(mine);
     const bool mixField = !bgOn && (S.multi || (!mine.empty() && !cfg.xOn && !home.event() && (mineKlass == "gt3" || mineKlass == "gt4" || mineKlass == "hyper" || mineKlass == "f1")));
     for (Entry &e : S.race->entries) {
@@ -1173,14 +1260,19 @@ int main(int argc, char **argv) {
           if (e.key.repeat && screen == DRIVE) break;
           const bool menuish = screen != DRIVE;
           switch (e.key.scancode) {
-            case SDL_SCANCODE_ESCAPE: act[screen == DRIVE || screen == PAUSE ? A_PAUSE : A_BACK] = true; break;
-            case SDL_SCANCODE_BACKSPACE: act[menuish ? A_BACK : A_RESET] = true; break;
+            case SDL_SCANCODE_ESCAPE: act[screen == DRIVE || screen == PAUSE ? A_PAUSE : home.placing() ? A_GO : A_BACK] = true; break;
+            case SDL_SCANCODE_BACKSPACE: act[menuish ? (home.placing() ? A_GO : A_BACK) : A_RESET] = true; break;
+            // the weather map (home_race.cpp): with a blob in your hands = and - grow and shrink it, [ and ] turn it, ENTER sets it down
+            case SDL_SCANCODE_EQUALS: case SDL_SCANCODE_KP_PLUS: if (menuish && home.placing()) act[A_Y] = true; break;
+            case SDL_SCANCODE_MINUS: case SDL_SCANCODE_KP_MINUS: if (menuish && home.placing()) act[A_OK] = true; break;
+            case SDL_SCANCODE_LEFTBRACKET: if (menuish && home.placing()) act[A_X] = true; break;
+            case SDL_SCANCODE_RIGHTBRACKET: if (menuish && home.placing()) act[A_BACK] = true; break;
             case SDL_SCANCODE_UP: if (menuish) act[A_UP] = true; break;
             case SDL_SCANCODE_DOWN: if (menuish) act[A_DOWN] = true; break;
             case SDL_SCANCODE_LEFT: if (menuish) act[A_LEFT] = true; break;
             case SDL_SCANCODE_RIGHT: if (menuish) act[A_RIGHT] = true; break;
-            case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: act[A_OK] = true; break;
-            case SDL_SCANCODE_SPACE: act[menuish ? A_OK : A_DRS] = true; break;
+            case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: act[screen == HOME && home.placing() ? A_GO : A_OK] = true; break;
+            case SDL_SCANCODE_SPACE: act[menuish ? (screen == HOME && home.placing() ? A_GO : A_OK) : A_DRS] = true; break;
             case SDL_SCANCODE_G: if (menuish) act[A_GO] = true; break;
             case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: if (screen == DRIVE) S.hands.selector = S.hands.selector < 0 ? 1 : -1; break;
             case SDL_SCANCODE_R: if (!menuish) act[A_RESET] = true; break;
@@ -1230,7 +1322,7 @@ int main(int argc, char **argv) {
         held[A_LEFT] |= pb(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || (menuish && ax < -0.6); held[A_RIGHT] |= pb(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || (menuish && ax > 0.6);
         held[screen == HOME ? A_GO : A_PAUSE] |= pb(SDL_GAMEPAD_BUTTON_START);
         if (!menuish) { held[A_DRS] |= pb(SDL_GAMEPAD_BUTTON_SOUTH); held[A_RESET] |= pb(SDL_GAMEPAD_BUTTON_BACK); held[A_CAM] |= pb(SDL_GAMEPAD_BUTTON_NORTH); held[A_PIT] |= pb(SDL_GAMEPAD_BUTTON_WEST); }
-        else { held[A_OK] |= pb(SDL_GAMEPAD_BUTTON_SOUTH); held[A_BACK] |= pb(SDL_GAMEPAD_BUTTON_EAST); }
+        else { held[A_X] |= pb(SDL_GAMEPAD_BUTTON_WEST); held[A_Y] |= pb(SDL_GAMEPAD_BUTTON_NORTH); held[A_OK] |= pb(SDL_GAMEPAD_BUTTON_SOUTH); held[A_BACK] |= pb(SDL_GAMEPAD_BUTTON_EAST); }
       }
       for (int i = 0; i < A_COUNT; i++) {
         if (held[i] && !actPrev[i]) { act[i] = true; repeatAt[i] = clock + 0.38; }
@@ -1248,6 +1340,9 @@ int main(int argc, char **argv) {
       if (act[A_OK]) home.input(Nav::Ok);
       if (act[A_BACK]) home.input(Nav::Back);
       if (act[A_GO]) home.input(Nav::Go);
+      if (act[A_X]) home.input(Nav::X);
+      if (act[A_Y]) home.input(Nav::Y);
+      if (home.click) { audio.click(home.click); home.click = 0; }      // the menu's switches (audio.cpp)
       if (home.wantQuit) running = false;
       if (home.wantStart) { home.wantStart = false; lightsOut(); }
       else if (home.dirty) { home.dirty = false; if (bgOn && bgCar != home.seatCar() + "/" + home.pack()) { startBackdrop(); audio.setClass(home.voice()); prev = SDL_GetTicksNS(); } }

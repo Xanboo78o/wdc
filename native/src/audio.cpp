@@ -1,6 +1,7 @@
 // audio.cpp — js/gearbox.js and js/enginecore.js, ported. See the top of
 // js/enginecore.js for the four real recordings the model was measured against.
 #include "audio.hpp"
+#include <map>
 
 #include <SDL3/SDL.h>
 
@@ -16,7 +17,25 @@ static const double PI_ = 3.141592653589793;
 static double clampd0(double v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
 // ---- gearbox ---------------------------------------------------------------------
-const BoxSpec &boxFor(const std::string &cls) {
+// A NAMED CAR ("gt3:hura": its class, then the car) has its own engine below, and so its own rev range:
+// the class's gearing, that engine's idle and limit.
+static bool engineRevs(const std::string &key, double &idle, double &limit);
+static const BoxSpec &classBox(const std::string &cls);
+const BoxSpec &boxFor(const std::string &voice) {
+  const size_t colon = voice.find(':');
+  const std::string cls = voice.substr(0, colon);
+  double idle = 0, limit = 0;
+  if (colon == std::string::npos || !engineRevs(voice.substr(colon + 1), idle, limit)) return classBox(cls);
+  static std::map<std::string, BoxSpec> made;
+  auto it = made.find(voice);
+  if (it == made.end()) {
+    BoxSpec b = classBox(cls);
+    b.idle = idle; b.limit = limit; b.shiftUp = limit - (limit > 12000 ? 400 : 300);
+    it = made.emplace(voice, b).first;
+  }
+  return it->second;
+}
+static const BoxSpec &classBox(const std::string &cls) {
   static const BoxSpec f1{4500, 19000, 18600, 0.74, {85, 115, 146, 176, 208, 240, 280, 321}};
   static const BoxSpec f4{1800, 6500, 6300, 0.72, {55, 80, 108, 138, 175, 215}};
   static const BoxSpec gt3{1250, 7800, 7500, 0.70, {95, 130, 168, 205, 240, 273}};
@@ -100,6 +119,9 @@ struct EngineP {
   double pipes[4][3];
   double noise, jitterA, jitterT, cylSpread, drive, whineTeeth;
   double whine = 0.035, body = 0.9;      // gear/turbo whine level, and how much of the low pressure pulse comes through
+  // SPORTIER (Adam, 2026-10-10: "make em sound sportier"): how often the exhaust pops on a closed throttle,
+  // and the crack it gives on a full-throttle upshift (0 = none). bodyHz: where the low body is cut (0 = by the cylinders).
+  double pop = 0.012, bang = 0, bodyHz = 0;
 };
 // The V10 is the one Adam chose and the one that was measured (js/enginecore.js).
 const EngineP V10{10, 4500, 19000,
@@ -120,19 +142,64 @@ const EngineP I4{4, 1800, 6500,
                  0.50, 0.30, 0.014, 0.22, 2.2, 23, 0.035, 0.9};
 const EngineP V8{8, 1250, 7800,
                  {{170, 1.6, 1.5}, {420, 2.0, 1.25}, {1150, 2.4, 0.7}, {2600, 2.8, 0.3}},
-                 0.58, 0.42, 0.020, 0.34, 3.2, 21, 0.020, 1.6};
+                 0.58, 0.42, 0.020, 0.34, 3.2, 21, 0.020, 1.6, 0.030, 0.6};
 const EngineP V12{12, 1500, 9200,
                   {{1500, 2.4, 0.9}, {3300, 2.8, 1.1}, {6000, 3.0, 0.9}, {9000, 3.2, 0.45}},
-                  0.48, 0.24, 0.008, 0.14, 2.2, 37, 0.110, 0.6};
-const EngineP &paramsFor(int cls) { return cls == 0 ? I4 : cls == 2 ? V8 : cls == 3 ? V12 : V10; }
+                  0.48, 0.24, 0.008, 0.14, 2.2, 37, 0.110, 0.6, 0.020, 0.45};
+// EVERY CAR HAS ITS OWN ENGINE (Adam, 2026-10-10: "make them sound different per car"). The engine each
+// of these really has — how many cylinders, how high it revs, whether it breathes through turbos — on the
+// same firing model. An even-firing engine (flat six, flat-plane V8, V10) has a small cylSpread and sings;
+// a cross-plane V8 has a large one and rumbles; a turbo takes the edge off the pipes and adds whine.
+// NOT measured against recordings, and not yet heard by anybody: tuned by the numbers only.
+struct NamedEngine { const char *key; EngineP P; };
+const NamedEngine NAMED[] = {
+    // Lamborghini Huracán GT3: 5.2 V10, no turbos. A scream.
+    {"hura", {10, 1500, 8500, {{240, 1.8, 1.1}, {640, 2.2, 1.2}, {1700, 2.6, 1.0}, {3800, 3.0, 0.55}}, 0.56, 0.28, 0.010, 0.18, 3.0, 23, 0.025, 1.1, 0.034, 0.7}},
+    // BMW M4 GT3: 3.0 straight six, two turbos. Smooth, deep, whistling.
+    {"m4", {6, 1100, 7000, {{190, 1.7, 1.3}, {480, 2.1, 1.2}, {1250, 2.4, 0.75}, {2900, 2.8, 0.35}}, 0.50, 0.30, 0.014, 0.18, 3.0, 19, 0.075, 1.3, 0.030, 0.75}},
+    // McLaren 720S GT3: 4.0 flat-plane V8, two turbos. Higher and harder than a cross-plane.
+    {"m720", {8, 1300, 8100, {{230, 1.8, 1.2}, {600, 2.2, 1.2}, {1600, 2.6, 0.9}, {3500, 3.0, 0.45}}, 0.58, 0.26, 0.010, 0.12, 3.2, 23, 0.070, 1.0, 0.030, 0.75, 1600}},
+    // Acura NSX GT3: 3.5 V6, two turbos.
+    {"nsx", {6, 1200, 7500, {{210, 1.7, 1.2}, {540, 2.2, 1.2}, {1400, 2.5, 0.85}, {3200, 2.9, 0.4}}, 0.56, 0.34, 0.016, 0.26, 3.1, 21, 0.080, 1.2, 0.028, 0.7}},
+    // Porsche 911 GT3 R (992): 4.2 flat six, no turbos, past nine thousand. A howl.
+    {"p992", {6, 1500, 9250, {{260, 1.8, 1.2}, {700, 2.4, 1.25}, {1900, 2.8, 0.95}, {4200, 3.0, 0.5}}, 0.62, 0.26, 0.010, 0.16, 3.0, 25, 0.030, 1.0, 0.036, 0.7}},
+    {"p992r", {6, 1500, 9250, {{260, 1.8, 1.2}, {700, 2.4, 1.25}, {1900, 2.8, 0.95}, {4200, 3.0, 0.5}}, 0.62, 0.26, 0.010, 0.16, 3.0, 25, 0.030, 1.0, 0.036, 0.7}},
+    // Porsche 911 GT3 RS (991.1): the 4.0 road engine. The same howl, a little lower.
+    {"p911", {6, 1300, 8800, {{240, 1.8, 1.25}, {650, 2.3, 1.2}, {1750, 2.7, 0.9}, {3900, 3.0, 0.45}}, 0.60, 0.28, 0.011, 0.17, 2.9, 25, 0.028, 1.1, 0.030, 0.6}},
+    // Alpine A110 GT4: 1.8 turbo four.
+    {"a110", {4, 1300, 7000, {{300, 1.9, 1.1}, {820, 2.3, 1.1}, {2000, 2.6, 0.7}, {3900, 3.0, 0.3}}, 0.55, 0.30, 0.014, 0.22, 2.8, 23, 0.070, 1.0, 0.034, 0.7}},
+    // Mercedes-AMG GT4: 4.0 cross-plane V8, two turbos. The deepest thing on the grid.
+    {"amg4", {8, 1100, 7000, {{150, 1.6, 1.6}, {380, 2.0, 1.3}, {1000, 2.4, 0.7}, {2400, 2.8, 0.3}}, 0.60, 0.44, 0.022, 0.38, 3.4, 21, 0.045, 1.7, 0.034, 0.7}},
+    // Ginetta G55: 3.7 V6, no turbos. Raw.
+    {"g55", {6, 1200, 7200, {{200, 1.7, 1.3}, {520, 2.1, 1.15}, {1350, 2.5, 0.8}, {3000, 2.8, 0.4}}, 0.60, 0.36, 0.018, 0.28, 3.3, 21, 0.020, 1.3, 0.030, 0.65}},
+    // BMW M4 GT4 (F82): the same straight six as the GT3, a road car's exhaust.
+    {"m4g4", {6, 1100, 7300, {{180, 1.7, 1.35}, {460, 2.1, 1.15}, {1200, 2.4, 0.7}, {2700, 2.8, 0.3}}, 0.48, 0.30, 0.014, 0.18, 2.9, 19, 0.065, 1.4, 0.028, 0.6}},
+    // Alpine A480: a 4.5 racing V8 with no turbos, to nine thousand.
+    {"a480", {8, 2000, 9000, {{330, 2.0, 1.1}, {900, 2.4, 1.25}, {2300, 2.8, 1.05}, {5000, 3.0, 0.6}}, 0.60, 0.26, 0.010, 0.12, 3.2, 31, 0.060, 0.9, 0.026, 0.6, 2000}},
+    // Ferrari 499P: 3.0 V6, two turbos, and a hybrid's whine over it.
+    {"f499", {6, 1800, 8500, {{280, 1.9, 1.1}, {760, 2.3, 1.2}, {2000, 2.7, 0.95}, {4500, 3.0, 0.5}}, 0.52, 0.28, 0.012, 0.20, 2.8, 37, 0.120, 0.9, 0.022, 0.5}},
+    // Peugeot 9X8: 2.6 V6, two turbos. Gruffer than the Ferrari.
+    {"p9x8", {6, 1700, 8000, {{250, 1.8, 1.2}, {680, 2.2, 1.2}, {1800, 2.6, 0.9}, {4000, 3.0, 0.45}}, 0.55, 0.32, 0.014, 0.24, 3.0, 33, 0.100, 1.0, 0.022, 0.5}},
+    // McLaren MCL36: 1.6 turbo V6 hybrid. Nothing like the V10: lower, with the turbo over everything.
+    {"f122", {6, 4000, 12500, {{600, 2.1, 1.0}, {1500, 2.5, 1.15}, {3300, 2.8, 0.85}, {6200, 3.0, 0.4}}, 0.50, 0.30, 0.012, 0.20, 2.4, 29, 0.090, 0.9, 0.016, 0.3}},
+};
+const int N_NAMED = (int)(sizeof NAMED / sizeof NAMED[0]);
+const EngineP &paramsFor(int cls) { return cls >= 4 && cls < 4 + N_NAMED ? NAMED[cls - 4].P : cls == 0 ? I4 : cls == 2 ? V8 : cls == 3 ? V12 : V10; }
 // f4 | f1 | gt (gt3, gt4, 911 and the like) | hyper
-int clsIndex(const std::string &c) {
+int clsIndex(const std::string &voice) {
+  const size_t colon = voice.find(':');
+  if (colon != std::string::npos) for (int q = 0; q < N_NAMED; q++) if (voice.compare(colon + 1, std::string::npos, NAMED[q].key) == 0) return 4 + q;
+  const std::string c = voice.substr(0, colon);
   if (c == "f4" || c == "rally") return 0;          // a four-cylinder, both of them
   if (c == "hyper") return 3;
   if (c == "gt3" || c == "gt4" || c == "gt" || c == "911") return 2;
   return 1;
 }
 }  // namespace
+static bool engineRevs(const std::string &key, double &idle, double &limit) {
+  for (int q = 0; q < N_NAMED; q++) if (key == NAMED[q].key) { idle = NAMED[q].P.idle; limit = NAMED[q].P.limit; return true; }
+  return false;
+}
 
 struct EngineAudio::Core {
   double sr;
@@ -144,7 +211,7 @@ struct EngineAudio::Core {
   double rpm, thr = 0, gain = 0, speed = 0;
   double phase = 0, nextAt = 0, pulse = 0, burst = 0, crackle = 0, whineP = 0;
   int next = 0;
-  bool cut = false;
+  bool cut = false, armed = true;
   double makeup = 1;           // level trim so every class is as loud as the F1 car at the same revs and load
 
   double rand() { s = s * 1664525u + 1013904223u; return s / 4294967296.0; }
@@ -153,7 +220,7 @@ struct EngineAudio::Core {
     for (int i = 0; i < P.cyl; i++) cylA[i] = 1 + (rand() * 2 - 1) * P.cylSpread;
     for (int i = 0; i < P.cyl; i++) cylT[i] = (rand() * 2 - 1) * P.cylSpread * 0.08;
     for (int i = 0; i < 4; i++) pipes[i].set('b', P.pipes[i][0], P.pipes[i][1], sr);
-    body.set('l', P.cyl == 8 ? 900 : 2400, 0.7, sr);
+    body.set('l', P.bodyHz > 0 ? P.bodyHz : P.cyl == 8 ? 900 : 2400, 0.7, sr);
     hiss.set('h', 3000, 0.7, sr);
     road.set('l', 400, 0.6, sr);
     rpm = P.idle;
@@ -162,6 +229,11 @@ struct EngineAudio::Core {
 
   void render(float *out, int n, double Trpm, double Tthr, double Tgain, double Tspeed) {
     for (int i = 0; i < n; i++) {
+      // the crack of a full-throttle upshift: the revs are told to fall while your foot is still down
+      if (P.bang > 0) {
+        if (armed && Trpm < rpm - P.limit * 0.05 && Tthr > 0.4) { crackle = std::max(crackle, P.bang * (0.7 + 0.3 * rand())); armed = false; }
+        else if (!armed && std::fabs(Trpm - rpm) < P.limit * 0.01) armed = true;
+      }
       rpm += (Trpm - rpm) * 0.0009;
       thr += (Tthr - thr) * 0.0012;
       gain += (Tgain - gain) * 0.002;
@@ -186,7 +258,7 @@ struct EngineAudio::Core {
         } else {
           crackle = std::max(crackle, 0.6 + 0.4 * rand());
         }
-        if (thr < 0.15 && revs > 0.45 && rand() < 0.012) crackle = std::max(crackle, 0.4 + 0.6 * rand());
+        if (thr < 0.15 && revs > 0.45 && rand() < P.pop) crackle = std::max(crackle, 0.4 + 0.6 * rand());
       }
       const double decP = std::exp(-1 / (sr * 0.2 / fire));
       const double decB = std::exp(-1 / (sr * std::min(0.35, 0.16 + 0.19 * (1 - revs)) / fire));
@@ -215,7 +287,7 @@ struct EngineAudio::Core {
 namespace {
 // (the first N_LOOPS are loops. RAIN: recordings — Adam, 2026-10-09: "find rain and storm noises and play those,
 // better if the rain is on window or metal" — the open air, and rain on the glass of a closed car)
-enum { S_TYRE, S_GRAVEL, S_GRASS, S_SCRAPE, S_RAIN, S_ROOF, S_DIRT1, S_DIRT2, S_DIRT3, S_DIRT4, S_BUMP1, S_BUMP2, S_HEAVY, S_CRASH1, S_THUNDER1 = S_CRASH1 + 11, S_COUNT = S_THUNDER1 + 3 };
+enum { S_TYRE, S_GRAVEL, S_GRASS, S_SCRAPE, S_RAIN, S_ROOF, S_DIRT1, S_DIRT2, S_DIRT3, S_DIRT4, S_BUMP1, S_BUMP2, S_HEAVY, S_CRASH1, S_THUNDER1 = S_CRASH1 + 11, S_CLICK_ON = S_THUNDER1 + 3, S_CLICK_OFF, S_TICK, S_COUNT };
 const int N_LOOPS = 6, N_SHOTS = 12;
 }
 
@@ -326,8 +398,9 @@ void EngineAudio::once(int sample, double gain, double rate) {
 // moment at 85% of its own rev range on full throttle, and trimmed to the level
 // the F1 engine makes there. Done once; it is a few milliseconds of arithmetic.
 static double classMakeup(int cls) {
-  static double table[4] = {0, 0, 0, 0};
-  if (table[cls] > 0) return table[cls];
+  static std::vector<double> table(4 + (size_t)N_NAMED, 0.0);
+  cls = std::max(0, std::min((int)table.size() - 1, cls));
+  if (table[(size_t)cls] > 0) return table[(size_t)cls];
   auto rms = [](int c) {
     EngineAudio::Core *k = EngineAudio::newCore(c);
     std::vector<float> buf(24000);
@@ -340,8 +413,9 @@ static double classMakeup(int cls) {
     return std::sqrt(sum / 24000.0);
   };
   const double ref = rms(1);
-  for (int c = 0; c < 4; c++) { const double r = rms(c); table[c] = r > 1e-6 ? std::min(4.0, std::max(0.25, ref / r)) : 1; }
-  return table[cls];
+  const double r = rms(cls);
+  table[(size_t)cls] = r > 1e-6 ? std::min(4.0, std::max(0.25, ref / r)) : 1;
+  return table[(size_t)cls];
 }
 
 static void SDLCALL audioCb(void *ud, SDL_AudioStream *stream, int additional, int) {
@@ -440,6 +514,30 @@ bool EngineAudio::open(const std::string &cls, const std::string &dataDir) {
   for (int i = 0; i < S_CRASH1; i++) mix->load(i, dataDir + "/audio/" + FILES[i] + ".wav");
   for (int i = 0; i < 11; i++) { char b[32]; std::snprintf(b, sizeof b, "/audio/crash_%02d.wav", i + 1); mix->load(S_CRASH1 + i, dataDir + b); }
   for (int i = 0; i < 3; i++) mix->load(S_THUNDER1 + i, dataDir + "/audio/thunder_" + std::to_string(i + 1) + ".wav");
+  // THE SWITCHES OF THE MENU (Adam, 2026-10-10: "toggle switches that make a rlly nice click noise"). Made here,
+  // not recorded: a rocker going over is a sharp tick as the contact snaps, the thud of the paddle landing a few
+  // milliseconds later, and the plastic ringing for a moment. ON lands higher than OFF. S_TICK is the small one.
+  {
+    auto make = [&](int id, double tickHz, double thudHz, double ringHz, double level) {
+      std::vector<float> &b = mix->buf[id];
+      b.assign(48000 / 8, 0.0f);
+      uint32_t s = 777u + (uint32_t)id;
+      Biquad bp; bp.set('b', tickHz, 1.4, 48000);
+      for (size_t i = 0; i < b.size(); i++) {
+        const double t = (double)i / 48000.0;
+        s = s * 1664525u + 1013904223u;
+        const double white = s / 2147483648.0 - 1.0;
+        double x = bp.run(white * std::exp(-t / 0.0016)) * 2.2;                                         // the snap
+        const double t2 = t - 0.011;
+        if (t2 > 0) x += std::sin(2 * PI_ * (thudHz * (1 + 0.5 * std::exp(-t2 / 0.006))) * t2) * std::exp(-t2 / 0.018) * 0.9;      // the landing
+        if (t2 > 0) x += std::sin(2 * PI_ * ringHz * t2) * std::exp(-t2 / 0.030) * 0.16;               // the ring
+        b[i] = (float)(std::tanh(x * 1.4) * level);
+      }
+    };
+    make(S_CLICK_ON, 4200, 190, 2350, 0.55);
+    make(S_CLICK_OFF, 3300, 150, 1900, 0.50);
+    make(S_TICK, 5200, 320, 3100, 0.22);
+  }
   SDL_AudioSpec spec{SDL_AUDIO_F32, 2, 48000};       // two ears: the field is placed round your head (renderStereo)
   stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, audioCb, this);
   if (!stream) return false;
@@ -447,6 +545,7 @@ bool EngineAudio::open(const std::string &cls, const std::string &dataDir) {
   return true;
 }
 
+void EngineAudio::click(int kind) { once(kind == 1 ? S_CLICK_ON : kind == 2 ? S_CLICK_OFF : S_TICK, 1.0, 1.0); }
 void EngineAudio::setClass(const std::string &cls) { makeupNext = classMakeup(clsIndex(cls)); pendingCls = clsIndex(cls); }
 EngineAudio::Core *EngineAudio::newCore(int cls) { return new Core(48000, paramsFor(cls)); }
 void EngineAudio::freeCore(Core *c) { delete c; }

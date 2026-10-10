@@ -140,6 +140,8 @@ void MenuSave::load(const std::string &path) {
     else if (k.rfind("model.", 0) == 0) modelBy[k.substr(6)] = v == "-" ? "" : v;
     else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "gears") gears = v == "manual" ? "manual" : "auto";
+    else if (k == "ghost") ghost = v == "1"; else if (k == "ghosttier") ghostTier = v; else if (k == "wxadv") wxAdv = v == "1"; else if (k == "zonetrack") zoneTrack = v;
+    else if (k == "zone") { WxZone z; char kind[32] = ""; if (std::sscanf(v.c_str(), "%31s %f %f %f %f %f", kind, &z.x, &z.y, &z.r, &z.stretch, &z.rot) == 6) { z.kind = kind; zones.push_back(z); } }
     else if (k == "endur") endur = v == "1"; else if (k == "canon") canon = v == "1"; else if (k == "leagues") leagues = std::atoi(v.c_str()) & 7;
     else if (k == "gton") gtOn = v == "1"; else if (k == "gtclass") gtClass = gtClassOf(v) >= 0 ? v : "gt3";
     else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "easy") easy = v == "1"; else if (k == "tabfx") tabFx = v; else if (k == "dash") dash = v == "1"; else if (k == "dashcode") dashCode = v; else if (k == "tabvol") tabVol = std::max(0, std::min(200, std::atoi(v.c_str()))); else if (k == "xminutes") xMinutes = std::max(1, std::min(1440, std::atoi(v.c_str()))); else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
@@ -173,6 +175,9 @@ void MenuSave::save(const std::string &path) const {
   for (const auto &kv : modelBy) f << "model." << kv.first << " " << (kv.second.empty() ? "-" : kv.second) << "\n";
   f << "look " << look << "\n";
   f << "xon " << (xOn ? 1 : 0) << "\neasy " << (easy ? 1 : 0) << "\ndash " << (dash ? 1 : 0) << "\ndashcode " << (dashCode.empty() ? "-" : dashCode) << "\ntabfx " << tabFx << "\ntabvol " << tabVol << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
+  f << "ghost " << (ghost ? 1 : 0) << "\nghosttier " << ghostTier << "\nwxadv " << (wxAdv ? 1 : 0) << "\n";
+  if (!zoneTrack.empty()) f << "zonetrack " << zoneTrack << "\n";
+  for (const WxZone &z : zones) f << "zone " << z.kind << " " << z.x << " " << z.y << " " << z.r << " " << z.stretch << " " << z.rot << "\n";
   f << "gears " << gears << "\nendur " << (endur ? 1 : 0) << "\ncanon " << (canon ? 1 : 0) << "\nleagues " << (leagues & 7) << "\n";
   f << "gton " << (gtOn ? 1 : 0) << "\ngtclass " << gtClass << "\n";
   if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
@@ -196,6 +201,13 @@ Home::Home(const std::string &dataDir_, const std::string &savePath_) : dataDir(
   }
   // the career's save sits beside the menu's; an unattended run has no path and writes nothing
   if (savePath.size() > 8 && savePath.compare(savePath.size() - 8, 8, "menu.txt") == 0) career.loadState(savePath.substr(0, savePath.size() - 8) + "career.txt", true);
+  // for a photograph or an unattended check (nothing is saved from these: a run with --shot has no record to save to)
+  if (const char *g = std::getenv("XBR_GHOST")) { S.ghost = true; S.ghostTier = g; S.mode = "hotlap"; }
+  if (const char *z = std::getenv("XBR_ZONE")) {
+    MenuSave::WxZone w; char kind[32] = "";
+    if (std::sscanf(z, "%31s %f %f %f %f %f", kind, &w.x, &w.y, &w.r, &w.stretch, &w.rot) == 6) { w.kind = kind; S.zones.push_back(w); S.wxAdv = true; S.zoneTrack = S.track; }
+  }
+  if (const char *t = std::getenv("XBR_TIME")) S.time = t;
   sayText = greeting();
   build();
 }
@@ -237,11 +249,13 @@ std::string Home::pack() const {
   for (const Pack &p : packs) if (p.key == S.model) return p.key;
   return "";
 }
+// "class" or "class:car": a car that has an engine of its own (audio.cpp NAMED) is named after its class
 std::string Home::voice() const {
-  if (seatCar() != S.car) return S.gtClass;
   const std::string k = pack();
-  for (const Pack &p : packs) if (p.key == k) return p.klass;
-  return S.xOn ? "gt3" : S.car;
+  std::string klass = S.xOn ? "gt3" : S.car, named;
+  for (const Pack &p : packs) if (p.key == k) { klass = p.klass; named = ":" + k; }
+  if (seatCar() != S.car) klass = S.gtClass;
+  return klass + named;
 }
 // The circuit row. Heiligen is Xingus's own: one entry, its route chosen on a map. So is the oval.
 std::vector<Home::Circuit> Home::circuits() const {
@@ -543,6 +557,10 @@ void Home::build() {
     tidy();
     static const char *PG[5] = {"track", "mode", "sky", "level", "details"};
     for (int q = 0; q < 5; q++) if (page == PG[q]) back = [this, q] { show("setup", q); };
+    if (page == "wx") {
+      back = [this] { wxAt = -1; show("sky", 0); };
+      if (S.zoneTrack != S.track) { S.zones.clear(); S.zoneTrack = S.track; wxAt = -1; }      // blobs belong to the circuit they were laid on
+    } else wxAt = -1;
     for (const Cell &c : cells(mW, mH, [](float sz, const std::string &t) { return sz * 0.5f * (float)t.size(); }))
       if (c.focus) items.push_back({c.ok, c.left, c.right, c.up, c.down});
   } else if (page == "xsetup") {
@@ -619,11 +637,13 @@ void Home::build() {
 }
 
 void Home::input(Nav n) {
+  if (page == "wx" && wxAt >= 0) { wxInput(n); return; }
+  if (n == Nav::X || n == Nav::Y) return;
   if (n == Nav::Back) { if (back) back(); else wantQuit = true; return; }
   if (n == Nav::Go) { if (page == "xsetup" || racePage()) lightsOut(); else if (page == "home") { const EventDef *e = career.next(); if (e && career.unlocked(*e)) launchCareer(*e); else show("career"); } return; }
   if (items.empty()) return;
   const Item it = items[(size_t)at];
-  if (n == Nav::Ok) { if (it.ok) it.ok(); return; }
+  if (n == Nav::Ok) { const bool rp = racePage(); if (it.ok) { it.ok(); if (rp && !click) click = 3; } return; }
   if (n == Nav::Left || n == Nav::Right) {
     const auto &f = n == Nav::Left ? it.left : it.right;
     if (f) f();
