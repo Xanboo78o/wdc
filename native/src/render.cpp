@@ -368,9 +368,9 @@ void main(){
     float att = uLP[li].w * beam / (1.0 + d2 * 0.018);
     float nl = max(dot(n, Lv), 0.0);
     vec3 hl = normalize(Lv + V);
-    lit += c * uLC[li] * nl * att * 0.55;                                              // the glow of it on the panel
-    lit += uLC[li] * pow(max(dot(n, hl), 0.0), LSHINE) * LGLOSS * att * 2.2 * step(0.0, nl);          // the glint
-    lit += uLC[li] * pow(max(dot(reflect(-V, n), Lv), 0.0), 420.0) * LMIRROR * att * 9.0;             // the lamp itself, in the lacquer
+    lit += c * uLC[li] * nl * att * 0.05;                                              // (Adam: "i dont want spread i want shine": next to no glow on the panel)
+    lit += uLC[li] * pow(max(dot(n, hl), 0.0), LSHINE * 6.0) * LGLOSS * att * 7.0 * step(0.0, nl);    // the glint: small and hard
+    lit += uLC[li] * pow(max(dot(reflect(-V, n), Lv), 0.0), 900.0) * (0.25 + LMIRROR) * att * 26.0;            // the lamp itself, in the lacquer
   }
     vec3 h = normalize(uSun + V);
     if (uHdr > 0.5) {
