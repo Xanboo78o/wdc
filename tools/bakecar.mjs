@@ -148,6 +148,28 @@ const RECIPES = {
     role: { '9X8_Ext_Paint': 'paint', '9X8_Ext_Glass': 'glass', '9X8_Ext_LightBrakes': 'tail', '9X8_Ext_Mirror': 'chrome' },
     nodeRole: [[/_Tire/, 'tyre'], [/Rotor_LOD0_Details(?!Met)/, 'rim'], [/_Glass/, 'glass']],
   },
+  // "what abt the acura and 992" — two by the author of the McLaren, laid out the same way: one Body material,
+  // and the name of each piece says what it is.
+  nsx: {
+    eye: [-0.05, 0.84, -0.42],          // the driver's eyes, from a section through the seat
+    title: 'Acura NSX GT3', klass: 'gt3', length: 4.612,
+    skip: /Interior-.*Steering/, plain: /Tire-|Glass-Black_/,
+    wheels: { by: 'node', fl: /Wheel-LF_|Wheel-Rim-LF_/, fr: /Wheel-RF_|Wheel-Rim-RF_/, rl: /Wheel-LR_|Wheel-Rim-LR_/, rr: /Wheel-RR_|Wheel-Rim-RR_/,
+              hub: { fl: /Wheel-Caliper(Steel)?-LF/, fr: /Wheel-Caliper(Steel)?-RF/, rl: /Wheel-Caliper(Steel)?-LR/, rr: /Wheel-Caliper(Steel)?-RR/ }, tyreMat: 'Tire' },
+    role: { Body: 'paint', Tire: 'tyre', Wheel: 'rim' },
+    nodeRole: [[/Glass-(Window|Windshield|HeadLightCover|ChismelGlass)/, 'glass'], [/Body-(BumperFCarbon|CarbonFiber|Grille|Hoodpin|PaintBlack|PlasticBlack|WingMount)/, 'trim'],
+               [/Glass-(TailLightLens|ReflectorBrake|ReflectorRed|PlasticRed)/, 'tail'], [/Glass-HeadLight_/, 'lamp'], [/Caliper|Wheel-Disc|Wheel-Hub|Wheel-Nut/, 'trim']],
+  },
+  // a second 992, from another hand (the first is p992)
+  p992b: {
+    title: 'Porsche 911 GT3 R (992) Roxy', klass: 'gt3', length: 4.619,
+    skip: /Interior-.*Steering|Chassis-Emblem/, plain: /Tire-|Glass-WindScreenBanner/,
+    wheels: { by: 'node', fl: /Wheel_LF_|WheelAssembly_LF_/, fr: /Wheel_RF_|WheelAssembly_RF_/, rl: /Wheel_LR_|WheelAssembly_LR_/, rr: /Wheel_RR_|WheelAssembly_RR_/,
+              hub: { fl: /Wheel-Caliper-LF/, fr: /Wheel-Caliper-RF/, rl: /Wheel-Caliper-LR/, rr: /Wheel-Caliper-RR/ }, tyreMat: 'Tire' },
+    role: { Body: 'paint', Tire: 'tyre', Wheel: 'rim' },
+    nodeRole: [[/Glass-(RearWindows|Glass_|HeadlightCover|HeadLightGlass|TailLightCover)/, 'glass'], [/Body-(Grill|PaintBlack|Fasteners)/, 'trim'],
+               [/Glass-(TailLights|RedLightBar|RainLight)/, 'tail'], [/Glass-(Headlight_|LED)/, 'lamp'], [/Caliper|BrakeDisc|Wheel-..-Steel|ValveStem/, 'trim']],
+  },
   // The 2022 grand prix car. A million triangles as it came, 726,000 of them one hidden lump the size of
   // a shoebox between the rear wheels ('material'): left off, with the steering wheel he holds himself.
   f122: {
@@ -158,6 +180,30 @@ const RECIPES = {
     skipMat: ['material', 'Steer'],
     wheels: { by: 'material', mats: ['tyres', 'rims', 'Material'], tyre: 'tyres' },
     role: { Livery: 'paint', Livery_Wings: 'paint', 'Material.005': 'paint', 'Material.003': 'paint', tyres: 'tyre', rims: 'rim', Material: 'rim', mirror: 'chrome', chrome: 'chrome' },
+  },
+  // Two more GT3s by the 720's maker, laid out the same way: Body- / Chassis- / Glass- / Interior- / Wheel- nodes.
+  nsx: {
+    title: 'Acura NSX GT3', klass: 'gt3', length: null,          // already in metres
+    plain: /Glass-Black_|Tire-/,
+    wheels: { by: 'node', fl: /Wheel-LF_/, fr: /Wheel-RF_/, rl: /Wheel-LR_/, rr: /Wheel-RR_/,
+              hub: { fl: /Wheel-Caliper(Steel)?-LF_/, fr: /Wheel-Caliper(Steel)?-RF_/, rl: /Wheel-Caliper(Steel)?-LR_/, rr: /Wheel-Caliper(Steel)?-RR_/ },
+              tyreMat: 'Tire' },
+    role: { Body: 'paint', Tire: 'tyre', Wheel: 'rim' },
+    nodeRole: [[/Glass-(Window(Left|Right)|Windshield|HeadLightCover|ChismelGlass)/, 'glass'], [/Glass-(TailLightLens|ReflectorBrake|ReflectorRed)/, 'tail'], [/Glass-HeadLight_/, 'lamp'], [/Glass-Mirror/, 'chrome'],
+               [/Body-(PaintBlack|PlasticBlack|CarbonFiber|BumperFCarbon|Grille|Hoodpin|WingMount)/, 'trim'], [/Caliper|Disc|Hub|Nut/, 'trim']],
+  },
+  p992r: {
+    eye: [-0.22, 0.9, -0.4],          // the driver's eyes, from a section through the seat
+    title: 'Porsche 911 GT3 R (992) Roxy', klass: 'gt3', length: null,   // already in metres
+    // He drives with a real wheel in his hands: the model's own must not sit in front of it.
+    skip: /Interior-x?Steering/,
+    plain: /Glass-WindScreenBanner|Tire-|Chassis-Emblem/,
+    wheels: { by: 'node', fl: /WheelAssembly_LF/, fr: /WheelAssembly_RF/, rl: /WheelAssembly_LR/, rr: /WheelAssembly_RR/,
+              hub: { fl: /Wheel-Caliper-LF/, fr: /Wheel-Caliper-RF/, rl: /Wheel-Caliper-LR/, rr: /Wheel-Caliper-RR/ },
+              tyreMat: 'Tire' },
+    role: { Body: 'paint', Tire: 'tyre', Wheel: 'rim' },
+    nodeRole: [[/Glass-(RearWindows|Glass_|HeadlightCover|HeadLightGlass|TailLightCover)|Interior-Glass/, 'glass'], [/Glass-(TailLights|RedLightBar|RainLight)/, 'tail'], [/Glass-(Headlight_|LED)/, 'lamp'],
+               [/Glass-(Mirror|HeadLightChrome)/, 'chrome'], [/Body-(PaintBlack|Grill|Fasteners|GurneyFlap)/, 'trim'], [/Caliper|BrakeDisc|Steel|ValveStem/, 'trim']],
   },
   // NOT A CAR: the steering wheel in the driver's hands (Adam: "i downloaded that wheel put that in the game").
   // `prop` bakes it about its own hub instead of onto four tyres: the origin is the centre of the rim, its
