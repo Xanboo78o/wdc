@@ -346,13 +346,75 @@ static double classMakeup(int cls) {
 
 static void SDLCALL audioCb(void *ud, SDL_AudioStream *stream, int additional, int) {
   auto *self = (EngineAudio *)ud;
-  float buf[1024];
-  int frames = additional / (int)sizeof(float);
+  float buf[2048];
+  int frames = additional / (2 * (int)sizeof(float));
   while (frames > 0) {
     const int n = std::min(frames, 1024);
-    self->render(buf, n);
-    SDL_PutAudioStreamData(stream, buf, n * (int)sizeof(float));
+    self->renderStereo(buf, n);
+    SDL_PutAudioStreamData(stream, buf, n * 2 * (int)sizeof(float));
     frames -= n;
+  }
+}
+
+// Your own car in the middle of your head; the field round it (EngineAudio::field); then the limiter on each ear.
+void EngineAudio::renderStereo(float *lr, int n) {
+  float mono[1024], vb[1024];
+  const int pc = pendingCls.exchange(-1);
+  if (pc >= 0 || !core) { delete core; core = new Core(48000, paramsFor(pc >= 0 ? pc : 1)); core->makeup = makeupNext; }
+  core->render(mono, n, tRpm.load(), tThr.load(), tGain.load(), tSpeed.load());
+  if (mix) mix->render(mono, n);
+  for (int i = 0; i < n; i++) lr[2 * i] = lr[2 * i + 1] = mono[i];
+  for (int k = 0; k < FIELD_VOICES; k++) {
+    Voice &v = voice[k];
+    const float GL = v.gainL.load(), GR = v.gainR.load();
+    if (GL < 1e-4f && GR < 1e-4f && v.gl < 1e-4f && v.gr < 1e-4f) continue;          // nobody there: no engine is run
+    const int cls = v.cls.load();
+    if (cls >= 0 && (cls != v.has || !v.core)) { delete v.core; v.core = new Core(48000, paramsFor(cls), 1000u + (unsigned)k * 77u); v.core->makeup = classMakeup(cls); v.has = cls; }
+    if (!v.core) continue;
+    v.core->render(vb, n, v.rpm.load(), v.thr.load(), 0.8, v.speed.load());
+    const int dL = (int)v.lagL.load(), dR = (int)v.lagR.load();
+    const float aL = v.openL.load(), aR = v.openR.load();
+    for (int i = 0; i < n; i++) {
+      v.ring[v.w] = vb[i];
+      v.lpL += aL * (v.ring[(v.w - dL) & 63] - v.lpL);
+      v.lpR += aR * (v.ring[(v.w - dR) & 63] - v.lpR);
+      v.w = (v.w + 1) & 63;
+      v.gl += (GL - v.gl) * 0.0015f; v.gr += (GR - v.gr) * 0.0015f;
+      lr[2 * i] += v.lpL * v.gl; lr[2 * i + 1] += v.lpR * v.gr;
+    }
+  }
+  const double vol = mix ? mix->volume.load() : 1;
+  for (int i = 0; i < 2 * n; i++) lr[i] = (float)(std::tanh(lr[i] * 0.72) * 0.96 * vol);
+}
+
+// (main thread) Who is near, and where: see audio.hpp.
+void EngineAudio::field(const FieldCar *cars, int n, double dt, double volume) {
+  static const double REACH = 260, REF = 6, LOUD = 3.2;      // metres past which a rival is silent; the distance it is at full voice; "through the roof"
+  n = std::max(0, std::min(n, (int)FIELD_VOICES));
+  bool placed[FIELD_VOICES] = {};
+  int slotOf[FIELD_VOICES];
+  for (int i = 0; i < n; i++) { slotOf[i] = -1; for (int k = 0; k < FIELD_VOICES; k++) if (voiceId[k] == cars[i].id && !placed[k]) { slotOf[i] = k; placed[k] = true; break; } }
+  for (int i = 0; i < n; i++) if (slotOf[i] < 0) for (int k = 0; k < FIELD_VOICES; k++) if (!placed[k]) { slotOf[i] = k; placed[k] = true; voiceId[k] = cars[i].id; break; }
+  for (int k = 0; k < FIELD_VOICES; k++) if (!placed[k]) { voiceId[k] = -1; voice[k].gainL = 0; voice[k].gainR = 0; }
+  for (int i = 0; i < n; i++) {
+    const int k = slotOf[i];
+    if (k < 0) continue;
+    const FieldCar &c = cars[i];
+    Voice &v = voice[k];
+    if (!voiceBox[k] || voiceCls[k] != c.cls) { delete voiceBox[k]; voiceBox[k] = new Gearbox(c.cls); voiceCls[k] = c.cls; }
+    voiceBox[k]->update(dt, c.speed * 3.6, c.throttle);
+    const double d = std::hypot(c.right, c.ahead), side = d > 0.01 ? c.right / d : 0, front = d > 0.01 ? c.ahead / d : 1;
+    const double dop = std::max(0.80, std::min(1.25, 343.0 / (343.0 - std::max(-120.0, std::min(120.0, c.closing)))));
+    const double g = volume * LOUD * REF / (REF + std::max(0.0, d - 2)) * std::max(0.0, std::min(1.0, (REACH - d) / 60));
+    v.cls = clsIndex(c.cls);
+    v.rpm = (float)(voiceBox[k]->rpm * dop); v.thr = (float)c.throttle; v.speed = (float)c.speed;
+    // the near ear has it louder; the far ear gets it late (the width of a head) and with the top taken off; behind you is duller still
+    v.gainL = (float)(g * std::sqrt(0.5 * (1 - 0.86 * side)));
+    v.gainR = (float)(g * std::sqrt(0.5 * (1 + 0.86 * side)));
+    v.lagL = (float)(side > 0 ? 31 * side : 0); v.lagR = (float)(side < 0 ? -31 * side : 0);
+    const double back = std::max(0.0, -front);
+    v.openL = (float)std::max(0.10, 1 - 0.55 * back - (side > 0 ? 0.62 * side : 0));
+    v.openR = (float)std::max(0.10, 1 - 0.55 * back - (side < 0 ? -0.62 * side : 0));
   }
 }
 
@@ -378,7 +440,7 @@ bool EngineAudio::open(const std::string &cls, const std::string &dataDir) {
   for (int i = 0; i < S_CRASH1; i++) mix->load(i, dataDir + "/audio/" + FILES[i] + ".wav");
   for (int i = 0; i < 11; i++) { char b[32]; std::snprintf(b, sizeof b, "/audio/crash_%02d.wav", i + 1); mix->load(S_CRASH1 + i, dataDir + b); }
   for (int i = 0; i < 3; i++) mix->load(S_THUNDER1 + i, dataDir + "/audio/thunder_" + std::to_string(i + 1) + ".wav");
-  SDL_AudioSpec spec{SDL_AUDIO_F32, 1, 48000};
+  SDL_AudioSpec spec{SDL_AUDIO_F32, 2, 48000};       // two ears: the field is placed round your head (renderStereo)
   stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, audioCb, this);
   if (!stream) return false;
   SDL_ResumeAudioStreamDevice(stream);
@@ -501,6 +563,7 @@ void EngineAudio::close() {
   if (stream) { SDL_DestroyAudioStream(stream); stream = nullptr; }
   delete core; core = nullptr;
   delete mix; mix = nullptr;
+  for (int k = 0; k < FIELD_VOICES; k++) { delete voice[k].core; voice[k].core = nullptr; voice[k].has = -1; delete voiceBox[k]; voiceBox[k] = nullptr; voiceId[k] = -1; }
 }
 
 EngineAudio::~EngineAudio() { close(); }
