@@ -76,7 +76,8 @@ const RECIPES = {
     // one mesh for each material and no names: Object_51..54 are the steering wheel, 4 and 27 the banners, 17 the tyres
     skip: /Object_(51|52|53|54)$/,
     plain: /Object_(4|17|27)$/,
-    skipMat: ['EXT_Decals', 'EXT_RIM_BLUR', 'EXT_RIM_BLUR_STATIC', 'NUMBERPLATE_2018_EMISSIVE_PRO'],
+    // COCKPIT_LR is a second, rough cabin for the far-away car: it stands 11 cm proud of the door skin (a black blot on every door)
+    skipMat: ['EXT_Decals', 'EXT_RIM_BLUR', 'EXT_RIM_BLUR_STATIC', 'NUMBERPLATE_2018_EMISSIVE_PRO', 'COCKPIT_LR'],
     wheels: { by: 'material', mats: ['EXT_Tyre.006', 'EXT_RIM', 'EXT_Disc'], tyre: 'EXT_Tyre.006' },
     role: { EXT_Carpaint_Inst: 'paint', EXT_Windows: 'glass', INT_Windows: 'glass', INT_Windshield: 'glass', 'EXT_Tyre.006': 'tyre', EXT_RIM: 'rim', EXT_Glass_Emissive_Front: 'glass',
             EXT_Glass_Emissive_Rear: 'tail', EXT_Emissive_Light_Rear: 'tail', EXT_Emissive_Light_Front: 'lamp', 'MIRROR.006': 'chrome', EXT_CHROME_LIGHTS: 'chrome' },

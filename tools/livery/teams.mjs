@@ -1,4 +1,4 @@
-// teams.mjs — who the 320 teams ARE.
+// teams.mjs — who the teams ARE (320 on 2026-10-09; 640 once four more cars arrived the next day).
 //
 // Adam, 2026-10-09: "make sur everyone grts a unique name, bc these are js
 // gnerated by random cool name from list + random motorsport name from list".
@@ -10,7 +10,7 @@
 // And: "ADD PRIDE FLAG CARS THATD BE SO COOL TO SEE AS ONE FROM THAT
 // COMMUNITY ... make their names have smth to do with their sexuality".
 // PRIDE at the bottom: fourteen flags in their real colours, and the teams
-// that fly them. Ten cars in every paddock carry one.
+// that fly them. Ten cars in every paddock carry one (the second row of each flag's names came with the second four cars).
 
 // The four he picked out by name keep their name, their place and their paint.
 export const KEEP = { 'm720:2': 'Apex Union Endurance', 'm720:6': 'Donut District Motorsport', 'm720:13': 'Hyperion Corse', 'm720:14': 'Maison Vero GT' };
@@ -50,6 +50,42 @@ export const NAMES = {
     'Triple Stint Racing', 'Night Shift Works', 'Golden Hour Racing', 'Hour Twenty-Three', 'Tertre Rouge Racing', 'Arnage Works', 'Maison Blanche Racing', 'Chapelle Racing', 'Karting-Est Works',
     'Raccordement', 'Hunaudières Hypercar', 'Sarthe & Sons', 'Rillettes Racing', 'Garage 56 Experiment', 'Sleepless Endurance', 'Stint Five', 'Caffeine & Carbon', 'One More Lap Works', 'Sunrise Stint',
     'The Long Night Racing', 'Pit Wall Prophets', 'Fuel Window Racing'],
+  // the BMW GT3 paddock: the big coupé. Heavy things, workshop things, and everything a steward can show you
+  m4: ['Kraftwerk Nord Racing', 'Bassline Motorsport', 'Subwoofer Squad', 'Kidney Grille Gang', 'Autobahn Athletic', 'Stammtisch Racing', 'Hammerwerk', 'Panzerknacker Racing', 'Techno Viking Motorsport',
+    'Doppelkupplung', 'Turbolader Racing', 'Vollgas Verein', 'Überholspur', 'Lichthupe Racing', 'Dicke Karre Motorsport', 'Six Inline Six', 'Straight Six Syndicate', 'Big Coupé Energy', 'Long Bonnet Club',
+    'Heavyweight Division', 'Bruiser Racing', 'Sledgehammer GT', 'Wrecking Ball Works', 'Battering Ram Racing', 'Juggernaut Motorsport', 'Mammoth GT', 'Rhino Charge Racing', 'Bison Motorsport', 'Grizzly GT',
+    'Ox Cart Racing', 'Bulldozer Squadra', 'Freight Train Racing', 'Tugboat Motorsport', 'Anvil Racing', 'Cast Iron Corse', 'Girder GT', 'Rivet Racing', 'Forge & Furnace', 'Smelter Motorsport',
+    'Crankshaft Collective', 'Camshaft Racing', 'Piston Heads Racing', 'Gasket Case Motorsport', 'Torque Wrench Racing', 'Socket Set Squadra', 'Ratchet Racing', 'Breaker Bar GT', 'Dyno Day Racing',
+    'Boost Leak Motorsport', 'Wastegate Racing', 'Intercooler Club', 'Launch Control Racing', 'Limiter Bashers', 'Flat Shift Racing', 'Paddle Pullers', 'Kerb Hoppers', 'Sausage Kerb Racing',
+    'Track Limits Motorsport', 'Five Second Penalty', 'Drive Through Racing', 'Black & Orange Flag', 'Full Course Yellow', 'Safety Car Restart', 'Green Flag Racing', 'Slipstream Society', 'Tow Rope Racing',
+    'Dirty Air Motorsport', 'Marbles Racing', 'Lock-Up Racing', 'Blue Flag Blues', 'Chequered Past Racing', 'Jump Start Motorsport'],
+  // the 992 GT3 R paddock: gentlemen drivers. Somebody's money, somebody's harbour, somebody's lunch
+  p992: ['Riviera Gentlemen Racing', 'Casino Square Racing', 'Port Hercule Racing', 'Yacht Club Corse', 'Chronograph Racing', 'Tourbillon GT', 'Cufflink Motorsport', 'Signet Ring Racing', 'Old Money Motorsport',
+    'Trust Fund Racing', 'Hedge Fund Heroes', 'Quarterly Earnings GT', 'Bull Market Racing', 'Bear Market Motorsport', 'Dividend Racing', 'Venture Capital Corse', 'Angel Investor GT', 'Corner Office Racing',
+    'Boardroom Brawlers', 'Golf Was Boring Racing', 'Midlife Crisis Motorsport', 'Second Mortgage Racing', 'Dentist & Dentist', 'Orthodontist Racing', 'Tax Write-Off Racing', 'Expense Account Motorsport',
+    'Business Class Racing', 'Private Jet Set', 'Helipad Racing', 'Ski Chalet Corse', 'Après Ski Racing', 'St. Moritz Motor Club', 'Gstaad GT', 'Lake Como Racing', 'Portofino Squadra', 'Amalfi Motorsport',
+    'Capri Blue Racing', 'Saint-Tropez Speed', 'Cap Ferrat Racing', 'Marbella Motorsport', 'Ibiza Sunrise Racing', 'Mykonos GT', 'Santorini Squadra', 'Bosphorus Racing', 'Dubai Marina Motorsport',
+    'Pearl Coast Racing', 'Bahia Racing', 'Copacabana Corse', 'Punta del Este GT', 'Biscayne Racing', 'Palm Drive Motorsport', 'Rodeo Drive Racing', 'Mulholland GT', 'Pacific Coast Racing', 'Laguna Blanca',
+    'Big Sur Racing', 'Napa Valley Motorsport', 'Aspen Racing Club', 'Hamptons GT', "Martha's Vineyard Racing", 'Nantucket Motorsport', 'Savile Row Racing', 'Mayfair Motor Club', 'Belgravia GT',
+    'Knightsbridge Racing', 'Caviar Racing', 'Truffle Hunters GT', 'Oyster Bar Racing', 'Lobster Roll Motorsport', 'Silver Spoon Racing', 'Valet Parking GT', 'Concierge Corse'],
+  // the Huracán GT3 paddock: Italy, at full volume, and then lunch
+  hura: ['Scuderia Fulmine', 'Squadra Tuono', 'Toro Scatenato', 'Corsa Selvaggia', 'Vulcano Racing', 'Etna Corse', 'Stromboli Squadra', 'Scuderia Cinghiale', 'Lupo Nero Racing', 'Aquila Rossa',
+    'Falco Pellegrino Corse', 'Vespa Arrabbiata', 'Scuderia Mezzanotte', 'Notte Bianca Racing', 'Alba Corse', 'Tramonto GT', 'Scuderia Gelato', 'Tiramisù Racing', 'Cannoli Corse', 'Espresso Doppio',
+    'Ristretto Racing', 'Cappuccino Dopo Le Undici', 'Carbonara Corse', 'Cacio e Pepe Racing', 'Amatriciana Squadra', 'Pesto Genovese GT', 'Ragù Racing', 'Lasagna Squadra', 'Risotto Racing', 'Gnocchi GT',
+    'Focaccia Corse', 'Mozzarella Motorsport', 'Parmigiano Racing', 'Panettone Racing', 'Biscotti Corse', 'Granita Squadra', 'Aranciata GT', 'Chinotto Racing', 'Mamma Mia Motorsport', 'Nonna Knows Best',
+    'Allora Racing', 'Basta Così', 'Andiamo Corse', 'Forza Tutti', 'Piano Piano Racing', 'Presto Prestissimo', 'Fortissimo GT', 'Crescendo Corse', 'Opera Buffa Racing', 'La Scala Squadra', 'Tenore Racing',
+    'Soprano Speed', 'Commedia Corse', 'Arlecchino Racing', 'Pulcinella GT', 'Gondola Racing', 'Rialto Corse', 'Trastevere Racing', 'Colosseo GT', 'Navigli Squadra', 'Via Emilia Racing',
+    'Autostrada del Sole', 'Tangenziale Racing', 'Passo Stelvio GT', 'Dolomiti Corse', 'Lago Maggiore Racing', 'Cinque Terre Racing', 'Costa Smeralda GT', 'Neon Toro', 'Wedge Shape Works',
+    'Scissor Door Society', 'V10 Choir'],
+  // the grand prix paddock: constructors with a motorhome, and everything the pit wall has ever said on the radio
+  f122: ['Halcyon Grand Prix', 'Meridian F1 Team', 'Vellum Racing', 'Aster Grand Prix', 'Calder Formula', 'Ostrava GP', 'Lindqvist Racing', 'Marlowe Grand Prix', 'Tessera F1', 'Sorrel Racing',
+    'Kestrel Grand Prix', 'Altamira Formula', 'Flanders GP', 'Okuda Racing', 'Santoro Grand Prix', 'Whitlock Formula', 'Varga GP', 'Delacroix Racing', 'Montclair Grand Prix', 'Hartwell F1',
+    'Ashdown Racing', 'Pemberton Grand Prix', 'Wind Tunnel Wizards', 'Ground Effect Grand Prix', 'Porpoise Racing', 'Budget Cap Racing', 'Halo Grand Prix', 'Monocoque Motorsport', 'Carbon Tub Racing',
+    'Push Rod Racing', 'Pull Rod Grand Prix', 'Diffuser Dynamics', 'Venturi Tunnel GP', 'Sidepod Society', 'Zero Pod Racing', 'Bargeboard Racing', 'Beam Wing GP', 'Plank Wear Racing',
+    'Skid Block Grand Prix', 'Tyre Blanket Racing', 'Out Lap Grand Prix', 'In Lap Racing', 'Box Box Racing', 'Undercut Grand Prix', 'Overcut Racing', 'Plan B Grand Prix', 'Plan F Racing',
+    'Strat Mode Seven', 'Lift And Coast GP', 'Brake Magic Racing', 'Diff Entry Racing', 'Pole Position GP', 'Lights Out Racing', 'Fastest Lap Grand Prix', 'Driver Of The Day', 'Radio Check Racing',
+    'Leave Me Alone GP', 'Smooth Operator Racing', 'Paddock Club Racing', 'Motorhome Grand Prix', 'Silly Season Racing', 'Reserve Driver GP', 'Sim Driver Racing', 'Friday Practice Racing',
+    'Sprint Shootout GP', 'Formation Lap Racing', 'Grid Walk Grand Prix', 'Warm-Up Lap', 'Blistering Pace GP', 'Graining Racing', 'Flat Spot Grand Prix', 'DRS Train Racing'],
 };
 // A team named for the company that pays for it: the company, and one of these, each used once.
 export const TAILS = ['Works', 'Squadra Corse', 'Junior Team', 'Speed Shop', 'Race Lab', 'Factory Racing', 'Performance Centre', 'Skunkworks', 'Racing Division', 'Motor Club', 'Grand Prix Team',
@@ -59,31 +95,45 @@ export const TAILS = ['Works', 'Squadra Corse', 'Junior Team', 'Speed Shop', 'Ra
 // cols top to bottom as the flag is flown; w = each stripe's share (default equal)
 export const PRIDE = [
   { key: 'rainbow', label: 'Rainbow', cols: ['e40303', 'ff8c00', 'ffed00', '008026', '004dff', '750787'],
-    teams: ['Full Spectrum Racing', 'Over The Rainbow GT', 'Out & Proud Motorsport', 'Loud & Proud Racing'] },
+    teams: ['Full Spectrum Racing', 'Over The Rainbow GT', 'Out & Proud Motorsport', 'Loud & Proud Racing',
+      'Every Colour Corse', 'Rainbow Road Racing', 'Pride Parade Motorsport', 'Technicolour GT'] },
   { key: 'trans', label: 'Trans', cols: ['5bcefa', 'f5a9b8', 'ffffff', 'f5a9b8', '5bcefa'],
-    teams: ['Transmission Racing', 'Shift Happens GT', 'Trans Rights Rennsport', 'Blue Pink White Works'] },
+    teams: ['Transmission Racing', 'Shift Happens GT', 'Trans Rights Rennsport', 'Blue Pink White Works',
+      'Trans Am Racing', 'True Colours Rennsport', 'Manual Transition Motorsport', 'Becoming Racing'] },
   { key: 'bi', label: 'Bi', cols: ['d60270', '9b4f96', '0038a8'], w: [2, 1, 2],
-    teams: ['Bi-Turbo Racing', 'Bi The Way GT', 'Both Lanes Motorsport', 'Bi-Plane Endurance'] },
+    teams: ['Bi-Turbo Racing', 'Bi The Way GT', 'Both Lanes Motorsport', 'Bi-Plane Endurance',
+      'Bi-Directional Racing', 'Bi-Xenon GT', 'Bilingual Racing', 'Why Not Both Racing'] },
   { key: 'lesbian', label: 'Lesbian', cols: ['d52d00', 'ff9a56', 'ffffff', 'd362a4', 'a30262'],
-    teams: ['Sapphic Speed Works', 'Sappho Squadra', 'Girls Like Girls GT', 'Sunset Sapphics Racing'] },
+    teams: ['Sapphic Speed Works', 'Sappho Squadra', 'Girls Like Girls GT', 'Sunset Sapphics Racing',
+      'Girlfriends Grand Prix', 'Lavender Menace Racing', 'She & Her Racing', 'Violet Hour GT'] },
   { key: 'pan', label: 'Pan', cols: ['ff218c', 'ffd800', '21b1ff'],
-    teams: ['Panoramic Racing', 'Hearts Not Parts Motorsport', 'Pan Global GT', 'Pancake Stack Racing'] },
+    teams: ['Panoramic Racing', 'Hearts Not Parts Motorsport', 'Pan Global GT', 'Pancake Stack Racing',
+      'Pandemonium Racing', 'All Hearts Motorsport', 'Pansexual Panthers', 'Frying Pan GT'] },
   { key: 'nonbinary', label: 'Non-binary', cols: ['fcf434', 'ffffff', '9c59d1', '2c2c2c'],
-    teams: ['They/Them Motorsport', 'Enby Endurance', 'Outside The Binary GT', 'Neither Nor Racing'] },
+    teams: ['They/Them Motorsport', 'Enby Endurance', 'Outside The Binary GT', 'Neither Nor Racing',
+      'Third Option Racing', 'Enby Envy GT', 'Beyond Binary Works', 'Them Fatale Racing'] },
   { key: 'ace', label: 'Ace', cols: ['0e0f12', 'a3a3a3', 'ffffff', '800080'],
-    teams: ['Ace Of Pace Racing', 'Garlic Bread Racing', 'Cake Over Everything GT', 'Aces High Autosport'] },
+    teams: ['Ace Of Pace Racing', 'Garlic Bread Racing', 'Cake Over Everything GT', 'Aces High Autosport',
+      'Ace In The Hole GT', 'Four Aces Racing', 'Space Ace Motorsport', 'Dragons & Cake Racing'] },
   { key: 'mlm', label: 'Gay men', cols: ['078d70', '98e8c1', 'ffffff', '7bade2', '3d1a78'],
-    teams: ['Achilles Heel-and-Toe Racing', 'Patroclus Performance', 'Boys Like Boys GT', 'Husbands Racing'] },
+    teams: ['Achilles Heel-and-Toe Racing', 'Patroclus Performance', 'Boys Like Boys GT', 'Husbands Racing',
+      'Boyfriends Racing', 'Vincian Speed Works', 'Two Grooms GT', 'Him & Him Motorsport'] },
   { key: 'genderfluid', label: 'Genderfluid', cols: ['ff75a2', 'ffffff', 'be18d6', '0e0f12', '333ebd'],
-    teams: ['Fluid Dynamics GT', 'Go With The Flow Racing', 'Shapeshifter Squadra', 'Ebb & Flow Endurance'] },
+    teams: ['Fluid Dynamics GT', 'Go With The Flow Racing', 'Shapeshifter Squadra', 'Ebb & Flow Endurance',
+      'Tidal Shift Racing', 'Ever Changing GT', 'Mercury Rising Racing', 'Fluid Motion Works'] },
   { key: 'progress', label: 'Progress', cols: ['e40303', 'ff8c00', 'ffed00', '008026', '004dff', '750787'], chevron: ['0e0f12', '613915', '5bcefa', 'f5a9b8', 'ffffff'],
-    teams: ['Progress Autosport', 'Forward Together Racing', 'Everybody In Motorsport', 'Room For All Racing'] },
+    teams: ['Progress Autosport', 'Forward Together Racing', 'Everybody In Motorsport', 'Room For All Racing',
+      'Onward Racing', 'No One Left Behind GT', 'Bigger Table Motorsport', 'Chevron Forward Racing'] },
   { key: 'aro', label: 'Aro', cols: ['3da542', 'a7d379', 'ffffff', 'a9a9a9', '0e0f12'],
-    teams: ['Aro Dynamics', 'Platonic Performance', 'No Romance Just Racing', 'Just Friends Motorsport'] },
+    teams: ['Aro Dynamics', 'Platonic Performance', 'No Romance Just Racing', 'Just Friends Motorsport',
+      'Aro Ace Aero', 'Arrow Aro Racing', 'Squish Not Crush GT', 'Best Friends Forever Racing'] },
   { key: 'intersex', label: 'Intersex', cols: ['ffd800'], ring: '7902aa',
-    teams: ['Full Circle Racing', 'Purple Ring Works', 'Whole As We Are GT', 'Unbroken Circle Endurance'] },
+    teams: ['Full Circle Racing', 'Purple Ring Works', 'Whole As We Are GT', 'Unbroken Circle Endurance',
+      'Perfect Circle GT', 'Golden Field Racing', 'Born This Way Motorsport', 'Ring Of Purple Racing'] },
   { key: 'genderqueer', label: 'Genderqueer', cols: ['b57edc', 'ffffff', '4a8123'],
-    teams: ['Genderqueer Garage', 'Lavender & Green Racing', 'Queer Gear Motorsport', 'Rules Optional Racing'] },
+    teams: ['Genderqueer Garage', 'Lavender & Green Racing', 'Queer Gear Motorsport', 'Rules Optional Racing',
+      'Queer Joy Racing', 'Gender Outlaws GT', 'Unlabelled Motorsport', 'Lavender Fields Racing'] },
   { key: 'agender', label: 'Agender', cols: ['0e0f12', 'bcc4c7', 'ffffff', 'b7f684', 'ffffff', 'bcc4c7', '0e0f12'],
-    teams: ['No Gender Only Speed', 'Agender Agenda GT', 'Gender? Never Heard Of It Racing', 'Just A Driver Motorsport'] },
+    teams: ['No Gender Only Speed', 'Agender Agenda GT', 'Gender? Never Heard Of It Racing', 'Just A Driver Motorsport',
+      'Null Pointer Racing', 'Gender Not Found GT', 'Blank Space Racing', 'None Of The Above Motorsport'] },
 ];

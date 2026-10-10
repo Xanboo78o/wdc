@@ -159,6 +159,12 @@ const ZONES = {
   m720: { door: [-0.30, 0.36, 0.20, 0.62], quarter: [-0.88, -0.44, 0.56, 0.78], fender: [0.38, 0.82, 0.50, 0.68], sill: [-0.32, 0.38, 0.10, 0.25], bonnet: [-0.55, 0.55, 0.72, 0.98], roof: [-0.42, 0.42, -0.32, 0.11], deck: [-0.9, 0.9, -1.0, -0.88] },
   g55: { door: [-0.44, 0.08, 0.18, 0.64], quarter: [-0.94, -0.62, 0.28, 0.72], fender: [0.38, 0.88, 0.48, 0.66], sill: [-0.38, 0.38, 0.06, 0.2], bonnet: [-0.30, 0.30, 0.74, 0.97], roof: [-0.48, 0.48, -0.48, 0.02], deck: [-0.8, 0.8, -1.0, -0.88] },
   a480: { door: [-0.46, 0.40, 0.12, 0.44], quarter: [-0.98, -0.12, 0.48, 0.78], fender: [0.42, 0.92, 0.34, 0.52], sill: [-0.42, 0.32, 0.08, 0.2], bonnet: [-0.26, 0.26, 0.54, 0.96], roof: [-0.32, 0.32, -0.16, 0.22], deck: [-0.22, 0.22, -0.92, -0.32] },
+  // 2026-10-10: three more GT3s and the grand prix car. On the single-seater the 'door' is the sidepod,
+  // the 'quarter' the engine cover, the 'fender' the nose, the 'roof' the top of the engine cover and the 'deck' the rear wing.
+  m4: { door: [-0.26, 0.30, 0.20, 0.60], quarter: [-0.86, -0.36, 0.50, 0.72], fender: [0.34, 0.86, 0.45, 0.65], sill: [-0.30, 0.36, 0.10, 0.22], bonnet: [-0.52, 0.52, 0.44, 0.90], roof: [-0.40, 0.40, -0.32, 0.06], deck: [-0.6, 0.6, -0.96, -0.74] },
+  p992: { door: [-0.30, 0.30, 0.20, 0.60], quarter: [-0.82, -0.34, 0.55, 0.76], fender: [0.34, 0.86, 0.48, 0.64], sill: [-0.36, 0.36, 0.10, 0.24], bonnet: [-0.52, 0.52, 0.50, 0.90], roof: [-0.42, 0.42, -0.22, 0.16], deck: [-0.6, 0.6, -0.96, -0.74] },
+  hura: { door: [-0.36, 0.30, 0.20, 0.60], quarter: [-0.86, -0.40, 0.54, 0.76], fender: [0.34, 0.82, 0.48, 0.66], sill: [-0.40, 0.36, 0.10, 0.22], bonnet: [-0.52, 0.52, 0.58, 0.96], roof: [-0.40, 0.40, -0.12, 0.26], deck: [-0.6, 0.6, -0.96, -0.74] },
+  f122: { door: [-0.50, 0.22, 0.24, 0.60], quarter: [-0.90, -0.40, 0.45, 0.80], fender: [0.30, 0.92, 0.18, 0.46], sill: [-0.50, 0.22, 0.12, 0.30], bonnet: [-0.20, 0.20, 0.44, 0.96], roof: [-0.30, 0.30, -0.62, -0.08], deck: [-0.5, 0.5, -1.0, -0.84] },
 };
 
 // ---- who they are ----------------------------------------------------------------------------------
@@ -171,6 +177,11 @@ const PADDOCK = {
          suf: ['Racing', 'Motorsport', 'Racing Club', 'Heroes', 'Autosport', 'Racing Team', 'GT', 'Motor Club'] },
   a480: { klass: 'HYPER', pre: ['Aurore', 'Mistral', 'Tramontane', 'Kumo', 'Hayate', 'Raijin', 'Solstice', 'Borealis', 'Vostok', 'Titan', 'Helios', 'Écurie Lumière', 'Scuderia Volpe', 'Équipe Vingt-Quatre', 'Sirocco', 'Polaris', 'Meteor', 'Corona', 'Tsunami', 'Ventoux', 'Zephyr', 'Arcadia', 'Bifrost', 'Calypso', 'Daedalus', 'Elysium', 'Fenrir', 'Galatea', 'Horizon', 'Ionosphere', 'Juno', 'Krakatoa', 'Leviathan', 'Midnight Sun', 'Nebula', 'Orion'],
           suf: ['Hypercar', 'Endurance', 'Works', 'Factory', 'Prototype', 'Racing', 'Le Mans', 'Sport'] },
+  // (the cars of 2026-10-10 never had generated names: these hats only feed the draw that is thrown away)
+  m4: { klass: 'GT3', pre: Array.from({ length: 36 }, (_, k) => 'M' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
+  p992: { klass: 'GT3', pre: Array.from({ length: 36 }, (_, k) => 'P' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
+  hura: { klass: 'GT3', pre: Array.from({ length: 36 }, (_, k) => 'H' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
+  f122: { klass: 'PRO', pre: Array.from({ length: 36 }, (_, k) => 'F' + k), suf: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] },
 };
 
 // ---- a pride flag, as paint -----------------------------------------------------------------
@@ -250,6 +261,8 @@ function placer(key) {
 const uv = name => { const c = atlas.cells[name]; if (!c) throw new Error('no sticker called ' + name); return [c.x / atlas.size[0], c.y / atlas.size[1], c.w / atlas.size[0], c.h / atlas.size[1]]; };
 const isBadge = n => SPONSORS.find(s => s.n === n)?.lay === 'badge';
 
+// low cars with little flank: two-digit numbers, a smaller number panel, a longer title
+const SMALL = new Set(['a480', 'f122']);
 function build(key, carIx) {
   const Z = ZONES[key], P = PADDOCK[key];
   if (!Z || !P) throw new Error(`bake: no zones or paddock for ${key} — add them at the top of tools/livery/bake.mjs`);
@@ -292,7 +305,7 @@ function build(key, carIx) {
     if (everyName.has(name)) throw new Error(`bake: two teams are called ${name}`);
     everyName.add(name);
     let num;
-    do { num = 1 + Math.floor(r() * (key === 'a480' ? 99 : 199)); } while (numbers.has(num));
+    do { num = 1 + Math.floor(r() * (SMALL.has(key) ? 99 : 199)); } while (numbers.has(num));
     numbers.add(num);
     const others = [];
     const cats = [...new Set(SPONSORS.map(s => s.cat))].sort(() => r() - 0.5);
@@ -349,11 +362,11 @@ function build(key, carIx) {
       }
     };
     const doorMidX = (Z.door[0] + Z.door[1]) / 2;
-    number('side', Z.door, key === 'a480' ? 0.40 : 0.50, [Z.door[0] + 0.12, (Z.door[2] + Z.door[3]) / 2]);
+    number('side', Z.door, SMALL.has(key) ? 0.40 : 0.50, [Z.door[0] + 0.12, (Z.door[2] + Z.door[3]) / 2]);
     number('top', Z.bonnet, 0.44, null);
     if (style !== 'clean') number('top', Z.roof, 0.46, null);
     // the title sponsor: big, on the door and the bonnet (and the quarter when there is room)
-    sponsor(title, 'side', Z.door, key === 'a480' ? 1.25 : 1.05, { want: [doorMidX + 0.14, (Z.door[2] + Z.door[3]) / 2 + 0.03], plate: style === 'bomb' && r() < 0.5 });
+    sponsor(title, 'side', Z.door, SMALL.has(key) ? 1.25 : 1.05, { want: [doorMidX + 0.14, (Z.door[2] + Z.door[3]) / 2 + 0.03], plate: style === 'bomb' && r() < 0.5 });
     sponsor(title, 'top', Z.bonnet, 0.80, { plate: false });
     if (style !== 'clean') sponsor(title, 'side', Z.quarter, 0.62, { plate: false });
     // the others
