@@ -371,9 +371,11 @@ std::vector<Home::Opt> Home::setupRows() const {
   // (Adam, 2026-10-10: "the ui for selecting a race type is confusing as fuck")
   // ONE row says what kind of race this is, and it is the same list whatever the car. A type that needs
   // a particular car puts you in it (set "typeX"); the arcade ones are the Xingus styles under plain names.
-  rows.push_back({"RACE TYPE", "typeX", {{"hotlap", "HOT LAP"}, {"race", "RACE"}, {"gt", "MULTICLASS"}, {"x:endurance", "ENDURANCE"},
-                                         {"x:rally", "RALLY STAGE"}, {"x:rallycross", "RALLYCROSS"}, {"x:derby", "DEMO DERBY"}, {"x:gt3", "ARCADE RACE"},
-                                         {"x:gt3lonely", "ARCADE HOT LAP"}, {"x:hotlaps", "RALLY PRACTICE"}, {"x:rallygt", "RALLY GT"}}});
+  // (same day: "lets get strip the race selector to the basics") RACE offers the three real ones and nothing
+  // else; the arcade ones are behind the hub's XINGUS tile, which offers only those. Neither list leads into the other.
+  if (!S.xOn) rows.push_back({"RACE TYPE", "typeX", {{"hotlap", "HOT LAP"}, {"race", "RACE"}, {"gt", "MULTICLASS"}}});
+  else rows.push_back({"RACE TYPE", "typeX", {{"x:gt3", "RACE"}, {"x:gt3lonely", "HOT LAP"}, {"x:endurance", "ENDURANCE"}, {"x:rally", "RALLY STAGE"},
+                                              {"x:hotlaps", "RALLY PRACTICE"}, {"x:rallycross", "RALLYCROSS"}, {"x:rallygt", "RALLY GT"}, {"x:derby", "DEMO DERBY"}}});
   if (!S.xOn) rows.push_back({"CAR", "carX", {{"f4", "F4"}, {"f1", "F1"}, {"gt3", "GT3"}, {"gt4", "GT4"}, {"hyper", "HYPERCAR"}, {"rally", "RALLY"}}});
   // the paddles as the gearbox, in any car (Xingus has its own row below)
   if (!S.xOn) rows.push_back({"GEARS", "gears", {{"auto", "AUTOMATIC"}, {"manual", "MANUAL - PADDLES (E / Q)"}}});
