@@ -22,7 +22,7 @@ struct MenuSave {
   std::string track = "monza", car = "f1", mode = "race", tier = "medium", start = "mid";
   int grid = 22, laps = 3;
   bool noDnf = false;
-  std::string time = "live", weather = "live", battle = "medium", field = "f1", theme = "pro", music = "on";
+  std::string time = "live", weather = "live", battle = "medium", field = "f1", theme = "pro", colour = "film", music = "on";
   std::map<std::string, std::string> teams;      // league -> team key ("" = none yet)
   int ffb = 50, cam = 0, volume = 8;             // native only. ffb: percent of the bridge's ceiling (Adam: "starts at 50%")
   bool line = false;
@@ -36,6 +36,7 @@ struct MenuSave {
   std::string gears = "auto";                   // native only: "manual" = the paddles are the gearbox, in any car (Xingus keeps its own, xGears)
   std::string gtClass = "gt3";
   std::string xStyle = "gt3", xGears = "manual", xTrack, xHeil = "heilgrand", xField = "4fun";
+  int xMinutes = 30;                 // Xingus ENDURANCE: how long the race is, 5 minutes to 6 hours
   int xBots = 0;                                 // 0 = the style's own number
   void load(const std::string &path);
   void save(const std::string &path) const;
@@ -62,7 +63,9 @@ class Home {
   void mouse(float x, float y, bool click);
   void draw(Renderer &R, float k, double clock, const LiveTower &live);
   // sets the menu's colours from the THEME setting; true when it is the pro look (homestyle.hpp)
-  bool style() const;
+  bool style(double clock = -1) const;
+  // Xingus ENDURANCE: seconds the race runs for, or 0 when it is run to a number of laps
+  double timeLimit() const { return S.xOn && S.xStyle == "endurance" ? S.xMinutes * 60.0 : 0; }
   // the pro menus stand on a photograph, not a live race (Renderer::photoShow): which one, and the band of the screen it fills
   int photoIndex(double clock, int count) const;
   bool hub() const { return page == "home"; }
@@ -116,12 +119,14 @@ class Home {
   int garageAt = -1;
   struct Outline { std::vector<float> xy; double len = 0; float x0 = 0, y0 = 0, x1 = 1, y1 = 1; bool ok = false; };
   std::map<std::string, Outline> outlines;
+  std::map<std::string, std::vector<float>> lapTimes;      // circuit/car -> when the map's little car reaches each point of the outline
   const Outline &outline(const std::string &id);
   void drawMap(Renderer &R, float k, float x, float y, float w, float h, const std::string &id, bool car, double clock);
   void build();
   void lightsOut();
   struct Opt { std::string label, key; std::vector<std::pair<std::string, std::string>> opts; };
   std::vector<Opt> setupRows() const;
+  static Opt colourRow();              // SETTINGS - COLOUR
   std::vector<Opt> heilRows() const;
   struct Circuit { std::string id, name, tag; };
   std::vector<Circuit> extra;                     // optional circuits found on this machine (home.cpp OPTIONAL)

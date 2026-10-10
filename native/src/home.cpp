@@ -47,6 +47,8 @@ static const XStyle XSTYLES[] = {
     {"rallygt", "RALLY GT", "GT CARS ON THE STAGES", "gt", 9, false, false, false},
     {"gt3", "GT3", "FAST SEDAN RACE", "gt", 17, false, false, false},
     {"gt3lonely", "GT3 LONELY", "ALONE - GT CAR", "gt", 0, false, false, false},
+    // (Adam, 2026-10-09: "add a mode on xingus, endurance, its timed. from 5 mins to 6 hrs")
+    {"endurance", "ENDURANCE", "AGAINST THE CLOCK - GT CARS", "gt", 17, false, false, false},
     {"derby", "DEMO DERBY", "NOBODY IS CAREFUL", "gt", 21, true, false, false},
 };
 const XStyle &xstyle(const std::string &key) { for (const XStyle &x : XSTYLES) if (key == x.key) return x; return XSTYLES[4]; }
@@ -105,6 +107,12 @@ static std::string sayFor(const std::string &row, const std::string &v) {
     if (row == l.row) { if (v == l.val) return l.line; if (std::string(l.val) == "*") star = l.line; }
   return star ? star : "";
 }
+// SETTINGS - COLOUR: the pro look's one colour (homestyle.hpp STYLE_COLOURS)
+Home::Opt Home::colourRow() {
+  Home::Opt o{"COLOUR", "colour", {}};
+  for (const StyleColour &c : STYLE_COLOURS) o.opts.push_back({c.key, c.label});
+  return o;
+}
 static std::string greeting() {
   const std::time_t t = std::time(nullptr);
   const int h = std::localtime(&t)->tm_hour, r = std::rand() & 1;
@@ -123,14 +131,14 @@ void MenuSave::load(const std::string &path) {
     if (k == "track") track = v; else if (k == "car") car = v; else if (k == "mode") mode = v; else if (k == "tier") tier = v;
     else if (k == "start") start = v; else if (k == "grid") grid = std::atoi(v.c_str()); else if (k == "laps") laps = std::atoi(v.c_str());
     else if (k == "noDnf") noDnf = v == "1"; else if (k == "time") time = v; else if (k == "weather") weather = v;
-    else if (k == "battle") battle = v; else if (k == "field") field = v; else if (k == "theme") theme = v; else if (k == "music") music = v;
+    else if (k == "battle") battle = v; else if (k == "field") field = v; else if (k == "theme") theme = v; else if (k == "colour") colour = v; else if (k == "music") music = v;
     else if (k == "team.f1") teams["f1"] = v; else if (k == "team.gt3") teams["gt3"] = v; else if (k == "team.f4") teams["f4"] = v;
     else if (k == "ffb") ffbSeen = std::atoi(v.c_str()); else if (k == "ffbv") ffbVer = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
     else if (k == "volume") volume = std::atoi(v.c_str()); else if (k == "line") line = v == "1";
     else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "gears") gears = v == "manual" ? "manual" : "auto";
     else if (k == "gton") gtOn = v == "1"; else if (k == "gtclass") gtClass = gtClassOf(v) >= 0 ? v : "gt3";
-    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
+    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "xminutes") xMinutes = std::max(5, std::min(360, std::atoi(v.c_str()))); else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
     else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
   xStyle = xstyle(xStyle).key; xBots = std::max(0, std::min(60, xBots));
@@ -147,11 +155,11 @@ void MenuSave::save(const std::string &path) const {
   std::ofstream f(path);
   f << "track " << track << "\ncar " << car << "\nmode " << mode << "\ntier " << tier << "\nstart " << start << "\ngrid " << grid
     << "\nlaps " << laps << "\nnoDnf " << (noDnf ? 1 : 0) << "\ntime " << time << "\nweather " << weather << "\nbattle " << battle
-    << "\nfield " << field << "\ntheme " << theme << "\nmusic " << music << "\nffbv 2\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
+    << "\nfield " << field << "\ntheme " << theme << "\ncolour " << colour << "\nmusic " << music << "\nffbv 2\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
     << "\nline " << (line ? 1 : 0) << "\n";
   if (modelSeen || !model.empty()) f << "model " << (model.empty() ? "-" : model) << "\n";
   f << "look " << look << "\n";
-  f << "xon " << (xOn ? 1 : 0) << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
+  f << "xon " << (xOn ? 1 : 0) << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
   f << "gears " << gears << "\n";
   f << "gton " << (gtOn ? 1 : 0) << "\ngtclass " << gtClass << "\n";
   if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
@@ -248,6 +256,7 @@ std::string Home::get(const std::string &key) const {
   if (key == "carX") return seatCar();
   if (key == "gears") return S.gears;
   if (key == "xStyle") return S.xStyle;
+  if (key == "xMinutes") return std::to_string(S.xMinutes);
   if (key == "xGears") return S.xGears == "auto" ? "auto" : "manual";
   if (key == "xBots") return S.xBots > 0 ? std::to_string(S.xBots) : "style";
   if (key == "xField") return S.xField == "skilled" ? "skilled" : "4fun";
@@ -266,6 +275,7 @@ std::string Home::get(const std::string &key) const {
   if (key == "time") return S.time;
   if (key == "weather") return S.weather;
   if (key == "theme") return S.theme == "light" ? "pro" : S.theme;
+  if (key == "colour") return S.colour;
   if (key == "music") return S.music;
   if (key == "ffb") return std::to_string(S.ffb);
   if (key == "cam") return std::to_string(S.cam);
@@ -277,7 +287,7 @@ void Home::set(const std::string &key, const std::string &v) {
   if (key == "mode") S.mode = v; else if (key == "laps") S.laps = std::atoi(v.c_str()); else if (key == "grid") S.grid = std::atoi(v.c_str());
   else if (key == "tier") S.tier = v; else if (key == "battle") S.battle = v; else if (key == "start") S.start = v;
   else if (key == "noDnf") S.noDnf = v == "true"; else if (key == "field") S.field = v; else if (key == "time") S.time = v;
-  else if (key == "weather") S.weather = v; else if (key == "theme") S.theme = v; else if (key == "music") S.music = v;
+  else if (key == "weather") S.weather = v; else if (key == "theme") S.theme = v; else if (key == "colour") S.colour = v; else if (key == "music") S.music = v;
   else if (key == "ffb") S.ffb = std::atoi(v.c_str()); else if (key == "cam") S.cam = std::atoi(v.c_str());
   else if (key == "volume") S.volume = std::atoi(v.c_str()); else if (key == "line") S.line = v == "true";
   else if (key == "model") { S.model = v; S.modelSeen = true; dirty = true; }
@@ -291,6 +301,7 @@ void Home::set(const std::string &key, const std::string &v) {
     garageAt = -1; dirty = true;
   }
   else if (key == "gears") S.gears = v == "manual" ? "manual" : "auto";
+  else if (key == "xMinutes") S.xMinutes = std::atoi(v.c_str());
   else if (key == "xStyle") S.xStyle = xstyle(v).key; else if (key == "xGears") S.xGears = v;
   else if (key == "xBots") S.xBots = v == "style" ? 0 : std::atoi(v.c_str()); else if (key == "xField") S.xField = v;
   else if (key == "heil") S.xHeil = v;
@@ -332,8 +343,11 @@ std::vector<Home::Opt> Home::setupRows() const {
     rows.push_back(st);
     rows.push_back({"GEARS", "xGears", {{"manual", "PADDLES (E / Q)"}, {"auto", "AUTOMATIC"}}});
     const XStyle &x = xstyle(S.xStyle);
+    if (x.rivals && S.xStyle == "endurance")
+      rows.push_back({"LENGTH", "xMinutes", {{"5", "5 MIN"}, {"10", "10 MIN"}, {"15", "15 MIN"}, {"30", "30 MIN"}, {"45", "45 MIN"}, {"60", "1 HOUR"},
+                                               {"120", "2 HOURS"}, {"180", "3 HOURS"}, {"240", "4 HOURS"}, {"360", "6 HOURS"}}});
     if (x.rivals) {
-      rows.push_back({"LAPS", "laps", {{"2", "2"}, {"3", "3"}, {"5", "5"}, {"10", "10"}, {"20", "20"}}});
+      if (S.xStyle != "endurance") rows.push_back({"LAPS", "laps", {{"2", "2"}, {"3", "3"}, {"5", "5"}, {"10", "10"}, {"20", "20"}}});
       rows.push_back({"BOTS", "xBots", {{"style", std::to_string(x.rivals)}, {"29", "29"}, {"49", "49"}}});
       if (circuitId() == "speedway") rows.push_back({"FIELD", "xField", {{"skilled", "SKILLED"}, {"4fun", "4FUN"}}});
     }
@@ -517,7 +531,7 @@ void Home::build() {
       if (!keys.empty() && S.teams[S.car] == keys[(size_t)cur()]) show("home"); else join();
     }, nullptr, nullptr});
   } else if (page == "settings") {
-    optItems({{"THEME", "theme", {{"pro", "PRO"}, {"dark", "NIGHT PADDOCK"}, {"halloween", "HALLOWEEN"}}},
+    optItems({{"THEME", "theme", {{"pro", "PRO"}, {"dark", "NIGHT PADDOCK"}, {"halloween", "HALLOWEEN"}}}, colourRow(),
               {"MUSIC", "music", {{"on", "ON"}, {"low", "QUIET"}, {"off", "OFF"}}},
               {"VIEW", "cam", {{"0", "ONBOARD"}, {"1", "CHASE"}, {"2", "NOSE"}, {"3", "T-CAM"}}},
               {"LOOK", "look", {{"film", "FILM (SHADOWS, BLOOM)"}, {"plain", "PLAIN (FASTER)"}}},
@@ -597,18 +611,93 @@ void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, con
   R.path(p.data(), n, 8 * k, INK, true);          // .casing
   R.path(p.data(), n, 2.5f * k, STYLE_PRO ? hex("#0b0c10") : CARD, true);      // .tarmac
   if (car) {
-    const double u = std::fmod(clock / 9.0, 1.0) * n;      // a lone car lapping the outline, forever
-    const int i = (int)u % n, j = (i + 1) % n;
-    const float f = (float)(u - std::floor(u));
+    // THE CAR ON THE MAP (Adam, 2026-10-09: "make the lil dot racing on the track preview a mini car
+    // that is actually the car u have selected, and make it slow down and brake and accel on the
+    // line"). A lap of the outline at the speeds that car would do: as fast through each bend as
+    // its grip allows, braking into it as hard as it can and no harder, and out of it on its power.
+    // Worked out once a circuit and car, as the time at which it reaches every point; then played
+    // back six times faster than life, because a real lap of Spa is two and a half minutes.
+    const std::string ck = seatCar();
+    struct Kind { const char *key; float vmax, lat, brake, accel; int shape; };      // m/s, m/s2; shape 0 single-seater, 1 closed car
+    static const Kind KINDS[] = {{"f1", 92, 38, 44, 13, 0}, {"f4", 62, 19, 17, 6, 0}, {"gt3", 76, 21, 17, 7, 1},
+                                 {"gt4", 67, 16, 13.5f, 5.5f, 1}, {"hyper", 88, 29, 23, 10, 1}, {"rally", 58, 13, 11, 5, 1}};
+    const Kind *K = &KINDS[2];
+    for (const Kind &q : KINDS) if (ck == q.key) K = &q;
+    std::vector<float> &T = lapTimes[id + "/" + K->key];
+    if ((int)T.size() != n + 1) {
+      // metres, from the outline itself
+      std::vector<float> ds((size_t)n), v((size_t)n);
+      auto P2 = [&](int q, float &px, float &py) { q = ((q % n) + n) % n; px = o.xy[(size_t)q * 2]; py = o.xy[(size_t)q * 2 + 1]; };
+      for (int q = 0; q < n; q++) {
+        float ax, ay, bx, by, cx2, cy2;
+        P2(q - 2, ax, ay); P2(q, bx, by); P2(q + 2, cx2, cy2);
+        float nx, ny; P2(q + 1, nx, ny);
+        ds[(size_t)q] = std::max(0.5f, std::hypot(nx - bx, ny - by));
+        // the bend here: the circle through three points, as 2 x area / the product of the sides
+        const float la = std::hypot(bx - ax, by - ay), lb = std::hypot(cx2 - bx, cy2 - by), lc = std::hypot(cx2 - ax, cy2 - ay);
+        const float area2 = std::fabs((bx - ax) * (cy2 - ay) - (by - ay) * (cx2 - ax));
+        const float curv = area2 * 2 / std::max(1.0f, la * lb * lc);
+        v[(size_t)q] = std::min(K->vmax, std::sqrt(K->lat / std::max(curv, 1e-4f)));
+      }
+      // no faster than it can stop for what is coming, nor than it can have got up to from what is behind (twice round: it is a lap)
+      for (int pass = 0; pass < 2; pass++) {
+        for (int q = 2 * n - 1; q >= 0; q--) { const int i0 = q % n, i1 = (q + 1) % n; v[(size_t)i0] = std::min(v[(size_t)i0], std::sqrt(v[(size_t)i1] * v[(size_t)i1] + 2 * K->brake * ds[(size_t)i0])); }
+        for (int q = 0; q < 2 * n; q++) { const int i0 = q % n, i1 = (q + 1) % n; const float pull = K->accel * (1 - 0.6f * v[(size_t)i0] / K->vmax); v[(size_t)i1] = std::min(v[(size_t)i1], std::sqrt(v[(size_t)i0] * v[(size_t)i0] + 2 * pull * ds[(size_t)i0])); }
+      }
+      T.assign((size_t)n + 1, 0);
+      for (int q = 0; q < n; q++) T[(size_t)q + 1] = T[(size_t)q] + ds[(size_t)q] / std::max(3.0f, (v[(size_t)q] + v[(size_t)((q + 1) % n)]) / 2);
+    }
+    const float lap = T[(size_t)n], tt = (float)std::fmod(clock * 6.0, (double)std::max(1.0f, lap));
+    int i = (int)(std::upper_bound(T.begin(), T.end(), tt) - T.begin()) - 1;
+    i = std::max(0, std::min(n - 1, i));
+    const int j = (i + 1) % n;
+    const float seg = std::max(1e-4f, T[(size_t)i + 1] - T[(size_t)i]), f = (tt - T[(size_t)i]) / seg;
     const float cx = p[(size_t)i * 2] + (p[(size_t)j * 2] - p[(size_t)i * 2]) * f, cy = p[(size_t)i * 2 + 1] + (p[(size_t)j * 2 + 1] - p[(size_t)i * 2 + 1]) * f;
-    const float r = std::max(3.0f, size * 0.016f * sc) * k;
-    R.circle(cx, cy, r * 1.3f, INK);
-    R.circle(cx, cy, r, RED);
+    // is it on the brakes? the next stretch takes longer a metre than this one
+    const int j2 = (j + 1) % n;
+    const float sNow = std::hypot(o.xy[(size_t)j * 2] - o.xy[(size_t)i * 2], o.xy[(size_t)j * 2 + 1] - o.xy[(size_t)i * 2 + 1]) / seg;
+    const float sNext = std::hypot(o.xy[(size_t)j2 * 2] - o.xy[(size_t)j * 2], o.xy[(size_t)j2 * 2 + 1] - o.xy[(size_t)j * 2 + 1]) / std::max(1e-4f, T[(size_t)(j == 0 ? 1 : j + 1 > n ? n : j + 1)] - T[(size_t)j]);
+    const bool braking = sNext < sNow * 0.965f;
+    // ---- the car itself, from above, pointing the way it is going: big enough to read, whatever the map's size
+    const float hx = p[(size_t)j * 2] - p[(size_t)i * 2], hy = p[(size_t)j * 2 + 1] - p[(size_t)i * 2 + 1];
+    const float deg = std::atan2(hy, hx) * 180 / (float)PI;
+    const float L = std::max(13.0f, std::min(w, h) * 0.085f) * k, Wd = L * (K->shape ? 0.46f : 0.40f);
+    Rgba body = RED, second = INK;
+    { const std::string tkq = teamKey(); const Team *tq = tkq.empty() ? nullptr : teamByKey(tkq); if (tq) { body = hex(tq->col); second = hex(tq->fg.empty() ? "#ffffff" : tq->fg); } }
+    const Rgba TYRE = hex("#0a0a0c"), GLASS = hex("#11161c"), STOP = hex("#ff2a2a");
+    const bool flat = R.hudFlat;
+    R.hudFlat = false;                               // (the pro look turns tilting off; a car on a map has to turn)
+    R.hudRot(cx, cy, deg);
+    auto box = [&](float x0, float y0, float x1, float y1, const Rgba &c) { R.rect(cx + x0 * L, cy + y0 * Wd, (x1 - x0) * L, (y1 - y0) * Wd, c); };
+    if (braking) R.circle(cx - L * 0.55f, cy, Wd * 0.75f, alpha_(STOP, 0.45f));
+    if (K->shape == 0) {
+      // a single-seater: four wheels out in the air, a thin body, a wing at each end
+      for (float wx : {-0.36f, 0.30f}) for (float wy : {-0.62f, 0.38f}) box(wx, wy, wx + 0.20f, wy + 0.24f, TYRE);
+      box(0.40f, -0.50f, 0.50f, 0.50f, second);                               // front wing
+      box(-0.50f, -0.42f, -0.42f, 0.42f, second);                             // rear wing
+      box(-0.44f, -0.17f, 0.46f, 0.17f, body);                                // tub and nose
+      box(-0.30f, -0.30f, 0.06f, 0.30f, body);                                // sidepods
+      box(-0.06f, -0.09f, 0.10f, 0.09f, GLASS);                               // the cockpit
+    } else {
+      // a closed car: one body, its wheels tucked in, a windscreen and a rear window
+      for (float wx : {-0.36f, 0.24f}) for (float wy : {-0.56f, 0.44f}) box(wx, wy, wx + 0.18f, wy + 0.12f, TYRE);
+      box(-0.50f, -0.44f, 0.50f, 0.44f, body);
+      box(0.04f, -0.34f, 0.22f, 0.34f, GLASS);                                // windscreen
+      box(-0.30f, -0.30f, -0.18f, 0.30f, GLASS);                              // rear window
+      box(-0.16f, -0.36f, 0.02f, 0.36f, second);                              // the roof, in the team's second colour
+      if (K->key[0] != 'r') box(-0.54f, -0.46f, -0.47f, 0.46f, second);       // a wing (not on the rally car)
+    }
+    if (braking) { box(-0.52f, -0.40f, -0.47f, -0.18f, STOP); box(-0.52f, 0.18f, -0.47f, 0.40f, STOP); }
+    R.hudRot(0, 0, 0);
+    R.hudFlat = flat;
   }
 }
 
 // ---- drawing ---------------------------------------------------------------------------
-bool Home::style() const { return applyStyle(S.theme); }
+bool Home::style(double clock) const {
+  static const char *force = std::getenv("XBR_COLOUR");            // for a photograph: XBR_COLOUR=fall
+  return applyStyle(force ? "pro" : S.theme, force ? force : S.colour, clock < 0 ? now : clock);
+}
 int Home::photoIndex(double clock, int count) const {
   if (count <= 0) return 0;
   if (page == "home") return (int)(clock / 11.0) % count;          // the front page turns its photographs over
@@ -725,6 +814,15 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   };
 
   if (page != "home") R.rect(0, 0, (float)R.W, (float)R.H, alpha_(PAPER, STYLE_PRO ? 0.66f : 0.88f));       // the wash: the race is still there, behind
+  // a moving colour is in the air of the page as well: two soft bands of it, breathing, under everything
+  if (STYLE_PRO && STYLE_MOVING && page != "home") {
+    const int N = 26;
+    for (int q = 0; q < N; q++) {
+      const float t = (float)q / (N - 1), yy = t * (float)R.H;
+      const float a = 0.085f * (0.5f + 0.5f * std::sin(t * 3.1f + (float)clock * 0.11f)) + 0.03f;
+      R.rect(0, yy, (float)R.W, (float)R.H / N + 1, alpha_(mix(STYLE_GLOW, RED, t), a));
+    }
+  }
 
   if (page == "home") { drawHub(R, k, clock); return; }
   if (page == "career") { drawCareer(R, k, clock); return; }
@@ -1062,7 +1160,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     title("SETTINGS");
     sayBox(W - 24 - std::min(520.0f, width(17, sayText, MK) + 30), 30);
     const std::vector<Opt> rows = {
-      {"THEME", "theme", {{"pro", "PRO"}, {"dark", "NIGHT PADDOCK"}, {"halloween", "HALLOWEEN"}}},
+      {"THEME", "theme", {{"pro", "PRO"}, {"dark", "NIGHT PADDOCK"}, {"halloween", "HALLOWEEN"}}}, colourRow(),
       {"MUSIC", "music", {{"on", "ON"}, {"low", "QUIET"}, {"off", "OFF"}}},
       {"VIEW", "cam", {{"0", "ONBOARD"}, {"1", "CHASE"}, {"2", "NOSE"}, {"3", "T-CAM"}}},
       {"IDEAL LINE", "line", {{"false", "HIDDEN"}, {"true", "SHOWN"}}},

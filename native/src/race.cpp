@@ -143,7 +143,7 @@ std::function<double(double)> heightFromSlope(const Track &track, const std::fun
 // ======================================================================================
 Race::Race(const RaceOptions &o)
     : track(o.track), lines(o.lines), spec(o.spec), standIn(o.standIn), sideLock(o.sideLock), styles(o.styles),
-      openOn(o.opening), xingus(o.xingus), noDnf(o.noDnf), laps(o.laps), slots(o.slots), pits(o.pits), seed(o.seed) {
+      openOn(o.opening), xingus(o.xingus), noDnf(o.noDnf), timeLimit(o.timeLimit), laps(o.laps), slots(o.slots), pits(o.pits), seed(o.seed) {
   const Track &t = *track;
   // XINGUS MODE and its STYLES: which tune the car wears, whether anybody else
   // is out there, whether the others have stopped being careful.
@@ -1418,6 +1418,16 @@ void Race::tick(double dt, const PlayerInput *playerInput) {
   }
 
   carContact();
+
+  // ---- a timed race (Xingus ENDURANCE): the clock, not the lap board, says when
+  if (timeLimit > 0 && !timeUp && state == RaceState::Green) {
+    int lead = 0;
+    for (const Entry &e : entries) if (!e.retired) lead = std::max(lead, e.lap);
+    if (time - greenT >= timeLimit) {
+      timeUp = true; laps = lead + 1;
+      log("flag", "TIME IS UP — THE LEADER'S NEXT CROSSING OF THE LINE ENDS IT", nullptr, "time");
+    } else laps = std::max(laps, lead + 2);
+  }
 
   // ---- projection, laps, rules ------------------------------------------------------
   for (Entry &e : entries) {

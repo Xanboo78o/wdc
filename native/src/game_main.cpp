@@ -168,6 +168,7 @@ struct Devices {
 // ---------------------------------------------------------------------------
 struct RaceSetup {
   int grid = 22, laps = 3, slot = 12;
+  double timeLimit = 0;                // seconds; 0 = run to `laps` (Xingus ENDURANCE)
   std::string tier = "medium", battle, teamKey, field = "f1";
   bool noDnf = false, standIn = false;
   double seed = 1;
@@ -268,6 +269,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     o.track = &S.track; o.lines = S.lines.get(); o.spec = S.spec;
     o.slots = gridSlots(S.track, rs->grid);
     o.laps = rs->laps; o.grid = rs->grid; o.playerGrid = rs->slot; o.tier = rs->tier; o.player = true;
+    o.timeLimit = rs->timeLimit;
     o.battle = rs->battle; o.noDnf = rs->noDnf; o.seed = rs->seed; o.standIn = rs->standIn;
     o.playerTeam = rs->standIn ? nullptr : teamByKey(rs->teamKey);
     if (rs->freePace) o.duel = false;
@@ -729,6 +731,8 @@ int main(int argc, char **argv) {
     showLoading(home.gt() ? "THREE CLASSES. ONE ROAD. SOLVING A LINE FOR EACH..." : cfg.mode == "race" ? "BUILDING A GRID OF " + std::to_string(cfg.grid) + "..." : "SOLVING THE RACING LINE... (IT IS THE FAST ONE)");
     RaceSetup rs;
     rs.grid = cfg.grid; rs.laps = cfg.laps; rs.tier = cfg.tier;
+    rs.timeLimit = home.timeLimit();
+    if (rs.timeLimit > 0) rs.laps = 3;      // (kept ahead of the leader by the race itself until the clock runs out)
     rs.slot = std::max(1, std::min(cfg.grid, startArg > 0 ? startArg : home.startSlot(cfg.grid)));
     rs.battle = cfg.tier == "supercasual" ? cfg.battle : "";
     rs.noDnf = cfg.noDnf; rs.teamKey = cfg.teams[cfg.car]; rs.field = cfg.field;
@@ -899,7 +903,7 @@ int main(int argc, char **argv) {
     static unsigned mirrorTick = 0;
     const bool driving = screen != HOME && screen != RESULTS;
     // THE PRO MENUS stand on a photograph (frames of the cinematic advert), not on a live race
-    const bool photoMenu = screen == HOME && home.style() && R.photoCount() > 0;
+    const bool photoMenu = screen == HOME && home.style(clock) && R.photoCount() > 0;
     if (photoMenu) {
       R.mirrorClear();
       R.photoShow(home.photoIndex(clock, R.photoCount()), clock, home.hub() ? 0.115f : 0.0f, home.hub() ? 0.885f : 1.0f);
@@ -916,7 +920,7 @@ int main(int argc, char **argv) {
     R.hudBegin();
     R.drawRain(f);
     // the menus' own look (homestyle.hpp): PRO draws square, level and plain
-    R.hudFlat = home.style() && (screen == HOME || screen == RESULTS);
+    R.hudFlat = home.style(clock) && (screen == HOME || screen == RESULTS);
     if (screen == HOME) home.draw(R, K, clock, liveOf());
     else if (screen == RESULTS && S.race) { hud.results(R, K, theme, *S.race, resTitle, resLine); home.drawOutcome(R, K); }
     else {

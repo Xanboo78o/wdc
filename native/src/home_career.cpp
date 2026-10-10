@@ -289,6 +289,15 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
     const float bar = H * 0.115f, RULE = 3;
     for (int i = 0; i < 28; i++) P.rect((float)i * 22, bar, 22.5f, H - 2 * bar, alpha_(PAPER, 0.62f * (1 - (float)i / 28)));
     for (int i = 0; i < 22; i++) P.rect(W - (float)(i + 1) * 22, bar, 22.5f, H - 2 * bar, alpha_(PAPER, 0.55f * (1 - (float)i / 22)));
+    // a moving colour breathes over the photograph too (homestyle.hpp STYLE_MOVING)
+    if (STYLE_MOVING) {
+      const int N = 22;
+      for (int q = 0; q < N; q++) {
+        const float t = (float)q / (N - 1);
+        const float a = 0.10f * (0.5f + 0.5f * std::sin(t * 3.1f + (float)clock * 0.11f)) + 0.03f;
+        P.rect(0, bar + t * (H - 2 * bar), W, (H - 2 * bar) / N + 1, alpha_(mix(STYLE_GLOW, RED, t), a));
+      }
+    }
     // the photograph turns over every eleven seconds, through black
     {
       const float ph = (float)std::fmod(clock, 11.0), a = std::max(1 - ph / 0.8f, (ph - 10.2f) / 0.8f);

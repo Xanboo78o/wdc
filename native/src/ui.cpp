@@ -135,6 +135,14 @@ void GameHud::draw(Renderer &R, float k, const HudTheme &T, const HudIn &in) {
     }
     std::string lapNo = std::to_string(std::max(1, in.lap));
     if (race) lapNo = (race->state == RaceState::Formation ? std::string("F") : std::to_string(std::min(race->laps, me->lap + 1))) + "/" + std::to_string(race->laps);
+    if (race && race->timeLimit > 0) {
+      // a timed race: the lap you are on, and what is left on the clock
+      const int left = (int)race->timeLeft();
+      char tb[32];
+      if (left >= 3600) std::snprintf(tb, sizeof tb, "%d:%02d:%02d", left / 3600, left / 60 % 60, left % 60);
+      else std::snprintf(tb, sizeof tb, "%d:%02d", left / 60, left % 60);
+      lapNo = std::to_string(me->lap + 1) + "  -  " + (race->timeUp ? std::string("LAST LAP") : std::string(tb) + " LEFT");
+    }
     const float lw = text(L, y, 10, "LAP ", DIM, LEFT, B7, 0.2f);
     text(L + lw + 2, y, 10, lapNo, T.ink, LEFT, B7, 0.2f);
     y += 15;

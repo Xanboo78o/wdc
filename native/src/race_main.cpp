@@ -96,6 +96,7 @@ int main(int argc, char **argv) {
   std::vector<std::string> a;
   std::string dataDir = "data", battle, input = "park", xcar;
   double seed = 7, every = 1, maxTime = -1, wet = 0, rainAt = -1;
+  double timeLimit = 0;
   int playerSlot = 0, probeCar = -1;
   double probeFrom = 0, probeTo = 0;
   bool probeOn = false;
@@ -114,6 +115,7 @@ int main(int argc, char **argv) {
     const auto flag01 = [&]() { const std::string v = val(); if (v != "0" && v != "1") { std::fprintf(stderr, "xbr-race: %s takes 0 or 1\n", s.c_str()); std::exit(2); } return v == "1"; };
     if (s == "--data") dataDir = val();
     else if (s == "--seed") seed = std::atof(val());
+    else if (s == "--time") timeLimit = std::atof(val());          // a timed race: seconds of green (Race::timeLimit)
     else if (s == "--pits") pits = flag01();
     else if (s == "--rules") rules = flag01();
     else if (s == "--duel") duel = flag01();
@@ -180,6 +182,7 @@ int main(int argc, char **argv) {
   o.track = &track; o.lines = &lines; o.spec = &spec;
   o.slots = gridSlots(track, grid);
   o.laps = laps; o.grid = grid; o.tier = tier; o.seed = seed;
+  o.timeLimit = timeLimit;
   o.player = playerSlot > 0; if (playerSlot > 0) o.playerGrid = playerSlot;
   o.pits = pits; o.rules = rules; o.duel = duel; o.drs = drs; o.noDnf = noDnf; o.standIn = standIn; o.battle = battle;
   o.xingus = !xcar.empty(); if (!xcar.empty()) o.xopt.car = xcar;

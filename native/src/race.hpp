@@ -79,6 +79,7 @@ struct RaceOptions {
   Spec *spec = nullptr;
   std::vector<Slot> slots;
   int laps = 5, grid = 22, playerGrid = 10;
+  double timeLimit = 0;                // seconds of green-flag racing; 0 = the race is run to `laps` (Xingus ENDURANCE sets it)
   std::string tier = "medium";
   double seed = 1;
   bool player = true, pits = true, noDnf = false;
@@ -141,6 +142,11 @@ class Race {
   bool duel, drsRule;
   std::vector<Cheer> cheers;           // YOUR overtakes that stuck: read and clear as you like
   bool noDnf;
+  // A TIMED RACE: when the clock runs out the leader's next crossing of the line ends it. `laps` is kept two ahead of
+  // the leader until then, so everything that asks "how long is left" has an answer.
+  double timeLimit = 0;
+  bool timeUp = false;
+  double timeLeft() const { return timeLimit <= 0 ? 0 : state == RaceState::Green || state == RaceState::Finish || state == RaceState::Over ? (timeLimit - (time - greenT) > 0 ? timeLimit - (time - greenT) : 0) : timeLimit; }
   int laps;
   double peak;
   double time = 0;
