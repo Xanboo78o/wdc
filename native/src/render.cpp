@@ -476,36 +476,64 @@ void main(){
     blade = (uWipe >= 0.0 ? 1.0 : 0.0) * inFan * smoothstep(0.011, 0.004, abs(a01 - bladeA01));
     // ---- how hard the air is pulling at the drops: 0 parked, 1 by about 150 km/h
     float pull = clamp(speed * 0.024, 0.0, 1.0);
-    // ---- A: standing drops. Radius grows a little and the bulge falls as they flatten; they thin out, then vanish.
-    vec3 va = voronoi(P * 17.0);
-    float keepA = step(va.z, water * 0.78 * (1.0 - smoothstep(0.35, 0.85, pull)));
-    float RA = (0.16 + 0.20 * fract(va.z * 7.31)) * (1.0 + 0.5 * pull);
-    vec3 nA = dropNormal(va.xy, RA, 1.0 - 0.75 * pull) * keepA;
-    // ---- B: running drops. The composite velocity over the glass, in screen axes (x right, y up):
+    // ---- the composite velocity over the glass, in screen axes (x right, y up) — what every drop answers to:
     //   gravity pulls down the rake      (0, -9.81 * sin(rake))
-    //   the air pushes up and across      uRainCB[0].xy   (already the air RELATIVE to the car)
+    //   the air pushes up and across      uRainCB[0].xy   (already the air RELATIVE to the car: speed AND wind)
     //   lateral g throws them sideways, braking throws them forward — which on a raked screen is UP
-    vec2 Vf = vec2(0.0, -9.81 * sin(rake)) * 0.35 + uRainCB[0].xy * 0.20 + vec2(-uRainCB[1].x, -uRainCB[1].y * cos(rake)) * 2.4;
+    // (Adam: "react to gs and wind": a corner or a gust is seen in the water at once)
+    vec2 Vf = vec2(0.0, -9.81 * sin(rake)) * 0.35 + uRainCB[0].xy * vec2(0.42, 0.20) + vec2(-uRainCB[1].x, -uRainCB[1].y * cos(rake)) * 5.2;
     float vlen = length(Vf);
     vec2 dir = Vf / max(vlen, 0.001), across = vec2(-dir.y, dir.x);
-    // the drop's own frame: along the flow, and across it; drawn out along the flow by its speed
-    float stretch = 1.0 + 5.0 * clamp(vlen * 0.06, 0.0, 1.0);
-    vec2 Q = vec2(dot(P, dir) / stretch, dot(P, across)) * 23.0 - vec2(dot(uRainCB[3].xy, dir) / stretch, dot(uRainCB[3].xy, across)) * 23.0;
-    vec3 vb = voronoi(Q);
-    float broken = smoothstep(0.12, 0.55, pull + abs(uRainCB[1].x) * 0.12);      // free once speed x drag beats surface tension
-    float keepB = step(vb.z, water * 0.55 * broken);
-    float RB = 0.13 + 0.14 * fract(vb.z * 5.17);
-    vec3 nB = dropNormal(vb.xy, RB, 0.9) * keepB;
-    // back out of the drop's stretched frame into the screen's
-    vec2 leanB = dir * nB.x / stretch + across * nB.y;
-    // ---- together: the normal of the water, and what it does to the picture behind it
-    vec2 lean = nA.xy + leanB;
+    float drive = clamp(vlen * 0.055, 0.0, 1.0);                     // how hard the water is being pushed, 0..1
+    // ---- A: standing drops (Adam: "too big, they need to be more blobby, diff sizes").
+    // Small, and many: most of them specks, a few of them beads (the radius is a random
+    // number raised to a power). None is a circle: its rim is pushed in and out round
+    // its edge by two slow waves of its own, and it sags the way it is being pushed.
+    vec2 PA = vec2(dot(P, dir) / (1.0 + 0.9 * drive), dot(P, across)) * 38.0;
+    vec3 va = voronoi(PA);
+    float keepA = step(va.z, water * 0.86 * (1.0 - smoothstep(0.45, 0.95, pull)));
+    float sizeA = fract(va.z * 7.31);
+    float RA = (0.07 + 0.34 * sizeA * sizeA * sizeA) * (1.0 + 0.35 * pull);
+    float angA = atan(va.y, va.x), phA = va.z * 43.0;
+    float rimA = 1.0 + 0.24 * sin(angA * 2.0 + phA) + 0.15 * sin(angA * 3.0 - phA * 1.7) + 0.08 * sin(angA * 5.0 + phA * 0.6);
+    // sagging: the side the push comes from is flattened, the lee side bulges (va.x runs along the push)
+    vec2 rA = va.xy + vec2(-0.22 * drive * RA, 0.0);
+    vec3 nA = dropNormal(rA, RA * rimA, 1.0 - 0.6 * pull) * keepA;
+    vec2 leanA = dir * nA.x / (1.0 + 0.9 * drive) + across * nA.y;
+    // ---- B: running drops (Adam: "streak not just move"). A drop that has broken free is a
+    // head with a tail: the head a blob, the tail the water it has left behind it, thinning
+    // to nothing. The harder it is driven the longer the tail, and it does not run straight:
+    // it wanders from side to side as it finds its way across the glass.
+    float broken = smoothstep(0.10, 0.50, pull + abs(uRainCB[1].x) * 0.20 + abs(uRainCB[1].y) * 0.10);   // free once the push beats surface tension
+    float tail = 1.6 + 7.0 * drive;                                // how many head-lengths of tail
+    vec2 PB = vec2(dot(P, dir), dot(P, across));
+    vec2 FB = vec2(dot(uRainCB[3].xy, dir), dot(uRainCB[3].xy, across));
+    // lanes across the flow, cells along it; each lane runs at its own pace, and meanders
+    float lane = floor(PB.y * 34.0), lh = rhash(vec2(lane, 4.7));
+    float alongU = (PB.x - FB.x * (0.55 + 0.9 * lh)) * 34.0 / (tail + 1.6) + lh * 9.0;
+    float cellB = floor(alongU), hb = rhash(vec2(lane, cellB));
+    float fx = (fract(alongU) - 0.5) * (tail + 1.6);               // along the flow, in head radii: + is the head end
+    float fy = (fract(PB.y * 34.0) - 0.5) * 2.0 + 0.30 * sin(PB.x * 21.0 + lh * 40.0 + cellB);   // across, -1..1, with the wander in it
+    float keepB = step(hb, water * 0.40 * broken);
+    float RBh = 0.40 + 0.45 * fract(hb * 5.17);                    // the head's radius, in lane half-widths: all sizes
+    float headX = 0.5 * (tail + 1.6) - 1.2;                        // the head sits at the front of its cell
+    float back = max(headX - fx, 0.0);                             // how far behind the head this pixel is
+    // the tail's half-width: the head's at the head, nothing at the end, and beaded along the way
+    float tw = RBh * mix(0.62, 0.0, clamp(back / tail, 0.0, 1.0)) * (0.80 + 0.20 * sin(back * 5.0 + hb * 30.0));
+    float inTail = step(0.0, headX - fx) * smoothstep(tw, tw * 0.55, abs(fy)) * step(0.02, tw);
+    vec3 nH = dropNormal(vec2(fx - headX, fy), RBh, 0.95);
+    // the tail's surface is a ridge: it leans away from its centre line, across the flow only
+    vec2 nT = vec2(0.0, clamp(fy / max(tw, 0.02), -1.0, 1.0) * 0.55) * inTail * (1.0 - nH.z);
+    vec3 nB = vec3(nH.xy + nT, max(nH.z, inTail * 0.8)) * keepB;
+    vec2 leanB = dir * nB.x + across * nB.y;
+    vec2 lean = leanA + leanB;
     float cover = clamp(nA.z + nB.z, 0.0, 1.0);
+    // ---- together: the normal of the water, and what it does to the picture behind it
     vec3 N = normalize(vec3(lean, 1.0));
     // REFRACTION: the scene is looked up where the bent ray lands. A drop is a strong
     // little lens, so the picture inside it is the world upside down and small: the
     // offset is against the lean, and large (0.055 of the screen at the rim).
-    u = clamp(u - lean * 0.055 * uK * vec2(1.0 / uMbAsp, 1.0), vec2(0.0), uK - uPx * 0.5);
+    u = clamp(u - lean * 0.030 * uK * vec2(1.0 / uMbAsp, 1.0), vec2(0.0), uK - uPx * 0.5);
     // SPECULAR: the light (the sun; at night, the lamps) glancing off the water, Blinn-Phong on the drop's normal
     vec3 Ld = normalize(uRainCB[4].xyz), Hh = normalize(Ld + vec3(0.0, 0.0, 1.0));
     spec0 = pow(max(dot(N, Hh), 0.0), 60.0) * uRainCB[4].w * cover;
@@ -2065,7 +2093,7 @@ void Renderer::updateRainCB(const FrameIn &f, const Mat4 &view) {
   cb.wiperAngle = wiper.pos >= 0 ? (wiper.pos - 0.5f) * 1.9f : -9.0f;
   cb.waterBefore = wiper.before; cb.gather = 0.75f; cb.rainSince = wiper.since; cb.sweep = wiper.sweepWater;
   // the running drops' travel: the same composite velocity the shader draws them along, integrated
-  const float vfx = cb.wind[0] * 0.20f - cb.gLat * 2.4f, vfy = -9.81f * std::sin(cb.rake) * 0.35f + cb.wind[1] * 0.20f - cb.gLong * std::cos(cb.rake) * 2.4f;
+  const float vfx = cb.wind[0] * 0.42f - cb.gLat * 5.2f, vfy = -9.81f * std::sin(cb.rake) * 0.35f + cb.wind[1] * 0.20f - cb.gLong * std::cos(cb.rake) * 5.2f;
   flowX += vfx * dt * 0.035f; flowY += vfy * dt * 0.035f;
   if (std::fabs(flowX) > 500 || std::fabs(flowY) > 500) { flowX = 0; flowY = 0; }
   cb.flow[0] = flowX; cb.flow[1] = flowY;
