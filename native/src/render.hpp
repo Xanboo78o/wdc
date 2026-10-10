@@ -108,6 +108,10 @@ class Renderer {
   // Returns false, and changes nothing, if there is no such pack.
   bool setCarPack(const std::string &key);
   const std::string &carPack() const { return packKey; }
+  // A MODELLED CIRCUIT (Adam: "use the file for silverstone"): data/cars/<key> baked as a world (tools/bakecar.mjs,
+  // `world: true`). When this circuit has one it is drawn in place of the generated road, land, barriers and scenery.
+  // Call after buildWorld; "" or a key with no such model goes back to the generated circuit.
+  void setWorldModel(const std::string &dataDir, const std::string &key);
   // which of a downloaded car's teams the next car drawn wears: an index, or -1 for the one its paint chooses
   void setLivery(int index);
   void snapCamera() { camReady = false; }
@@ -268,6 +272,7 @@ class Renderer {
   Mat4 mbView;
   // the steering wheel in the cockpit (data/cars/wheel, a downloaded model): drawn in your own car, from the seat
   bool rimWant = false; float rimTurn = 0;
+  const PackCar *worldPack = nullptr;
   bool ownDraw = false;                          // drawCar is drawing YOUR car (never swapped for the far stand-in)
   // every car's lamps (render.cpp drawCar): gathered this frame, used on the paint in the next; 11 floats a lamp
   std::vector<float> lampsNow, lampsWere, lampP, lampD, lampC;

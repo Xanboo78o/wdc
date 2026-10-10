@@ -17,8 +17,8 @@
 //                 the lap are downloaded once to ~/.cache/wdc-dgm/rlp (150 MB,
 //                 NOT into the repo) and read with ImageMagick.
 //   lagunaseca    USGS 3DEP (1 m lidar DEM where surveyed), ImageServer getSamples
-//   brandshatch   Environment Agency LIDAR Composite DTM 1 m, by WCS (two rasters:
-//                 1 m under the lap, 5 m for the land)
+//   brandshatch,  Environment Agency LIDAR Composite DTM 1 m, by WCS (two rasters each:
+//   silverstone   1 m under the lap, 5 m for the land)
 //   bathurst      NSW Spatial Services 5 m DEM (photogrammetric ground model;
 //                 the state's lidar is not behind a public point service)
 //
@@ -220,6 +220,8 @@ const SOURCES = {
     many: latLonRasters([
       { file: path.join(TILEDIR, 'ea', 'brandshatch-road.tif'), url: eaWcs(51.3518, 51.3616, 0.2560, 0.2692) },          // 1 m, under the lap
       { file: path.join(TILEDIR, 'ea', 'brandshatch-land.tif'), url: eaWcs(51.3460, 51.3674, 0.2470, 0.2782, 0.2) },     // 5 m, the land round it
+      { file: path.join(TILEDIR, 'ea', 'silverstone-road.tif'), url: eaWcs(52.0628, 52.0798, -1.0252, -1.0083) },        // 1 m, under the lap
+      { file: path.join(TILEDIR, 'ea', 'silverstone-land.tif'), url: eaWcs(52.0572, 52.0852, -1.0342, -0.9994, 0.2) },   // 5 m, the land round it
     ]),
   },
   nsw5m: {
@@ -275,6 +277,8 @@ const CIRCUIT = {
   nordschleife: { src: 'rlp', grid: 128, bridges: [[102, 146], [1842, 1890], [7944, 7988], [17814, 17858], [20656, 20700]] },
   lagunaseca: { src: 'threedep', grid: 64, bridges: [] },
   brandshatch: { src: 'ea', grid: 64, bridges: [] },
+  // An airfield: no deck anywhere on the Grand Prix lap (the vehicle tunnels pass UNDER the road).
+  silverstone: { src: 'ea', grid: 64, bridges: [] },
   // 5 m posts off stereo imagery: a longer Gaussian than a lidar model needs
   bathurst: { src: 'nsw5m', grid: 64, bridges: [], sigma: 14 },
 };

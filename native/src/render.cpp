@@ -815,6 +815,14 @@ bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
 }
 
 void Renderer::setLivery(int index) { if (dress) dress->setLivery(index); }
+void Renderer::setWorldModel(const std::string &dataDir, const std::string &key) {
+  worldPack = nullptr;
+  if (key.empty() || !dress) return;
+  const Json j = Json::loadOpt(dataDir + "/cars/" + key + "/car.json");
+  if (!j.isObj() || j["klass"].s("") != "world") return;
+  worldPack = dress->pack(key);
+  if (worldPack) std::fprintf(stderr, "world: %s is a modelled circuit (%zu triangles): drawn in place of the generated one\n", key.c_str(), packInfo(*worldPack).tris);
+}
 bool Renderer::setCarPack(const std::string &key) {
   if (key.empty()) { packCar = nullptr; packKey.clear(); return true; }
   const PackCar *pc = dress ? dress->pack(key) : nullptr;
@@ -2614,12 +2622,23 @@ void Renderer::drawWorld(const FrameIn &f) {
   setDents(nullptr);
   PROF.mark(4);
 
+  if (worldPack) {
+    // the circuit as it was modelled: its own road, kerbs, grass, walls, stands and trees, where its file put them
+    dress->setWorld(true);
+    dress->setDents(nullptr, 0);
+    dress->setLivery(-1);
+    dress->drawPack(*worldPack, Mat4::identity(), 0, 0, nullptr, nullptr, nullptr, false);
+    dress->drawPack(*worldPack, Mat4::identity(), 0, 0, nullptr, nullptr, nullptr, true);
+    dress->setWorld(false);
+    glUseProgram(prog);
+  } else {
   drawMesh(corridor, Mat4::identity());
   drawMesh(scenery, Mat4::identity());
+  }
   PROF.mark(2);
   // (in the mirror: every tree as its two photographs and every rail as its big faces — a small picture needs no more)
-  if (dress) { if (mirrorPass) dress->drawShadow(); else dress->drawWorld(); }
-  if (props) { props->farOnly = mirrorPass; const BarrierWear &bw = barrierWear(); if (bw.on) props->deform(bw.bend, bw.broke, bw.version); props->draw(); }
+  if (dress && !worldPack) { if (mirrorPass) dress->drawShadow(); else dress->drawWorld(); }
+  if (props && !worldPack) { props->farOnly = mirrorPass; const BarrierWear &bw = barrierWear(); if (bw.on) props->deform(bw.bend, bw.broke, bw.version); props->draw(); }
   PROF.mark(3);
 
   // The land, pushed a little AWAY in depth: where it runs level with the
@@ -2627,8 +2646,7 @@ void Renderer::drawWorld(const FrameIn &f) {
   // what is behind it.
   glEnable(GL_POLYGON_OFFSET_FILL);
   glPolygonOffset(1.5f, 6.0f);
-  drawMesh(sea, Mat4::identity());
-  drawMesh(ground, Mat4::identity());
+  if (!worldPack) { drawMesh(sea, Mat4::identity()); drawMesh(ground, Mat4::identity()); }
   glDisable(GL_POLYGON_OFFSET_FILL);
   // the sky: behind everything, and it writes no depth
   glDepthMask(GL_FALSE);
@@ -2637,7 +2655,7 @@ void Renderer::drawWorld(const FrameIn &f) {
 
   glEnable(GL_POLYGON_OFFSET_FILL);
   glPolygonOffset(-2.0f, -6.0f);
-  drawMesh(decals, Mat4::identity());
+  if (!worldPack) drawMesh(decals, Mat4::identity());
   if (f.showLine) drawMesh(lineMesh, Mat4::identity());
   // a soft dark patch under the car: the cheapest thing that glues it down
   glEnable(GL_BLEND);

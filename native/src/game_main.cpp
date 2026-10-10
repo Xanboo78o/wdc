@@ -307,6 +307,7 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
   barrierWear().reset(S.track);      // new session, straight barriers (collide.hpp: the game's walls give)
   R.buildWorld(S.track, *S.world, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"),
                S.lines->race);
+  R.setWorldModel(dataDir, key);
   R.buildCar(*S.spec);
   return true;
 }
@@ -1122,6 +1123,7 @@ int main(int argc, char **argv) {
   dev.prof = loadWheelProfile(dataDir);
   dev.scan();
   if (!dev.name.empty()) std::fprintf(stderr, "xbr: input device: %s (%s)\n", dev.name.c_str(), dev.joy ? "wheel profile" : "gamepad");
+  if (dev.joy) xingusSteer(1);        // a rim in his hands: Xingus steers in a straight line (xingus.cpp STEER_AT)
   RimMap rim;
   rim.load(dataDir);
   Bridge bridge;

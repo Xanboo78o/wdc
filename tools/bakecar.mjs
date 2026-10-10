@@ -148,28 +148,6 @@ const RECIPES = {
     role: { '9X8_Ext_Paint': 'paint', '9X8_Ext_Glass': 'glass', '9X8_Ext_LightBrakes': 'tail', '9X8_Ext_Mirror': 'chrome' },
     nodeRole: [[/_Tire/, 'tyre'], [/Rotor_LOD0_Details(?!Met)/, 'rim'], [/_Glass/, 'glass']],
   },
-  // "what abt the acura and 992" — two by the author of the McLaren, laid out the same way: one Body material,
-  // and the name of each piece says what it is.
-  nsx: {
-    eye: [-0.05, 0.84, -0.42],          // the driver's eyes, from a section through the seat
-    title: 'Acura NSX GT3', klass: 'gt3', length: 4.612,
-    skip: /Interior-.*Steering/, plain: /Tire-|Glass-Black_/,
-    wheels: { by: 'node', fl: /Wheel-LF_|Wheel-Rim-LF_/, fr: /Wheel-RF_|Wheel-Rim-RF_/, rl: /Wheel-LR_|Wheel-Rim-LR_/, rr: /Wheel-RR_|Wheel-Rim-RR_/,
-              hub: { fl: /Wheel-Caliper(Steel)?-LF/, fr: /Wheel-Caliper(Steel)?-RF/, rl: /Wheel-Caliper(Steel)?-LR/, rr: /Wheel-Caliper(Steel)?-RR/ }, tyreMat: 'Tire' },
-    role: { Body: 'paint', Tire: 'tyre', Wheel: 'rim' },
-    nodeRole: [[/Glass-(Window|Windshield|HeadLightCover|ChismelGlass)/, 'glass'], [/Body-(BumperFCarbon|CarbonFiber|Grille|Hoodpin|PaintBlack|PlasticBlack|WingMount)/, 'trim'],
-               [/Glass-(TailLightLens|ReflectorBrake|ReflectorRed|PlasticRed)/, 'tail'], [/Glass-HeadLight_/, 'lamp'], [/Caliper|Wheel-Disc|Wheel-Hub|Wheel-Nut/, 'trim']],
-  },
-  // a second 992, from another hand (the first is p992)
-  p992b: {
-    title: 'Porsche 911 GT3 R (992) Roxy', klass: 'gt3', length: 4.619,
-    skip: /Interior-.*Steering|Chassis-Emblem/, plain: /Tire-|Glass-WindScreenBanner/,
-    wheels: { by: 'node', fl: /Wheel_LF_|WheelAssembly_LF_/, fr: /Wheel_RF_|WheelAssembly_RF_/, rl: /Wheel_LR_|WheelAssembly_LR_/, rr: /Wheel_RR_|WheelAssembly_RR_/,
-              hub: { fl: /Wheel-Caliper-LF/, fr: /Wheel-Caliper-RF/, rl: /Wheel-Caliper-LR/, rr: /Wheel-Caliper-RR/ }, tyreMat: 'Tire' },
-    role: { Body: 'paint', Tire: 'tyre', Wheel: 'rim' },
-    nodeRole: [[/Glass-(RearWindows|Glass_|HeadlightCover|HeadLightGlass|TailLightCover)/, 'glass'], [/Body-(Grill|PaintBlack|Fasteners)/, 'trim'],
-               [/Glass-(TailLights|RedLightBar|RainLight)/, 'tail'], [/Glass-(Headlight_|LED)/, 'lamp'], [/Caliper|BrakeDisc|Wheel-..-Steel|ValveStem/, 'trim']],
-  },
   // The 2022 grand prix car. A million triangles as it came, 726,000 of them one hidden lump the size of
   // a shoebox between the rear wheels ('material'): left off, with the steering wheel he holds himself.
   f122: {
@@ -183,6 +161,7 @@ const RECIPES = {
   },
   // Two more GT3s by the 720's maker, laid out the same way: Body- / Chassis- / Glass- / Interior- / Wheel- nodes.
   nsx: {
+    eye: [-0.05, 0.84, -0.42],          // the driver's eyes, from a section through the seat
     title: 'Acura NSX GT3', klass: 'gt3', length: null,          // already in metres
     plain: /Glass-Black_|Tire-/,
     wheels: { by: 'node', fl: /Wheel-LF_/, fr: /Wheel-RF_/, rl: /Wheel-LR_/, rr: /Wheel-RR_/,
@@ -204,6 +183,15 @@ const RECIPES = {
     role: { Body: 'paint', Tire: 'tyre', Wheel: 'rim' },
     nodeRole: [[/Glass-(RearWindows|Glass_|HeadlightCover|HeadLightGlass|TailLightCover)|Interior-Glass/, 'glass'], [/Glass-(TailLights|RedLightBar|RainLight)/, 'tail'], [/Glass-(Headlight_|LED)/, 'lamp'],
                [/Glass-(Mirror|HeadLightChrome)/, 'chrome'], [/Body-(PaintBlack|Grill|Fasteners|GurneyFlap)/, 'trim'], [/Caliper|BrakeDisc|Steel|ValveStem/, 'trim']],
+  },
+  // NOT A CAR EITHER: a whole circuit, as somebody modelled it (Adam: "use the file for silverstone").
+  // `world` leaves it exactly where and how big it is in its own file (metres, y up): the game draws it at
+  // the origin, and the track (tools/circuit/) is measured off the same model, so the two agree by construction.
+  silverstone: {
+    title: 'Silverstone Circuit (2024 layout)', klass: 'world', prop: true, world: true,
+    role: {},
+    // grass and sand get the game's own turf over their photograph, tarmac its speckle (dress.cpp roles 8 and 9)
+    matRole: [[/^(grass|sand)/, 'ground'], [/^(asphalt|asph_pit|top2)/, 'road']],
   },
   // NOT A CAR: the steering wheel in the driver's hands (Adam: "i downloaded that wheel put that in the game").
   // `prop` bakes it about its own hub instead of onto four tyres: the origin is the centre of the rim, its
@@ -302,7 +290,7 @@ if (!tris.length) { console.error('bakecar: no triangles in ' + src); process.ex
 // ---- into the car's frame -------------------------------------------------------------
 // glTF: +y up, and these models face +z with their left at +x. Ours: x forward,
 // y up, z right. (z, y, -x) is a pure turn: nothing is mirrored.
-for (const t of tris) for (const arr of [t.p, t.n]) for (let k = 0; k < 9; k += 3) {
+if (!R.world) for (const t of tris) for (const arr of [t.p, t.n]) for (let k = 0; k < 9; k += 3) {
   const x = arr[k], z = arr[k + 2];
   arr[k] = z; arr[k + 2] = -x;
 }
@@ -314,12 +302,12 @@ const box = list => {
   return { lo, hi, mid: lo.map((l, k) => (l + hi[k]) / 2), size: hi.map((h, k) => h - lo[k]) };
 };
 let all = box(tris);
-if (R.prop) {
+if (R.prop && !R.world) {
   // turned to face the driver (the model's face looks along its own +x, which the turn above made -z)
   for (const t of tris) for (const arr of [t.p, t.n]) for (let k = 0; k < 9; k += 3) { const x = arr[k], z = arr[k + 2]; arr[k] = z; arr[k + 2] = -x; }
   all = box(tris);
 }
-const scale = R.prop ? R.diameter / Math.max(all.size[1], all.size[2]) : R.length ? R.length / all.size[0] : 1;
+const scale = R.world ? 1 : R.prop ? R.diameter / Math.max(all.size[1], all.size[2]) : R.length ? R.length / all.size[0] : 1;
 for (const t of tris) for (let k = 0; k < 9; k++) t.p[k] *= scale;
 all = box(tris);
 if (!R.prop && (all.size[0] < 2.5 || all.size[0] > 7 || all.size[2] < 1.2 || all.size[2] > 2.8)) {
@@ -334,7 +322,7 @@ let isTyre = () => false;
 for (const t of tris) t.part = 'body';
 if (R.prop) {
   // about its own middle: nothing to stand it on
-  for (const t of tris) for (let k = 0; k < 9; k++) t.p[k] -= all.mid[k % 3];
+  if (!R.world) for (const t of tris) for (let k = 0; k < 9; k++) t.p[k] -= all.mid[k % 3];
   for (const w of WHEELS) wheels[w] = { c: [0, 0, 0], r: 0.33, w: 0.3 };
   all = box(tris);
 } else {
@@ -413,6 +401,7 @@ const outDir = path.join(outRoot, key);
 fs.mkdirSync(outDir, { recursive: true });
 function roleOf(t) {
   for (const [re, role] of R.nodeRole || []) if (re.test(t.path)) return role;
+  for (const [re, role] of R.matRole || []) if (re.test(t.mat)) return role;
   return R.role[t.mat] || 'trim';
 }
 const mats = [], matIx = new Map();
@@ -439,7 +428,7 @@ function material(t) {
     const pam = name.replace(/\.[^.]+$/, '') + '.pam';
     execFileSync('magick', [from, '-resize', role === 'paint' ? '2048x2048>' : '1024x1024>', '-depth', '8', '-alpha', keepAlpha ? 'on' : 'off', '-define', 'pam:tupletype=RGB_ALPHA', ...(keepAlpha ? [] : ['-alpha', 'opaque']), '-colorspace', 'sRGB', '-type', 'TrueColorAlpha', 'pam:' + path.join(outDir, pam)]);   // (a grey picture would come out two channels wide, and the game reads four)
     out.pam = pam;
-    if (keepAlpha && m.alphaMode === 'MASK') out.cutout = true;
+    if (keepAlpha && (m.alphaMode === 'MASK' || R.world)) out.cutout = true;      // (a circuit's trees and fences are cards with holes, however their file flags them)
   }
   matIx.set(id, mats.length);
   mats.push(out);

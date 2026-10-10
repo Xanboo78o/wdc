@@ -134,7 +134,11 @@ void xingusStep(Car &car, const PlayerInput &inp, double dt) {
     if (x.state == 0) {
       beta = target;                     // in grip the limit is a limit, not a spring
       // THE WHEEL TURNS THE CAR: in grip the yaw rate is the wheel's.
-      const double sEff = sign(steer) * std::min(1.0, std::pow(std::fabs(steer) / STEER_AT[steerLevel], 0.85));
+      // (Level 1 is a real steering wheel's: a straight line, full turn at 85% of the rim's travel. The others
+      // are for a key or a thumbstick, which has a few millimetres to say everything in — on a rim they gave full
+      // turn at 45% of its travel and three times what was asked near the middle. Adam, 2026-10-10: "the wheel
+      // highly exxagerates my input, i goes way past at least on xingus".)
+      const double sEff = sign(steer) * std::min(1.0, std::pow(std::fabs(steer) / STEER_AT[steerLevel], steerLevel == 1 ? 1.0 : 0.85));
       const double aMax = (TURN_G - (TURN_G - TURN_G_FAST) * std::max(0.0, std::min(1.0, (v - 30) / 45)) + std::min(BANK_MAX, std::fabs(x.bank) / 10 * BANK_G)) * G;
       // x.gCap (g): all the cornering the tyres have left. Only an oval's stock rules set it.
       const double rCmd = sEff * std::min((x.gCap != 0 ? std::min(aMax, x.gCap * G) : aMax) / v, 2.8);

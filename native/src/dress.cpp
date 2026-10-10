@@ -89,7 +89,7 @@ static GLuint texture(const std::string &path, bool repeat = true) {
 
 // ---- the downloaded cars ---------------------------------------------------------------
 // Roles, as tools/bakecar.mjs names them.
-enum Role { R_TRIM, R_PAINT, R_GLASS, R_TYRE, R_RIM, R_LAMP, R_TAIL, R_CHROME };
+enum Role { R_TRIM, R_PAINT, R_GLASS, R_TYRE, R_RIM, R_LAMP, R_TAIL, R_CHROME, R_GROUND, R_ROAD };      // (the last two: a modelled circuit's grass and tarmac)
 static int roleOf(const std::string &s) {
   if (s == "paint") return R_PAINT;
   if (s == "glass") return R_GLASS;
@@ -98,6 +98,8 @@ static int roleOf(const std::string &s) {
   if (s == "lamp") return R_LAMP;
   if (s == "tail") return R_TAIL;
   if (s == "chrome") return R_CHROME;
+  if (s == "ground") return R_GROUND;
+  if (s == "road") return R_ROAD;
   return R_TRIM;
 }
 struct PackMat { int role = R_TRIM; float col[3] = {1, 1, 1}; float alpha = 1; GLuint map = 0; bool cutout = false; bool see = false; };
@@ -127,7 +129,7 @@ size_t Dress::liveryCount(const PackCar &pc) const { return pc.liveries.size(); 
 PackInfo packInfo(const PackCar &pc) {
   PackInfo I;
   for (int k = 0; k < 3; k++) I.eye[k] = pc.eye[k];
-  I.wheelbase = pc.wheelbase; I.wheelR = pc.wr[0];
+  I.wheelbase = pc.wheelbase; I.wheelR = pc.wr[0]; I.tris = pc.tris;
   return I;
 }
 
@@ -164,7 +166,7 @@ void main(){
 static const char *LIV_STUB = "vec3 livery(vec3 p, vec3 b){ return b; }\nvec3 stickers(vec3 c, vec3 p, vec3 n, sampler2D s){ return c; }\n";
 static const char *CAR_FS_A = R"(#version 330 core
 in vec3 vW, vN, vP, vNo; in vec2 vU; in float vHurt;
-uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish, uCabin; uniform float uBrake, uLift; uniform vec3 uCabinEye;
+uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish, uCabin, uWorld; uniform float uBrake, uLift; uniform vec3 uCabinEye;
 uniform vec3 uLivBase; uniform vec4 uLivFrame, uRim;
 )";
 static const char *CAR_FS_B = R"(
@@ -175,6 +177,8 @@ uniform vec3 uEye, uSun, uSunCol, uSkyAmb, uGndAmb, uFog, uSkyTop; uniform float
 // narrow its beam (0 = all round); and its colour.
 uniform int uNL; uniform vec4 uLP[8], uLD[8]; uniform vec3 uLC[8];
 out vec4 o;
+float wh(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float wn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(wh(i), wh(i + vec2(1, 0)), f.x), mix(wh(i + vec2(0, 1)), wh(i + vec2(1, 1)), f.x), f.y); }
 vec3 skyAt(vec3 d){ return mix(uFog, uSkyTop, pow(clamp(d.y, 0.0, 1.0), 0.55)) * (d.y < 0.0 ? 0.45 : 1.0); }
 void main(){
   vec3 V = uEye - vW; float dist = length(V); V /= dist;
@@ -195,6 +199,18 @@ void main(){
   if (uCutout == 1 && t.a < 0.5) discard;
   vec3 c = uHasMap == 1 ? t.rgb : uColor;
   float a = uOpacity;
+  // A MODELLED CIRCUIT'S GROUND. Its grass is one photograph stretched over a square kilometre: up close a smear. So
+  // grass and sand (role 8) keep only the photograph's broad colour and get a turf of their own; the tarmac
+  // (role 9) keeps its picture and gets the fine speckle of stone on top.
+  if (uWorld == 1 && uRole == 8) {
+    vec2 q = vW.xz;
+    vec3 base = uHasMap == 1 ? textureLod(uTex, vU, 6.0).rgb : c;
+    float f = wn(q * 0.07) * 0.5 + wn(q * 0.6) * 0.3 + wn(q * 5.0) * 0.2 * clamp(1.0 - dist / 90.0, 0.0, 1.0);
+    c = base * (0.72 + 0.56 * f);
+  } else if (uWorld == 1 && uRole == 9) {
+    vec2 q = vW.xz;
+    c *= 0.90 + 0.10 * wn(q * 0.9) + 0.14 * wn(q * 22.0) * clamp(1.0 - dist / 40.0, 0.0, 1.0);
+  }
   float gloss = 0.0, shine = 24.0, mirror = 0.0;
   // 0 trim  1 paint  2 glass  3 tyre  4 rim  5 lamp  6 tail  7 chrome
   if (uRole == 1) {
@@ -221,7 +237,7 @@ void main(){
   else { gloss = 0.10; shine = 18.0; }
   // where it was hit the paint is scuffed to the primer and the shine is gone
   if (uRole != 2) { c = mix(c, vec3(dot(c, vec3(0.333)) * 0.45 + 0.03), vHurt * 0.55); gloss *= 1.0 - 0.8 * vHurt; mirror *= 1.0 - 0.9 * vHurt; }
-  float lampK = (uRole == 0 || uRole == 3) ? 0.0 : 1.0;           // rubber and plain trim throw no lamp back
+  float lampK = (uRole == 0 || uRole == 3 || uRole >= 8) ? 0.0 : 1.0;          // rubber and plain trim throw no lamp back
   if (inside) {
     // nothing in there gleams; and trim modelled pure black is lifted to a dark grey, so that a dashboard,
     // a wheel and a cage can be told apart by the daylight coming in through the glass
@@ -539,13 +555,14 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
   glUniform1i(glGetUniformLocation(carProg, "uTex"), 0);
   glUniform1f(glGetUniformLocation(carProg, "uBrake"), brakeNow);
   glUniform1f(glGetUniformLocation(carProg, "uLift"), cabinLift);
+  glUniform1i(glGetUniformLocation(carProg, "uWorld"), worldDraw ? 1 : 0);
   {
     // is the camera sitting in this car? (its place in the car's own frame, against the size of a car)
     const float d[3] = {eye[0] - carM.m[12], eye[1] - carM.m[13], eye[2] - carM.m[14]};
     const float lx = d[0] * carM.m[0] + d[1] * carM.m[1] + d[2] * carM.m[2], ly = d[0] * carM.m[4] + d[1] * carM.m[5] + d[2] * carM.m[6],
                 lz = d[0] * carM.m[8] + d[1] * carM.m[9] + d[2] * carM.m[10];
     glUniform3f(glGetUniformLocation(carProg, "uCabinEye"), lx, ly, lz);
-    glUniform1i(glGetUniformLocation(carProg, "uCabin"), std::fabs(lx) < 2.2f && ly > 0.0f && ly < 1.45f && std::fabs(lz) < 0.95f ? 1 : 0);
+    glUniform1i(glGetUniformLocation(carProg, "uCabin"), !worldDraw && std::fabs(lx) < 2.2f && ly > 0.0f && ly < 1.45f && std::fabs(lz) < 0.95f ? 1 : 0);
   }
   if (paint) glUniform3f(uPaint, paint[0], paint[1], paint[2]); else glUniform3f(uPaint, -1, 0, 0);
   // WHICH TEAM. The one asked for (setLivery), else one chosen by the paint

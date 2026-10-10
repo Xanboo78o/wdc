@@ -87,6 +87,29 @@ export const CIRCUITS = {
     notCorner: /Straight|Circuit/i,
     pitName: /^Pit Lane$/i,
   },
+  silverstone: {
+    name: 'Silverstone', full: 'Silverstone Grand Prix Circuit', country: 'UNITED KINGDOM', real: 5891,
+    bb: '52.056,-1.042,52.086,-0.996',
+    // The Grand Prix lap (the Arena layout, raced since 2011 from the Wing): the 27
+    // ways of OSM's own relation 51160 "Silverstone Grand Prix", in lap order from
+    // the Hamilton Straight. By id, because half the lap's ways have no name and so
+    // do the roads that are NOT on it: the National link from Maggotts to Aintree
+    // (227820537), the International link past Chapel (227820536, 227332428,
+    // 169733771, 227820535), the old Bridge section and Priory (15264528xx,
+    // 14303859xx), the Vale short cut (3945001), the Stowe school circuit, both pit
+    // lanes and the experience-centre and rally tracks.
+    lap: w => [55224167, 169854842, 169800226, 169800223, 169800225, 169848882, 169800224, 169800222, 169618242,
+      169618240, 169618241, 169618245, 169609611, 169730588, 3571477, 169730585, 169730587, 169733768, 169730586,
+      430075118, 169733766, 169733769, 169733770, 169848880, 169848884, 169848881, 55224168].includes(w.id),
+    // OSM node 13036050130, raceway=start/finish: on the Hamilton Straight under the Wing's gantry.
+    start: [52.0693366, -1.0221521], cw: true,
+    // No way of the lap carries a width tag. 15 m is the circuit's own published figure.
+    w: 7.5, minTagW: 10, runoff: 14, wall: 'gravel', aiPace: 0.8,
+    drs: 2, corner: [200, 14, 24, 40],
+    notCorner: /Straight/i,
+    // The lane the Grand Prix uses, from Vale to Farm (way 227902927), not the National one.
+    pitName: /^International pit lane$/i,
+  },
 };
 for (const k of Object.keys(CIRCUITS)) if (!EXACT.has(k)) throw new Error(`${k} must be listed in tools/geodesy.mjs EXACT`);
 

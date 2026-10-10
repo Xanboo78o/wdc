@@ -367,6 +367,14 @@ async function bake(key, force) {
     `[out:json][timeout:180];(node["natural"="tree"](${box}););out;`,
     raw + `${key}-trees.json`, force).catch(() => ({ elements: [] }));
 
+  const overRoad = pts => {
+    for (let i = 0; i < n; i++) {
+      const x = track.x[i], y = track.y[i]; let c = false;
+      for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) { const p = pts[a], q = pts[b]; if ((p[1] > y) !== (q[1] > y) && x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0]) c = !c; }
+      if (c) return true;
+    }
+    return false;
+  };
   const buildings = [];
   for (const el of bJson.elements || []) {
     // A way carries `geometry`; a relation carries `members`, each with its
@@ -384,6 +392,11 @@ async function bake(key, force) {
       if (pts.length < 3 || area2(pts) < 18) continue;
       if (placed) pts = placeBeside(pts, placed);
       else if (fit && !pts.every(p => clearOf(p[0], p[1], 4))) continue;
+      // A footprint that covers the lap's own centreline is a bridge OVER the road
+      // (Silverstone: two footbridges and the Wing's glass bridge, OSM layer/level 1).
+      // Every building here stands on the ground, so it would be a wall across the
+      // lap. Not built, and said so. No circuit baked before 2026-10-10 has one.
+      if (!placed && !fit && overRoad(pts)) { console.log(`  over the road, not built: ${el.type} ${el.id} ${tg.name || tg.building || ''}`); continue; }
       const b = { h: Math.round(heightOf(tg) * 10) / 10, p: pts, ...extra };
       if (placed) { b.h = 8; b.k = 'retail'; }
       else if (fit && fit.condo && !b.k) {
