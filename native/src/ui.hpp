@@ -68,6 +68,8 @@ class GameHud {
   std::vector<Row> rows;
 };
 
-std::string fmtLapTime(double s, bool has);   // m:ss.mmm, or --:--.---
+std::string fmtLapTime(double s, bool has);
+// the gap a row of the timing tower shows for standings[i] (the iPad's tower reads the same words)
+std::string towerGap(Race &race, size_t i);   // m:ss.mmm, or --:--.---
 
 }  // namespace xbr

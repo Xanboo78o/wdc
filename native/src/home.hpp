@@ -38,6 +38,10 @@ struct MenuSave {
   std::string xStyle = "gt3", xGears = "manual", xTrack, xHeil = "heilgrand", xField = "4fun";
   std::string tabFx = "hall";        // MUSIC ROOM: your browser's music through the game (radio.hpp): off, clean, room, hall, cathedral
   int tabVol = 100;                  // MUSIC VOLUME, percent
+  // THE IPAD DASH (tools/dashfeed.mjs): the page xanboo78o.github.io/wdc/dash.html, paired by this code.
+  // The code is made the first time the game runs and kept.
+  bool dash = true;
+  std::string dashCode;
   bool easy = false;                 // HANDLING - EASY: Xingus's forgiving handling on your car, in the ordinary game
   int xMinutes = 30;                 // Xingus ENDURANCE: how long the race is, 5 minutes to 6 hours
   int xBots = 0;                                 // 0 = the style's own number

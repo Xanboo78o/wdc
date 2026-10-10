@@ -519,6 +519,52 @@ static pid_t spawnBridge(const std::string &repo) {
   return p;
 }
 
+// THE IPAD DASH (Adam: "wait, ipad dash, just wire it into the native"). The page on the iPad
+// (dash.html) hears a Supabase channel named by a six-letter code; tools/dashfeed.mjs speaks to
+// it, and this hands that helper a line of JSON telemetry fifteen times a second while you drive:
+// the fields js/main.js's dashTelemetry() sends, so the page cannot tell which game it is watching.
+struct DashFeed {
+  pid_t pid = -1; int fd = -1; double next = 0, towerAt = 0, retry = 0;
+  bool ok() const { return fd >= 0; }
+  void start(const std::string &repo, const std::string &code, double now) {
+    if (ok() || now < retry || code.size() < 4 || !std::filesystem::exists(repo + "/tools/dashfeed.mjs")) return;
+    retry = now + 10;
+    int p[2];
+    if (pipe(p) != 0) return;
+    pid = fork();
+    if (pid == 0) {
+      setsid();
+      dup2(p[0], 0); close(p[0]); close(p[1]);
+      if (chdir(repo.c_str()) != 0) _exit(126);
+      const int lf = open("/tmp/xbr-dash.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      if (lf >= 0) { dup2(lf, 1); dup2(lf, 2); }
+      execlp("node", "node", "tools/dashfeed.mjs", code.c_str(), (char *)nullptr);
+      _exit(127);
+    }
+    close(p[0]);
+    if (pid < 0) { close(p[1]); return; }
+    fd = p[1];
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);     // a helper that has stopped reading never stalls a frame
+    signal(SIGPIPE, SIG_IGN);
+  }
+  void stop() {
+    if (fd >= 0) close(fd);                                  // its stdin ends, and it goes
+    fd = -1;
+    if (pid > 0) { int st; if (waitpid(pid, &st, WNOHANG) == 0) { kill(pid, SIGTERM); waitpid(pid, &st, 0); } }
+    pid = -1;
+  }
+  void send(const std::string &line) {
+    if (fd < 0) return;
+    const ssize_t n = write(fd, line.data(), line.size());
+    if (n < 0 && errno != EAGAIN) { close(fd); fd = -1; int st; if (pid > 0) waitpid(pid, &st, WNOHANG); pid = -1; }   // it died: start() tries again in ten seconds
+  }
+};
+static std::string jstr(const std::string &s) {
+  std::string o = "\"";
+  for (char c : s) { if (c == '"' || c == '\\') o += '\\'; if ((unsigned char)c >= 32) o += c; }
+  return o + "\"";
+}
+
 enum Act { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_PAUSE, A_CAM, A_DRS, A_RESET, A_GO, A_PIT, A_SHUP, A_SHDN, A_COUNT };
 
 // ---------------------------------------------------------------------------
@@ -861,6 +907,7 @@ int main(int argc, char **argv) {
   // the crash effects watch every car, once a frame (fx.hpp): they read, and never write
   // YOUR MUSIC, THROUGH THE GAME (radio.hpp): the browser's sound brought in, put in a room, and played with everything else
   Radio radio;
+  DashFeed dashFeed;
   double radioRetry = 0;
   // the foam blocks and braking boards (knock.hpp): every car on the circuit can send one flying
   auto knockTick = [&](double dt) {
@@ -928,6 +975,47 @@ int main(int argc, char **argv) {
       }
       // the menus move to it (homestyle.hpp STYLE_PULSE): a bump on every kick, eased away
       home.music(radio.ok() ? radio.beats() : 0, radio.ok() ? radio.bass() : 0.0f, clock);
+    }
+    // the iPad dash: the helper runs while the setting is on; telemetry goes while you drive
+    {
+      static const bool forced = std::getenv("XBR_DASHFEED") != nullptr;       // for checking it with no window
+      const bool want = cfg.dash && ((!offscreen && !hidden) || forced);
+      if (want && !dashFeed.ok()) dashFeed.start(dataDir + "/..", forced ? std::string(std::getenv("XBR_DASHFEED")) : cfg.dashCode, clock);
+      else if (!want && dashFeed.ok()) dashFeed.stop();
+      if (dashFeed.ok() && (screen == DRIVE || screen == PAUSE) && S.car && clock >= dashFeed.next) {
+        dashFeed.next = clock + 1.0 / 15;
+        const Car &c = *S.car;
+        char b[640];
+        std::snprintf(b, sizeof b, "{\"spd\":%.1f,\"gLat\":%.3f,\"thr\":%.3f,\"brk\":%.3f,\"slipF\":%.4f,\"slipR\":%.4f,\"peak\":%.4f,\"tf\":%.1f,\"tr\":%.1f,"
+                      "\"lapT\":%.3f,\"invalid\":%s,\"drs\":%s,\"pad\":%s,\"sel\":%d",
+                      c.speed * 2.23694, c.gLat, c.throttle, c.brake, c.slipF, c.slipR, S.spec->pk, c.tyre.Tf, c.tyre.Tr,
+                      S.lapT, S.invalid ? "true" : "false", c.drsOpen ? "true" : "false", S.hands.usingPad ? "true" : "false", (int)c.selector);
+        std::string t = b;
+        // (a time that does not exist yet is left out, never sent as a nought: the page shows only what arrived)
+        if (S.hasLast) { std::snprintf(b, sizeof b, ",\"last\":%.3f", S.last); t += b; }
+        if (S.hasBest) { std::snprintf(b, sizeof b, ",\"best\":%.3f", S.best); t += b; }
+        t += ",\"track\":" + jstr(S.track.name.empty() ? S.key : S.track.name) + ",\"car\":" + jstr(S.spec->full);
+        if (S.box && S.box->box) { std::snprintf(b, sizeof b, ",\"gear\":%d,\"rpm\":%.0f,\"rpmMax\":%.0f", S.box->gear, S.box->rpm, S.box->box->limit); t += b; }
+        Race *race = S.race.get();
+        if (race && race->me) {
+          const Entry &me = *race->me;
+          std::snprintf(b, sizeof b, ",\"lap\":%d,\"laps\":%d,\"box\":%s,\"sc\":%s", std::min(race->laps, me.lap + 1), race->laps,
+                        me.pitRequest || me.inPit ? "true" : "false", race->safety > 0 ? "true" : "false");
+          t += b;
+          t += me.retired ? std::string(",\"pos\":\"DNF\"") : ",\"pos\":" + std::to_string(me.pos);
+          if (clock >= dashFeed.towerAt) {                 // the tower is twenty rows of words: twice a second is plenty
+            dashFeed.towerAt = clock + 0.5;
+            t += ",\"tower\":[";
+            for (size_t i = 0; i < race->standings.size(); i++) {
+              const Entry &e = *race->standings[i];
+              t += std::string(i ? "," : "") + "{\"p\":" + std::to_string(i + 1) + ",\"n\":" + jstr(e.name) + ",\"col\":" + jstr(e.col)
+                 + ",\"you\":" + (e.isPlayer ? "true" : "false") + ",\"g\":" + jstr(towerGap(*race, i)) + "}";
+            }
+            t += "]";
+          }
+        } else { t += ",\"lap\":" + std::to_string(std::max(1, S.lap)); }
+        dashFeed.send(t + "}\n");
+      }
     }
     R.post = cfg.look != "plain" && R.postOk;
     R.scalePin = (float)scaleArg;
@@ -1326,6 +1414,7 @@ int main(int argc, char **argv) {
     if (maxFrames > 0 && frames >= maxFrames) running = false;
   }
   bridge.release();
+  dashFeed.stop();
   if (bridgePid > 0) { SDL_Delay(120); kill(bridgePid, SIGTERM); waitpid(bridgePid, nullptr, 0); }   // the bridge we started goes with us; its last act is to zero the wheel
   home.cancelEvent();                                           // an event's settings are not the menu's: put the menu's own back before it is kept
   if (!savePath.empty()) cfg.save(savePath);

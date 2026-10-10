@@ -3,6 +3,7 @@
 #include "home.hpp"
 #include "multiclass.hpp"
 
+#include <random>
 #include <set>
 #include <algorithm>
 #include <cmath>
@@ -138,7 +139,7 @@ void MenuSave::load(const std::string &path) {
     else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "gears") gears = v == "manual" ? "manual" : "auto";
     else if (k == "gton") gtOn = v == "1"; else if (k == "gtclass") gtClass = gtClassOf(v) >= 0 ? v : "gt3";
-    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "easy") easy = v == "1"; else if (k == "tabfx") tabFx = v; else if (k == "tabvol") tabVol = std::max(0, std::min(200, std::atoi(v.c_str()))); else if (k == "xminutes") xMinutes = std::max(5, std::min(360, std::atoi(v.c_str()))); else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
+    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "easy") easy = v == "1"; else if (k == "tabfx") tabFx = v; else if (k == "dash") dash = v == "1"; else if (k == "dashcode") dashCode = v; else if (k == "tabvol") tabVol = std::max(0, std::min(200, std::atoi(v.c_str()))); else if (k == "xminutes") xMinutes = std::max(5, std::min(360, std::atoi(v.c_str()))); else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
     else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
   xStyle = xstyle(xStyle).key; xBots = std::max(0, std::min(60, xBots));
@@ -149,6 +150,13 @@ void MenuSave::load(const std::string &path) {
   grid = std::max(2, std::min(61, grid)); laps = std::max(1, std::min(999, laps));
   cam = std::max(0, std::min(3, cam)); ffb = std::max(0, std::min(100, ffb)); volume = std::max(0, std::min(10, volume));
   for (const char *l : LEAGUE_KEYS) if (!teams[l].empty() && !teamByKey(teams[l])) teams[l].clear();
+  if (dashCode.size() < 4) {
+    // six letters nobody can misread, as js/dash.js makes them
+    static const char abc[] = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    std::random_device rd;
+    dashCode.clear();
+    for (int i = 0; i < 6; i++) dashCode += abc[rd() % (sizeof abc - 1)];
+  }
 }
 void MenuSave::save(const std::string &path) const {
   if (path.empty()) return;
@@ -159,7 +167,7 @@ void MenuSave::save(const std::string &path) const {
     << "\nline " << (line ? 1 : 0) << "\n";
   if (modelSeen || !model.empty()) f << "model " << (model.empty() ? "-" : model) << "\n";
   f << "look " << look << "\n";
-  f << "xon " << (xOn ? 1 : 0) << "\neasy " << (easy ? 1 : 0) << "\ntabfx " << tabFx << "\ntabvol " << tabVol << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
+  f << "xon " << (xOn ? 1 : 0) << "\neasy " << (easy ? 1 : 0) << "\ndash " << (dash ? 1 : 0) << "\ndashcode " << (dashCode.empty() ? "-" : dashCode) << "\ntabfx " << tabFx << "\ntabvol " << tabVol << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
   f << "gears " << gears << "\n";
   f << "gton " << (gtOn ? 1 : 0) << "\ngtclass " << gtClass << "\n";
   if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
@@ -258,6 +266,7 @@ std::string Home::get(const std::string &key) const {
   if (key == "xStyle") return S.xStyle;
   if (key == "easy") return S.easy ? "true" : "false";
   if (key == "tabFx") return S.tabFx;
+  if (key == "dash") return S.dash ? "on" : "off";
   if (key == "tabVol") return std::to_string(S.tabVol);
   if (key == "xMinutes") return std::to_string(S.xMinutes);
   if (key == "xGears") return S.xGears == "auto" ? "auto" : "manual";
@@ -307,6 +316,7 @@ void Home::set(const std::string &key, const std::string &v) {
   else if (key == "xMinutes") S.xMinutes = std::atoi(v.c_str());
   else if (key == "easy") S.easy = v == "true";
   else if (key == "tabFx") S.tabFx = v;
+  else if (key == "dash") S.dash = v == "on";
   else if (key == "tabVol") S.tabVol = std::atoi(v.c_str());
   else if (key == "xStyle") S.xStyle = xstyle(v).key; else if (key == "xGears") S.xGears = v;
   else if (key == "xBots") S.xBots = v == "style" ? 0 : std::atoi(v.c_str()); else if (key == "xField") S.xField = v;
@@ -544,6 +554,8 @@ void Home::build() {
       // your browser's music, through the game (radio.hpp)
       {"MUSIC ROOM", "tabFx", {{"off", "OFF"}, {"clean", "CLEAN"}, {"room", "ROOM"}, {"hall", "HALL"}, {"cathedral", "CATHEDRAL"}}}, {"MUSIC VOLUME", "tabVol", {{"25", "25%"}, {"50", "50%"}, {"75", "75%"}, {"100", "100%"}, {"125", "125%"}, {"150", "150%"}}},
               {"MUSIC", "music", {{"on", "ON"}, {"low", "QUIET"}, {"off", "OFF"}}},
+              // the iPad on the desk (tools/dashfeed.mjs): open xanboo78o.github.io/wdc/dash.html and type the code
+              {"IPAD DASH", "dash", {{"on", "ON  -  CODE " + S.dashCode}, {"off", "OFF"}}},
               {"VIEW", "cam", {{"0", "ONBOARD"}, {"1", "CHASE"}, {"2", "NOSE"}, {"3", "T-CAM"}}},
               {"LOOK", "look", {{"film", "FILM (SHADOWS, BLOOM)"}, {"plain", "PLAIN (FASTER)"}}},
               {"IDEAL LINE", "line", {{"false", "HIDDEN"}, {"true", "SHOWN"}}},
@@ -1190,6 +1202,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
       // your browser's music, through the game (radio.hpp)
       {"MUSIC ROOM", "tabFx", {{"off", "OFF"}, {"clean", "CLEAN"}, {"room", "ROOM"}, {"hall", "HALL"}, {"cathedral", "CATHEDRAL"}}}, {"MUSIC VOLUME", "tabVol", {{"25", "25%"}, {"50", "50%"}, {"75", "75%"}, {"100", "100%"}, {"125", "125%"}, {"150", "150%"}}},
       {"MUSIC", "music", {{"on", "ON"}, {"low", "QUIET"}, {"off", "OFF"}}},
+      {"IPAD DASH", "dash", {{"on", "ON  -  CODE " + S.dashCode}, {"off", "OFF"}}},
       {"VIEW", "cam", {{"0", "ONBOARD"}, {"1", "CHASE"}, {"2", "NOSE"}, {"3", "T-CAM"}}},
       {"IDEAL LINE", "line", {{"false", "HIDDEN"}, {"true", "SHOWN"}}},
       {"VOLUME", "volume", {{"0", "OFF"}, {"2", "20%"}, {"4", "40%"}, {"6", "60%"}, {"8", "80%"}, {"10", "100%"}}},

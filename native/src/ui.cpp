@@ -90,6 +90,11 @@ static void rowText(Race &race, const Entry &e, size_t i, std::string &cls, std:
   if (i == 0) { gap = "LEADER"; return; }
   gap = interval(race, *race.standings[i - 1], e);
 }
+std::string towerGap(Race &race, size_t i) {
+  std::string cls, gap;
+  if (i < race.standings.size()) rowText(race, *race.standings[i], i, cls, gap);
+  return gap;
+}
 
 static std::string upper(std::string s) { for (char &c : s) c = (char)std::toupper((unsigned char)c); return s; }
 
