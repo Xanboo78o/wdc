@@ -28,10 +28,14 @@
 //             all cut vinyl in one colour, or all on their own boards — never a
 //             mixture — and nothing floats in the middle of a panel.
 //
-// WHO THE TEAMS ARE is tools/livery/roster.json: each seat's name and number.
-// The numbers are the first edition's; the names are tools/livery/names.mjs
-// ("make the names actual team names that sound real"), but for the pride
-// teams and the grand prix grid, which are tools/livery/teams.mjs. The four liveries Adam picked out by name
+// WHO THE TEAMS ARE. A team is NAMED FOR ITS LIVERY: the sponsor across its
+// doors, and what kind of outfit it is — Red Bull Racing, Voltra Endurance,
+// Box Box Grand Prix. (Adam, 2026-10-10, of a paddock of invented surnames and
+// place names: "no these team names suck ass, make them the names of their
+// liveriessssss".) So no two cars of one model share a title sponsor. The seats
+// that keep a written name: the ten pride teams in every paddock and the grand
+// prix grid (tools/livery/teams.mjs), and the four liveries Adam picked out.
+// tools/livery/roster.json holds every seat's number and which seats those are. The four liveries Adam picked out by name
 // are kept exactly as they were (tools/livery/keep.json).
 //
 // A livery is still: a base colour, up to twelve layers of shape for
@@ -294,6 +298,8 @@ const ZONES = {
   f499: { door: [-0.50, 0.30, 0.15, 0.45], quarter: [-0.95, -0.20, 0.45, 0.80], fender: [0.40, 0.90, 0.30, 0.50], sill: [-0.40, 0.30, 0.08, 0.20], bonnet: [-0.30, 0.30, 0.50, 0.95], roof: [-0.30, 0.30, -0.20, 0.20], deck: [-0.30, 0.30, -0.90, -0.40] },
   a110: { door: [-0.30, 0.25, 0.20, 0.60], quarter: [-0.85, -0.40, 0.50, 0.72], fender: [0.35, 0.85, 0.45, 0.62], sill: [-0.30, 0.30, 0.10, 0.22], bonnet: [-0.50, 0.50, 0.50, 0.90], roof: [-0.40, 0.40, -0.30, 0.20], deck: [-0.5, 0.5, -0.95, -0.78] },
   p9x8: { door: [-0.45, 0.30, 0.15, 0.50], quarter: [-0.90, -0.30, 0.50, 0.85], fender: [0.40, 0.90, 0.30, 0.50], sill: [-0.40, 0.30, 0.08, 0.22], bonnet: [-0.30, 0.30, 0.55, 0.95], roof: [-0.30, 0.30, -0.25, 0.15], deck: [-0.5, 0.5, -0.95, -0.60] },
+  nsx: { door: [-0.36, 0.30, 0.20, 0.60], quarter: [-0.86, -0.42, 0.54, 0.76], fender: [0.36, 0.82, 0.48, 0.66], sill: [-0.36, 0.34, 0.10, 0.22], bonnet: [-0.50, 0.50, 0.55, 0.95], roof: [-0.38, 0.38, -0.10, 0.22], deck: [-0.6, 0.6, -0.96, -0.76] },
+  p992r: { door: [-0.30, 0.30, 0.20, 0.60], quarter: [-0.82, -0.34, 0.55, 0.76], fender: [0.34, 0.86, 0.48, 0.64], sill: [-0.36, 0.36, 0.10, 0.24], bonnet: [-0.52, 0.52, 0.50, 0.90], roof: [-0.42, 0.42, -0.22, 0.16], deck: [-0.6, 0.6, -0.96, -0.74] },
 };
 
 
@@ -379,8 +385,8 @@ const STUDIO = SPONSORS.filter(s => s.cat === 'studio' && atlas.cells['plate:' +
 const sheet = id => { const b = SHEET.find(x => x.id === id); if (!b) throw new Error('bake: the sheet has no sponsor called ' + id); return b; };
 const TYRE = sheet('pirelli');
 // what kind of car it is decides where its number and its names go
-const FORM = { p911: 'gt', m720: 'gt', g55: 'gt', a480: 'proto', m4: 'gt', p992: 'gt', hura: 'gt', f122: 'f1', m4g4: 'gt', amg4: 'gt', f499: 'proto', a110: 'gt', p9x8: 'proto' };
-const KLASS = { p911: 'CUP', m720: 'GT3', g55: 'GT4', a480: 'HYPER', m4: 'GT3', p992: 'GT3', hura: 'GT3', m4g4: 'GT4', amg4: 'GT4', f499: 'HYPER', a110: 'GT4', p9x8: 'HYPER' };
+const FORM = { p911: 'gt', m720: 'gt', g55: 'gt', a480: 'proto', m4: 'gt', p992: 'gt', hura: 'gt', f122: 'f1', m4g4: 'gt', amg4: 'gt', f499: 'proto', a110: 'gt', p9x8: 'proto', nsx: 'gt', p992r: 'gt' };
+const KLASS = { p911: 'CUP', m720: 'GT3', g55: 'GT4', a480: 'HYPER', m4: 'GT3', p992: 'GT3', hura: 'GT3', m4g4: 'GT4', amg4: 'GT4', f499: 'HYPER', a110: 'GT4', p9x8: 'HYPER', nsx: 'GT3', p992r: 'GT3' };
 const NUMBER_AFT = new Set(['g55', 'a110']);      // engine behind the driver: the number sits at the back of the door
 // the actual grid's actual backers, as far as the sheet has them (teams.mjs REAL)
 const BACKERS = {
@@ -390,6 +396,17 @@ const BACKERS = {
   'Audi': ['audi', 'revolut', 'adidas'], 'Cadillac': ['cadillac', 'tommy-hilfiger'],
 };
 
+// what a team named for its sponsor is called, by the kind of racing it does
+const OUTFIT = {
+  CUP: ['Cup Team', 'Racing', 'Motorsport', 'Rennsport', 'Junior Team', 'Carrera Team'], GT3: ['Racing', 'Motorsport', 'GT Team', 'Racing Team', 'Squadra Corse', 'GT Racing', 'Performance', 'Autosport'],
+  GT4: ['Racing', 'Motorsport', 'Junior Team', 'Racing Club', 'GT4 Team', 'Academy', 'Autosport'], HYPER: ['Endurance', 'Hypercar Team', 'Works', 'Factory Racing', 'Prototype Team', 'Racing'],
+  F1: ['Grand Prix', 'F1 Team', 'Racing', 'Formula Team', 'GP'],
+};
+const cased = n => (/^[A-Z0-9]{1,3}$/.test(n) ? n : n.split(' ').map(w => w[0] + w.slice(1).toLowerCase()).join(' '));
+const shortOf = s => (s.sheet ? s.short || s.name : cased(s.name));
+const NOT_A_TITLE = new Set(['pirelli', 'f1', 'fia']);      // the tyre maker and the two governing bodies back everybody, and nobody in particular
+const everyName = new Set(Object.values(roster).flat().filter(t => t.pride || t.real).map(t => t.name).concat(Object.values(KEEPS).map(k => k.name)));
+
 const uv = name => { const c = atlas.cells[name]; if (!c) throw new Error('no sticker called ' + name); return [c.x / atlas.size[0], c.y / atlas.size[1], c.w / atlas.size[0], c.h / atlas.size[1]]; };
 const INK = 'f4f3ee', BLACK = '0e0f12';
 
@@ -397,6 +414,10 @@ function build(key, carIx) {
   const Z = ZONES[key], form = FORM[key], who = roster[key];
   if (!Z || !form || !who) throw new Error(`bake: ${key} has no zones, no form or no teams — ZONES/FORM in tools/livery/bake.mjs, and its names in tools/livery/roster.json`);
   const reals = REAL[key] || [], out = [], pairs = new Set();
+  // the title sponsors of this paddock, dealt out one a team: no two cars of one model wear the same name
+  const deal = [...SHEET.filter(s => !NOT_A_TITLE.has(s.id)), ...STUDIO], rd = rngOf(carIx * 31337 + 99);
+  for (let k = deal.length - 1; k > 0; k--) { const j = Math.floor(rd() * (k + 1)); [deal[k], deal[j]] = [deal[j], deal[k]]; }
+  let dealt = 0;
   who.forEach((team, i) => {
     if (KEEPS[`${key}:${i}`]) { out.push(KEEPS[`${key}:${i}`]); return; }
     const r = rngOf(carIx * 7919 + i * 104729 + 2026);
@@ -435,8 +456,7 @@ function build(key, carIx) {
     let title, others = [];
     if (real) { const ids = BACKERS[real.team]; title = sheet(ids[0]); others = ids.slice(1).map(sheet); }
     else {
-      const k = r();
-      title = k < 0.16 ? pick(STUDIO) : k < 0.62 ? draw(['real']) : k < 0.88 ? draw(['fake']) : draw(['joke']);
+      title = flag ? pick(deal) : deal[dealt++ % deal.length];
       while (others.length < 9) { const s = r() < 0.6 ? draw(['real']) : r() < 0.6 ? draw(['fake']) : draw(['joke']); if (s !== title && !others.includes(s)) others.push(s); }
     }
     // how it wears them: cut vinyl in one colour · the logos' own colours · every small one on its board
@@ -564,9 +584,19 @@ function build(key, carIx) {
       row((real ? others.slice(2, 4) : small.slice(0, 2)).concat(TYRE), 'side', Z.sill, 0.07, 0.08);
     }
 
+    // ---- what it is called: its sponsor, and what kind of outfit it is
+    let name = team.name;
+    if (!real && !flag) {
+      const base = shortOf(title), kinds = OUTFIT[KLASS[key] || 'F1'], k0 = Math.floor(r() * kinds.length);
+      name = null;
+      for (let k = 0; k < kinds.length && !name; k++) { const sfx = kinds[(k0 + k) % kinds.length], n = /Racing$/.test(base) && /^Racing/.test(sfx) ? base : `${base} ${sfx}`; if (!everyName.has(n)) name = n; }
+      if (!name) name = `Team ${base} ${KLASS[key] || 'F1'}`;
+      if (everyName.has(name)) throw new Error(`bake: two teams are called ${name}`);
+      everyName.add(name);
+    }
     const rim = real ? real.rim : flag ? pick([null, INK, '15161a']) : r() < 0.35 ? null : pick(['15161a', '15161a', '15161a', INK, 'c9a13b', '8a5a2b', cols[2], cols[1]]);
     out.push({
-      name: team.name, num: team.num, design, way: real ? real.team : flag ? flag.label : way, style, rim, title: title.name, sponsors: others.slice(0, real ? others.length : 2 + busy).map(s => s.name), finish,
+      name, num: team.num, design, way: real ? real.team : flag ? flag.label : way, style, rim, title: title.name, sponsors: others.slice(0, real ? others.length : 2 + busy).map(s => s.name), finish,
       base: liv.base, chips: cols, layers: liv.layers,
       stickers: S.slice(0, 24).map(st => ({ uv: uv(st.cell).map(v => +v.toFixed(5)), plane: st.plane, rect: st.rect, tint: st.tint })),
     });

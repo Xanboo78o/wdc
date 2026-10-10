@@ -34,6 +34,8 @@ const REAL = JSON.parse(fs.readFileSync(RC + 'real/manifest.json', 'utf8'));
 
 const W = 4096, H = 2048, RH = 92, PAD = 4;
 const lum = h => { h = h.replace('#', ''); if (h.length === 3) h = [...h].map(c => c + c).join(''); const f = i => { const v = parseInt(h.slice(i, i + 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(0) + 0.7152 * f(2) + 0.0722 * f(4); };
+// a brand's name as a team would carry it: NORVANE -> Norvane, BOX BOX -> Box Box (bake.mjs names teams for their title sponsor)
+const tidy = n => n.split(' ').map(w => (w.length <= 3 && w === w.toUpperCase() && !/^(BOX|AIR|CAR|DEG|GYM|UP)$/.test(w) ? w : w[0].toUpperCase() + w.slice(1).toLowerCase())).join(' ');
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
 // ---- every sticker, as the sheet's own markup -------------------------------------------------
@@ -46,7 +48,7 @@ for (const b of REAL) {
   const byBg = [...b.boards].sort((x, y) => lum(y.bg) - lum(x.bg));       // lightest board first
   const light = byBg[0], dark = byBg[byBg.length - 1], a = Math.min(b.aspect, 5.2);
   const w = Math.round(Math.max(118, RH * (0.62 * a + 0.55)));
-  cells.push({ name: 'board:' + b.slug, w, html: realLogo(b, b.boards[0], b.boards[0].bg), brand: b.name, kind: 'real', tier: b.tier, bg: b.boards[0].bg });
+  cells.push({ name: 'board:' + b.slug, w, html: realLogo(b, b.boards[0], b.boards[0].bg), brand: b.name, short: b.name, kind: 'real', tier: b.tier, bg: b.boards[0].bg });
   cells.push({ name: 'logo:' + b.slug, w, html: realLogo(b, light, null), tight: true, guess: light.mode === 'white' ? 'ffffff' : light.mode === 'black' ? '000000' : null });
   cells.push({ name: 'logod:' + b.slug, w, html: realLogo(b, dark, null), tight: true, guess: dark.mode === 'white' ? 'ffffff' : dark.mode === 'black' ? '000000' : null });
 }
@@ -59,7 +61,7 @@ const fakeLogo = (b, v, bg, onDark) => {
 for (const b of FAKE) {
   const byBg = [...b.boards].sort((x, y) => lum(y.bg) - lum(x.bg));
   const light = byBg[0], dark = byBg[byBg.length - 1], w = 330;
-  cells.push({ name: 'board:' + b.id, w, html: fakeLogo(b, b.boards[0], b.boards[0].bg), brand: b.name + (b.sub ? ' ' + b.sub : ''), kind: b.joke ? 'joke' : 'fake', tier: 2, bg: b.boards[0].bg });
+  cells.push({ name: 'board:' + b.id, w, html: fakeLogo(b, b.boards[0], b.boards[0].bg), brand: b.name + (b.sub ? ' ' + b.sub : ''), short: tidy(b.name), kind: b.joke ? 'joke' : 'fake', tier: 2, bg: b.boards[0].bg });
   // a logo for light paint is drawn in the colours it wears on its LIGHT board, and the other way about
   cells.push({ name: 'logo:' + b.id, w, html: fakeLogo(b, light, null, false), tight: true, guess: null, fg: light.fg });
   cells.push({ name: 'logod:' + b.id, w, html: fakeLogo(b, dark, null, true), tight: true, guess: null, fg: dark.fg });
@@ -182,7 +184,7 @@ const first = ROOT + 'data/livery/atlas.png', meta = JSON.parse(fs.readFileSync(
 execFileSync('magick', [first, '-crop', `${W}x${H}+0+0`, '+repage', tmp + '/top.png']);
 execFileSync('magick', [tmp + '/top.png', tmp + '/sheet.png', '-background', 'none', '-append', '-define', 'png:compression-level=9', first]);
 const keep = Object.fromEntries(Object.entries(meta.cells).filter(([k, c]) => c.y < H && !/^(board|logo|logod):/.test(k)));
-const brands = cells.filter(c => c.brand).map(c => ({ id: c.name.slice(6), name: c.brand, kind: c.kind, tier: c.tier, aspect: +(out[c.name].w / out[c.name].h).toFixed(2), laspect: +(out['logo:' + c.name.slice(6)].w / out['logo:' + c.name.slice(6)].h).toFixed(2) }));
+const brands = cells.filter(c => c.brand).map(c => ({ id: c.name.slice(6), name: c.brand, short: c.short, kind: c.kind, tier: c.tier, aspect: +(out[c.name].w / out[c.name].h).toFixed(2), laspect: +(out['logo:' + c.name.slice(6)].w / out['logo:' + c.name.slice(6)].h).toFixed(2) }));
 fs.writeFileSync(ROOT + 'data/livery/atlas.json', JSON.stringify({ size: [W, H * 2], cells: { ...keep, ...out }, brands }));
 console.log(`data/livery/atlas.png  ${W}x${H * 2}  +${cells.length} stickers of ${brands.length} sheet sponsors (${brands.filter(b => b.kind === 'real').length} real, ${brands.filter(b => b.kind === 'fake').length} invented, ${brands.filter(b => b.kind === 'joke').length} joke)  ${(fs.statSync(first).size / 1024).toFixed(0)} KB`);
 done(0);
