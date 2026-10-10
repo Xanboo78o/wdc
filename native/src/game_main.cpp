@@ -945,6 +945,7 @@ int main(int argc, char **argv) {
     h.race = S.race.get(); h.clock = clock;
     h.passFlash = S.race && S.race->time - S.passAt < 2.6;
     h.rimLights = rimLed.ok();
+    h.wheelInView = cfg.cam == 0 && !R.carPack().empty();
     return h;
   };
   auto liveOf = [&]() {

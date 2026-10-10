@@ -161,7 +161,8 @@ void GameHud::draw(Renderer &R, float k, const HudTheme &T, const HudIn &in) {
   }
 
   // ---- #dash: what is on a real wheel's screen
-  {
+  // (Not from the seat of a car with a steering wheel in it: the box sat over the wheel, and the iPad shows the same.)
+  if (!in.wheelInView) {
     const float w = 340, x0 = W / 2 - w / 2, x1 = x0 + w, y1 = H - 20, h = 116, y0 = y1 - h;
     plate(R, k, x0 + 16, y0, x1 - 16, y0, x1, y1, x0, y1, PLATE);
     // fifteen rev lights: five green, five red, five blue, over the top half of

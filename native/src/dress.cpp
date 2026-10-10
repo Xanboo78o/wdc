@@ -235,7 +235,7 @@ void main(){
   vec3 amb = mix(uGndAmb, uSkyAmb, n.y * 0.5 + 0.5);
   vec3 lit = c * (amb + uSunCol * ndl * 0.78);
   // (uLift: the steering wheel sits in the daylight from the windscreen, where the rest of the cabin is in shade)
-  if (inside && uLift > 0.0) lit += c * (uSkyAmb + uSunCol * 0.35) * uLift * (0.55 + 0.45 * n.y);
+  if (inside && uLift > 0.0) lit = min(lit + min(c, vec3(0.5)) * (uSkyAmb + uSunCol * 0.35) * uLift * (0.55 + 0.45 * n.y), vec3(0.8));    // (capped: a white part must not bloom)
   float fres = pow(1.0 - max(dot(n, V), 0.0), 4.0);
   vec3 h = normalize(uSun + V);
   lit = mix(lit, skyAt(reflect(-V, n)), clamp(mirror + fres * (mirror > 0.0 ? 0.5 : 0.0), 0.0, 0.9));

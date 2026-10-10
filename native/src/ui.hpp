@@ -40,6 +40,7 @@ struct HudIn {
   Race *race = nullptr;             // null in a hot lap
   double clock = 0;                 // wall seconds, for anything that blinks
   bool passFlash = false;           // your tower row flashes green for the pass that stuck
+  bool wheelInView = false;         // the cockpit view of a downloaded car: its steering wheel is where the speed box would be
   bool rimLights = false;           // the real wheel is showing the revs: the fifteen on screen are left out
 };
 
