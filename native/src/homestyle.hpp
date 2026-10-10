@@ -68,8 +68,8 @@ inline bool applyStyle(const std::string &theme, const std::string &colour = "fi
       if (c.n == 1) RED = hex(c.ring[0]);
       else { STYLE_MOVING = true; RED = styleRing(c, (clock + STYLE_DRIFT) / c.period); STYLE_GLOW = styleRing(c, (clock + STYLE_DRIFT) / c.period + 0.27); }
       if (c.n == 1) STYLE_GLOW = RED;
-      // on the beat the colour flashes toward white, and eases back
-      if (STYLE_PULSE > 0.01f) RED = mix(hex("#ffffff"), RED, 0.32f * STYLE_PULSE);
+      // on the beat the colour lifts a little toward white, and eases back
+      if (STYLE_PULSE > 0.01f) RED = mix(hex("#ffffff"), RED, 0.10f * STYLE_PULSE);
       PLUM = RED;
       ONRED = inkOn(RED);
     }

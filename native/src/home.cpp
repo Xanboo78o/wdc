@@ -708,11 +708,14 @@ void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, con
 void Home::music(int beats, float bass, double clock) {
   const float dt = musicAt < 0 ? 0.016f : (float)std::max(0.0, std::min(0.1, clock - musicAt));
   musicAt = clock;
-  if (beats != musicBeats) { musicBeats = beats; STYLE_PULSE = 1; }          // the bump
-  else STYLE_PULSE *= std::exp(-dt * 5.5f);                                  // and the ease
-  if (STYLE_PULSE < 0.004f) STYLE_PULSE = 0;
-  STYLE_BASS += (bass - STYLE_BASS) * std::min(1.0f, dt * 9);
-  STYLE_DRIFT += (double)STYLE_BASS * dt * 9.0;                              // loud music carries the colour round faster
+  // (Adam: "not intense js ease". Nothing jumps: a kick sets a target, the look swells toward it
+  // over about a fifth of a second and settles back over a second, and all of it is small.)
+  if (beats != musicBeats) { musicBeats = beats; musicTarget = 1; }
+  musicTarget *= std::exp(-dt * 2.2f);
+  STYLE_PULSE += (musicTarget - STYLE_PULSE) * std::min(1.0f, dt * (musicTarget > STYLE_PULSE ? 7.0f : 2.4f));
+  if (STYLE_PULSE < 0.004f && musicTarget < 0.004f) STYLE_PULSE = 0;
+  STYLE_BASS += (bass - STYLE_BASS) * std::min(1.0f, dt * 2.5f);
+  STYLE_DRIFT += (double)STYLE_BASS * dt * 4.0;                              // loud music carries the colour round faster
 }
 
 bool Home::style(double clock) const {
@@ -838,7 +841,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
   // a moving colour is in the air of the page as well: two soft bands of it, breathing, under everything
   if (STYLE_PRO && (STYLE_MOVING || STYLE_BASS > 0.02f) && page != "home") {
     const int N = 26;
-    const float amt = (STYLE_MOVING ? 1.0f : 0.0f) + 1.6f * STYLE_BASS + 0.7f * STYLE_PULSE;      // the music fills the room with it
+    const float amt = (STYLE_MOVING ? 1.0f : 0.0f) + 0.9f * STYLE_BASS + 0.2f * STYLE_PULSE;      // the music fills the room with it, gently
     for (int q = 0; q < N; q++) {
       const float t = (float)q / (N - 1), yy = t * (float)R.H;
       const float a = (0.085f * (0.5f + 0.5f * std::sin(t * 3.1f + (float)clock * 0.11f)) + 0.03f) * amt;
@@ -889,9 +892,9 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
         const std::string name = upper(L[(size_t)i].name);
         float size = 112;
         while (size > 56 && width(size, name, A, 0.03f) > W - tx - X0) size -= 6;
-        size *= 1 + 0.035f * STYLE_PULSE;                       // the name bumps with the music
+        size *= 1 + 0.012f * STYLE_PULSE;                       // the name bumps with the music
         const float nw = text(tx, y + 58, size, name, INK, LEFT, A, 0.03f);
-        R.rect(tx * k, (y + 58 + size + 8) * k, (on ? nw : 90) * k, RULE * (1 + 1.6f * STYLE_PULSE) * k, RED);
+        R.rect(tx * k, (y + 58 + size + 8) * k, (on ? nw : 90) * k, RULE * (1 + 0.5f * STYLE_PULSE) * k, RED);
         const Outline &o = outline(mapId);
         char km[32];
         std::snprintf(km, sizeof km, "%.3f KM", o.len / 1000);

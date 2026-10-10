@@ -125,6 +125,7 @@ class Home {
   struct Outline { std::vector<float> xy; double len = 0; float x0 = 0, y0 = 0, x1 = 1, y1 = 1; bool ok = false; };
   std::map<std::string, Outline> outlines;
   int musicBeats = 0;
+  float musicTarget = 0;
   double musicAt = -1;
   std::map<std::string, std::vector<float>> lapTimes;      // circuit/car -> when the map's little car reaches each point of the outline
   const Outline &outline(const std::string &id);
