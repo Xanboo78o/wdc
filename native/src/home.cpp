@@ -584,7 +584,7 @@ const Home::Outline &Home::outline(const std::string &id) {
 
 void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, const std::string &id, bool car, double clock) {
   // .frame: 7% ink on the card, the outline inside 8 px of padding, north up
-  R.rrect(x * k, y * k, w * k, h * k, 8 * k, mix(INK, CARD, 0.07f));
+  if (!STYLE_PRO) R.rrect(x * k, y * k, w * k, h * k, 8 * k, mix(INK, CARD, 0.07f));      // (the pro look: the outline alone, on the picture)
   const Outline &o = outline(id);
   if (!o.ok) return;
   const float size = std::max(o.x1 - o.x0, o.y1 - o.y0), pad = size * 0.07f;
@@ -595,7 +595,7 @@ void Home::drawMap(Renderer &R, float k, float x, float y, float w, float h, con
   for (size_t i = 0; i < o.xy.size(); i += 2) { p[i] = (ox + o.xy[i] * sc) * k; p[i + 1] = (oy + o.xy[i + 1] * sc) * k; }
   const int n = (int)p.size() / 2;
   R.path(p.data(), n, 8 * k, INK, true);          // .casing
-  R.path(p.data(), n, 2.5f * k, CARD, true);      // .tarmac
+  R.path(p.data(), n, 2.5f * k, STYLE_PRO ? hex("#0b0c10") : CARD, true);      // .tarmac
   if (car) {
     const double u = std::fmod(clock / 9.0, 1.0) * n;      // a lone car lapping the outline, forever
     const int i = (int)u % n, j = (i + 1) % n;
@@ -717,7 +717,7 @@ void Home::draw(Renderer &R, float k, double clock, const LiveTower &live) {
     }
   };
 
-  if (page != "home") R.rect(0, 0, (float)R.W, (float)R.H, alpha_(PAPER, STYLE_PRO ? 0.84f : 0.88f));       // the wash: the race is still there, behind
+  if (page != "home") R.rect(0, 0, (float)R.W, (float)R.H, alpha_(PAPER, STYLE_PRO ? 0.66f : 0.88f));       // the wash: the race is still there, behind
 
   if (page == "home") { drawHub(R, k, clock); return; }
   if (page == "career") { drawCareer(R, k, clock); return; }

@@ -283,6 +283,92 @@ void Home::drawHub(Renderer &R, float k0, double clock) {
   const Pen P(R, k0);
   auto hot = [&](float x, float y, float w, float h, int item) { hots.push_back({x * P.k, y * P.k, w * P.k, h * P.k, item, nullptr}); };
   const float W = P.W, H = P.H;
+  if (STYLE_PRO) {
+    // ---- THE FILM (ad-cinematic.html). Two black bars and the picture between
+    // them; the menu is lettering on the picture, not furniture in front of it.
+    const float bar = H * 0.115f, RULE = 3;
+    for (int i = 0; i < 28; i++) P.rect((float)i * 22, bar, 22.5f, H - 2 * bar, alpha_(PAPER, 0.62f * (1 - (float)i / 28)));
+    for (int i = 0; i < 22; i++) P.rect(W - (float)(i + 1) * 22, bar, 22.5f, H - 2 * bar, alpha_(PAPER, 0.55f * (1 - (float)i / 22)));
+    P.rect(0, 0, W, bar, PAPER); P.rect(0, H - bar, W, bar, PAPER);
+    // the mark, as the film ends on it
+    {
+      const float x = 56, y = bar / 2 - 23;
+      const float w1 = P.text(x, y, 46, "XB", INK, LEFT, A, 0.02f);
+      P.text(x + w1, y, 46, "R", RED, LEFT, A, 0.02f);
+      P.text(W - 56, bar / 2 - 6, 11, "R A C I N G   F O R   A L L", SOFT, RIGHT, RB, 0.5f);
+    }
+    const EventDef *nx = career.next();
+    const bool open = nx && career.unlocked(*nx);
+    auto label = [&](const EventDef &e) { return e.kind == "round" ? "ROUND " + std::to_string(e.round) : std::string(kindName(e.kind)); };
+    const Team *team = teamKey().empty() ? nullptr : teamByKey(teamKey());
+    int openN = 0;
+    for (const EventDef &m : career.modes) if (career.modeOpen(m)) openN++;
+    // ---- the list: six words down the left
+    {
+      const std::string subs[6] = {
+        !nx ? "ALL OF IT. DONE." : (open ? "NEXT  -  " : "LOCKED  -  ") + label(*nx) + ": " + upper(nx->title),
+        "ANY CIRCUIT  -  " + upper(circuitName(S.track)), std::to_string(openN) + " OF " + std::to_string(career.modes.size()) + " MODES OPEN",
+        "ARCADE. DRIFT. NO SPINS.", team ? upper(team->name) : "PICK A TEAM", "SOUND  -  LOOK  -  WHEEL"};
+      const char *names[6] = {"CAREER", "RACE", "EVENTS", "XINGUS", "GARAGE", "SETTINGS"};
+      const float x = 56, step = (H - 2 * bar - 110) / 6;
+      float y = bar + 54;
+      for (int i = 0; i < 6; i++) {
+        const bool on = at == i;
+        hot(x - 16, y - 6, 470, step, i);
+        const float size = on ? 58 : 44;
+        const float w = P.text(x, y + (on ? 0 : 7), size, names[i], on ? INK : alpha_(INK, 0.46f), LEFT, A, 0.045f);
+        if (on) {
+          P.rect(x, y + 64, w, RULE, RED);
+          P.text(x + w + 22, y + 26, 11, P.fit(11, subs[i], RB, 0.32f, 430), alpha_(INK, 0.82f), LEFT, RB, 0.32f);
+        }
+        y += step;
+      }
+    }
+    // ---- tonight: the next career event, as a slug and a title, no poster
+    {
+      const bool on = at == 6;
+      const float pw = 400, px = W - 56 - pw, py = bar + 54;
+      hot(px - 14, py - 10, pw + 28, H - 2 * bar - 80, 6);
+      if (nx) {
+        const SeasonDef &sd = career.seasons[(size_t)nx->season];
+        int laps = nx->laps, rounds = 0;
+        const std::string trk = career.trackFor(*nx, &laps);
+        for (const EventDef &e : sd.events) if (e.kind == "round") rounds++;
+        const std::string tag = "TONIGHT  -  " + sd.tag + "  -  " + label(*nx) + (nx->kind == "round" ? " OF " + std::to_string(rounds) : "");
+        P.text(px, py, 11, P.fit(11, tag, RB, 0.36f, pw), RED, LEFT, RB, 0.36f);
+        drawMap(R, P.k, px - 8, py + 24, pw * 0.72f, 150, trk.empty() ? "monza" : trk, true, clock);
+        float ty = py + 190;
+        for (const std::string &ln : P.wrap(50, upper(nx->title), A, pw, 0.03f)) { P.text(px, ty, 50, ln, INK, LEFT, A, 0.03f); ty += 54; if (ty > py + 310) break; }
+        P.rect(px, ty + 4, 120, RULE, RED);
+        std::string facts = upper(trk.empty() ? "NOT ON THIS MACHINE YET" : circuitName(trk));
+        if (nx->kind == "hotlap") facts += "  -  ALONE";
+        else if (nx->kind == "elimination") facts += "  -  " + std::to_string(nx->grid) + " CARS, ONE OUT A LAP";
+        else if (nx->kind == "duel" || nx->kind == "the78") facts += "  -  " + std::to_string(laps) + " LAPS  -  TWO CARS";
+        else facts += "  -  " + std::to_string(laps) + " LAP" + (laps == 1 ? "" : "S");
+        P.text(px, ty + 22, 11, P.fit(11, facts, RB, 0.32f, pw), alpha_(INK, 0.82f), LEFT, RB, 0.32f);
+        P.text(px, ty + 46, 11, P.fit(11, upper(career.objText(*nx)), RB, 0.32f, pw), career.state(nx->key).met ? RED : SOFT, LEFT, RB, 0.32f);
+        // the one button, as the film's own: an outline until you are on it
+        const float by = H - bar - 86, bw = 250;
+        if (on && open) P.rect(px, by, bw, 50, RED);
+        else { P.rect(px, by, bw, 50, alpha_(INK, 0.55f)); P.rect(px + 1.5f, by + 1.5f, bw - 3, 47, alpha_(PAPER, 0.72f)); }
+        P.text(px + bw / 2, by + 18, 13, open ? "L I G H T S   O U T" : "L O C K E D", INK, CENTRE, RB, 0.3f);
+      } else {
+        P.text(px, py, 11, "T H E   E N D", RED, LEFT, RB, 0.36f);
+        P.text(px, py + 30, 50, "ALL OF IT. DONE.", INK, LEFT, A, 0.03f);
+      }
+    }
+    // ---- the lower bar: what the keys do, and what day it is
+    {
+      const std::time_t tt = std::time(nullptr);
+      std::tm lt = *std::localtime(&tt), d0{};
+      d0.tm_year = 126; d0.tm_mon = 9; d0.tm_mday = 3;
+      std::tm today = lt; today.tm_hour = today.tm_min = today.tm_sec = 0;
+      const int day = (int)std::floor(std::difftime(std::mktime(&today), std::mktime(&d0)) / 86400.0 + 0.5) + 1;
+      if (day >= 1) { const float w = P.text(56, H - bar / 2 - 6, 11, "CHASING THE WDC", RED, LEFT, RB, 0.36f); P.text(56 + w + 14, H - bar / 2 - 6, 11, "DAY " + std::to_string(day), INK, LEFT, RB, 0.36f); }
+      P.text(W - 56, H - bar / 2 - 6, 10, "ARROWS  -  ENTER  -  G = TONIGHT'S EVENT  -  ESC LEAVES", alpha_(INK, 0.5f), RIGHT, RB, 0.3f);
+    }
+    return;
+  }
   // the dark comes in from both sides and up from the floor; the middle is left to the race
   for (int i = 0; i < 24; i++) P.rect((float)i * 24, 0, 24.5f, H, alpha_(PAPER, 0.72f * (1 - (float)i / 24)));
   for (int i = 0; i < 20; i++) P.rect(W - (float)(i + 1) * 24, 0, 24.5f, H, alpha_(PAPER, 0.62f * (1 - (float)i / 20)));
