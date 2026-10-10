@@ -68,6 +68,55 @@ const RECIPES = {
     wheels: { by: 'node', fl: /WHEEL_LF/, fr: /WHEEL_RF/, rl: /WHEEL_LR/, rr: /WHEEL_RR/, tyre: /TYRE_/ },
     role: { car_paint_g55: 'paint', glass: 'glass', g55_tyre: 'tyre', rimm: 'rim', rear_lights_glass: 'tail', brake_light1: 'tail', ext_metals: 'chrome', aluminium_ext: 'chrome' },
   },
+  // Adam, 2026-10-10: "i donwloaeded moree cars lets make teasms and liveriesssss". Three more GT3s.
+  // Each came in somebody's real colours: the maker's banner and the tyre maker's sidewalls are painted
+  // out, the badge sheets are left off, and the paint is the team's own (tools/livery).
+  m4: {
+    title: 'BMW M4 GT3', klass: 'gt3', length: 5.020,
+    // one mesh for each material and no names: Object_51..54 are the steering wheel, 4 and 27 the banners, 17 the tyres
+    skip: /Object_(51|52|53|54)$/,
+    plain: /Object_(4|17|27)$/,
+    skipMat: ['EXT_Decals', 'EXT_RIM_BLUR', 'EXT_RIM_BLUR_STATIC', 'NUMBERPLATE_2018_EMISSIVE_PRO'],
+    wheels: { by: 'material', mats: ['EXT_Tyre.006', 'EXT_RIM', 'EXT_Disc'], tyre: 'EXT_Tyre.006' },
+    role: { EXT_Carpaint_Inst: 'paint', EXT_Windows: 'glass', INT_Windows: 'glass', INT_Windshield: 'glass', 'EXT_Tyre.006': 'tyre', EXT_RIM: 'rim', EXT_Glass_Emissive_Front: 'glass',
+            EXT_Glass_Emissive_Rear: 'tail', EXT_Emissive_Light_Rear: 'tail', EXT_Emissive_Light_Front: 'lamp', 'MIRROR.006': 'chrome', EXT_CHROME_LIGHTS: 'chrome' },
+  },
+  p992: {
+    title: 'Porsche 911 GT3 R (992)', klass: 'gt3', length: 4.619,
+    skip: /RIM_BLUR|STEER_HR|steer_hr/,
+    plain: /GEO_TIRE_|EXT_Banner|INT_BANNER/,
+    skipMat: ['EXT_Details', 'EXT_Details_0', 'EXT_Details_1'],     // the maker's crest
+    wheels: { by: 'node', fl: /WHEEL_LF|DISC_LF/, fr: /WHEEL_RF|DISC_RF/, rl: /WHEEL_LR|DISC_LR/, rr: /WHEEL_RR|DISC_RR/,
+              hub: { fl: /SUSP_LF/, fr: /SUSP_RF/, rl: /SUSP_LR/, rr: /SUSP_RR/ }, tyre: /GEO_TIRE_/ },
+    role: {},
+    nodeRole: [[/EXT_Carpaint_Inst/, 'paint'], [/GEO_TIRE_/, 'tyre'], [/GEO_RIM_/, 'rim'], [/EXT_Windows|INT_Windows|INT_Windshield|Glass_Emissive_Front/, 'glass'],
+               [/Emissive_Light_Rear|Glass_Emissive_Rear/, 'tail'], [/Emissive_Light_Front|AUX_LIGHT/, 'lamp'], [/MIRROR/, 'chrome']],
+  },
+  hura: {
+    title: 'Lamborghini Huracán GT3', klass: 'gt3', length: 4.458,
+    skip: /STEERING_WHEEL/,
+    plain: /_TYRE_/,
+    noAerial: true,
+    skipMat: ['BADGES'],
+    wheels: { by: 'material', mats: ['NEUMA', 'material_11'], tyre: 'NEUMA' },      // four wheels named tyre, tyre1, tyre2 and tyre: cut by quarter
+    role: { CAR_PAINT: 'paint', NEUMA: 'tyre', material_11: 'rim', phong1: 'glass', RED_GLASS: 'tail', LIGHTS: 'lamp' },
+  },
+  // The 2022 grand prix car. A million triangles as it came, 726,000 of them one hidden lump the size of
+  // a shoebox between the rear wheels ('material'): left off, with the steering wheel he holds himself.
+  f122: {
+    title: 'McLaren MCL36', klass: 'f1', length: 5.70,
+    plain: /Object_4[01]$/,
+    skipMat: ['material', 'Steer'],
+    wheels: { by: 'material', mats: ['tyres', 'rims', 'Material'], tyre: 'tyres' },
+    role: { Livery: 'paint', Livery_Wings: 'paint', 'Material.005': 'paint', 'Material.003': 'paint', tyres: 'tyre', rims: 'rim', Material: 'rim', mirror: 'chrome', chrome: 'chrome' },
+  },
+  // NOT A CAR: the steering wheel in the driver's hands (Adam: "i downloaded that wheel put that in the game").
+  // `prop` bakes it about its own hub instead of onto four tyres: the origin is the centre of the rim, its
+  // face looks back at the driver (-x), and it is `diameter` metres across. The game turns it about x.
+  wheel: {
+    title: 'Steering wheel', klass: 'prop', prop: true, diameter: 0.30,
+    role: {},
+  },
 };
 
 const argv = process.argv.slice(2);
@@ -168,19 +217,33 @@ const box = list => {
   return { lo, hi, mid: lo.map((l, k) => (l + hi[k]) / 2), size: hi.map((h, k) => h - lo[k]) };
 };
 let all = box(tris);
-const scale = R.length ? R.length / all.size[0] : 1;
+if (R.prop) {
+  // turned to face the driver (the model's face looks along its own +x, which the turn above made -z)
+  for (const t of tris) for (const arr of [t.p, t.n]) for (let k = 0; k < 9; k += 3) { const x = arr[k], z = arr[k + 2]; arr[k] = z; arr[k + 2] = -x; }
+  all = box(tris);
+}
+const scale = R.prop ? R.diameter / Math.max(all.size[1], all.size[2]) : R.length ? R.length / all.size[0] : 1;
 for (const t of tris) for (let k = 0; k < 9; k++) t.p[k] *= scale;
 all = box(tris);
-if (all.size[0] < 2.5 || all.size[0] > 7 || all.size[2] < 1.2 || all.size[2] > 2.8) {
+if (!R.prop && (all.size[0] < 2.5 || all.size[0] > 7 || all.size[2] < 1.2 || all.size[2] > 2.8)) {
   console.error(`bakecar: ${key} comes out ${all.size.map(v => v.toFixed(2)).join(' x ')} m — not a car. Give the recipe a real length.`);
   process.exit(1);
 }
 
 // ---- which triangles are which wheel ----------------------------------------------------
 const WHEELS = ['fl', 'fr', 'rl', 'rr'];
+const wheels = {};
+let isTyre = () => false;
+for (const t of tris) t.part = 'body';
+if (R.prop) {
+  // about its own middle: nothing to stand it on
+  for (const t of tris) for (let k = 0; k < 9; k++) t.p[k] -= all.mid[k % 3];
+  for (const w of WHEELS) wheels[w] = { c: [0, 0, 0], r: 0.33, w: 0.3 };
+  all = box(tris);
+} else {
 const cen = t => [(t.p[0] + t.p[3] + t.p[6]) / 3, (t.p[1] + t.p[4] + t.p[7]) / 3, (t.p[2] + t.p[5] + t.p[8]) / 3];
 for (const t of tris) t.part = 'body';
-const isTyre = t => R.wheels.tyreMat ? t.mat === R.wheels.tyreMat : R.wheels.by === 'node' ? R.wheels.tyre.test(t.path) : t.mat === R.wheels.tyre;
+isTyre = t => R.wheels.tyreMat ? t.mat === R.wheels.tyreMat : R.wheels.by === 'node' ? R.wheels.tyre.test(t.path) : t.mat === R.wheels.tyre;
 if (R.wheels.by === 'node') {
   for (const t of tris) for (const w of WHEELS) {
     if (R.wheels.hub && R.wheels.hub[w].test(t.path)) t.part = w + '.hub';       // a caliper sits inside the wheel's own node
@@ -196,11 +259,26 @@ if (R.wheels.by === 'node') {
     t.part = (R.wheels.hub || []).includes(t.mat) ? w + '.hub' : w;
   }
 }
-const wheels = {};
+
 for (const w of WHEELS) {
   const ty = tris.filter(t => t.part === w && isTyre(t));
   if (!ty.length) { console.error(`bakecar: ${key} has no tyre for wheel ${w} — the recipe's wheel rule matched nothing`); process.exit(1); }
-  const b = box(ty);
+  // A model posed with its front wheels turned (the M4 came 13 degrees into a left-hander) would be
+  // steered twice. The tyre is a ring: seen from above its long axis is the way it points. Turn the
+  // wheel, and the caliper with it, about its own middle until that is straight ahead.
+  let b = box(ty), sxx = 0, sxz = 0, szz = 0, n = 0;
+  for (const t of ty) for (let k = 0; k < 9; k += 3) { const x = t.p[k] - b.mid[0], z = t.p[k + 2] - b.mid[2]; sxx += x * x; sxz += x * z; szz += z * z; n++; }
+  const turned = 0.5 * Math.atan2(2 * sxz, sxx - szz);
+  if (Math.abs(turned) > 0.009 && Math.abs(turned) < 0.6) {
+    const c = Math.cos(-turned), s = Math.sin(-turned);
+    for (const t of tris) if (t.part.slice(0, 2) === w) for (let k = 0; k < 9; k += 3) {
+      const x = t.p[k] - b.mid[0], z = t.p[k + 2] - b.mid[2], nx = t.n[k], nz = t.n[k + 2];
+      t.p[k] = b.mid[0] + x * c - z * s; t.p[k + 2] = b.mid[2] + x * s + z * c;
+      t.n[k] = nx * c - nz * s; t.n[k + 2] = nx * s + nz * c;
+    }
+    console.log(`  wheel ${w} came turned ${(turned * 180 / Math.PI).toFixed(1)} degrees: straightened`);
+    b = box(ty);
+  }
   wheels[w] = { c: b.mid, r: Math.max(b.size[0], b.size[1]) / 2, w: b.size[2] };
 }
 // the side a wheel says it is on must be the side it is on
@@ -223,15 +301,23 @@ for (const t of tris) {
   const w = wheels[t.part.slice(0, 2)];
   if (t.part !== 'body' && w) for (let k = 0; k < 9; k++) t.p[k] -= w.c[k % 3];
 }
+// a radio aerial stands half a metre over the roof, and the car's height is what its paint is fitted to
+if (R.noAerial) {
+  const roof = box(tris.filter(t => t.part === 'body' && roleOf(t) === 'paint')).hi[1] + 0.02;
+  const n0 = tris.length;
+  for (let k = tris.length - 1; k >= 0; k--) { const t = tris[k]; if (t.part === 'body' && Math.min(t.p[1], t.p[4], t.p[7]) > roof) tris.splice(k, 1); }
+  console.log(`  ${n0 - tris.length} triangles above the roof (an aerial) left off`);
+}
 all = box(tris.filter(t => t.part === 'body'));
+}
 
 // ---- materials ----------------------------------------------------------------------------
 const outDir = path.join(outRoot, key);
 fs.mkdirSync(outDir, { recursive: true });
-const roleOf = t => {
+function roleOf(t) {
   for (const [re, role] of R.nodeRole || []) if (re.test(t.path)) return role;
   return R.role[t.mat] || 'trim';
-};
+}
 const mats = [], matIx = new Map();
 function material(t) {
   const plain = !!(R.plain && R.plain.test(t.path));
@@ -254,7 +340,7 @@ function material(t) {
     out.map = name;
     // the native game has no picture decoder: the same picture again as a plain PAM (RGBA, 8 bit)
     const pam = name.replace(/\.[^.]+$/, '') + '.pam';
-    execFileSync('magick', [from, '-resize', role === 'paint' ? '2048x2048>' : '1024x1024>', '-depth', '8', '-alpha', keepAlpha ? 'on' : 'off', '-define', 'pam:tupletype=RGB_ALPHA', ...(keepAlpha ? [] : ['-alpha', 'opaque']), 'pam:' + path.join(outDir, pam)]);
+    execFileSync('magick', [from, '-resize', role === 'paint' ? '2048x2048>' : '1024x1024>', '-depth', '8', '-alpha', keepAlpha ? 'on' : 'off', '-define', 'pam:tupletype=RGB_ALPHA', ...(keepAlpha ? [] : ['-alpha', 'opaque']), '-colorspace', 'sRGB', '-type', 'TrueColorAlpha', 'pam:' + path.join(outDir, pam)]);   // (a grey picture would come out two channels wide, and the game reads four)
     out.pam = pam;
     if (keepAlpha && m.alphaMode === 'MASK') out.cutout = true;
   }
@@ -314,8 +400,8 @@ if (licence) fs.writeFileSync(path.join(outDir, 'LICENSE.txt'), licence);
 const ixPath = path.join(outRoot, 'index.json');
 let ix = [];
 try { ix = JSON.parse(fs.readFileSync(ixPath, 'utf8')); } catch { /* the first car */ }
-ix = ix.filter(c => c.key !== key).concat([{ key, title: R.title, klass: R.klass, tris: car.tris }]).sort((a, b) => a.klass.localeCompare(b.klass) || a.key.localeCompare(b.key));
-fs.writeFileSync(ixPath, JSON.stringify(ix, null, 1));
+if (!R.prop) ix = ix.filter(c => c.key !== key).concat([{ key, title: R.title, klass: R.klass, tris: car.tris }]).sort((a, b) => a.klass.localeCompare(b.klass) || a.key.localeCompare(b.key));
+if (!R.prop) fs.writeFileSync(ixPath, JSON.stringify(ix, null, 1));
 
 // ---- say what was decided ---------------------------------------------------------------------
 const parts = {};

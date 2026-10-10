@@ -53,6 +53,7 @@ class Dress {
   // LIGHTS (Adam: "make their headlights and brake lights work and brakes glow").
   // How hard this car is on the brakes, 0..1: the next drawPack lights its tail lamps by it.
   void setBrake(float b) { brakeNow = b; }
+  void setCabinLift(float k) { cabinLift = k; }   // extra daylight on what is drawn next from inside (the steering wheel); 0 = none
   // every car's lamps, for the paint of the downloaded cars (render.cpp gathers them): up to eight
   void setLamps(int n, const float *pos4, const float *dir4, const float *col3) {
     nLamp = n < 8 ? n : 8;
@@ -83,6 +84,7 @@ class Dress {
   int liveryIx = -1;
   float wheelSweep = 0, brakeNow = 0;
   int nDent = 0, nLamp = 0;
+  float cabinLift = 0;
   float lampP[32] = {}, lampD[32] = {}, lampC[24] = {};
   float dentV[32] = {}, dentN[16] = {};
   unsigned glowProg = 0, glowVao = 0, glowVbo = 0;

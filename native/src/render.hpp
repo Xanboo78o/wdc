@@ -87,6 +87,7 @@ struct FrameIn {
   int camMode = 0;              // 0 onboard, 1 chase, 2 high
   bool showLine = false;
   double wheelAngle = 0;        // metres the wheels have rolled
+  double handWheel = 0;         // the steering wheel in your hands: -1 full right .. +1 full left
   double groundH = 0;           // height of the road under the car
   double gPitch = 0, gRoll = 0; // the tilt of the ground under its wheels
   double dt = 1.0 / 60;
@@ -261,6 +262,8 @@ class Renderer {
   // motion blur (render.cpp COMP_FS): the camera's travel in view space, the view itself, and the cars to leave sharp
   float mbVel[3] = {0, 0, 0}, mbTan = 0.6f, mbAmt = 0, mbHole[4] = {-1, -1, -1, -1};
   Mat4 mbView;
+  // the steering wheel in the cockpit (data/cars/wheel, a downloaded model): drawn in your own car, from the seat
+  bool rimWant = false; float rimTurn = 0;
   // every car's lamps (render.cpp drawCar): gathered this frame, used on the paint in the next; 11 floats a lamp
   std::vector<float> lampsNow, lampsWere, lampP, lampD, lampC;
   std::vector<float> floods;                    // the circuit's floodlights, xyz each (buildWorld); lit at night

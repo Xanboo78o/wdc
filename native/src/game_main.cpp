@@ -870,6 +870,7 @@ int main(int argc, char **argv) {
     FrameIn f;
     f.car = S.car; f.spec = S.spec; f.showLine = cfg.line && !bgOn; f.wheelAngle = S.rolled; f.dt = dt; f.time = clock;
     f.camMode = bgOn ? 1 : cfg.cam;
+    f.handWheel = bgOn ? 0 : S.hands.wheel;
     S.terrain->under(*S.car, S.proj, S.gnd);
     f.groundH = S.terrain->h(S.proj.s, S.proj.lat); f.gPitch = S.gnd.pitch; f.gRoll = S.gnd.roll;
     f.look = lookNow(dt);

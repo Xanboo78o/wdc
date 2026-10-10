@@ -164,7 +164,7 @@ void main(){
 static const char *LIV_STUB = "vec3 livery(vec3 p, vec3 b){ return b; }\nvec3 stickers(vec3 c, vec3 p, vec3 n, sampler2D s){ return c; }\n";
 static const char *CAR_FS_A = R"(#version 330 core
 in vec3 vW, vN, vP, vNo; in vec2 vU; in float vHurt;
-uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish, uCabin; uniform float uBrake; uniform vec3 uCabinEye;
+uniform sampler2D uTex, uSheet; uniform int uHasMap, uRole, uCutout, uLivOn, uLivFinish, uCabin; uniform float uBrake, uLift; uniform vec3 uCabinEye;
 uniform vec3 uLivBase; uniform vec4 uLivFrame, uRim;
 )";
 static const char *CAR_FS_B = R"(
@@ -234,6 +234,8 @@ void main(){
   float ndl = max(dot(n, uSun), 0.0) * (inside ? 0.25 : 1.0);
   vec3 amb = mix(uGndAmb, uSkyAmb, n.y * 0.5 + 0.5);
   vec3 lit = c * (amb + uSunCol * ndl * 0.78);
+  // (uLift: the steering wheel sits in the daylight from the windscreen, where the rest of the cabin is in shade)
+  if (inside && uLift > 0.0) lit += c * (uSkyAmb + uSunCol * 0.35) * uLift * (0.55 + 0.45 * n.y);
   float fres = pow(1.0 - max(dot(n, V), 0.0), 4.0);
   vec3 h = normalize(uSun + V);
   lit = mix(lit, skyAt(reflect(-V, n)), clamp(mirror + fres * (mirror > 0.0 ? 0.5 : 0.0), 0.0, 0.9));
@@ -536,6 +538,7 @@ void Dress::drawPack(const PackCar &pc, const Mat4 &carM, double steer, double r
               uOpacity = glGetUniformLocation(carProg, "uOpacity");
   glUniform1i(glGetUniformLocation(carProg, "uTex"), 0);
   glUniform1f(glGetUniformLocation(carProg, "uBrake"), brakeNow);
+  glUniform1f(glGetUniformLocation(carProg, "uLift"), cabinLift);
   {
     // is the camera sitting in this car? (its place in the car's own frame, against the size of a car)
     const float d[3] = {eye[0] - carM.m[12], eye[1] - carM.m[13], eye[2] - carM.m[14]};

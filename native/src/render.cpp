@@ -1739,6 +1739,26 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     dress->setDents(&car, S.a - S.L / 2);
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, false);
     dress->drawPack(*packCar, M, car.steerEff, rolled, paint, lost, sag, true);
+    // THE WHEEL IN YOUR HANDS (Adam: "i downloaded that wheel put that in the game"). On its column in front of
+    // the driver's eyes, leaning back toward them, and turning as the real one turns: 270 degrees each way.
+    // (Not in the 720: its model came with a wheel of its own, and two would sit one inside the other.)
+    if (rimWant && packKey != "m720") {
+      static const PackCar *rim = dress->pack("wheel");
+      // (XBR_RIM="forward,down,turn" moves it for a photograph: metres from the eyes, and a turn of -1..1)
+      static float fwd = 0.55f, down = 0.19f, test = 0; static bool env = false;
+      if (!env) { env = true; if (const char *e = std::getenv("XBR_RIM")) std::sscanf(e, "%f,%f,%f", &fwd, &down, &test); }
+      if (rim) {
+        const PackInfo pi = packInfo(*packCar);
+        const Mat4 Mw = M * Mat4::translate(pi.eye[0] + fwd, pi.eye[1] - down, pi.eye[2]) * Mat4::rotZ(-0.33f) * Mat4::rotX(-(rimTurn + test) * 4.712f);
+        dress->setDents(nullptr, 0);                 // the car's dents are not the wheel's
+        dress->setCabinLift(1.6f);
+        glDepthRange(0.0, 0.02);                     // nearer than anything else in the car: a dashboard modelled too close never cuts it in half
+        dress->drawPack(*rim, Mw, 0, 0, nullptr, nullptr, nullptr, false);
+        dress->drawPack(*rim, Mw, 0, 0, nullptr, nullptr, nullptr, true);
+        dress->setCabinLift(0);
+        glDepthRange(0.0, 1.0);
+      }
+    }
     dress->setDents(nullptr, 0);
     dress->drawLights(*packCar, M, &car, car.brake, car.speed, car.steerEff, lost, sag);      // lamps, brake lights, hot discs (dress.hpp)
     return;
@@ -2533,7 +2553,9 @@ void Renderer::drawWorld(const FrameIn &f) {
   glDepthMask(GL_TRUE);
   glDepthFunc(GL_LEQUAL);
   const float RED[3] = {0.78f, 0.06f, 0.08f};
-  if (!mirrorPass) drawCar(car, S, f.groundH, f.gPitch, f.gRoll, f.paint[0] < 0 ? RED : f.paint, f.wheelAngle, f.camMode != 0);   // the glass is above your own car
+  rimWant = f.camMode == 0 && !mirrorPass; rimTurn = (float)f.handWheel;
+  if (!mirrorPass) drawCar(car, S, f.groundH, f.gPitch, f.gRoll, f.paint[0] < 0 ? RED : f.paint, f.wheelAngle, f.camMode != 0);
+  rimWant = false;   // the glass is above your own car
   glBindVertexArray(0);
   glUseProgram(prog);
   glUniform3f(uPaint, 0.78f, 0.06f, 0.08f);
