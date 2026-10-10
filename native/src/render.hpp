@@ -108,6 +108,8 @@ class Renderer {
   // Returns false, and changes nothing, if there is no such pack.
   bool setCarPack(const std::string &key);
   const std::string &carPack() const { return packKey; }
+  // which of a downloaded car's teams the next car drawn wears: an index, or -1 for the one its paint chooses
+  void setLivery(int index);
   void snapCamera() { camReady = false; }
   void drawWorld(const FrameIn &f);
   // the mirror (render.cpp): mirrorBegin, drawWorld + the rivals, mirrorEnd; then mirrorShow after endScene
@@ -264,6 +266,7 @@ class Renderer {
   Mat4 mbView;
   // the steering wheel in the cockpit (data/cars/wheel, a downloaded model): drawn in your own car, from the seat
   bool rimWant = false; float rimTurn = 0;
+  bool ownDraw = false;                          // drawCar is drawing YOUR car (never swapped for the far stand-in)
   // every car's lamps (render.cpp drawCar): gathered this frame, used on the paint in the next; 11 floats a lamp
   std::vector<float> lampsNow, lampsWere, lampP, lampD, lampC;
   std::vector<float> floods;                    // the circuit's floodlights, xyz each (buildWorld); lit at night

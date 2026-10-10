@@ -883,6 +883,8 @@ int main(int argc, char **argv) {
   // everyone else on the circuit
   auto drawField = [&]() {
     if (!S.race) return;
+    const std::string mine = home.pack(), mineKlass = home.klassOf(mine);
+    const bool mixField = !bgOn && (S.multi || (!mine.empty() && !cfg.xOn && !home.event() && (mineKlass == "gt3" || mineKlass == "gt4" || mineKlass == "hyper" || mineKlass == "f1")));
     for (Entry &e : S.race->entries) {
       if (e.isPlayer) continue;
       float paint[3];
@@ -891,10 +893,19 @@ int main(int argc, char **argv) {
       Gnd g;
       S.terrain->under(e.car, e.proj, g);
       if (e.ghost || (hauntArg && S.race->entries.size() == 2)) R.ghost = 0.9f;      // THE 78: see render.hpp `ghost`
-      if (S.multi && !R.setCarPack(gtClass(e.klass).pack)) R.setCarPack("");      // GT MODE: each class in its own car
+      // WHICH CAR IT WEARS (Adam: "so we dont have the same gt4 and hypers but 4 diff gt3s"): a rival takes one of
+      // the downloaded cars of its class, the same one all race. Xingus, the rally and an event keep one car for all;
+      // so does a field whose player chose the game's own body.
+      if (mixField) {
+        const std::string cls = S.multi ? std::string(gtClass(e.klass).key) : mineKlass;
+        const auto all = home.packsOf(cls);
+        const std::string want = all.empty() ? (S.multi ? std::string(gtClass(e.klass).pack) : mine) : all[(size_t)e.idx % all.size()];
+        if (!R.setCarPack(want)) R.setCarPack("");
+        R.setLivery(want == "f122" ? e.idx % 22 : -1);            // the grand prix car: the actual grid, one driver a car
+      }
       R.drawCar(e.car, *e.car.spec, S.terrain->h(e.proj.s, e.proj.lat), g.pitch, g.roll, paint, std::fmod(S.race->progress(e), 1000.0));
     }
-    if (S.multi && !R.setCarPack(home.pack())) R.setCarPack("");                  // and yours back in yours
+    if (mixField) { R.setLivery(-1); if (!R.setCarPack(mine)) R.setCarPack(""); }       // and yours back in yours
     // the safety car, when it is out: the same body in silver, until its own is drawn
     const SafetyCar &sc = S.race->rc.sc;
     if (sc.out) {

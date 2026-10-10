@@ -36,6 +36,8 @@ const RECIPES = {
     role: { Paint1Mtl: 'paint', Windows1Mtl: 'glass', Glass2Mtl: 'glass', Glass1Mtl: 'lamp', Tyre1Mtl: 'tyre', Rim1Mtl: 'rim', Lights1Mtl: 'chrome', Tex1Mtl: 'tail', Rotor1Mtl: 'trim', Black1Mtl: 'trim', BlackT1Mtl: 'trim', WhiteButLessWhite1Mtl: 'trim' },
   },
   a480: {
+    // the driver's eyes, found from a section through the model: the automatic guess put them outside the bodywork
+    eye: [0.15, 0.8, -0.25],
     title: 'Alpine A480', klass: 'hyper', length: 4.745,
     wheels: { by: 'node', fl: /_W_FL_Rotor/, fr: /_W_FR_Rotor/, rl: /_W_RL_Rotor/, rr: /_W_RR_Rotor/,
               hub: { fl: /_W_FL_Stator/, fr: /_W_FR_Stator/, rl: /_W_RL_Stator/, rr: /_W_RR_Stator/ }, tyre: /_Tire/ },
@@ -120,6 +122,8 @@ const RECIPES = {
     role: { Paint1Mtl: 'paint', Windows1Mtl: 'glass', Windows2Mtl: 'glass', Glass1Mtl: 'glass', Tyre1Mtl: 'tyre', Rim1Mtl: 'rim', Lights4Mtl: 'tail', Lights1Mtl: 'lamp', Lights3Mtl: 'chrome', Lights13Mtl: 'chrome' },
   },
   f499: {
+    // the driver's eyes, found from a section through the model: the automatic guess put them outside the bodywork
+    eye: [0.25, 0.8, -0.25],
     title: 'Ferrari 499P', klass: 'hyper', length: 5.10,
     skip: /STEER_HR|Rim_Blur|RIM_RR1_002/, plain: /EXT_Tyre/,          // (the right rear rim is in the file twice)
     skipMat: ['logo_cos'],
@@ -135,6 +139,8 @@ const RECIPES = {
     nodeRole: [[/_Tire/, 'tyre'], [/Rotor_LOD0_Details(?!Met)/, 'rim'], [/_Glass/, 'glass']],
   },
   p9x8: {
+    // the driver's eyes, found from a section through the model: the automatic guess put them outside the bodywork
+    eye: [0.25, 0.78, -0.25],
     title: 'Peugeot 9X8', klass: 'hyper', length: 5.00,
     skip: /_Int_Steer|_LOD[12]_/, plain: /Rotor_LOD0_Tire/,
     wheels: { by: 'node', fl: /_W_FL_Rotor/, fr: /_W_FR_Rotor/, rl: /_W_RL_Rotor/, rr: /_W_RR_Rotor/,
@@ -145,6 +151,8 @@ const RECIPES = {
   // The 2022 grand prix car. A million triangles as it came, 726,000 of them one hidden lump the size of
   // a shoebox between the rear wheels ('material'): left off, with the steering wheel he holds himself.
   f122: {
+    // the driver's eyes, found from a section through the model: the automatic guess put them outside the bodywork
+    eye: [0.05, 0.74, 0],
     title: 'McLaren MCL36', klass: 'f1', length: 5.70,
     plain: /Object_4[01]$/,
     skipMat: ['material', 'Steer'],

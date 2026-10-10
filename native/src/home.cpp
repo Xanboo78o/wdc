@@ -136,6 +136,7 @@ void MenuSave::load(const std::string &path) {
     else if (k == "team.f1") teams["f1"] = v; else if (k == "team.gt3") teams["gt3"] = v; else if (k == "team.f4") teams["f4"] = v;
     else if (k == "ffb") ffbSeen = std::atoi(v.c_str()); else if (k == "ffbv") ffbVer = std::atoi(v.c_str()); else if (k == "cam") cam = std::atoi(v.c_str());
     else if (k == "volume") volume = std::atoi(v.c_str()); else if (k == "line") line = v == "1";
+    else if (k.rfind("model.", 0) == 0) modelBy[k.substr(6)] = v == "-" ? "" : v;
     else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "gears") gears = v == "manual" ? "manual" : "auto";
     else if (k == "gton") gtOn = v == "1"; else if (k == "gtclass") gtClass = gtClassOf(v) >= 0 ? v : "gt3";
@@ -166,6 +167,7 @@ void MenuSave::save(const std::string &path) const {
     << "\nfield " << field << "\ntheme " << theme << "\ncolour " << colour << "\nmusic " << music << "\nffbv 2\nffb " << ffb << "\ncam " << cam << "\nvolume " << volume
     << "\nline " << (line ? 1 : 0) << "\n";
   if (modelSeen || !model.empty()) f << "model " << (model.empty() ? "-" : model) << "\n";
+  for (const auto &kv : modelBy) f << "model." << kv.first << " " << (kv.second.empty() ? "-" : kv.second) << "\n";
   f << "look " << look << "\n";
   f << "xon " << (xOn ? 1 : 0) << "\neasy " << (easy ? 1 : 0) << "\ndash " << (dash ? 1 : 0) << "\ndashcode " << (dashCode.empty() ? "-" : dashCode) << "\ntabfx " << tabFx << "\ntabvol " << tabVol << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
   f << "gears " << gears << "\n";
@@ -214,10 +216,19 @@ std::string Home::pack() const {
   // the rally car wears the 911, where this machine has it: short, rear-engined, made for this
   if (!eventOn && !S.xOn && S.car == "rally") { for (const Pack &p : packs) if (p.key == "p911") return "p911"; return ""; }
   // a GT4 or a hypercar wears its class's own car, as does every class in a multiclass race
-  if (gt() || (!eventOn && !S.xOn && S.car == "gt3" && S.gtClass != "gt3")) {
-    const std::string want = xbr::gtClass(gtClassOf(S.gtClass)).pack;
-    for (const Pack &p : packs) if (p.key == want) return want;
-    return "";
+  // a GT4, a hypercar or the grand prix car wears the car chosen for its class: the one you picked, or its first
+  const bool f1Seat = !eventOn && !S.xOn && S.car == "f1";
+  if (gt() || f1Seat || (!eventOn && !S.xOn && S.car == "gt3" && S.gtClass != "gt3")) {
+    const std::string cls = seatClass();
+    if (cls == "gt3") {                          // (GT MODE from the GT3 seat: your GT3, or the class's own if yours is the stand-in body)
+      if (klassOf(S.model) == "gt3") return S.model;
+    } else {
+      const auto it = S.modelBy.find(cls);
+      if (it != S.modelBy.end() && (it->second.empty() || klassOf(it->second) == cls)) { if (!it->second.empty() || f1Seat) return it->second; }
+    }
+    if (!f1Seat) { const std::string want = xbr::gtClass(gtClassOf(S.gtClass)).pack; if (!klassOf(want).empty()) return want; }
+    const auto all = packsOf(cls);
+    return all.empty() ? "" : all[0];
   }
   if (!S.xOn && S.car != "gt3") return "";
   for (const Pack &p : packs) if (p.key == S.model) return p.key;
@@ -302,7 +313,11 @@ void Home::set(const std::string &key, const std::string &v) {
   else if (key == "weather") S.weather = v; else if (key == "theme") S.theme = v; else if (key == "colour") S.colour = v; else if (key == "music") S.music = v;
   else if (key == "ffb") S.ffb = std::atoi(v.c_str()); else if (key == "cam") S.cam = std::atoi(v.c_str());
   else if (key == "volume") S.volume = std::atoi(v.c_str()); else if (key == "line") S.line = v == "true";
-  else if (key == "model") { S.model = v; S.modelSeen = true; dirty = true; }
+  else if (key == "model") {
+    // the GT3 seat (and Xingus) keep their one choice; every other class has its own
+    if (S.xOn || eventOn || seatClass() == "gt3") { S.model = v; S.modelSeen = true; } else S.modelBy[seatClass()] = v;
+    dirty = true;
+  }
   else if (key == "look") S.look = v;
   else if (key == "modeX") { S.xOn = v == "xingus"; S.gtOn = v == "gt"; if (!S.xOn) S.mode = v == "race" || v == "gt" ? "race" : "hotlap"; dirty = true; }
   else if (key == "carX") {
@@ -371,10 +386,20 @@ std::vector<Home::Opt> Home::setupRows() const {
       if (circuitId() == "speedway") rows.push_back({"FIELD", "xField", {{"skilled", "SKILLED"}, {"4fun", "4FUN"}}});
     }
   }
-  if ((S.xOn || seatCar() == "gt3") && !gt() && !packs.empty()) {
-    Opt m{"MODEL", "model", {{"", "XBR GT3"}}};
-    for (const Pack &p : packs) { std::string t = p.title; for (char &c : t) c = (char)std::toupper((unsigned char)c); m.opts.push_back({p.key, t}); }
-    rows.push_back(m);
+  {
+    // MODEL: the downloaded cars of your class (Xingus may wear any of them). The GT3 and grand prix seats can
+    // also have the game's own body; a GT4 or a hypercar has no stand-in, so only real ones are offered.
+    const std::string cls = seatClass();
+    const bool known = cls == "gt3" || cls == "gt4" || cls == "hyper" || cls == "f1";
+    Opt m{"MODEL", "model", {}};
+    if (S.xOn || (cls == "gt3" && !gt())) m.opts.push_back({"", "XBR GT3"});
+    else if (cls == "f1") m.opts.push_back({"", "XBR F1"});
+    for (const Pack &p : packs) {
+      if (!S.xOn && p.klass != cls) continue;
+      std::string t = p.title; for (char &c : t) c = (char)std::toupper((unsigned char)c);
+      m.opts.push_back({p.key, t});
+    }
+    if ((S.xOn || (known && !eventOn)) && m.opts.size() > 1) rows.push_back(m);
   }
   if (!S.xOn && S.mode == "race") {
     rows.push_back({"LAPS", "laps", {{"2", "2"}, {"3", "3"}, {"5", "5"}, {"10", "10"}, {"20", "20"}}});

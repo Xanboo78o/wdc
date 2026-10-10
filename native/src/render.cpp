@@ -803,6 +803,7 @@ bool Renderer::init(const std::string &dataDir, const std::string &texDir) {
   return true;
 }
 
+void Renderer::setLivery(int index) { if (dress) dress->setLivery(index); }
 bool Renderer::setCarPack(const std::string &key) {
   if (key.empty()) { packCar = nullptr; packKey.clear(); return true; }
   const PackCar *pc = dress ? dress->pack(key) : nullptr;
@@ -1728,7 +1729,11 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);                 // light added to the night, never taken from it
   }
-  if (packCar && gh <= 0) {
+  // A FIELD OF REAL MODELS is millions of triangles (the M4 alone is half a million): past 170 m a rival is
+  // drawn as the game's own body in its colour. Your own car is always the real one.
+  const float fdx = (float)car.x - curEye[0], fdz = (float)-car.y - curEye[2];
+  const bool farCar = !ownDraw && !mirrorPass && fdx * fdx + fdz * fdz > 170.0f * 170.0f;
+  if (packCar && gh <= 0 && !farCar && !(mirrorPass && !ownDraw && fdx * fdx + fdz * fdz > 60.0f * 60.0f)) {
     // The model stands on the road at mid-wheelbase; the sim's origin is the CG.
     const Mat4 M = carM * Mat4::translate((float)(S.a - S.L / 2), 0, 0);
     bool lost[4]; double sag[4];
@@ -1748,7 +1753,8 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
       static float fwd = 0.55f, down = 0.19f, test = 0; static bool env = false;
       if (!env) { env = true; if (const char *e = std::getenv("XBR_RIM")) std::sscanf(e, "%f,%f,%f", &fwd, &down, &test); }
       if (rim) {
-        const PackInfo pi = packInfo(*packCar);
+        PackInfo pi = packInfo(*packCar);
+        if (const char *ev = std::getenv("XBR_EYE")) std::sscanf(ev, "%f,%f,%f", &pi.eye[0], &pi.eye[1], &pi.eye[2]);
         const Mat4 Mw = M * Mat4::translate(pi.eye[0] + fwd, pi.eye[1] - down, pi.eye[2]) * Mat4::rotZ(-0.33f) * Mat4::rotX(-(rimTurn + test) * 9.4248f);
         dress->setDents(nullptr, 0);                 // the car's dents are not the wheel's
         dress->setCabinLift(1.6f);
@@ -2410,7 +2416,13 @@ void Renderer::drawWorld(const FrameIn &f) {
   if (f.camMode != 1) {
     float e[3], aim = 24, drop = 0.22f;
     if (f.camMode == 0) {
-      if (packCar) { const PackInfo pi = packInfo(*packCar); e[0] = pi.eye[0] + shift; e[1] = pi.eye[1]; e[2] = pi.eye[2]; drop = 1.1f; }
+      if (packCar) {
+        const PackInfo pi = packInfo(*packCar); e[0] = pi.eye[0] + shift; e[1] = pi.eye[1]; e[2] = pi.eye[2]; drop = 1.1f;
+        // (XBR_EYE="x,y,z" tries a seat before it is written into the car's recipe)
+        static float te[3]; static int tn = -1;
+        if (tn < 0) { const char *ev = std::getenv("XBR_EYE"); tn = ev ? std::sscanf(ev, "%f,%f,%f", &te[0], &te[1], &te[2]) : 0; }
+        if (tn == 3) { e[0] = te[0] + shift; e[1] = te[1]; e[2] = te[2]; }
+      }
       else if (carCabin) { e[0] = carEye[0]; e[1] = carEye[1]; e[2] = carEye[2]; drop = 1.1f; }
       else { e[0] = onboardX + shift; e[1] = onboardX > 0 ? camFloor[0] + 0.06f : std::max(1.19f, camFloor[0]); e[2] = 0; }        // no cabin to sit in: above the airbox, as the JS does
     } else if (f.camMode == 2) { e[0] = 1.62f + shift; e[1] = packCar ? 0.46f : std::max(0.46f, camFloor[1]); e[2] = 0; aim = 26; }
@@ -2554,8 +2566,9 @@ void Renderer::drawWorld(const FrameIn &f) {
   glDepthFunc(GL_LEQUAL);
   const float RED[3] = {0.78f, 0.06f, 0.08f};
   rimWant = f.camMode == 0 && !mirrorPass; rimTurn = (float)f.handWheel;
+  ownDraw = true;
   if (!mirrorPass) drawCar(car, S, f.groundH, f.gPitch, f.gRoll, f.paint[0] < 0 ? RED : f.paint, f.wheelAngle, f.camMode != 0);
-  rimWant = false;   // the glass is above your own car
+  rimWant = false; ownDraw = false;   // the glass is above your own car
   glBindVertexArray(0);
   glUseProgram(prog);
   glUniform3f(uPaint, 0.78f, 0.06f, 0.08f);

@@ -28,6 +28,9 @@ struct MenuSave {
   bool line = false;
   std::string look = "film";                     // native only: "film" = shadows, bloom, the film curve; "plain" = the picture as it was
   bool modelSeen = false;                        // false: no choice has ever been saved, so the best car on this machine is offered
+  // (Adam: "wire up all cars".) Every class has its own choice now: model is the GT3 seat's, modelBy the others'
+  // ("gt4", "hyper", "f1"); a class with no entry gets its first car.
+  std::map<std::string, std::string> modelBy;
   std::string model;                             // native only: a downloaded car (data/cars/<key>) for the GT3 seat, "" = the built-in body
   // XINGUS (js/home.js `X`, the browser's own record `wdc.xingus`)
   bool xOn = false;
@@ -116,6 +119,12 @@ class Home {
 
  private:
   struct Pack { std::string key, title, klass; };
+ public:
+  // the class your seat is in ("gt3", "gt4", "hyper", "f1", ...), and every downloaded car of a class
+  std::string seatClass() const { return S.car == "gt3" ? S.gtClass : S.car; }
+  std::vector<std::string> packsOf(const std::string &klass) const { std::vector<std::string> o; for (const Pack &p : packs) if (p.klass == klass) o.push_back(p.key); return o; }
+  std::string klassOf(const std::string &key) const { for (const Pack &p : packs) if (p.key == key) return p.klass; return ""; }
+ private:
   std::vector<Pack> packs;      // data/cars/index.json: what tools/bakecar.mjs has baked on this machine
   struct Item { std::function<void()> ok, left, right, up = nullptr, down = nullptr; };
   struct Hot { float x, y, w, h; int item; std::function<void()> fn; };
