@@ -25,7 +25,7 @@
 import fs from 'fs';
 import { SPONSORS } from './sponsors.mjs';
 import { rasters, MW, MH } from './carmask.mjs';
-import { NAMES, TAILS, KEEP, PRIDE } from './teams.mjs';
+import { NAMES, TAILS, KEEP, PRIDE, REAL } from './teams.mjs';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 const atlas = JSON.parse(fs.readFileSync(ROOT + 'data/livery/atlas.json', 'utf8'));
@@ -268,7 +268,10 @@ function build(key, carIx) {
   if (!Z || !P) throw new Error(`bake: no zones or paddock for ${key} — add them at the top of tools/livery/bake.mjs`);
   const out = [], names = new Set(), numbers = new Set(), pairs = new Set();
   let written = 0;
-  for (let i = 0; i < 80; i++) {
+  // eighty invented teams, and after them (written out first) any real ones this car has: teams.mjs REAL
+  const reals = REAL[key] || [];
+  for (let i = 0; i < 80 + reals.length; i++) {
+    const real = i >= 80 ? reals[i - 80] : null;
     const r = rngOf(carIx * 7919 + i * 104729 + 17);
     const pick = a => a[Math.floor(r() * a.length)];
     // ---- paint: a design, and a colourway whose graphic can be seen on its body
@@ -278,10 +281,10 @@ function build(key, carIx) {
     pairs.add(design + w);
     const [way, a, b, c, d, fin = 0] = WAYS[w];
     // every eighth car flies a pride flag
-    const flag = i % 8 === 3 ? PRIDE[((i - 3) / 8 + carIx * 3) % PRIDE.length] : null;
-    const liv = flag ? prideLivery(flag, ((i - 3) / 8 + carIx) % 4) : { base: C[a], layers: DESIGNS[design](C[a], C[b], C[c], C[d]) };
-    const finish = flag ? 0 : design === 'CAMO' ? 1 : fin;
-    const tints = flag ? [] : [C[c], C[b], C[a]];
+    const flag = !real && i % 8 === 3 ? PRIDE[((i - 3) / 8 + carIx * 3) % PRIDE.length] : null;
+    const liv = real ? { base: real.cols[0], layers: DESIGNS[real.design](...real.cols) } : flag ? prideLivery(flag, ((i - 3) / 8 + carIx) % 4) : { base: C[a], layers: DESIGNS[design](C[a], C[b], C[c], C[d]) };
+    const finish = real ? real.fin : flag ? 0 : design === 'CAMO' ? 1 : fin;
+    const tints = real ? [real.cols[2], real.cols[1]] : flag ? [] : [C[c], C[b], C[a]];
     // ---- the team
     const title = pick(SPONSORS);
     let name;
@@ -289,13 +292,14 @@ function build(key, carIx) {
     // draw — the number, the sponsors, where the stickers went — as it was, so
     // a car he has already seen keeps its number and its look under its new name)
     let bySponsor = false;
-    do {
+    if (!real) do {
       bySponsor = r() < 0.3;
       name = bySponsor ? `${title.n} ${pick(P.suf)}` : `${pick(P.pre)} ${pick(P.suf)}`;
     } while (names.has(name));
-    names.add(name);
+    if (!real) names.add(name);
     const cased = title.n.replace(/\b([A-Z])([A-Z']*)/g, (m, x, y) => x + y.toLowerCase());
-    if (flag) { const k = prideCount[flag.key] = (prideCount[flag.key] || 0) + 1; name = flag.teams[(k - 1) % flag.teams.length]; }
+    if (real) name = real.name;
+    else if (flag) { const k = prideCount[flag.key] = (prideCount[flag.key] || 0) + 1; name = flag.teams[(k - 1) % flag.teams.length]; }
     else if (KEEP[`${key}:${i}`]) name = KEEP[`${key}:${i}`];
     else if (bySponsor && !sponsorTeams.has(title.n)) { sponsorTeams.add(title.n); name = `${cased} ${TAILS[tailIx++ % TAILS.length]}`; }
     else {
@@ -304,15 +308,15 @@ function build(key, carIx) {
     }
     if (everyName.has(name)) throw new Error(`bake: two teams are called ${name}`);
     everyName.add(name);
-    let num;
-    do { num = 1 + Math.floor(r() * (SMALL.has(key) ? 99 : 199)); } while (numbers.has(num));
+    let num = real ? real.num : 0;
+    if (!real) do { num = 1 + Math.floor(r() * (SMALL.has(key) ? 99 : 199)); } while (numbers.has(num));
     numbers.add(num);
     const others = [];
     const cats = [...new Set(SPONSORS.map(s => s.cat))].sort(() => r() - 0.5);
     for (const cat of cats) { const pool = SPONSORS.filter(s => s.cat === cat && s !== title && !others.includes(s)); if (pool.length) others.push(pick(pool)); }
     while (others.length < 12) { const s = pick(SPONSORS); if (s !== title && !others.includes(s)) others.push(s); }
     // how loud: clean (vinyl only, few) · works (neat rows) · bomb (plates everywhere) · retro (roundels, three names)
-    const style = ['works', 'bomb', 'works', 'clean', 'bomb', 'retro', 'works', 'bomb'][Math.floor(r() * 8)];
+    const style = real ? 'clean' : ['works', 'bomb', 'works', 'clean', 'bomb', 'retro', 'works', 'bomb'][Math.floor(r() * 8)];
 
     // ---- stickers
     const PL = placer(key), S = [];
@@ -332,6 +336,7 @@ function build(key, carIx) {
       return rect;
     };
     const sponsor = (s, view, zone, wm, o = {}) => {
+      if (real) return null;      // a real team wears its number and its colours, and nobody's name
       const plate = o.plate ?? (style === 'bomb' || (style === 'works' && r() < 0.35));
       const hm = isBadge(s.n) ? wm * 0.52 : wm / 2.08;
       return put((plate ? 'plate:' : 'bare:') + s.n, view, zone, isBadge(s.n) ? hm : wm, hm, { ...o, tint: plate ? undefined : 'auto' });
@@ -374,18 +379,18 @@ function build(key, carIx) {
     const spots = [['side', Z.fender, 0.40], ['side', Z.quarter, 0.42], ['side', Z.sill, 0.34], ['side', Z.sill, 0.34], ['top', Z.roof, 0.46], ['side', Z.sill, 0.34], ['top', Z.deck, 0.40],
       ['side', Z.door, 0.30], ['side', Z.fender, 0.26], ['side', Z.door, 0.28], ['side', Z.quarter, 0.28], ['top', Z.bonnet, 0.30], ['side', Z.door, 0.26]];
     for (let k = 0; k < n2 && k < others.length; k++) { const [view, zone, wm] = spots[k % spots.length]; sponsor(others[k], view, zone, wm, k >= 7 ? { plate: true } : {}); }
-    put('class:' + P.klass, 'side', [Z.door[0] - 0.1, Z.door[1] + 0.1, Z.sill[2], Z.door[3]], 0.30, 0.15, { want: [Z.door[1], Z.door[3]] });
+    if (!real) put('class:' + P.klass, 'side', [Z.door[0] - 0.1, Z.door[1] + 0.1, Z.sill[2], Z.door[3]], 0.30, 0.15, { want: [Z.door[1], Z.door[3]] });
     if (style !== 'clean') { put('safety:ext', 'side', [Z.door[0], Z.door[1] + 0.2, Z.door[2], Z.door[3] + 0.1], 0.11, 0.11, { want: [Z.door[1] + 0.1, Z.door[3]] }); put('safety:cut', 'side', [Z.door[0], Z.door[1] + 0.2, Z.door[2], Z.door[3] + 0.1], 0.11, 0.11, { want: [Z.door[1] + 0.1, Z.door[3] - 0.1] }); }
 
     // the wheels: as they came, or in black, white, gold, bronze or one of the team's own colours
     const rim = r() < 0.3 ? null : pick(['15161a', '15161a', 'f4f3ee', 'c9a13b', '8a5a2b', C[c], C[b], C[c]]);
     out.push({
-      name, num, design: flag ? 'PRIDE' : design, way: flag ? flag.label : way, style, rim: flag ? pick([null, 'f4f3ee', '15161a']) : rim, title: title.n, sponsors: others.slice(0, n2).map(s => s.n), finish,
-      base: liv.base, chips: flag ? [flag.cols[0], flag.cols[Math.floor(flag.cols.length / 2)] || flag.ring, flag.cols[flag.cols.length - 1] === flag.cols[0] ? (flag.ring || flag.cols[1]) : flag.cols[flag.cols.length - 1]] : [C[a], C[b], C[c]], layers: liv.layers.slice(0, 12),
+      name, num, design: real ? real.design : flag ? 'PRIDE' : design, way: real ? real.team : flag ? flag.label : way, style, rim: real ? real.rim : flag ? pick([null, 'f4f3ee', '15161a']) : rim, title: real ? real.team : title.n, sponsors: real ? [] : others.slice(0, n2).map(s => s.n), finish,
+      base: liv.base, chips: real ? real.cols.slice(0, 3) : flag ? [flag.cols[0], flag.cols[Math.floor(flag.cols.length / 2)] || flag.ring, flag.cols[flag.cols.length - 1] === flag.cols[0] ? (flag.ring || flag.cols[1]) : flag.cols[flag.cols.length - 1]] : [C[a], C[b], C[c]], layers: liv.layers.slice(0, 12),
       stickers: S.slice(0, 24).map(s => ({ uv: uv(s.cell).map(v => +v.toFixed(5)), plane: s.plane, rect: s.rect, tint: s.tint })),
     });
   }
-  return out;
+  return [...out.slice(80), ...out.slice(0, 80)];
 }
 
 const index = JSON.parse(fs.readFileSync(ROOT + 'data/cars/index.json', 'utf8'));

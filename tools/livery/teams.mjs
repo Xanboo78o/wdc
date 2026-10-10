@@ -137,3 +137,26 @@ export const PRIDE = [
     teams: ['No Gender Only Speed', 'Agender Agenda GT', 'Gender? Never Heard Of It Racing', 'Just A Driver Motorsport',
       'Null Pointer Racing', 'Gender Not Found GT', 'Blank Space Racing', 'None Of The Above Motorsport'] },
 ];
+
+// ---- the actual grid ----------------------------------------------------------------------------
+// Adam, 2026-10-10, looking at the grand prix car in the garage: "add the acc f1 teams lol".
+// The eleven teams of the 2026 season and their twenty-two drivers, in each team's own colours.
+// A name, a number and paint: no maker's badge and no real sponsor is drawn (the sticker sheet has
+// only the invented ones, and these cars carry none of those either). They come FIRST in the car's list.
+// cols: body, graphic, accent, dark.  fin: 0 gloss · 1 matte · 2 metallic
+const T = (team, design, cols, fin, rim, ...drivers) => drivers.map(([driver, num]) => ({ name: `${team} — ${driver}`, team, num, design, cols, fin, rim }));
+export const REAL = {
+  f122: [
+    ...T('McLaren', 'SWEEP', ['ff8000', '15161a', '47c7fc', '15161a'], 0, '15161a', ['Norris', 1], ['Piastri', 81]),
+    ...T('Scuderia Ferrari', 'PINSTRIPE', ['e8002d', 'f4f3ee', 'ffeb00', '15161a'], 0, '15161a', ['Leclerc', 16], ['Hamilton', 44]),
+    ...T('Red Bull Racing', 'WAVE', ['121f45', 'e30118', 'ffc906', '0b1430'], 1, '15161a', ['Verstappen', 3], ['Hadjar', 6]),
+    ...T('Mercedes', 'FADE', ['c8ccce', '15161a', '00d7b6', '15161a'], 2, '15161a', ['Russell', 63], ['Antonelli', 12]),
+    ...T('Aston Martin', 'TWIN STRIPE', ['00594f', 'cedc00', 'f4f3ee', '0e0f12'], 2, '15161a', ['Alonso', 14], ['Stroll', 18]),
+    ...T('Alpine', 'HALF AND HALF', ['0078c1', 'ff87bc', 'f4f3ee', '0e0f12'], 0, '15161a', ['Gasly', 10], ['Colapinto', 43]),
+    ...T('Williams', 'SPEEDFORM', ['00205b', '00a0de', 'f4f3ee', '0e0f12'], 0, '15161a', ['Albon', 23], ['Sainz', 55]),
+    ...T('Racing Bulls', 'ARROW', ['f4f3ee', '1634cb', 'e30118', '15161a'], 0, 'f4f3ee', ['Lawson', 30], ['Lindblad', 41]),
+    ...T('Haas', 'BLOCK', ['f4f3ee', '15161a', 'e6002b', '15161a'], 0, '15161a', ['Ocon', 31], ['Bearman', 87]),
+    ...T('Audi', 'HALFTONE', ['b9bdc0', '15161a', 'f50537', '15161a'], 2, '15161a', ['Hülkenberg', 27], ['Bortoleto', 5]),
+    ...T('Cadillac', 'TWO-FACE', ['f4f3ee', '0e0f12', '8a8d8f', '0e0f12'], 0, '15161a', ['Pérez', 11], ['Bottas', 77]),
+  ],
+};
