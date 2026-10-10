@@ -169,6 +169,7 @@ struct Devices {
 struct RaceSetup {
   int grid = 22, laps = 3, slot = 12;
   double timeLimit = 0;                // seconds; 0 = run to `laps` (Xingus ENDURANCE)
+  bool easy = false;                   // HANDLING - EASY: the forgiving handling on your car, and nothing else changed
   std::string tier = "medium", battle, teamKey, field = "f1";
   bool noDnf = false, standIn = false;
   double seed = 1;
@@ -297,6 +298,8 @@ static bool loadSession(Session &S, Renderer &R, const std::string &dataDir, con
     S.driver = makeDriver(1, pilotTier, S.track.corners.empty() ? 24 : (int)S.track.corners.size());
     S.pilot = std::make_unique<Autopilot>(S.track, *S.lines, *S.spec, peakSlip(*S.spec), &S.driver);
   }
+  // HANDLING - EASY: Xingus's handling on your own car (xingus.hpp). Nothing else about the session is Xingus.
+  if (rs && rs->easy && S.car && !S.car->xg.on) xingusCar(*S.car, "gt", false);
   { World *wk = S.world.get(); knock().ground = [wk](double x, double y) { return wk->heightAt(x, y); }; }
   barrierWear().reset(S.track);      // new session, straight barriers (collide.hpp: the game's walls give)
   R.buildWorld(S.track, *S.world, Json::loadOpt(dataDir + "/surf/" + key + ".json"), Json::loadOpt(dataDir + "/env/" + key + ".json"),
@@ -363,6 +366,13 @@ static void simStep(Session &S, const HandsIn &in, bool autoDrive, bool drsTap, 
   // gravity along the road: the surveyed gradient under the car's own heading
   env.slope = S.world->gradeAt(proj.s) * std::cos(car.hdg - track.hdg[(size_t)proj.i]);
   step(car, FIXED_DT, env);
+  if (car.xg.on) {
+    // HANDLING - EASY on a hot lap: the same hand on the car that Xingus has in a race (race.cpp)
+    PlayerInput pi;
+    pi.throttle = car.throttle; pi.brake = car.brake; pi.delta = car.delta;
+    if (!autoDrive) pi.wheel = S.hands.wheel;
+    xingusStep(car, pi, FIXED_DT);
+  }
 
   const Hit hit = resolveBarrier(car, track, S.hint);
   if (hit.hit && hit.closing > 3.5) {
@@ -732,6 +742,7 @@ int main(int argc, char **argv) {
     RaceSetup rs;
     rs.grid = cfg.grid; rs.laps = cfg.laps; rs.tier = cfg.tier;
     rs.timeLimit = home.timeLimit();
+    rs.easy = cfg.easy;
     if (rs.timeLimit > 0) rs.laps = 3;      // (kept ahead of the leader by the race itself until the clock runs out)
     rs.slot = std::max(1, std::min(cfg.grid, startArg > 0 ? startArg : home.startSlot(cfg.grid)));
     rs.battle = cfg.tier == "supercasual" ? cfg.battle : "";

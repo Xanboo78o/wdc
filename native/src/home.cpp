@@ -138,7 +138,7 @@ void MenuSave::load(const std::string &path) {
     else if (k == "model") { model = v == "-" ? "" : v; modelSeen = true; } else if (k == "look") look = v == "plain" ? "plain" : "film";
     else if (k == "gears") gears = v == "manual" ? "manual" : "auto";
     else if (k == "gton") gtOn = v == "1"; else if (k == "gtclass") gtClass = gtClassOf(v) >= 0 ? v : "gt3";
-    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "xminutes") xMinutes = std::max(5, std::min(360, std::atoi(v.c_str()))); else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
+    else if (k == "xon") xOn = v == "1"; else if (k == "xstyle") xStyle = v; else if (k == "easy") easy = v == "1"; else if (k == "xminutes") xMinutes = std::max(5, std::min(360, std::atoi(v.c_str()))); else if (k == "xgears") xGears = v; else if (k == "xtrack") xTrack = v;
     else if (k == "xheil") xHeil = v; else if (k == "xfield") xField = v; else if (k == "xbots") xBots = std::atoi(v.c_str());
   }
   xStyle = xstyle(xStyle).key; xBots = std::max(0, std::min(60, xBots));
@@ -159,7 +159,7 @@ void MenuSave::save(const std::string &path) const {
     << "\nline " << (line ? 1 : 0) << "\n";
   if (modelSeen || !model.empty()) f << "model " << (model.empty() ? "-" : model) << "\n";
   f << "look " << look << "\n";
-  f << "xon " << (xOn ? 1 : 0) << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
+  f << "xon " << (xOn ? 1 : 0) << "\neasy " << (easy ? 1 : 0) << "\nxminutes " << xMinutes << "\nxstyle " << xStyle << "\nxgears " << xGears << "\nxheil " << xHeil << "\nxfield " << xField << "\nxbots " << xBots << "\n";
   f << "gears " << gears << "\n";
   f << "gton " << (gtOn ? 1 : 0) << "\ngtclass " << gtClass << "\n";
   if (!xTrack.empty()) f << "xtrack " << xTrack << "\n";
@@ -256,6 +256,7 @@ std::string Home::get(const std::string &key) const {
   if (key == "carX") return seatCar();
   if (key == "gears") return S.gears;
   if (key == "xStyle") return S.xStyle;
+  if (key == "easy") return S.easy ? "true" : "false";
   if (key == "xMinutes") return std::to_string(S.xMinutes);
   if (key == "xGears") return S.xGears == "auto" ? "auto" : "manual";
   if (key == "xBots") return S.xBots > 0 ? std::to_string(S.xBots) : "style";
@@ -302,6 +303,7 @@ void Home::set(const std::string &key, const std::string &v) {
   }
   else if (key == "gears") S.gears = v == "manual" ? "manual" : "auto";
   else if (key == "xMinutes") S.xMinutes = std::atoi(v.c_str());
+  else if (key == "easy") S.easy = v == "true";
   else if (key == "xStyle") S.xStyle = xstyle(v).key; else if (key == "xGears") S.xGears = v;
   else if (key == "xBots") S.xBots = v == "style" ? 0 : std::atoi(v.c_str()); else if (key == "xField") S.xField = v;
   else if (key == "heil") S.xHeil = v;
@@ -337,6 +339,9 @@ std::vector<Home::Opt> Home::setupRows() const {
   }
   // the paddles as the gearbox, in any car (Xingus has its own row below)
   if (!S.xOn) rows.push_back({"GEARS", "gears", {{"auto", "AUTOMATIC"}, {"manual", "MANUAL - PADDLES (E / Q)"}}});
+  // (Adam, 2026-10-09: "make xingus just ez physics for when i js wanna chill thats the only diff")
+  // The same car, circuit, rivals and rules; only the handling forgives.
+  if (!S.xOn) rows.push_back({"HANDLING", "easy", {{"false", "REAL"}, {"true", "EASY - XINGUS"}}});
   if (S.xOn) {
     Opt st{"STYLE", "xStyle", {}};
     for (const XStyle &x : XSTYLES) st.opts.push_back({x.key, x.label});

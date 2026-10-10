@@ -36,6 +36,7 @@ struct MenuSave {
   std::string gears = "auto";                   // native only: "manual" = the paddles are the gearbox, in any car (Xingus keeps its own, xGears)
   std::string gtClass = "gt3";
   std::string xStyle = "gt3", xGears = "manual", xTrack, xHeil = "heilgrand", xField = "4fun";
+  bool easy = false;                 // HANDLING - EASY: Xingus's forgiving handling on your car, in the ordinary game
   int xMinutes = 30;                 // Xingus ENDURANCE: how long the race is, 5 minutes to 6 hours
   int xBots = 0;                                 // 0 = the style's own number
   void load(const std::string &path);
