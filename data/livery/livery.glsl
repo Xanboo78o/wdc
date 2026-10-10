@@ -34,6 +34,15 @@
 //   19 PIXEL    squares dissolving along the car: q.x squares, gone by x = q.z, direction q.w (1 thins toward the nose)
 //   20 DRIP     paint running down from the roof line q.x, tongues q.y long, q.z of them
 //   21 BAND     a stripe along the car between z = q.x and z = q.y — LEFT to RIGHT, not mirrored: a flag laid over the car
+//   (2026-10-10, from photographs of real cars)
+//   22 SASH     a slanted band right round the car: |q.x*x + q.y*y - q.z| < q.w
+//   23 VEE      a chevron on each flank pointing at the nose: tip at x = q.x, height q.y, opening q.z, band q.w thick (big = a filled arrow)
+//   24 SHARDS   scattered triangles: q.x across the car, seed q.y, thinning out to nothing by x = q.z in the direction q.w
+//   25 PLAID    tartan: bars q.x along and q.y up, each q.z of its cell wide; q.w = 1 keeps only where two bars cross
+//   26 BRUSH    a ragged brush stroke along the flanks: height q.x + q.y*x, about q.z thick, seed q.w
+//   27 BOX      one end of the car, above or below a height: q.z*x > q.x and q.w*y > q.y   (the rear wing; the splitter)
+//   28 SPEED    slanted bars that thin away: q.x along, q.y up, gone by x = q.z, over a length 1/q.w
+//   29 PINS     thin lines along the flanks between heights q.x and q.y: q.z of them, each q.w of its gap
 uniform int uLivN;
 uniform int uLivType[12];
 uniform vec3 uLivCol[12];
@@ -75,6 +84,14 @@ vec3 livery(vec3 p, vec3 base) {
     else if (t == 19) { vec2 g = floor(vec2(p.x * q.x * 2.2, (p.y + az * 0.6) * q.x)); m = step(livHash(g), clamp((q.z - p.x * q.w) * 0.9, 0.0, 1.0)); }
     else if (t == 20) { float k = 0.5 + 0.5 * sin(p.x * q.z + 1.7 * sin(p.x * q.z * 0.37)); m = step(q.x - q.y * k * k * k, p.y); }
     else if (t == 21) m = step(q.x, p.z) * step(p.z, q.y);
+    else if (t == 22) m = step(abs(p.x * q.x + p.y * q.y - q.z), q.w);
+    else if (t == 23) { float d = (q.x - p.x) - abs(p.y - q.y) * q.z; m = step(0.0, d) * step(d, q.w) * step(0.4, az); }
+    else if (t == 24) { vec2 g = vec2(p.x * q.x, (p.y + az * 0.6) * q.x * 0.55); vec2 f = fract(g); m = step(livHash(floor(g) * 2.0 + step(1.0, f.x + f.y) + q.y), clamp((q.z - p.x * q.w) * 0.8, 0.0, 1.0)); }
+    else if (t == 25) { float a = step(fract(p.x * q.x), q.z), b = step(fract((p.y + az * 0.6) * q.y), q.z); m = q.w > 0.5 ? a * b : max(a, b); }
+    else if (t == 26) m = step(abs(p.y - (q.x + q.y * p.x) + (livNoise(vec2(p.x * 5.0, q.w)) - 0.5) * q.z), q.z * (0.35 + 0.9 * livNoise(vec2(p.x * 11.0, q.w * 3.1)))) * step(0.4, az);
+    else if (t == 27) m = step(q.x, p.x * q.z) * step(q.y, p.y * q.w);
+    else if (t == 28) m = step(fract(p.x * q.x + p.y * q.y), clamp((q.z - p.x) * q.w, 0.0, 1.0)) * step(p.x, q.z);
+    else if (t == 29) m = step(q.x, p.y) * step(p.y, q.y) * step(fract((p.y - q.x) / (q.y - q.x) * q.z), q.w) * step(0.4, az);
     c = mix(c, uLivCol[i], m);
   }
   return c;
