@@ -159,6 +159,19 @@ class Renderer {
   bool post = true;             // false: the plain picture, as it was (SETTINGS - LOOK)
   bool postOk = true;           // false: this GPU could not build the look at all
   bool treeShadows = true;
+  // THE HEADSET (vr.cpp): while vrOn, drawWorld's camera is one eye of it. vrViewCar takes the car's own frame (the one the
+  // cockpit camera and the wheel are placed in, so it rides on the springs with the car) to that eye; vrEyeCar is the eye
+  // and vrAtCar a point down its gaze, in the same frame (the sun's shadow map and the lamps want them). Nothing else is
+  // changed: the same world, the same car, drawn twice.
+  float farCarDist = 170;                       // beyond this many metres a rival is drawn as the game's own body, not the real model (vr: much nearer)
+  bool vrOn = false;
+  Mat4 vrViewCar = Mat4::identity(), vrProj = Mat4::identity();
+  float vrEyeCar[3] = {0, 0, 0}, vrAtCar[3] = {24, 0, 0};
+  // where the final picture is written (the screen is 0). Not used by the offscreen shot, which owns its own.
+  void setTarget(unsigned f) { fbo = f; }
+  // the hub of the wheel in your hands, in that same car frame: where a real wheel has to be for the two to agree.
+  // False when the car has no wheel of its own (then nothing is drawn there either).
+  bool wheelHub(const Spec &S, float out[3], float eye[3] = nullptr) const;     // (eye: the driver's eyes, in the same frame)
   // Another car on the circuit (a rival): same meshes, its own paint. Call
   // between drawWorld and the HUD.
   void drawCar(const Car &car, const Spec &S, double groundH, double gPitch, double gRoll, const float paint[3], double rolled,

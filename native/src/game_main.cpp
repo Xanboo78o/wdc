@@ -57,6 +57,7 @@
 #include "physics.hpp"
 #include "race.hpp"
 #include "render.hpp"
+#include "vr.hpp"
 #include "track.hpp"
 #include "ui.hpp"
 #include "weather.hpp"
@@ -617,7 +618,8 @@ int main(int argc, char **argv) {
   bool autoDrive = false, lineArg = false, windowed = false, hidpi = false, noAudio = false, hidden = false, hauntArg = false;
   int camArg = -1, ffbArg = -1, winW = 1600, winH = 900, gridArg = 0, lapsArg = 0, startArg = 0;
   long maxFrames = 0;
-  double spool = 0, seedArg = 0, scaleArg = 0;
+  double spool = 0, seedArg = 0, scaleArg = 0, vrScale = 0.45;
+  bool vrArg = false, vrFake = false;
   for (int i = 1; i < argc; i++) {
     const std::string a = argv[i];
     auto val = [&](const char *flag) -> std::string {
@@ -643,6 +645,9 @@ int main(int argc, char **argv) {
     else if (a == "--cam") camArg = std::atoi(val("--cam").c_str());
     else if (a == "--ffb") ffbArg = std::atoi(val("--ffb").c_str());
     else if (a == "--shot") shot = val("--shot");
+    else if (a == "--vr") vrArg = true;                          // the headset (vr.hpp): the cockpit in each eye, the HUD on a panel
+    else if (a == "--vrscale") vrScale = std::atof(val("--vrscale").c_str());   // share of the headset's recommended eye size (0.3..1)
+    else if (a == "--vrfake") { vrArg = vrFake = true; }         // no headset: a seated body, for checking (needs --shot PREFIX: writes PREFIX-L.ppm and PREFIX-R.ppm)
     else if (a == "--screen") screenArg = val("--screen");
     else if (a == "--model") modelArg = val("--model");
     else if (a == "--look") lookArg = val("--look");
@@ -678,6 +683,14 @@ int main(int argc, char **argv) {
   std::srand((unsigned)std::time(nullptr));
 
   if (shotMode) SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
+  else if (vrArg) {
+    // THE HEADSET draws through GLX (OpenXR's OpenGL binding), so the window is an X11 one, on the GeForce (render offload).
+    setenv("SDL_VIDEO_DRIVER", "x11", 1);                                // (this session sets it to wayland, and an environment variable beats a hint)
+    setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 0);
+    setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 0);
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");      // the wheel is read while the window is not the one in focus
+    windowed = true; winW = 960; winH = 540;
+  }
   SDL_SetAppMetadata("XBR", "native", "xbr");
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     if (shotMode) { SDL_ResetHint(SDL_HINT_VIDEO_DRIVER); if (!SDL_Init(SDL_INIT_VIDEO)) { std::fprintf(stderr, "xbr: SDL: %s\n", SDL_GetError()); return 1; } }
@@ -761,7 +774,7 @@ int main(int argc, char **argv) {
   }
   if (!ctx) { std::fprintf(stderr, "xbr: no OpenGL 3.3 context: %s\n", SDL_GetError()); return 1; }
   SDL_GL_MakeCurrent(win, ctx);
-  if (!offscreen) SDL_GL_SetSwapInterval(1);
+  if (!offscreen) SDL_GL_SetSwapInterval(vrArg ? 0 : 1);          // (the headset sets the beat, not the monitor)
   std::fprintf(stderr, "xbr: %s | %s | video driver %s\n", (const char *)glGetString(GL_RENDERER), (const char *)glGetString(GL_VERSION),
                SDL_GetCurrentVideoDriver());
 
@@ -1106,7 +1119,8 @@ int main(int argc, char **argv) {
     return std::vector<std::string>{"RESUME", S.race ? "REJOIN" : "RESTART LAP", std::string("CAMERA - ") + CAMS[cfg.cam], "IDEAL LINE",
                                     "FORCE FEEDBACK - " + std::to_string(cfg.ffb) + "%", "QUIT TO MENU"};
   };
-  auto drawAll = [&](FrameIn &f) {
+  // what runs beside the picture whichever way it is drawn: the engineer's radio, the iPad dash
+  auto feeds = [&]() {
     {
       const bool want = cfg.tabFx != "off" && !offscreen && !hidden;
       if (want && !radio.ok() && clock >= radioRetry) { if (!radio.start()) radioRetry = clock + 10; }
@@ -1160,6 +1174,9 @@ int main(int argc, char **argv) {
         dashFeed.send(t + "}\n");
       }
     }
+  };
+  auto drawAll = [&](FrameIn &f) {
+    feeds();
     R.post = cfg.look != "plain" && R.postOk;
     R.scalePin = (float)scaleArg;
     // the mirror first, on alternate frames: the same world, looking back
@@ -1213,6 +1230,106 @@ int main(int argc, char **argv) {
     R.hudEnd();
   };
 
+  // ---- THE HEADSET (vr.hpp). Driving: the cockpit drawn once for each eye from where the head is, then the HUD as a flat panel
+  // fixed in front of the wheel. Anything else (the menus, the results): the whole screen as that panel. `fake`: no headset, the
+  // two eyes are written to PREFIX-L.ppm and PREFIX-R.ppm.
+  Vr vr;
+  int vrCamWas = -1;
+  auto drawVr = [&](FrameIn &f) {
+    const bool fake = vr.fake();
+    const unsigned fboWas = R.offscreenFbo();       // (0 in a window; the photograph's own target in a shot: put back at the end)
+    const bool inCar = screen == DRIVE || screen == PAUSE;
+    R.post = cfg.look != "plain" && R.postOk;
+    R.scalePin = scaleArg > 0 ? (float)scaleArg : 1.0f;      // (the governor enlarges a smaller picture, and in a headset that reads as short-sight: --vrscale is the dial)
+    feeds();
+    float hub[3], eye[3];
+    if (inCar && R.wheelHub(*S.spec, hub, eye)) vr.setCockpit(hub, eye);
+    static Uint64 tA = 0, tStat = SDL_GetTicksNS();
+    static double msWait = 0, msDraw = 0; static long nStat = 0;
+    const Uint64 t1 = SDL_GetTicksNS();
+    const bool seeing = vr.begin();
+    const Uint64 t2 = SDL_GetTicksNS();
+    (void)tA;
+    bool drew = false;
+    if (seeing && inCar) {
+      f.camMode = 0;
+      // what a frame costs is the whole game here: 2 eyes in 13.9 ms, on a laptop GeForce that is also encoding the stream (measured: a
+      // 20-car race holds 77 fps at 0.45 with every rival a plain body and no mirrors, and falls under 72 at 0.55).
+      // Rivals nearer than this are the real model (XBR_VRFARCAR, metres; 0 = none); the mirrors are redrawn every Nth frame (XBR_VRMIRROR, 0 = never)
+      static const float farCar = std::getenv("XBR_VRFARCAR") ? (float)std::atof(std::getenv("XBR_VRFARCAR")) : 0.0f;
+      static const int mirEvery = std::getenv("XBR_VRMIRROR") ? std::atoi(std::getenv("XBR_VRMIRROR")) : 0;
+      R.farCarDist = farCar;
+      static unsigned mirrorTickVr = 0;
+      if (mirEvery > 0 && R.mirrorWanted(0)) { if (mirrorTickVr++ % (unsigned)mirEvery == 0) { R.mirrorBegin(); R.drawWorld(f); drawField(); R.mirrorEnd(); } }
+      else R.mirrorClear();
+      R.setLivery(home.livery());
+      // both eyes' images first, both eyes drawn and queued, then ONE wait for the GPU, then both handed over
+      unsigned target[2] = {0, 0};
+      for (int e = 0; e < 2; e++) target[e] = fake ? R.offscreenFbo() : vr.acquireEye(e);
+      bool both = fake || (target[0] && target[1]);
+      for (int e = 0; e < 2; e++) {
+        if (!target[e]) continue;
+        const Vr::Eye ve = vr.eye(e);
+        R.setTarget(target[e]);
+        R.resize(vr.eyeW, vr.eyeH);
+        R.vrOn = true; R.vrViewCar = ve.viewCar; R.vrProj = ve.proj;
+        for (int k = 0; k < 3; k++) { R.vrEyeCar[k] = ve.eyeCar[k]; R.vrAtCar[k] = ve.atCar[k]; }
+        R.drawWorld(f);
+        drawField();
+        fx.draw(R, f.time);
+        R.endScene(f.time);
+        R.vrOn = false;
+        if (fake) {
+          glFinish();
+          if (vr.calibrated() && !shot.empty()) R.writePPM(shot + (e ? "-R.ppm" : "-L.ppm"));
+        } else glFlush();                       // (start the GPU on this eye; the second eye is got ready meanwhile)
+      }
+      if (!fake) { vr.sync(); for (int e = 0; e < 2; e++) if (target[e]) vr.releaseEye(e); }
+      (void)both;
+      drew = true;
+    }
+    // the panel: the HUD in the car, the whole screen out of it
+    if (seeing && !fake) {
+      const unsigned hf = vr.acquireHud();
+      if (hf) {
+        R.setTarget(hf);
+        R.resize(Vr::HUD_W, Vr::HUD_H);
+        glBindFramebuffer(GL_FRAMEBUFFER, hf);
+        glViewport(0, 0, Vr::HUD_W, Vr::HUD_H);
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        if (drew) {
+          R.hudBegin();
+          hud.draw(R, 1.0f, theme, hudIn());
+          if (screen == PAUSE) hud.pause(R, 1.0f, theme, pauseItems(), pauseAt, pauseSay);
+          if (!vr.calibrated()) {
+            const float back[4] = {0, 0, 0, 0.55f}, white[4] = {1, 1, 1, 1};
+            R.rrect(Vr::HUD_W * 0.12f, Vr::HUD_H * 0.38f, Vr::HUD_W * 0.76f, Vr::HUD_H * 0.24f, 14, back);
+            R.textPx(Vr::HUD_W * 0.5f, Vr::HUD_H * 0.50f, 24, vr.status(), white, CENTRE, Renderer::HUD_B, 0.5f);
+          }
+          R.hudEnd();
+        } else {
+          drawAll(f);                                    // the menus: all of it, as a screen
+        }
+        glFlush();
+        vr.sync();
+        vr.releaseHud();
+      }
+    }
+    vr.end();
+    R.setTarget(fboWas);
+    {
+      // what the headset is getting: how often, how long we waited for its beat, how long the picture took (GPU finished)
+      const Uint64 t3 = SDL_GetTicksNS();
+      msWait += (t2 - t1) / 1e6; msDraw += (t3 - t2) / 1e6; nStat++;
+      if (t3 - tStat > 3000000000ull && !fake) {
+        std::fprintf(stderr, "vr: %.1f fps | waiting on the headset %.1f ms | drawing %.1f ms a frame | %s\n", nStat / ((t3 - tStat) / 1e9), msWait / nStat, msDraw / nStat,
+                     seeing ? "seen" : "not being shown");
+        tStat = t3; msWait = msDraw = 0; nStat = 0;
+      }
+    }
+  };
+
   // the rules a career event adds from outside the race (career.hpp): a car out a lap, a medal for a lap time
   auto eventTick = [&]() {
     if (!home.event() || bgOn) return;
@@ -1255,9 +1372,22 @@ int main(int argc, char **argv) {
     if (screenArg == "results" && S.race) { screen = RESULTS; resultMood(S.race->me->pos, (int)S.race->entries.size(), S.race->me->retired, resTitle, resLine); }
     FrameIn f = frameOf(1.0 / 60);
     R.snapCamera();
-    drawAll(f);
-    glFinish();
-    const bool ok = R.writePPM(shot);
+    bool ok;
+    if (vrFake) {
+      // a seated body squeezes both triggers for a few frames, lets go, and the two eyes of the last frame are written (drawVr)
+      vr.initFake(1, winW, winH);
+      for (int k = 0; k < 12; k++) { f = frameOf(1.0 / 60); drawVr(f); }
+      float hd[3], l[3], r[3];
+      vr.headInCar(hd);
+      std::fprintf(stderr, "vr(fake): seat %s; head in the car frame (%.3f, %.3f, %.3f)", vr.calibrated() ? "set" : "NOT set", hd[0], hd[1], hd[2]);
+      if (vr.handsInCar(l, r)) std::fprintf(stderr, "; hands (%.3f, %.3f, %.3f) (%.3f, %.3f, %.3f)", l[0], l[1], l[2], r[0], r[1], r[2]);
+      std::fprintf(stderr, "\n");
+      ok = vr.calibrated();
+    } else {
+      drawAll(f);
+      glFinish();
+      ok = R.writePPM(shot);
+    }
     // what the barriers took, for a crash photograph (XBR_FXCRASH)
     { const BarrierWear &bw = barrierWear(); float most = 0; int bent = 0, torn = 0;
       for (int k = 0; k < 2; k++) for (size_t i = 0; i < bw.bend[k].size(); i++) { most = std::max(most, bw.bend[k][i]); bent += bw.bend[k][i] > 0.02f; torn += bw.broke[k][i] != 0; }
@@ -1294,6 +1424,58 @@ int main(int argc, char **argv) {
   auto toHome = [&]() { bridge.release(); screen = HOME; home.leaveEvent(S.race.get(), S.hasBest, S.best, S.lines->race.lapTime); home.show(home.landing()); if (startBackdrop()) audio.setClass(home.voice()); prev = SDL_GetTicksNS(); };
   auto lightsOut = [&]() { bridge.release(); if (startSession()) { audio.setClass(home.voice()); autoDrive = false; } else { home.cancelEvent(); home.say("that one would not load."); startBackdrop(); } prev = SDL_GetTicksNS(); };
 
+  // WARM-UP, before the headset has seen a frame. The renderer makes its buffers and shaders and loads the car's models on the first
+  // frames it draws: measured, 9 seconds at 1 to 5 frames a second. Streamed to a headset that is a stalled picture and a burst of
+  // keyframes, so those frames are drawn here, into a scratch picture nobody sees.
+  auto vrWarm = [&]() {
+    if (!vr.on() || vr.fake()) return;
+    GLuint tex = 0, fb = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, vr.eyeW, vr.eyeH, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glGenFramebuffers(1, &fb);
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+    FrameIn f = frameOf(1.0 / 72);
+    f.camMode = 0;
+    R.post = cfg.look != "plain" && R.postOk;
+    R.scalePin = scaleArg > 0 ? (float)scaleArg : 1.0f;
+    float hub[3], eye[3] = {0.3f, 0.75f, 0};
+    if (R.wheelHub(*S.spec, hub, eye)) vr.setCockpit(hub, eye);
+    const float at[3] = {eye[0] + 24, eye[1], eye[2]}, up[3] = {0, 1, 0};
+    R.vrViewCar = Mat4::lookAt(eye, at, up);
+    R.vrProj = Mat4::perspective(1.5f, (float)vr.eyeW / (float)vr.eyeH, 0.05f, 12000.0f);
+    for (int k = 0; k < 3; k++) { R.vrEyeCar[k] = eye[k]; R.vrAtCar[k] = at[k]; }
+    R.farCarDist = 0;
+    feeds();
+    const double t0w = SDL_GetTicksNS() / 1e9;
+    for (int k = 0; k < 6; k++) {
+      R.setTarget(fb);
+      R.resize(vr.eyeW, vr.eyeH);
+      R.vrOn = true;
+      R.drawWorld(f);
+      drawField();
+      fx.draw(R, f.time);
+      R.endScene(f.time);
+      R.vrOn = false;
+      glFinish();
+    }
+    // the panel's own pass (fonts, the HUD shader)
+    R.resize(Vr::HUD_W, Vr::HUD_H);
+    glViewport(0, 0, Vr::HUD_W, Vr::HUD_H);
+    R.hudBegin(); hud.draw(R, 1.0f, theme, hudIn()); R.hudEnd();
+    glFinish();
+    R.setTarget(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fb); glDeleteTextures(1, &tex);
+    std::fprintf(stderr, "vr: warmed up in %.1f s\n", SDL_GetTicksNS() / 1e9 - t0w);
+  };
+  if (vrArg && !shotMode) {
+    if (!vr.init((float)std::min(1.0, std::max(0.3, vrScale)))) { std::fprintf(stderr, "xbr: no headset (--vr). Is the Quest awake and the WiVRn app connected to this PC?\n"); return 1; }
+    vrCamWas = cfg.cam; cfg.cam = 0;           // the driver's eyes; the menu's own choice is put back on the way out
+    vrWarm();
+  }
   while (running) {
     bool act[A_COUNT] = {false};
     SDL_Event e;
@@ -1360,6 +1542,10 @@ int main(int argc, char **argv) {
     prev = now;
     if (dt > 0) fps += (1.0 / dt - fps) * 0.05;
     dt = std::min(dt, 0.1);
+    // THE HEADSET WAITS FOR YOU: nothing moves, and the wheel pushes nothing, until the seat is set (both triggers squeezed, then let go)
+    static const bool vrGo = std::getenv("XBR_VRGO") != nullptr;        // (for checking a headset game with the reference driver, nobody wearing it: --auto)
+    const bool vrWait = vr.on() && (!vr.calibrated() || !vr.seeing()) && screen == DRIVE && !vrGo;       // (or while it is off your head)
+    if (vrWait) dt = 0;
     clock += dt;
 
     // pad and rim: held states, turned into presses (a held direction repeats, like a held key)
@@ -1610,8 +1796,8 @@ int main(int argc, char **argv) {
       const double sf = S.car->surface;
       const double rough = sf < 0.9 ? 0.45 : sf < 1 ? 0.22 : 0;
       // force only from the one game you are looking at: never unseen, never from a window without the keyboard
-      const bool mine = !offscreen && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
-      if (!offscreen) bridge.update(*S.car, rough, dt, mine && screen == DRIVE && !autoDrive && !bgOn && cfg.ffb > 0, cfg.ffb / 100.0);
+      const bool mine = !offscreen && ((SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS) || vr.on());
+      if (!offscreen) bridge.update(*S.car, rough, dt, mine && screen == DRIVE && !autoDrive && !bgOn && !vrWait && cfg.ffb > 0, cfg.ffb / 100.0);
       // force is wanted and no bridge has answered for a few seconds: start it, once
       if (!hidden && cfg.ffb > 0 && dev.joy && !bridge.live() && !bridgeTried) {
         bridgeWait += dt;
@@ -1629,6 +1815,14 @@ int main(int argc, char **argv) {
     }
 
     FrameIn f = frameOf(dt);
+    if (vr.on()) {
+      drawVr(f);
+      if (vr.quit()) running = false;
+      if (frames % 30 == 0) { glBindFramebuffer(GL_FRAMEBUFFER, 0); glClearColor(0.05f, 0.05f, 0.06f, 1); glClear(GL_COLOR_BUFFER_BIT); SDL_GL_SwapWindow(win); }   // (the window is only the window; the picture is in the headset)
+      frames++;
+      if (maxFrames > 0 && frames >= maxFrames) running = false;
+      continue;
+    }
     drawAll(f);
     if (showFps) {
       char b[32];
@@ -1642,6 +1836,8 @@ int main(int argc, char **argv) {
     if (maxFrames > 0 && frames >= maxFrames) running = false;
   }
   bridge.release();
+  vr.shutdown();
+  if (vrCamWas >= 0) cfg.cam = vrCamWas;
   dashFeed.stop();
   if (bridgePid > 0) { SDL_Delay(120); kill(bridgePid, SIGTERM); waitpid(bridgePid, nullptr, 0); }   // the bridge we started goes with us; its last act is to zero the wheel
   home.cancelEvent();                                           // an event's settings are not the menu's: put the menu's own back before it is kept

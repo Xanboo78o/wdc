@@ -79,6 +79,13 @@ Mat4 Mat4::rotZ(float a) { Mat4 r = identity(); const float c = std::cos(a), s =
 static void xform(const Mat4 &m, const float p[3], float w, float out[3]) {
   for (int r = 0; r < 3; r++) out[r] = m.m[r] * p[0] + m.m[4 + r] * p[1] + m.m[8 + r] * p[2] + m.m[12 + r] * w;
 }
+// the inverse of a rotation and a translation (a car's matrix is nothing more): the rotation turned over, the shift carried back through it
+static Mat4 rigidInverse(const Mat4 &m) {
+  Mat4 r = Mat4::identity();
+  for (int c = 0; c < 3; c++) for (int k = 0; k < 3; k++) r.m[c * 4 + k] = m.m[k * 4 + c];
+  for (int k = 0; k < 3; k++) r.m[12 + k] = -(r.m[k] * m.m[12] + r.m[4 + k] * m.m[13] + r.m[8 + k] * m.m[14]);
+  return r;
+}
 
 // ---------------------------------------------------------------------------
 // MeshB
@@ -666,7 +673,7 @@ void main(){
 )";
 // FXAA (the short form), then the lens: a vignette and a grain you only notice if it is missing
 static const char *FXAA_FS = R"(#version 330 core
-in vec2 vU; uniform sampler2D uTex; uniform vec2 uPx; uniform float uTime; out vec4 o;
+in vec2 vU; uniform sampler2D uTex; uniform vec2 uPx; uniform float uTime; uniform float uLens; out vec4 o;
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 void main(){
   vec4 m = texture(uTex, vU);
@@ -683,8 +690,8 @@ void main(){
     c = (b.a < lMin || b.a > lMax) ? a.rgb : b.rgb;
   }
   vec2 v = vU - 0.5;
-  c *= 1.0 - 0.34 * smoothstep(0.30, 0.95, length(v * vec2(1.0, 0.82)) * 1.35);
-  c += (hash(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) * 0.012;
+  c *= 1.0 - uLens * 0.34 * smoothstep(0.30, 0.95, length(v * vec2(1.0, 0.82)) * 1.35);
+  c += (hash(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) * 0.012 * uLens;
   o = vec4(c, 1.0);
 }
 )";
@@ -1719,6 +1726,26 @@ const Renderer::Susp &Renderer::suspOf(const Car &car, const Spec &S) {
   return q;
 }
 
+// WHERE THE WHEEL IS HELD, from the driver's eyes: metres forward and down, and a test turn.
+// (XBR_RIM="forward,down,turn" moves it for a photograph: metres from the eyes, and a turn of -1..1)
+static void rimTune(float &fwd, float &down, float &test) {
+  static float f = 0.55f, d = 0.19f, t = 0; static bool env = false;
+  if (!env) { env = true; if (const char *e = std::getenv("XBR_RIM")) std::sscanf(e, "%f,%f,%f", &f, &d, &t); }
+  fwd = f; down = d; test = t;
+}
+
+// The cockpit camera's own seat, in the car frame (drawWorld's camMode 0): the same numbers it uses.
+bool Renderer::wheelHub(const Spec &S, float out[3], float eye[3]) const {
+  if (!packCar || packKey == "m720") return false;
+  PackInfo pi = packInfo(*packCar);
+  if (const char *ev = std::getenv("XBR_EYE")) std::sscanf(ev, "%f,%f,%f", &pi.eye[0], &pi.eye[1], &pi.eye[2]);
+  float fwd, down, test;
+  rimTune(fwd, down, test);
+  out[0] = pi.eye[0] + (float)(S.a - S.L / 2) + fwd; out[1] = pi.eye[1] - down; out[2] = pi.eye[2];     // (+ the mid-wheelbase shift the camera adds too)
+  if (eye) { eye[0] = pi.eye[0] + (float)(S.a - S.L / 2); eye[1] = pi.eye[1]; eye[2] = pi.eye[2]; }
+  return true;
+}
+
 void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPitch, double gRoll, const float paint[3], double rolled,
                        bool helmet) {
   // its lamps, for every other car's paint (and the shader's uNL list): two white at the nose, shining
@@ -1752,7 +1779,7 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
   // A FIELD OF REAL MODELS is millions of triangles (the M4 alone is half a million): past 170 m a rival is
   // drawn as the game's own body in its colour. Your own car is always the real one.
   const float fdx = (float)car.x - curEye[0], fdz = (float)-car.y - curEye[2];
-  const bool farCar = !ownDraw && !mirrorPass && fdx * fdx + fdz * fdz > 170.0f * 170.0f;
+  const bool farCar = !ownDraw && !mirrorPass && fdx * fdx + fdz * fdz > farCarDist * farCarDist;
   if (packCar && gh <= 0 && !farCar && !(mirrorPass && !ownDraw && fdx * fdx + fdz * fdz > 60.0f * 60.0f)) {
     // The model stands on the road at mid-wheelbase; the sim's origin is the CG.
     const Mat4 M = carM * Mat4::translate((float)(S.a - S.L / 2), 0, 0);
@@ -1769,9 +1796,8 @@ void Renderer::drawCar(const Car &car, const Spec &S, double groundH, double gPi
     // (Not in the 720: its model came with a wheel of its own, and two would sit one inside the other.)
     if (rimWant && packKey != "m720") {
       static const PackCar *rim = dress->pack("wheel");
-      // (XBR_RIM="forward,down,turn" moves it for a photograph: metres from the eyes, and a turn of -1..1)
-      static float fwd = 0.55f, down = 0.19f, test = 0; static bool env = false;
-      if (!env) { env = true; if (const char *e = std::getenv("XBR_RIM")) std::sscanf(e, "%f,%f,%f", &fwd, &down, &test); }
+      float fwd, down, test;
+      rimTune(fwd, down, test);
       if (rim) {
         PackInfo pi = packInfo(*packCar);
         if (const char *ev = std::getenv("XBR_EYE")) std::sscanf(ev, "%f,%f,%f", &pi.eye[0], &pi.eye[1], &pi.eye[2]);
@@ -1908,16 +1934,31 @@ void Renderer::drawMesh(const GLMesh &m, const Mat4 &model, float alpha) {
 // the total is slower than a real frame; the SHARES are what to read.
 namespace {
 struct Prof {
+  // GPU timestamps, not glFinish: stopping the GPU between sections changes what is being measured (a laptop GeForce lets its
+  // clock fall when it is kept waiting). A stamp is asked for at each mark; two draws later the stamps are read and the gaps
+  // between them are the sections' GPU times.
   bool on = std::getenv("XBR_PROF") != nullptr;
-  double acc[8] = {0}, t0 = 0; long frames = 0;
-  static double now() { timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6; }
-  void begin() { if (on) { glFinish(); t0 = now(); } }
-  void mark(int i) { if (on) { glFinish(); const double t = now(); acc[i] += t - t0; t0 = t; } }
-  ~Prof() {
-    if (!on || !frames) return;
-    static const char *N[8] = {"shadow map", "ground+sky", "corridor+scenery", "woods", "your car", "decals+blob", "develop", "field (rivals)"};
-    for (int i = 0; i < 8; i++) std::fprintf(stderr, "prof: %-18s %6.2f ms\n", N[i], acc[i] / frames);
+  double acc[8] = {0}; long frames = 0, reads = 0;
+  GLuint q[4][16] = {};
+  int ord[4][16] = {}, cnt[4] = {0, 0, 0, 0}, set = 0;
+  bool act = false, made = false, filled[4] = {false, false, false, false};
+  void stamp(int id) { if (cnt[set] < 15) { glQueryCounter(q[set][cnt[set]], GL_TIMESTAMP); ord[set][cnt[set]++] = id; } }
+  void begin() {
+    if (!on) return;
+    if (!made) { for (auto &r : q) glGenQueries(16, r); made = true; }
+    set = (set + 1) & 3;
+    const int old = (set + 2) & 3;                       // what was stamped two draws ago has surely finished
+    if (filled[old]) {
+      GLuint64 t[16];
+      for (int i = 0; i < cnt[old]; i++) glGetQueryObjectui64v(q[old][i], GL_QUERY_RESULT, &t[i]);
+      for (int i = 1; i < cnt[old]; i++) if (ord[old][i] >= 0 && ord[old][i] < 8) acc[ord[old][i]] += (double)(t[i] - t[i - 1]) / 1e6;
+      reads++;
+    }
+    cnt[set] = 0; filled[set] = false; act = true;
+    stamp(-1);
   }
+  void mark(int i) { if (on && act) { stamp(i); if (i == 6) { act = false; filled[set] = true; } } }
+  ~Prof() {}
 } PROF;
 }
 static float sl0(const float v[3]) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
@@ -2059,7 +2100,7 @@ void Renderer::endScene(double time) {
     glUniform1f(glGetUniformLocation(compProg, "uMbMax"), 0.07f * blurK);
     glUniform4fv(glGetUniformLocation(compProg, "uMbHole"), 1, mbHole);
   }
-  glUniform1f(glGetUniformLocation(compProg, "uFar"), farSoft * (float)H / 900.0f);
+  glUniform1f(glGetUniformLocation(compProg, "uFar"), vrOn ? 0.0f : farSoft * (float)H / 900.0f);      // (in a headset the distance is sharp: your eyes do their own focusing)
   glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, sceneDepth);
   glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, bloomTex[0]);
   glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, sceneCol);
@@ -2069,6 +2110,7 @@ void Renderer::endScene(double time) {
   glBindTexture(GL_TEXTURE_2D, ldrTex);
   glUniform2f(glGetUniformLocation(fxaaProg, "uPx"), 1.0f / (float)W, 1.0f / (float)H);
   glUniform1f(glGetUniformLocation(fxaaProg, "uTime"), (float)time);
+  glUniform1f(glGetUniformLocation(fxaaProg, "uLens"), vrOn ? 0.0f : 1.0f);      // a headset has its own lenses: no vignette, no grain that differs eye to eye
   glDrawArrays(GL_TRIANGLES, 0, 3);
   glBindVertexArray(0);
   glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST);
@@ -2076,6 +2118,10 @@ void Renderer::endScene(double time) {
   glEndQuery(GL_TIME_ELAPSED);
   gpuAt ^= 1;
   if (PROF.on && PROF.frames % 100 == 0) std::fprintf(stderr, "governor: GPU %.1f ms a frame, drawing at %.0f%%\n", gpuMs, scale * 100);
+  if (PROF.on && PROF.frames % 200 == 0) {            // (live, not only at exit: a headset game is often ended by pulling the plug)
+    static const char *N[8] = {"shadow map", "ground+sky", "corridor+scenery", "woods", "your car", "decals+blob", "develop", "field (rivals)"};
+    for (int i = 0; i < 8; i++) std::fprintf(stderr, "prof: %-18s %6.2f ms (GPU, per eye)\n", N[i], PROF.acc[i] / std::max(1L, PROF.reads));
+  }
   PROF.mark(6);
 }
 
@@ -2484,7 +2530,15 @@ void Renderer::drawWorld(const FrameIn &f) {
   }
   Mat4 proj = Mat4::perspective(fov * (float)PI / 180, mirrorPass ? (float)MIR_W / (float)MIR_H : (float)W / (float)std::max(1, H), 0.12f, 12000.0f);
   if (turntable && !mirrorPass) proj = Mat4::translate(turnX, turnY, 0) * proj;
-  const Mat4 view = Mat4::lookAt(eye, at, up);
+  Mat4 view = Mat4::lookAt(eye, at, up);
+  if (vrOn && !mirrorPass) {
+    // THE HEADSET: this eye, in the car's own frame, then out into the world with the car (springs and all)
+    xform(carM, vrEyeCar, 1, eye); xform(carM, vrAtCar, 1, at);
+    up[0] = 0; up[1] = 1; up[2] = 0;
+    proj = vrProj;
+    view = vrViewCar * rigidInverse(carM);
+    fov = 90;                                    // (only the motion blur reads it, and that is off in the headset)
+  }
   // for the motion blur (endScene): how the camera is travelling, in its own frame.
   // Fades in from 110 to 260 km/h, as the browser game's does.
   if (!mirrorPass) {
@@ -2492,7 +2546,7 @@ void Renderer::drawWorld(const FrameIn &f) {
     const float wv[3] = {(float)(std::cos(dir) * car.speed), 0, (float)(-std::sin(dir) * car.speed)};
     for (int k = 0; k < 3; k++) mbVel[k] = view.m[k] * wv[0] + view.m[4 + k] * wv[1] + view.m[8 + k] * wv[2];
     mbView = view; mbTan = std::tan(fov * (float)PI / 360);
-    mbAmt = turntable ? 0 : car.speed > 30 ? (float)std::min(1.0, std::max(0.0, (car.speed * 3.6 - 110) / 150)) : 0;
+    mbAmt = (turntable || vrOn) ? 0 : car.speed > 30 ? (float)std::min(1.0, std::max(0.0, (car.speed * 3.6 - 110) / 150)) : 0;
     mbSpots.clear();
     lampsWere.swap(lampsNow); lampsNow.clear();       // the lamps the cars put out this frame light the paint in the next
   }

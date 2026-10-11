@@ -16,13 +16,13 @@ BUILD    := build
 SIM  := physics.cpp parts.cpp track.cpp driver.cpp collide.cpp world.cpp
 # the race layer: js/race.js and everything it imports that is pure logic
 SIM  += grid.cpp drivers.cpp pitstop.cpp xingus.cpp safetycar.cpp race.cpp weather.cpp multiclass.cpp brain.cpp
-GAME := game_main.cpp rimlights.cpp render.cpp audio.cpp bridge.cpp carmesh.cpp ui.cpp home.cpp dress.cpp props.cpp knock.cpp radio.cpp fx.cpp career.cpp home_career.cpp home_race.cpp engineer.cpp pitwall.cpp
+GAME := game_main.cpp rimlights.cpp render.cpp audio.cpp bridge.cpp carmesh.cpp ui.cpp home.cpp dress.cpp props.cpp knock.cpp radio.cpp fx.cpp career.cpp home_career.cpp home_race.cpp engineer.cpp pitwall.cpp vr.cpp
 
 SIM_O  := $(SIM:%.cpp=$(BUILD)/%.o)
 GAME_O := $(GAME:%.cpp=$(BUILD)/%.o)
 
-GAME_CFLAGS := $(shell pkg-config --cflags sdl3 epoxy freetype2)
-GAME_LIBS   := $(shell pkg-config --libs sdl3 epoxy freetype2) -lm
+GAME_CFLAGS := $(shell pkg-config --cflags sdl3 epoxy freetype2 openxr x11)
+GAME_LIBS   := $(shell pkg-config --libs sdl3 epoxy freetype2 openxr x11) -lm
 
 # The photographs the browser game uses (data/tex, CC0 from ambientCG), turned
 # into plain PPMs at build time so the game needs no JPEG decoder of its own.
